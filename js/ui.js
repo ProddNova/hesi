@@ -106,7 +106,9 @@ export class GameUI {
     });
     if (player) {
       const x=tx(player.x), y=ty(player.z);
-      c.save(); c.translate(x,y); c.rotate(-(player.heading ?? 0));
+      // heading 0 faces +Z which is +y (down) on the canvas, so the up-drawn
+      // arrow needs a half-turn base rotation.
+      c.save(); c.translate(x,y); c.rotate(Math.PI-(player.heading ?? 0));
       c.fillStyle='#fff'; c.beginPath(); c.moveTo(0,-7);c.lineTo(5,5);c.lineTo(0,2);c.lineTo(-5,5);c.closePath();c.fill(); c.restore();
     }
   }
@@ -135,16 +137,18 @@ export class GameUI {
     if (this.pcOpen) return;
     this.lastContext=context; this.phoneOpen=true; this.$('phone').classList.remove('hidden'); this.showPhoneHome(); this.cb.phoneChanged?.(true); this.cb.uiClick?.();
   }
-  closePhone() { this.phoneOpen=false; this.$('phone').classList.add('hidden'); this.cb.phoneChanged?.(false); this.cb.uiClick?.(); }
-  showPhoneHome() { this.phonePage='home';this.$('phone-home').classList.add('active');this.$('phone-app').classList.remove('active');this.cb.uiClick?.(); }
+  closePhone() { this.phoneOpen=false; this._stopMapRefresh(); this.$('phone').classList.add('hidden'); this.cb.phoneChanged?.(false); this.cb.uiClick?.(); }
+  showPhoneHome() { this.phonePage='home';this._stopMapRefresh();this.$('phone-home').classList.add('active');this.$('phone-app').classList.remove('active');this.cb.uiClick?.(); }
   openPhoneApp(app) {
     this.phonePage=app; this.$('phone-home').classList.remove('active'); this.$('phone-app').classList.add('active');
+    this._stopMapRefresh();
     const root=this.$('phone-app'), c=this.cb.getPhoneContext?.() || this.lastContext || {};
     if (app==='map') {
-      root.innerHTML='<div class="app-view"><h2>EXPRESSWAY MAP</h2><p>Live route position / service areas</p><canvas id="phone-map-canvas" class="phone-map" width="280" height="280"></canvas></div>';
-      if(this.lastMinimap) this.drawMinimap(this.lastMinimap.data,this.lastMinimap.player,this.lastMinimap.services,this.$('phone-map-canvas'));
+      root.innerHTML='<div class="app-view"><h2>EXPRESSWAY MAP</h2><p>Drag to pan · pinch or double-tap to zoom · ⌖ recenters</p><canvas id="phone-map-canvas" class="phone-map"></canvas><button id="phone-map-center" class="map-center">⌖ MY CAR</button></div>';
+      this.initPhoneMap(this.$('phone-map-canvas'));
+      this.$('phone-map-center').onclick=()=>{if(this.mapView){this.mapView.followPlayer=true;}this.renderPhoneMap();this.cb.uiClick?.();};
     } else if(app==='tow') {
-      root.innerHTML=`<div class="app-view"><h2>湾岸 TOW</h2><p>Emergency recovery to Tatsumi garage. Your current run will be lost.</p><div class="phone-card"><small>SERVICE FEE</small><b>${this.money(c.towCost??2500)}</b><button id="call-tow">CALL TOW TRUCK</button></div></div>`;
+      root.innerHTML=`<div class="app-view"><h2>湾岸 TOW</h2><p>Emergency recovery to the Shiba PA garage. Your current run will be lost.</p><div class="phone-card"><small>SERVICE FEE</small><b>${this.money(c.towCost??2500)}</b><button id="call-tow">CALL TOW TRUCK</button></div></div>`;
       this.$('call-tow').onclick=()=>this.cb.tow?.();
     } else if(app==='stats') {
       root.innerHTML=`<div class="app-view"><h2>NIGHT LOG</h2><p>Driver statistics</p>${this.phoneCard('CURRENT RUN',(c.runScore??0).toLocaleString())}${this.phoneCard('LIVE COMBO',`×${(c.combo??1).toFixed(1)}`)}${this.phoneCard('BEST COMBO',`×${(c.bestCombo??1).toFixed(1)}`)}${this.phoneCard('BEST BANK',(c.bestScore??0).toLocaleString())}${this.phoneCard('BALANCE',this.money(c.money??0))}</div>`;
@@ -154,10 +158,10 @@ export class GameUI {
         ${this.setting('MASTER VOLUME',`<input id="set-volume" type="range" min="0" max="1" step=".05" value="${s.volume??.65}">`)}
         ${this.setting('CAMERA',`<select id="set-camera"><option value="chase">Chase</option><option value="hood">Hood</option><option value="cockpit">Cockpit</option></select>`)}
         ${this.setting('GEARBOX',`<select id="set-gearbox"><option value="auto">Automatic</option><option value="manual">Manual</option></select>`)}
-        ${this.setting('RENDER',`<select id="set-resolution"><option value="320">320×180 PSX</option><option value="480">480×270</option><option value="640">640×360</option></select>`)}
+        ${this.setting('RENDER QUALITY',`<select id="set-quality"><option value="low">Low · chunky PSX</option><option value="medium">Medium · default</option><option value="high">High · sharp</option></select>`)}
         <button id="phone-newgame">WIPE SAVE / NEW GAME</button></div>`;
-      this.$('set-camera').value=s.camera||'chase';this.$('set-gearbox').value=s.gearbox||'auto';this.$('set-resolution').value=String(s.resolution||480);
-      ['volume','camera','gearbox','resolution'].forEach(k=>this.$(`set-${k}`).onchange=e=>this.cb.setting?.(k,k==='volume'?+e.target.value:k==='resolution'?+e.target.value:e.target.value));
+      this.$('set-camera').value=s.camera||'chase';this.$('set-gearbox').value=s.gearbox||'auto';this.$('set-quality').value=['low','medium','high'].includes(s.quality)?s.quality:'medium';
+      ['volume','camera','gearbox','quality'].forEach(k=>this.$(`set-${k}`).onchange=e=>this.cb.setting?.(k,k==='volume'?+e.target.value:e.target.value));
       this.$('phone-newgame').onclick=()=>{if(confirm('Erase all progress?'))this.cb.newGame?.();};
     } else if(app==='admin') this.renderAdmin(root,c);
     else {
@@ -184,6 +188,66 @@ export class GameUI {
   }
   phoneCard(label,value){return `<div class="phone-card"><small>${label}</small><b>${value}</b></div>`;}
   setting(label,control){return `<label class="setting"><span>${label}</span>${control}</label>`;}
+
+  /* Phone map: fully self-drawn from live map data with pan / pinch / follow. */
+  _stopMapRefresh(){if(this._mapTimer){clearInterval(this._mapTimer);this._mapTimer=null;}this.phoneMapCanvas=null;}
+  initPhoneMap(canvas){
+    const rect=canvas.getBoundingClientRect();
+    const dpr=Math.min(window.devicePixelRatio||1,2);
+    canvas.width=Math.max(220,Math.round((rect.width||280)*dpr));
+    canvas.height=Math.max(220,Math.round((rect.height||280)*dpr));
+    this.mapView=this.mapView||{zoom:2.4,followPlayer:true,cx:0,cz:0};
+    const pointers=new Map();let pinchDist=0,pinchZoom=this.mapView.zoom;
+    canvas.addEventListener('pointerdown',e=>{e.preventDefault();try{canvas.setPointerCapture?.(e.pointerId);}catch(err){}pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      if(pointers.size===2){const [a,b]=[...pointers.values()];pinchDist=Math.hypot(a.x-b.x,a.y-b.y);pinchZoom=this.mapView.zoom;}});
+    canvas.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;e.preventDefault();
+      const prev=pointers.get(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      if(pointers.size===1&&this._mapRenderScale){this.mapView.followPlayer=false;this.mapView.cx-=(e.clientX-prev.x)*dpr/this._mapRenderScale;this.mapView.cz-=(e.clientY-prev.y)*dpr/this._mapRenderScale;this.renderPhoneMap();}
+      else if(pointers.size===2){const [a,b]=[...pointers.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);this.mapView.zoom=Math.min(16,Math.max(.8,pinchZoom*d/Math.max(24,pinchDist)));this.renderPhoneMap();}});
+    const up=e=>{if(!pointers.has(e.pointerId))return;pointers.delete(e.pointerId);
+      const now=performance.now();
+      if(pointers.size===0&&now-(this._mapLastTap||0)<320){this.mapView.zoom=this.mapView.zoom<4?6:2.4;this.renderPhoneMap();}
+      if(pointers.size===0)this._mapLastTap=now;};
+    canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+    this.phoneMapCanvas=canvas;
+    this.renderPhoneMap();
+    this._mapTimer=setInterval(()=>this.renderPhoneMap(),650);
+  }
+  renderPhoneMap(){
+    const canvas=this.phoneMapCanvas;
+    if(!canvas||!canvas.isConnected){this._stopMapRefresh();return;}
+    const src=this.cb.getMinimap?.()||this.lastMinimap;
+    const c=canvas.getContext('2d');const w=canvas.width,h=canvas.height;
+    c.fillStyle='#060a10';c.fillRect(0,0,w,h);
+    if(!src?.data?.routes?.length){c.fillStyle='#7c8aa0';c.font=`${Math.round(12*(w/280))}px monospace`;c.textAlign='center';c.fillText('NO SIGNAL // DRIVE TO SYNC',w/2,h/2);return;}
+    const {data,player,services=[]}=src;const b=data.bounds;const view=this.mapView;
+    if(view.followPlayer&&player){view.cx=player.x;view.cz=player.z;}
+    else if(!view.cx&&!view.cz){view.cx=(b.minX+b.maxX)/2;view.cz=(b.minZ+b.maxZ)/2;}
+    const baseScale=Math.min(w/Math.max(1,b.maxX-b.minX),h/Math.max(1,b.maxZ-b.minZ));
+    const scale=baseScale*view.zoom;this._mapRenderScale=scale;
+    const tx=x=>w/2+(x-view.cx)*scale, ty=z=>h/2+(z-view.cz)*scale;
+    for(const r of data.routes){
+      const pts=r.points||[];if(!pts.length)continue;
+      c.beginPath();pts.forEach((p,i)=>i?c.lineTo(tx(p.x),ty(p.z)):c.moveTo(tx(p.x),ty(p.z)));
+      if(r.closed)c.closePath();
+      c.strokeStyle=r.color||'#42546b';c.lineWidth=Math.max(1.5,(r.width||2)*Math.min(2.4,view.zoom*.5));c.lineJoin='round';c.stroke();
+    }
+    const fontPx=Math.max(9,Math.round(10*(w/280)));
+    for(const s of services){
+      const x=tx(s.position?.x??s.x),y=ty(s.position?.z??s.z);
+      if(x<-30||y<-30||x>w+30||y>h+30)continue;
+      c.fillStyle=s.garage||s.hasGarage?'#ff4156':'#39d7f2';c.fillRect(x-4,y-4,8,8);
+      c.fillStyle='#ccd4df';c.font=`${fontPx}px monospace`;c.textAlign='left';c.fillText(s.name||'PA',x+8,y-6);
+    }
+    if(data.garage){const x=tx(data.garage.x),y=ty(data.garage.z);c.strokeStyle='#ff9a2e';c.lineWidth=2;c.strokeRect(x-6,y-6,12,12);c.fillStyle='#ff9a2e';c.font=`${fontPx}px monospace`;c.fillText('GARAGE',x+9,y+4);}
+    if(player){
+      const x=tx(player.x),y=ty(player.z);
+      c.save();c.translate(x,y);c.rotate(Math.PI-(player.heading??0));
+      c.fillStyle='#fff';c.strokeStyle='#05080e';c.lineWidth=2;
+      c.beginPath();c.moveTo(0,-9);c.lineTo(6,7);c.lineTo(0,3);c.lineTo(-6,7);c.closePath();c.stroke();c.fill();c.restore();
+    }
+    c.fillStyle='#5d6b80';c.font=`${fontPx}px monospace`;c.textAlign='right';c.fillText(`×${view.zoom.toFixed(1)}`,w-8,h-8);
+  }
 
   openPC(context) {
     this.lastContext=context;this.pcOpen=true;this.phoneOpen=false;this.$('phone').classList.add('hidden');this.$('pc-overlay').classList.remove('hidden');this.pcTab='auction';

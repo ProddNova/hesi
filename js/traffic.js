@@ -121,12 +121,46 @@ function geometrySet() {
   };
 }
 
-function addBox(group, geometry, material, scale, position) {
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.scale.set(scale[0], scale[1], scale[2]);
-  mesh.position.set(position[0], position[1], position[2]);
-  group.add(mesh);
-  return mesh;
+/**
+ * Bake a list of axis-aligned boxes into a single BufferGeometry so each
+ * traffic car costs a handful of draw calls instead of ~15. This avoids the
+ * three.js addons dependency by concatenating the box attributes directly.
+ */
+function mergedBoxGeometry(parts) {
+  const geometries = parts.map(([scale, position]) => {
+    const box = new THREE.BoxGeometry(scale[0], scale[1], scale[2]);
+    box.translate(position[0], position[1], position[2]);
+    return box;
+  });
+  let vertexCount = 0;
+  let indexCount = 0;
+  for (const geometry of geometries) {
+    vertexCount += geometry.attributes.position.count;
+    indexCount += geometry.index.count;
+  }
+  const position = new Float32Array(vertexCount * 3);
+  const normal = new Float32Array(vertexCount * 3);
+  const uv = new Float32Array(vertexCount * 2);
+  const index = new (vertexCount > 65535 ? Uint32Array : Uint16Array)(indexCount);
+  let vertexOffset = 0;
+  let indexOffset = 0;
+  for (const geometry of geometries) {
+    position.set(geometry.attributes.position.array, vertexOffset * 3);
+    normal.set(geometry.attributes.normal.array, vertexOffset * 3);
+    uv.set(geometry.attributes.uv.array, vertexOffset * 2);
+    const sourceIndex = geometry.index.array;
+    for (let i = 0; i < sourceIndex.length; i += 1) index[indexOffset + i] = sourceIndex[i] + vertexOffset;
+    vertexOffset += geometry.attributes.position.count;
+    indexOffset += sourceIndex.length;
+    geometry.dispose();
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(position, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+  merged.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  merged.setIndex(new THREE.BufferAttribute(index, 1));
+  merged.computeBoundingSphere();
+  return merged;
 }
 
 function makeTrafficMesh(type, color, geometries, sharedMaterials) {
@@ -136,55 +170,70 @@ function makeTrafficMesh(type, color, geometries, sharedMaterials) {
   const darkerMaterial = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).multiplyScalar(0.58), flatShading: true });
   const bodyHeight = type.id === 'bus' ? type.height * 0.78 : type.id === 'truck' ? 0.75 : type.height * 0.42;
   const bodyY = type.id === 'bus' ? type.height * 0.45 : 0.43 + bodyHeight * 0.5;
-  addBox(group, geometries.box, bodyMaterial, [type.width, bodyHeight, type.length], [0, bodyY, 0]);
+
+  const partsByMaterial = new Map();
+  const push = (material, scale, position) => {
+    if (!partsByMaterial.has(material)) partsByMaterial.set(material, []);
+    partsByMaterial.get(material).push([scale, position]);
+  };
+  push(bodyMaterial, [type.width, bodyHeight, type.length], [0, bodyY, 0]);
 
   if (type.id === 'truck') {
-    addBox(group, geometries.box, bodyMaterial, [type.width * 0.96, 1.7, type.length * 0.25], [0, 1.22, type.length * 0.35]);
-    addBox(group, geometries.box, sharedMaterials.cargo, [type.width * 0.98, type.height * 0.73, type.length * 0.67], [0, type.height * 0.54, -type.length * 0.14]);
-    addBox(group, geometries.box, sharedMaterials.window, [type.width * 0.74, 0.48, 0.03], [0, 1.54, type.length * 0.481]);
+    push(bodyMaterial, [type.width * 0.96, 1.7, type.length * 0.25], [0, 1.22, type.length * 0.35]);
+    push(sharedMaterials.cargo, [type.width * 0.98, type.height * 0.73, type.length * 0.67], [0, type.height * 0.54, -type.length * 0.14]);
+    push(sharedMaterials.window, [type.width * 0.74, 0.48, 0.03], [0, 1.54, type.length * 0.481]);
   } else if (type.id === 'bus') {
-    addBox(group, geometries.box, sharedMaterials.window, [type.width * 0.91, type.height * 0.28, type.length * 0.88], [0, type.height * 0.69, 0]);
-    addBox(group, geometries.box, bodyMaterial, [type.width * 0.95, 0.14, type.length * 0.92], [0, type.height * 0.7, 0]);
+    push(sharedMaterials.window, [type.width * 0.91, type.height * 0.28, type.length * 0.88], [0, type.height * 0.69, 0]);
+    push(bodyMaterial, [type.width * 0.95, 0.14, type.length * 0.92], [0, type.height * 0.7, 0]);
   } else if (type.id === 'van') {
-    addBox(group, geometries.box, darkerMaterial, [type.width * 0.86, type.height * 0.52, type.length * 0.72], [0, type.height * 0.66, -type.length * 0.07]);
-    addBox(group, geometries.box, sharedMaterials.window, [type.width * 0.72, 0.43, type.length * 0.36], [0, type.height * 0.73, type.length * 0.2]);
+    push(darkerMaterial, [type.width * 0.86, type.height * 0.52, type.length * 0.72], [0, type.height * 0.66, -type.length * 0.07]);
+    push(sharedMaterials.window, [type.width * 0.72, 0.43, type.length * 0.36], [0, type.height * 0.73, type.length * 0.2]);
   } else {
     const cabinLength = type.id === 'wagon' ? type.length * 0.61 : type.id === 'kei' ? type.length * 0.56 : type.length * 0.49;
     const cabinZ = type.id === 'wagon' ? -0.08 : -type.length * 0.055;
-    addBox(group, geometries.box, darkerMaterial, [type.width * 0.82, type.height * 0.47, cabinLength], [0, bodyY + bodyHeight * 0.7, cabinZ]);
-    addBox(group, geometries.box, sharedMaterials.window, [type.width * 0.72, type.height * 0.31, cabinLength * 0.88], [0, bodyY + bodyHeight * 0.72, cabinZ]);
-    addBox(group, geometries.box, darkerMaterial, [type.width * 0.86, 0.075, 0.055], [0, bodyY + bodyHeight * 0.73, cabinZ]);
+    push(darkerMaterial, [type.width * 0.82, type.height * 0.47, cabinLength], [0, bodyY + bodyHeight * 0.7, cabinZ]);
+    push(sharedMaterials.window, [type.width * 0.72, type.height * 0.31, cabinLength * 0.88], [0, bodyY + bodyHeight * 0.72, cabinZ]);
+    push(darkerMaterial, [type.width * 0.86, 0.075, 0.055], [0, bodyY + bodyHeight * 0.73, cabinZ]);
   }
 
   const wheelY = 0.31;
   const wheelZ = type.length * (type.id === 'bus' ? 0.34 : type.id === 'truck' ? 0.35 : 0.31);
-  const wheelWidth = 0.18;
+  const wheelDepth = type.id === 'truck' || type.id === 'bus' ? 0.72 : 0.58;
   for (const x of [-type.width * 0.51, type.width * 0.51]) {
     for (const z of [-wheelZ, wheelZ]) {
-      addBox(group, geometries.wheel, sharedMaterials.tire, [wheelWidth, 0.52, type.id === 'truck' || type.id === 'bus' ? 0.72 : 0.58], [x, wheelY, z]);
+      push(sharedMaterials.tire, [0.18, 0.52, wheelDepth], [x, wheelY, z]);
     }
   }
+  push(sharedMaterials.headlamp, [type.width * 0.19, 0.18, 0.035], [-type.width * 0.32, bodyY, type.length * 0.503]);
+  push(sharedMaterials.headlamp, [type.width * 0.19, 0.18, 0.035], [type.width * 0.32, bodyY, type.length * 0.503]);
 
-  const headlamps = [];
-  const taillamps = [];
-  const indicators = [];
-  for (const x of [-type.width * 0.32, type.width * 0.32]) {
-    headlamps.push(addBox(group, geometries.lamp, sharedMaterials.headlamp, [type.width * 0.19, 0.18, 1], [x, bodyY, type.length * 0.503]));
-    taillamps.push(addBox(group, geometries.lamp, sharedMaterials.taillamp, [type.width * 0.18, 0.17, 1], [x, bodyY, -type.length * 0.503]));
+  for (const [material, list] of partsByMaterial) {
+    group.add(new THREE.Mesh(mergedBoxGeometry(list), material));
   }
+
+  // Tail lamps stay their own mesh because braking swaps their material.
+  const taillamp = new THREE.Mesh(mergedBoxGeometry([
+    [[type.width * 0.18, 0.17, 0.035], [-type.width * 0.32, bodyY, -type.length * 0.503]],
+    [[type.width * 0.18, 0.17, 0.035], [type.width * 0.32, bodyY, -type.length * 0.503]],
+  ]), sharedMaterials.taillamp);
+  group.add(taillamp);
+
+  // Indicators stay separate per side because they blink via `visible`.
+  const indicators = [];
   for (const side of [-1, 1]) {
     const material = new THREE.MeshBasicMaterial({ color: 0xffa51f, toneMapped: false });
-    const front = addBox(group, geometries.lamp, material, [0.12, 0.13, 1], [side * type.width * 0.45, bodyY, type.length * 0.505]);
-    const rearMaterial = material.clone();
-    const rear = addBox(group, geometries.lamp, rearMaterial, [0.12, 0.13, 1], [side * type.width * 0.45, bodyY, -type.length * 0.505]);
-    front.visible = false;
-    rear.visible = false;
-    indicators.push({ side, meshes: [front, rear] });
+    const mesh = new THREE.Mesh(mergedBoxGeometry([
+      [[0.12, 0.13, 0.035], [side * type.width * 0.45, bodyY, type.length * 0.505]],
+      [[0.12, 0.13, 0.035], [side * type.width * 0.45, bodyY, -type.length * 0.505]],
+    ]), material);
+    mesh.visible = false;
+    group.add(mesh);
+    indicators.push({ side, meshes: [mesh] });
   }
 
   group.userData.bodyMaterials = [bodyMaterial, darkerMaterial];
-  group.userData.headlamps = headlamps;
-  group.userData.taillamps = taillamps;
+  group.userData.headlamps = [];
+  group.userData.taillamps = [taillamp];
   group.userData.indicators = indicators;
   group.userData.ownedMaterials = [bodyMaterial, darkerMaterial, ...indicators.flatMap((entry) => entry.meshes.map((mesh) => mesh.material))];
   return group;
@@ -961,7 +1010,6 @@ export class TrafficSystem {
     const blink = Math.floor(this.time * 3.2) % 2 === 0;
     for (const lamp of vehicle.mesh.userData.taillamps) {
       lamp.material = braking ? this._brakeMaterial() : this._sharedMaterials.taillamp;
-      lamp.scale.y = braking ? 1.35 : 1;
     }
     for (const indicator of vehicle.mesh.userData.indicators) {
       const active = vehicle.indicator === indicator.side && blink;
@@ -1147,6 +1195,7 @@ export class TrafficSystem {
     this.clear();
     for (const vehicle of this.pool) {
       this.scene.remove(vehicle.mesh);
+      vehicle.mesh.traverse((object) => object.geometry?.dispose?.());
       for (const material of vehicle.mesh.userData.ownedMaterials ?? []) material.dispose();
     }
     for (const geometry of Object.values(this._geometries)) geometry.dispose();
