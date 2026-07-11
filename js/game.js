@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260711a';
-import * as PhysicsModule from './physics.js';
-import * as TrafficModule from './traffic.js';
+import * as MapModule from './map.js?v=20260712a';
+import * as PhysicsModule from './physics.js?v=20260712a';
+import * as TrafficModule from './traffic.js?v=20260712a';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
-import { GarageSystem } from './garage.js?v=20260711b';
-import { GameUI } from './ui.js?v=20260711n';
+import { GarageSystem } from './garage.js?v=20260712a';
+import { GameUI } from './ui.js?v=20260712a';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
@@ -19,14 +19,22 @@ class ShutokoNights {
     this.canvas=document.getElementById('game-canvas');
     this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:false,powerPreference:'high-performance',alpha:false});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.shadowMap.enabled=false;
-    this.camera=new THREE.PerspectiveCamera(64,16/9,.08,1250);
+    this.psxGridUniform={value:270};
+    // Near plane at .3 keeps depth precision tight enough that coplanar road
+    // details stop z-fighting at distance.
+    this.camera=new THREE.PerspectiveCamera(64,16/9,.3,1250);
     this.roadScene=new THREE.Scene();this.garageScene=new THREE.Scene();
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
     this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
-    this.resize();window.addEventListener('resize',()=>this.resize());this.ui.showBoot(this.hadSave);this.ui.finishLoading();this.animate();
+    this.resize();window.addEventListener('resize',()=>this.resize());
+    // iOS Safari: orientation changes and browser-chrome show/hide don't always
+    // fire a plain resize, so listen to everything and settle late.
+    window.addEventListener('orientationchange',()=>{this.resize();setTimeout(()=>this.resize(),350);});
+    window.visualViewport?.addEventListener('resize',()=>this.resize());
+    this.ui.showBoot(this.hadSave);this.ui.finishLoading();this.animate();
   }
 
   setupPersistence(){
@@ -41,7 +49,7 @@ class ShutokoNights {
     if(!Array.isArray(this.partCatalog)&&typeof this.partCatalog==='object')this.partCatalog=Object.values(this.partCatalog).flat();
     const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar();
     const starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};
-    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
     this.state=this.normalizeState(raw||defaults,defaults);
     if(!this.state.auctions.length)this.state.auctions=this.generateAuctions(this.state.auctionSeed);
     this.admin={...this.admin,...this.state.admin};this.cameraMode=this.state.settings.camera||'chase';this.persist();
@@ -49,6 +57,7 @@ class ShutokoNights {
 
   normalizeState(raw,d){
     const s={...d,...raw};s.settings={...d.settings,...raw.settings};s.records={...d.records,...raw.records};s.admin={...d.admin,...raw.admin};
+    if(!['low','medium','high'].includes(s.settings.quality)){const legacy=+s.settings.resolution||480;s.settings.quality=legacy<=320?'low':legacy>=640?'high':'medium';}
     s.money=Number.isFinite(+s.money)?+s.money:d.money;s.installedParts=Array.isArray(s.installedParts)?s.installedParts:[];s.deliveries=Array.isArray(s.deliveries)?s.deliveries:[];s.auctions=Array.isArray(s.auctions)?s.auctions:[];
     s.ownedCarId=s.ownedCarId||s.ownedCar?.id||d.ownedCarId;s.ownedCar=s.ownedCar||this.catalog.find(c=>c.id===s.ownedCarId)||d.ownedCar;
     s.fuel=Number.isFinite(+s.fuel)?+s.fuel:(s.ownedCar.fuelCapacity||45);return s;
@@ -81,7 +90,8 @@ class ShutokoNights {
   }
 
   setupUI(){
-    this.ui=new GameUI({continue:()=>this.start(),newGame:()=>this.newGame(),phoneChanged:o=>this.audioClick(),getPhoneContext:()=>this.getPhoneContext(),tow:()=>this.tow(),setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},uiClick:()=>this.audioClick(),
+    this.ui=new GameUI({continue:()=>this.start(),newGame:()=>this.newGame(),phoneChanged:o=>this.audioClick(),getPhoneContext:()=>this.getPhoneContext(),tow:()=>this.tow(),
+      getMinimap:()=>{const s=this.getVehicleState(),p=vec(s.position||s);return{data:this.map?.getMinimapData?.()||null,player:{x:p.x,z:p.z,heading:s.heading||0},services:this.map?.getServiceAreas?.()||[]};},setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},uiClick:()=>this.audioClick(),
       getPCContext:()=>this.getPCContext(),buyCar:i=>this.buyCar(i),buyPart:i=>this.buyPart(i),buyFuelCan:()=>this.buyFuelCan(),pcChanged:o=>{if(o)document.exitPointerLock?.();},returnGarage:()=>this.enterGarage('crash')});
     const AudioCtor=AudioModule.AudioSystem||AudioModule.default;
     try{this.audio=typeof AudioCtor==='function'?new AudioCtor({volume:this.state.settings.volume}):AudioCtor;}catch(e){console.warn('Audio init',e);}
@@ -97,6 +107,15 @@ class ShutokoNights {
       if(e.code==='F1'){e.preventDefault();this.ui.showHelp();}
     });
     window.addEventListener('keyup',e=>{this.keys[e.code]=false;});window.addEventListener('blur',()=>{this.keys={};this.pressed.clear();this.releaseTouchInput?.();});
+    // iOS Safari: block pinch zoom, long-press callout/selection and double-tap zoom on the game surface.
+    for(const type of ['gesturestart','gesturechange','gestureend'])document.addEventListener(type,e=>e.preventDefault());
+    document.addEventListener('contextmenu',e=>{if(this.isTouchDevice)e.preventDefault();});
+    if(this.isTouchDevice){
+      document.addEventListener('dblclick',e=>e.preventDefault());
+      this.canvas.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+      document.getElementById('touch-controls')?.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+      document.getElementById('touch-controls')?.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+    }
     this.setupTouchInput();
   }
 
@@ -112,7 +131,8 @@ class ShutokoNights {
     look?.addEventListener('pointermove',e=>{if(e.pointerId!==lookPointer||this.mode!=='garage')return;e.preventDefault();const movementX=e.clientX-lastX,movementY=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;this.garage?.onMouse?.({movementX:movementX*1.35,movementY:movementY*1.35});});
     const endLook=e=>{if(e.pointerId===lookPointer)lookPointer=null;};look?.addEventListener('pointerup',endLook);look?.addEventListener('pointercancel',endLook);
     this.releaseTouchInput=()=>{this.touchPointers?.forEach(({code,button})=>{this.keys[code]=false;button.classList.remove('active');});this.touchPointers?.clear();};
-    document.addEventListener('visibilitychange',()=>{if(document.hidden)this.releaseTouchInput();});
+    document.addEventListener('visibilitychange',()=>{if(document.hidden){this.releaseTouchInput();this.persist();}});
+    window.addEventListener('pagehide',()=>this.persist());
   }
 
   syncTouchUI(){
@@ -124,8 +144,8 @@ class ShutokoNights {
   start(){this.audio?.unlock?.();this.ui.hideBoot();this.started=true;this.enterGarage('start');}
   newGame(){
     this.ui?.closePhone?.();this.ui?.closePC?.();try{localStorage.removeItem(this.runtimeSaveKey);this.saver?.newGame?.();}catch(e){}
-    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
-    this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.admin={...this.state.admin,timeScale:1};this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
+    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.admin={...this.state.admin,timeScale:1};this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
   }
 
   placeAtSpawn(){
@@ -145,23 +165,28 @@ class ShutokoNights {
   getInput(){
     const throttle=this.keys.KeyW||this.keys.ArrowUp,brake=this.keys.KeyS||this.keys.ArrowDown,left=this.keys.KeyA||this.keys.ArrowLeft,right=this.keys.KeyD||this.keys.ArrowRight;
     const canInteract=this.getTelemetry().speedKmh<18;
-    return{throttle:throttle?1:0,brake:brake?1:0,steer:(left?-1:0)+(right?1:0),handbrake:!!this.keys.Space,shiftUp:canInteract?this.take('ShiftLeft','ShiftRight'):this.take('ShiftLeft','ShiftRight','KeyE'),shiftDown:this.take('ControlLeft','ControlRight','KeyQ'),clutch:false};
+    // Positive steer yaws the car toward the physics "right" basis, which is
+    // screen-LEFT for the chase camera, so the left key must map to +1.
+    return{throttle:throttle?1:0,brake:brake?1:0,steer:(left?1:0)+(right?-1:0),handbrake:!!this.keys.Space,shiftUp:canInteract?this.take('ShiftLeft','ShiftRight'):this.take('ShiftLeft','ShiftRight','KeyE'),shiftDown:this.take('ControlLeft','ControlRight','KeyQ'),clutch:false};
   }
   getWalkInput(){return{forward:!!(this.keys.KeyW||this.keys.ArrowUp),backward:!!(this.keys.KeyS||this.keys.ArrowDown),left:!!this.keys.KeyA,right:!!this.keys.KeyD,sprint:!!this.keys.ShiftLeft,interactPressed:this.take('KeyE')};}
   take(...codes){for(const c of codes)if(this.pressed.has(c)){this.pressed.delete(c);return true;}return false;}
 
   animate(){requestAnimationFrame(()=>this.animate());let dt=Math.min(.033,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
-    if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else this.updateBoot();
+    if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
     this.render();this.pressed.clear();
   }
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
     this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
-    if(this.ui.phoneOpen&&this.ui.phonePage==='map'&&this.ui.lastMinimap)this.ui.openPhoneApp('map');
   }
 
   updateDriving(dt){
+    // On touch devices you cannot browse the phone and steer at the same
+    // time, so the world freezes while an overlay is up. Desktop keeps
+    // driving as before.
+    if(this.isTouchDevice&&(this.ui.phoneOpen||this.ui.pcOpen)&&!this.crash.active){const tel=this.getTelemetry();this.updateAudio({...tel,throttle:0,slip:0},dt);return;}
     this.contactCooldown=Math.max(0,this.contactCooldown-dt);if(this.crash.active){this.updateCrash(dt);return;}
     const state=this.getVehicleState(),pos=vec(state.position||state);let roadInfo=this.map?.getRoadInfo?.(pos)||this.map?.getNearestRoute?.(pos)||{};
     roadInfo={...roadInfo,height:roadInfo.height??roadInfo.point?.y??roadInfo.center?.y,snapHeight:true,surfaceGrip:roadInfo.drivable===false?.55:1};this.currentRoadInfo=roadInfo;
@@ -181,6 +206,7 @@ class ShutokoNights {
   updateScoring(dt,t){
     if(t.speedKmh>=100){const flow=(t.speedKmh-85)*.21*this.run.combo;this.run.score+=flow*dt;}
     if(this.run.combo>1){this.run.comboTimer-=dt;if(this.run.comboTimer<=0){this.run.combo=Math.max(1,this.run.combo-dt*.85);if(this.run.combo<=1.01){this.run.combo=1;this.run.nearMisses=0;}}}
+    this.run.comboTimerFraction=this.run.combo>1?clamp(this.run.comboTimer/4.5,0,1):0;
     this.run.bestRunCombo=Math.max(this.run.bestRunCombo,this.run.combo);this.state.records.bestCombo=Math.max(this.state.records.bestCombo||1,this.run.combo);
   }
   handleTrafficEvents(){
@@ -191,7 +217,12 @@ class ShutokoNights {
     }
   }
   nearMiss(e={}){const t=this.getTelemetry();if(t.speedKmh<100)return;const distance=e.distance??e.clearance??1.2;const base=e.points??Math.round(220+(t.speedKmh-100)*4+Math.max(0,1.5-distance)*420);this.run.combo=clamp(this.run.combo+.25+(distance<.65?.2:0),1,8);this.run.comboTimer=4.5;this.run.nearMisses++;const points=base*this.run.combo;this.run.score+=points;this.ui.nearMiss(points,distance<.65);this.audio?.nearMiss?.({side:e.side==='left'?-1:1,speedKmh:t.speedKmh,closeness:e.closeness??1-distance/2.25});}
-  registerContact(kind,e={}){if(this.contactCooldown>0||this.crash.active)return;this.contactCooldown=1.1;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;if(!this.admin.infiniteLives)this.run.lives--;const impact=clamp((e.severity??e.intensity??4)/8,.4,2);this.audio?.crash?.(impact);this.ui.toast(`${kind.toUpperCase()} CONTACT // LIFE LOST`,'red');if(kind!=='wall')this.physics.resolveCollision?.({...e,normal:e.normal||new THREE.Vector3(1,0,0),kind});
+  registerContact(kind,e={}){if(this.contactCooldown>0||this.crash.active)return;this.contactCooldown=1.1;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;const severity=Number.isFinite(e.severity)?e.severity:(e.intensity??4);const impact=clamp(severity/8,.4,2);this.audio?.crash?.(impact);
+    // A light scrape resets the combo; only a real impact costs a life.
+    const serious=severity>2.5;
+    if(serious&&!this.admin.infiniteLives)this.run.lives--;
+    this.ui.toast(serious?`${kind.toUpperCase()} CONTACT // LIFE LOST`:`${kind.toUpperCase()} SCRAPE // COMBO LOST`,'red');
+    if(kind!=='wall')this.physics.resolveCollision?.({...e,normal:e.normal||new THREE.Vector3(1,0,0),kind});
     if(this.run.lives<=0)this.beginCrash();
   }
   beginCrash(){this.crash={active:true,timer:0,score:this.run.score};}
@@ -202,22 +233,26 @@ class ShutokoNights {
     const wallRadius=Math.max(.62,(s.width||this.getEffectiveCar().width||1.7)*.46);
     try{hit=this.map?.sweepWallCollision?.(previous,position,velocity,wallRadius,2.5)||this.map?.resolveWallCollision?.(position,velocity,wallRadius);}catch(e){console.warn('Wall collision check',e);}
     if(hit&&(hit.collided??hit.hit??hit===true)){
+      const detail=hit===true?{}:hit;
+      if(detail.normal&&!Number.isFinite(detail.severity))detail.severity=Math.max(0,-vec(velocity).dot(vec(detail.normal)));
       if(hit.position){this.physics.position?.copy?.(hit.position);s.position?.copy?.(hit.position);}if(hit.velocity){this.physics.velocity?.copy?.(hit.velocity);s.velocity?.copy?.(hit.velocity);}
-      this.registerContact('wall',hit===true?{}:hit);
+      this.registerContact('wall',detail);
     }
   }
   updateServices(t){
     const p=vec(this.getVehicleState().position||this.getVehicleState());let prox=this.map?.getServiceAreaProximity?.(p);
     if(Array.isArray(prox))prox=prox[0];const area=prox?.area||prox?.service||prox;const dist=prox?.distance??(area?.position?area.position.distanceTo?.(p):Infinity);const inside=!!(prox?.inside||area&&(dist<(area.radius||area.triggerRadius||22)));
+    let interactAvailable=false;
     if(inside&&area){const id=area.id||area.name;if(this.lastService!==id){this.lastService=id;this.bankScore(area.name||'SERVICE AREA');this.autoRefuel(area);}
-      if((area.garage||area.hasGarage||String(area.id).includes('garage'))&&t.speedKmh<12){this.ui.prompt('<kbd>E</kbd> ENTER WANGAN WORKS GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}
+      if((area.garage||area.hasGarage||String(area.id).includes('garage'))&&t.speedKmh<12){interactAvailable=true;this.ui.prompt('<kbd>E</kbd> ENTER WANGAN WORKS GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}
     }else{if(this.lastService&&(!area||dist>(area.radius||30)+15))this.lastService=null;if(!this.ui.pcOpen)this.ui.prompt('',false);}
-    if(!prox){let g=false;try{g=this.map?.checkGarageTransition?.(p,t.speedKmh);}catch(e){}if(g&&t.speedKmh<12){this.ui.prompt('<kbd>E</kbd> ENTER GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}}
+    if(!prox){let g=false;try{g=this.map?.checkGarageTransition?.(p,t.speedKmh);}catch(e){}if(g&&t.speedKmh<12){interactAvailable=true;this.ui.prompt('<kbd>E</kbd> ENTER GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}}
+    document.body.classList.toggle('interact-available',interactAvailable);
   }
   bankScore(name){if(this.run.score<1)return;const earned=Math.floor(this.run.score*(Data.ECONOMY?.scoreToMoney??Data.SCORE_TO_MONEY??.42));this.state.money+=earned;this.state.records.bestScore=Math.max(this.state.records.bestScore||0,Math.floor(this.run.score));this.state.records.totalBanked=(this.state.records.totalBanked||0)+earned;this.ui.toast(`${name.toUpperCase()} // ${Math.floor(this.run.score).toLocaleString()} BANKED = ¥${earned.toLocaleString()}`,'amber');this.run.score=0;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;this.persist();}
   autoRefuel(area){const car=this.getEffectiveCar(),capacity=car.fuelCapacity||45,needed=Math.max(0,capacity-this.state.fuel);if(needed<1)return;const cost=Math.ceil(needed*(Data.ECONOMY?.refuelPricePerLiter||Data.ECONOMY?.fuelPerLiter||170));if(this.state.money>=cost||this.admin.infiniteMoney){if(!this.admin.infiniteMoney)this.state.money-=cost;this.setPhysicsFuel(capacity);this.fuelWarned=false;this.ui.toast(`REFUELED ${needed.toFixed(1)}L // ¥${cost.toLocaleString()}`);this.persist();}else this.ui.toast('Not enough money to refuel','red');}
 
-  updatePlayerMesh(){const s=this.getVehicleState(),p=vec(s.position||s);this.playerMesh.position.copy(p);this.playerMesh.rotation.y=(s.heading??s.yaw??0)+Math.PI;const steer=s.steerAngle??s.steering??0;for(const w of this.playerMesh.userData.frontWheels||[])w.rotation.y=-steer;}
+  updatePlayerMesh(){const s=this.getVehicleState(),p=vec(s.position||s);this.playerMesh.position.copy(p);this.playerMesh.rotation.y=(s.heading??s.yaw??0)+Math.PI;const steer=s.steerAngle??s.steering??0;for(const w of this.playerMesh.userData.frontWheels||[])w.rotation.y=steer;}
   updateCamera(dt,t){const s=this.getVehicleState(),p=vec(s.position||s),h=s.heading??s.yaw??0,f=new THREE.Vector3(Math.sin(h),0,Math.cos(h));let desired,look;
     for(const mesh of this.playerMesh.userData.visualMeshes||[])mesh.visible=this.cameraMode==='chase';
     if(this.cameraMode==='hood'){desired=p.clone().addScaledVector(f,1.65).add(new THREE.Vector3(0,1.02,0));look=p.clone().addScaledVector(f,12).add(new THREE.Vector3(0,.9,0));}
@@ -242,8 +277,31 @@ class ShutokoNights {
   }
   updateAudio(t,dt){try{this.audio?.update?.({rpm:t.rpm,redlineRpm:t.redline,speedKmh:t.speedKmh,throttle:t.throttle,slip:t.slip,turbo:this.getEffectiveCar().turbo||0,running:t.fuel>0,fuel:t.fuelFraction});}catch(e){} }
   render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;this.renderer.render(scene,this.camera);}
-  resize(){const r=+this.state?.settings?.resolution||480,aspect=Math.max(.45,innerWidth/Math.max(1,innerHeight));let w,h;if(aspect>=1){w=r;h=Math.max(180,Math.round(r/aspect));}else{h=r;w=Math.max(180,Math.round(r*aspect));}this.renderer.setSize(w,h,false);this.camera.aspect=aspect;this.camera.updateProjectionMatrix();}
-  applyRetroMaterials(scene){scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if('flatShading'in m)m.flatShading=true;if(m.map){m.map.magFilter=THREE.NearestFilter;m.map.minFilter=THREE.NearestFilter;m.map.generateMipmaps=false;}m.dithering=true;if(!m.userData?.psxShader&&!m.isShaderMaterial){m.userData.psxShader=true;m.onBeforeCompile=shader=>{shader.vertexShader=shader.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\nfloat psxGrid = 210.0;\nfloat psxW = abs(gl_Position.w) < 0.0001 ? 0.0001 : gl_Position.w;\ngl_Position.xy = floor((gl_Position.xy / psxW) * psxGrid + 0.5) / psxGrid * psxW;');shader.fragmentShader=shader.fragmentShader.replace('#include <dithering_fragment>','gl_FragColor.rgb = floor(gl_FragColor.rgb * 31.0 + 0.5) / 31.0;\n#include <dithering_fragment>');};m.customProgramCacheKey=()=>`shutoko-psx-signed-${m.type}`;m.needsUpdate=true;}}});}
+  renderQuality(){
+    const q=this.state?.settings?.quality;if(['low','medium','high'].includes(q))return q;
+    const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';
+  }
+  resize(){
+    // Internal resolution as a fraction of true device pixels: Medium is the
+    // "modern PSX indie" target (~half device res); Low is the chunky retro
+    // fallback; High is near-native for powerful devices.
+    const q=this.renderQuality(),scale={low:.32,medium:.5,high:.72}[q]||.5;
+    const dpr=Math.min(window.devicePixelRatio||1,3);
+    let w=Math.round(innerWidth*dpr*scale),h=Math.round(innerHeight*dpr*scale);
+    const maxPixels=1600000;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    w=Math.max(320,w);h=Math.max(200,h);
+    this.renderer.setSize(w,h,false);
+    this.camera.aspect=innerWidth/Math.max(1,innerHeight);this.camera.updateProjectionMatrix();
+    // Vertex-snap grid follows the render height so the retro wobble stays
+    // subtle instead of scaling up with resolution.
+    this.psxGridUniform.value=Math.max(160,Math.round(h*.72));
+    this.canvas.style.imageRendering=q==='low'?'pixelated':'auto';
+  }
+  applyRetroMaterials(scene){scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if('flatShading'in m)m.flatShading=true;if(m.map){m.map.magFilter=THREE.NearestFilter;m.map.minFilter=THREE.NearestFilter;m.map.generateMipmaps=false;}m.dithering=true;if(!m.userData?.psxShader&&!m.isShaderMaterial){m.userData.psxShader=true;const grid=this.psxGridUniform;m.onBeforeCompile=shader=>{shader.uniforms.psxGrid=grid;
+    // Snap only vertices safely in front of the camera: snapping vertices at or
+    // behind the near plane (w <= 0) hurled triangles across the screen.
+    shader.vertexShader='uniform float psxGrid;\n'+shader.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\nif (gl_Position.w > 0.4) {\n  gl_Position.xy = floor((gl_Position.xy / gl_Position.w) * psxGrid + 0.5) / psxGrid * gl_Position.w;\n}');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <dithering_fragment>','gl_FragColor.rgb = floor(gl_FragColor.rgb * 31.0 + 0.5) / 31.0;\n#include <dithering_fragment>');};m.customProgramCacheKey=()=>`shutoko-psx-v2-${m.type}`;m.needsUpdate=true;}}});}
 
   createCarMesh(spec,player=false){
     const g=new THREE.Group(),visualMeshes=[],color=new THREE.Color(spec.color||'#8f2d38'),body=new THREE.MeshLambertMaterial({color,flatShading:true}),dark=new THREE.MeshLambertMaterial({color:0x0b1018,flatShading:true}),rubber=new THREE.MeshLambertMaterial({color:0x08090b,flatShading:true});
@@ -277,13 +335,18 @@ class ShutokoNights {
   buyFuelCan(){const can=Data.CONSUMABLES?.[0],price=can?.price||1200;if(!this.admin.infiniteMoney&&this.state.money<price){this.ui.toast('Insufficient funds','red');return;}if(!this.admin.infiniteMoney)this.state.money-=price;this.state.deliveries.push({id:`fuel-${Date.now()}`,partId:can?.id||'fuel-can',name:can?.name||'Fuel Can',liters:can?.liters||10,type:'fuel',readyAt:Date.now()+(this.admin.instantDelivery?0:2500)});this.persist();this.ui.refreshPC(this.getPCContext());this.ui.toast('Fuel can ordered');setTimeout(()=>this.makeDeliveriesReady(),2600);}
   availableDeliveries(){return this.state.deliveries.filter(d=>(d.readyAt||0)<=Date.now()||this.admin.instantDelivery);}
   makeDeliveriesReady(){if(!this.garage?.enabled)return;const ready=this.availableDeliveries();const signature=ready.map(d=>d.id).join('|');if(signature!==this.deliverySignature){this.deliverySignature=signature;this.garage.syncDeliveries(ready);if(ready.length)this.ui.toast(`${ready.length} delivery box${ready.length>1?'es':''} ready`);}}
-  finishInstall(d){const idx=this.state.deliveries.findIndex(x=>x.id===d.id||x.partId===d.partId);if(idx>=0)this.state.deliveries.splice(idx,1);if(d.type==='fuel'||String(d.partId).includes('fuel-can')){const cap=this.getEffectiveCar().fuelCapacity||45,liters=d.liters||10;this.state.fuel=Math.min(cap,this.state.fuel+liters);this.setPhysicsFuel(this.state.fuel);this.ui.toast(`Fuel can poured // +${liters}L`,'amber');}else if(!this.state.installedParts.includes(d.partId)){this.state.installedParts.push(d.partId);this.ui.toast(`${d.name} installed // Stats updated`,'amber');this.refreshVehicle();}this.persist();this.deliverySignature='';this.garage.syncDeliveries(this.availableDeliveries());this.ui.refreshPC(this.getPCContext());}
+  finishInstall(d){const idx=this.state.deliveries.findIndex(x=>x.id===d.id||x.partId===d.partId);if(idx>=0)this.state.deliveries.splice(idx,1);if(d.type==='fuel'||String(d.partId).includes('fuel-can')){const cap=this.getEffectiveCar().fuelCapacity||45,liters=d.liters||10;this.state.fuel=Math.min(cap,this.state.fuel+liters);this.setPhysicsFuel(this.state.fuel);this.fuelWarned=false;this.ui.toast(`Fuel can poured // +${liters}L`,'amber');}else if(!this.state.installedParts.includes(d.partId)){this.state.installedParts.push(d.partId);this.ui.toast(`${d.name} installed // Stats updated`,'amber');this.refreshVehicle();}this.persist();this.deliverySignature='';this.garage.syncDeliveries(this.availableDeliveries());this.ui.refreshPC(this.getPCContext());}
 
-  changeSetting(k,v){this.state.settings[k]=v;if(k==='volume'){this.audio?.setVolume?.(v);this.audio?.setMasterVolume?.(v);}if(k==='camera'){this.cameraMode=v;if(this.mode==='driving')this.snapDrivingCamera();}if(k==='resolution')this.resize();this.persist();this.audioClick();}
+  changeSetting(k,v){this.state.settings[k]=v;if(k==='volume'){this.audio?.setVolume?.(v);this.audio?.setMasterVolume?.(v);}if(k==='camera'){this.cameraMode=v;if(this.mode==='driving')this.snapDrivingCamera();}if(k==='resolution'||k==='quality')this.resize();this.persist();this.audioClick();}
   unlockAdmin(ok){if(!ok)return;this.admin.unlocked=true;this.persist();this.ui.toast('ADMIN MODE UNLOCKED','amber');}
   adminToggle(k,v){const prop={money:'infiniteMoney',lives:'infiniteLives',fuel:'infiniteFuel'}[k]||k;this.admin[prop]=v;this.persist();this.ui.toast(`${prop.replace(/([A-Z])/g,' $1').toUpperCase()} ${v?'ON':'OFF'}`,'amber');}
   adminAction(a){if(a==='money')this.state.money+=100000;else if(a==='garage'){this.ui.closePhone();this.enterGarage('admin');}else if(a==='pc'){this.ui.closePhone();if(this.mode!=='garage')this.enterGarage('admin');setTimeout(()=>this.ui.openPC(this.getPCContext()),this.mode==='garage'?40:560);}else if(a==='highway'){this.ui.closePhone();if(this.mode==='garage')this.exitGarage();else{this.mode='driving';this.placeAtSpawn();this.snapDrivingCamera();this.contactCooldown=1.2;}}else if(a==='deliverybay'){this.ui.closePhone();if(this.mode==='garage'){this.makeDeliveriesReady();this.garage.position.set(-7.35,1.72,9);this.garage.yaw=Math.PI/2;this.garage.pitch=0;}}else if(a==='carbay'){this.ui.closePhone();if(this.mode==='garage'){this.garage.position.set(0,1.72,3.65);this.garage.yaw=0;this.garage.pitch=-.08;}}else if(a==='fuel'){this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);this.fuelWarned=false;}else if(a==='lives')this.run.lives=3;else if(a==='parts'){this.state.installedParts=this.getPartsForOwned().map(p=>p.id);this.refreshVehicle();}else if(a==='delivery'){this.admin.instantDelivery=true;this.state.deliveries.forEach(d=>d.readyAt=0);this.makeDeliveriesReady();}else if(a==='boost'){this.physics.setSpeed?.(69.44);this.physics.setVelocity?.(69.44);if(!this.physics.setVelocity&&this.physics.velocity){const h=this.getVehicleState().heading||0;this.physics.velocity.set(Math.sin(h)*69.44,0,Math.cos(h)*69.44);}}this.persist();if(!['garage','pc','highway','deliverybay','carbay'].includes(a))this.ui.openPhoneApp('admin');this.ui.toast(`ADMIN // ${a.toUpperCase()}`,'amber');}
-  tow(){const cost=Data.ECONOMY?.towCost||2500;if(!this.admin.infiniteMoney&&this.state.money<cost){this.ui.toast('Tow refused // Insufficient funds','red');return;}if(!this.admin.infiniteMoney)this.state.money-=cost;this.run.score=0;this.run.combo=1;this.ui.closePhone();this.persist();this.enterGarage('tow');}
+  tow(){const cost=Data.ECONOMY?.towCost||2500;
+    // Never refuse the tow: a broke player out of fuel on the expressway
+    // would otherwise be soft-locked. Take whatever they can pay.
+    const paid=this.admin.infiniteMoney?0:Math.min(cost,this.state.money);this.state.money-=paid;
+    this.run.score=0;this.run.combo=1;this.fuelWarned=false;this.ui.closePhone();this.persist();this.enterGarage('tow');
+    if(paid<cost)this.ui.toast(`Tow driver took your last ¥${paid.toLocaleString()}`,'red');}
   audioClick(){this.audio?.uiClick?.();}
 }
 

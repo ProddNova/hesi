@@ -327,6 +327,8 @@ export class VehiclePhysics {
     this._rearLock = 0;
     this._surfaceGrip = 1;
     this._contactCooldown = 0;
+    this._postImpactTimer = 0;
+    this._yawKickCooldown = 0;
     this._lastThrottle = 0;
 
     this._state = {
@@ -369,6 +371,12 @@ export class VehiclePhysics {
     this.heading = wrapAngle(finite(heading, 0));
     this.yawRate = 0;
     this.velocity.set(0, 0, 0);
+    this.steering = 0;
+    this._longitudinalAcceleration = 0;
+    this._lateralAcceleration = 0;
+    this._roadHeightVelocity = 0;
+    this._postImpactTimer = 0;
+    this._yawKickCooldown = 0;
     this._safePosition.copy(this.position);
     this._safeHeading = this.heading;
     this._refreshPublicState(0, 0);
@@ -480,7 +488,17 @@ export class VehiclePhysics {
 
     this.time += frameDt;
     this._contactCooldown = Math.max(0, this._contactCooldown - frameDt);
+    this._postImpactTimer = Math.max(0, this._postImpactTimer - frameDt);
+    this._yawKickCooldown = Math.max(0, this._yawKickCooldown - frameDt);
     this._safeTimer += frameDt;
+
+    // Never let a NaN or an exploding integration leak into the renderer;
+    // recover to the last known-good on-road pose instead.
+    const speedSq = this.velocity.lengthSq();
+    if (!Number.isFinite(this.position.x + this.position.y + this.position.z + this.heading + this.yawRate)
+      || !Number.isFinite(speedSq) || speedSq > 250 * 250) {
+      this.reset();
+    }
 
     const forward = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
     const right = new THREE.Vector3(Math.cos(this.heading), 0, -Math.sin(this.heading));
@@ -516,9 +534,16 @@ export class VehiclePhysics {
 
     if (this.transmissionMode === 'automatic') this._automaticGearbox(input, u);
 
-    const speedSteerScale = THREE.MathUtils.lerp(1, 0.36, smoothstep01(speed / 55));
-    const targetSteering = input.steer * this.spec.maxSteer * speedSteerScale;
-    const steerRate = (2.8 + 4.5 / (1 + speed * 0.16)) * dt;
+    // Speed-sensitive steering sized to what the tires can actually use: the
+    // Ackermann angle for ~1.35x the grip-limited lateral acceleration plus a
+    // small slip allowance. Full lock stays available at parking speeds, while
+    // an on/off touch button at 200 km/h can no longer request an instant spin.
+    const gripLimitedSteer = this.spec.wheelbase * this.spec.tireGrip * this._surfaceGrip * G * 1.15
+      / Math.max(1, u * u) + 0.022;
+    const speedSteerScale = THREE.MathUtils.lerp(1, 0.3, smoothstep01(speed / 50));
+    const steerAuthority = Math.min(this.spec.maxSteer * speedSteerScale, gripLimitedSteer, this.spec.maxSteer);
+    const targetSteering = input.steer * steerAuthority;
+    const steerRate = (2.2 + 5.5 / (1 + speed * 0.2)) * dt;
     this.steering += clamp(targetSteering - this.steering, -steerRate, steerRate);
     if (Math.abs(input.steer) < 0.02) this.steering *= Math.exp(-dt * (5.5 + speed * 0.035));
 
@@ -616,8 +641,11 @@ export class VehiclePhysics {
     const yawMoment = a * frontBodyY - b * fyRear;
     const yawAcceleration = yawMoment / Math.max(1, inertia);
     this.yawRate += yawAcceleration * dt;
-    this.yawRate *= Math.exp(-dt * (0.14 + (speed < 1.5 ? 5 : 0)));
-    this.yawRate = clamp(this.yawRate, -2.8, 2.8);
+    // Heavier yaw damping right after an impact so wall/traffic hits shed
+    // rotation in well under a second instead of an endless pirouette.
+    const impactDamping = this._postImpactTimer > 0 ? 2.6 : 0;
+    this.yawRate *= Math.exp(-dt * (0.32 + impactDamping + (speed < 1.5 ? 5 : 0)));
+    this.yawRate = clamp(this.yawRate, -2.2, 2.2);
     this.heading = wrapAngle(this.heading + this.yawRate * dt);
 
     const oldPosition = this.position.clone();
@@ -807,6 +835,7 @@ export class VehiclePhysics {
     const normalSpeed = relativeVelocity.dot(normal);
     const restitution = clamp(firstNumber(contact, ['restitution'], 0.1), 0, 0.55);
     const friction = clamp(firstNumber(contact, ['friction'], 0.34), 0, 1);
+    const preImpactTangent = normal.x * relativeVelocity.z - normal.z * relativeVelocity.x;
 
     if (normalSpeed < 0) {
       relativeVelocity.addScaledVector(normal, -(1 + restitution) * normalSpeed);
@@ -820,11 +849,17 @@ export class VehiclePhysics {
     }
     if (penetration > 0) this.position.addScaledVector(normal, penetration + 0.015);
 
-    const point = asVector3(contact.point ?? contact.contactPoint, this.position);
-    const arm = point.sub(this.position);
-    const tangentImpulse = normal.x * relativeVelocity.z - normal.z * relativeVelocity.x;
-    this.yawRate += clamp((arm.x * normal.z - arm.z * normal.x) * -normalSpeed * 0.055 + tangentImpulse * 0.012, -1.4, 1.4);
     const severity = Math.max(0, -normalSpeed);
+    // Yaw kick only on a genuine impact and at most once per contact window;
+    // continuous scrapes used to inject rotation every frame and spin the car.
+    if (severity > 1.2 && this._yawKickCooldown <= 0) {
+      const point = asVector3(contact.point ?? contact.contactPoint, this.position);
+      const arm = point.sub(this.position);
+      const kick = clamp((arm.x * normal.z - arm.z * normal.x) * severity * 0.03 + preImpactTangent * 0.006, -0.7, 0.7);
+      this.yawRate = clamp(this.yawRate + kick, -1.6, 1.6);
+      this._yawKickCooldown = 0.45;
+      this._postImpactTimer = Math.max(this._postImpactTimer, 0.9);
+    }
     const event = {
       type: 'collision',
       serial: ++this._collisionSerial,
@@ -855,6 +890,11 @@ export class VehiclePhysics {
     this.steering = 0;
     this.bodyRoll = 0;
     this.bodyPitch = 0;
+    this._longitudinalAcceleration = 0;
+    this._lateralAcceleration = 0;
+    this._roadHeightVelocity = 0;
+    this._postImpactTimer = 0;
+    this._yawKickCooldown = 0;
     this.rpm = this.engineRunning ? this.spec.idleRPM : 0;
     this.gear = Math.max(1, this.gear);
     this._events.push({ type: 'reset', time: this.time, position: this.position.clone() });

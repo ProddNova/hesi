@@ -98,6 +98,8 @@ export class HighwayMap {
     this._poleInstances = [];
     this._lampInstances = [];
     this._tunnelLampInstances = [];
+    this._gantryInstances = [];
+    this._portalInstances = [];
 
     this.materials = this._createMaterials();
     this._createNetwork();
@@ -106,9 +108,9 @@ export class HighwayMap {
     this._buildRoadNetwork();
     this._buildJunctionPlatforms();
     this._buildServiceAreas();
+    this._buildSignage();
     this._buildInstancedDetails();
     this._buildCity();
-    this._buildSignage();
     this._buildMinimapData();
 
     this.routeAliases.set('c1_outer', { id: 'c1', direction: 1 });
@@ -131,7 +133,10 @@ export class HighwayMap {
       this.scene.add(this.group);
       if (this.options.applyFog !== false) {
         this.scene.background = new THREE.Color(0x03050e);
-        this.scene.fog = new THREE.FogExp2(0x050713, this.options.fogDensity || 0.000095);
+        // Dense enough that geometry is fully faded before the camera far
+        // plane (1250 m); the old 0.000095 left everything ~98% visible there,
+        // so distant decks and buildings popped in and out of existence.
+        this.scene.fog = new THREE.FogExp2(0x050713, this.options.fogDensity || 0.00125);
       }
     }
   }
@@ -1687,7 +1692,9 @@ export class HighwayMap {
         this.materials.road,
       );
       platform.position.copy(junction.point);
-      platform.position.y -= 0.56;
+      // Keep the platform top a few centimetres below the road decks so the
+      // surfaces never z-fight where routes cross the junction.
+      platform.position.y -= 0.64;
       platform.name = junction.name;
       group.add(platform);
 
@@ -1723,7 +1730,7 @@ export class HighwayMap {
           .addScaledVector(area.normal, side * area.width * 0.5)
           .addScaledVector(area.tangent, (startAlong + endAlong) * 0.5);
         railPosition.y += 0.55;
-        this._addBox(group, vec(0.42, 1.1, segmentLength), railPosition, orientation, this.materials.concrete, `${area.name} parking guardrail`);
+        this._gantryInstances.push(this._instanceRecord(railPosition, vec(0.42, 1.1, segmentLength), orientation));
       };
       addSideRail(-1, -area.length * 0.5, area.length * 0.5);
       if (area.hasGarage) {
@@ -1742,7 +1749,7 @@ export class HighwayMap {
             .addScaledVector(area.tangent, endSide * area.length * 0.5)
             .addScaledVector(area.normal, across);
           railPosition.y += 0.55;
-          this._addBox(group, vec(endRailLength, 1.1, 0.42), railPosition, orientation, this.materials.concrete, `${area.name} entry guardrail`);
+          this._gantryInstances.push(this._instanceRecord(railPosition, vec(endRailLength, 1.1, 0.42), orientation));
         }
       }
 
@@ -1887,6 +1894,8 @@ export class HighwayMap {
     this._createInstancedMesh(this._poleInstances, this.materials.concrete, 'Sodium lamp poles');
     this._createInstancedMesh(this._lampInstances, this.materials.lamp, 'Sodium vapor luminaires');
     this._createInstancedMesh(this._tunnelLampInstances, this.materials.tunnelLamp, 'Tunnel luminaires');
+    this._createInstancedMesh(this._gantryInstances, this.materials.concrete, 'Gantry beams and posts');
+    this._createInstancedMesh(this._portalInstances, this.materials.tunnelRib, 'Tunnel portal frames');
   }
 
   _distanceToRoadXZ(position) {
@@ -1999,11 +2008,11 @@ export class HighwayMap {
     const width = route.roadWidth + 4.5;
     const beamPosition = sample.position.clone();
     beamPosition.y += 6.35;
-    this._addBox(group, vec(width, 0.34, 0.34), beamPosition, orientation, this.materials.concrete, `${route.code} gantry beam`);
+    this._gantryInstances.push(this._instanceRecord(beamPosition, vec(width, 0.34, 0.34), orientation));
     for (const side of [-1, 1]) {
       const postPosition = sample.position.clone().addScaledVector(sample.normal, side * (route.halfWidth + 1.35));
       postPosition.y += 3.15;
-      this._addBox(group, vec(0.3, 6.3, 0.3), postPosition, orientation, this.materials.concrete, `${route.code} gantry post`);
+      this._gantryInstances.push(this._instanceRecord(postPosition, vec(0.3, 6.3, 0.3), orientation));
     }
     const signPosition = sample.position.clone().addScaledVector(sample.normal, route.halfWidth * 0.22);
     signPosition.y += 7.7;
@@ -2035,11 +2044,11 @@ export class HighwayMap {
     const orientation = yawQuaternion(sample.tangent);
     const beamPosition = sample.position.clone();
     beamPosition.y += 6.15;
-    this._addBox(group, vec(route.roadWidth + 2.2, 0.65, 0.75), beamPosition, orientation, this.materials.tunnelRib, `${name} portal lintel`);
+    this._portalInstances.push(this._instanceRecord(beamPosition, vec(route.roadWidth + 2.2, 0.65, 0.75), orientation));
     for (const side of [-1, 1]) {
       const sidePosition = sample.position.clone().addScaledVector(sample.normal, side * (route.halfWidth + 0.75));
       sidePosition.y += 3.05;
-      this._addBox(group, vec(0.72, 6.1, 0.75), sidePosition, orientation, this.materials.tunnelRib, `${name} portal side`);
+      this._portalInstances.push(this._instanceRecord(sidePosition, vec(0.72, 6.1, 0.75), orientation));
     }
   }
 
