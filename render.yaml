@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: shutoko-nights
+    runtime: static
+    buildCommand: echo "Static game - no build step"
+    staticPublishPath: .
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate

@@ -1,0 +1,292 @@
+import * as THREE from 'three';
+import * as MapModule from './map.js?v=20260711a';
+import * as PhysicsModule from './physics.js';
+import * as TrafficModule from './traffic.js';
+import * as Data from './data.js';
+import * as SaveModule from './save.js';
+import * as AudioModule from './audio.js';
+import { GarageSystem } from './garage.js?v=20260711b';
+import { GameUI } from './ui.js?v=20260711n';
+
+const HighwayMap = MapModule.HighwayMap || MapModule.default;
+const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
+const TrafficSystem = TrafficModule.TrafficSystem || TrafficModule.default;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const vec=p=>p?.isVector3?p:new THREE.Vector3(p?.x||0,p?.y||0,p?.z||0);
+
+class ShutokoNights {
+  constructor(){
+    this.canvas=document.getElementById('game-canvas');
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:false,powerPreference:'high-performance',alpha:false});
+    this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.shadowMap.enabled=false;
+    this.camera=new THREE.PerspectiveCamera(64,16/9,.08,1250);
+    this.roadScene=new THREE.Scene();this.garageScene=new THREE.Scene();
+    this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
+    this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
+    this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
+    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1};
+    this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
+    this.resize();window.addEventListener('resize',()=>this.resize());this.ui.showBoot(this.hadSave);this.ui.finishLoading();this.animate();
+  }
+
+  setupPersistence(){
+    const SaveCtor=SaveModule.SaveSystem||SaveModule.default;
+    try{this.saver=typeof SaveCtor==='function'?new SaveCtor({autoLoad:false,autoStart:false}):SaveCtor;}catch(e){console.warn('Save system fallback',e);this.saver=null;}
+    this.runtimeSaveKey='shutoko-nights.runtime.v2';let raw=null;
+    try{const serialized=localStorage.getItem(this.runtimeSaveKey);raw=serialized?JSON.parse(serialized):null;if(!raw&&localStorage.getItem(SaveModule.SAVE_KEY||'shutoko-nights.save'))raw=this.saver?.load?.()||null;}catch(e){console.warn(e);}
+    this.hadSave=!!raw;
+    this.catalog=Data.CARS||Data.CAR_CATALOG||Data.CAR_SPECS||Data.cars||[];
+    this.partCatalog=Data.PARTS||Data.PART_CATALOG||Data.UPGRADE_PARTS||Data.parts||[];
+    if(!Array.isArray(this.catalog)&&typeof this.catalog==='object')this.catalog=Object.values(this.catalog);
+    if(!Array.isArray(this.partCatalog)&&typeof this.partCatalog==='object')this.partCatalog=Object.values(this.partCatalog).flat();
+    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar();
+    const starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};
+    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    this.state=this.normalizeState(raw||defaults,defaults);
+    if(!this.state.auctions.length)this.state.auctions=this.generateAuctions(this.state.auctionSeed);
+    this.admin={...this.admin,...this.state.admin};this.cameraMode=this.state.settings.camera||'chase';this.persist();
+  }
+
+  normalizeState(raw,d){
+    const s={...d,...raw};s.settings={...d.settings,...raw.settings};s.records={...d.records,...raw.records};s.admin={...d.admin,...raw.admin};
+    s.money=Number.isFinite(+s.money)?+s.money:d.money;s.installedParts=Array.isArray(s.installedParts)?s.installedParts:[];s.deliveries=Array.isArray(s.deliveries)?s.deliveries:[];s.auctions=Array.isArray(s.auctions)?s.auctions:[];
+    s.ownedCarId=s.ownedCarId||s.ownedCar?.id||d.ownedCarId;s.ownedCar=s.ownedCar||this.catalog.find(c=>c.id===s.ownedCarId)||d.ownedCar;
+    s.fuel=Number.isFinite(+s.fuel)?+s.fuel:(s.ownedCar.fuelCapacity||45);return s;
+  }
+  persist(){this.state.admin={...this.admin};try{localStorage.setItem(this.runtimeSaveKey,JSON.stringify(this.state));this.saver?.save?.(this.state);}catch(e){console.warn('Autosave unavailable',e);}}
+  generateAuctions(seed){
+    const fn=Data.generateAuctions||Data.generateAuctionListings||Data.createAuctions;
+    if(fn){try{return fn(seed,this.catalog);}catch(e){console.warn(e);}}
+    let x=seed>>>0;const rnd=()=>((x=(x*1664525+1013904223)>>>0)/4294967296);const list=[];
+    for(let i=0;i<Math.max(8,Math.min(11,this.catalog.length*2));i++){const car=this.catalog[(1+Math.floor(rnd()*Math.max(1,this.catalog.length-1)))%this.catalog.length];const mileage=Math.floor(18000+rnd()*185000),condition=.82+rnd()*.18;list.push({id:`lot-${i}`,carId:car.id,car:{...car},year:(car.year||1994)-Math.floor(rnd()*3),mileage,condition,grade:['3','3.5','4','4.5'][Math.floor(rnd()*4)],price:Math.round((car.price||250000)*(.78+condition*.25)/1000)*1000,effectivePower:(car.power||car.horsepower||100)*condition});}return list;
+  }
+  fallbackCar(){return{id:'koten-90',name:'Koten Maru 90',year:1988,starter:true,color:'#7d3037',price:85000,power:90,torque:128,mass:1040,drivetrain:'RWD',engineLayout:'I4',redline:6500,idleRPM:850,gearRatios:[3.35,1.95,1.29,.96,.78],finalDrive:4.1,tireGrip:1.02,brakeForce:10500,suspensionStiffness:1,fuelCapacity:45,dimensions:{length:4.25,width:1.67,height:1.32}};}
+
+  setupLights(){
+    this.roadScene.background=new THREE.Color(0x02050c);this.roadScene.fog=new THREE.FogExp2(0x07101c,.0015);
+    this.roadScene.add(new THREE.HemisphereLight(0x496581,0x121522,2.15));this.roadScene.add(new THREE.AmbientLight(0x60718e,.72));const moon=new THREE.DirectionalLight(0x8da4c8,1.05);moon.position.set(-200,300,-100);this.roadScene.add(moon);
+    this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
+  }
+  buildWorld(){
+    try{this.map=new HighwayMap(this.roadScene,{quality:'psx'});this.map.build?.();const openSpawn=this.map.sampleLane?.('wangan',1800,1,1);if(openSpawn?.position){openSpawn.position.y+=.65;openSpawn.label='Wangan outbound garage merge';this.map.initialSpawn=openSpawn;}}catch(e){console.error('Map init',e);this.map=null;}
+    const effective=this.getEffectiveCar();this.audio?.setVehicle?.(effective);
+    this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
+    this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);
+    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?30:42,density:this.isTouchDevice?.78:1});}catch(e){console.error('Traffic init',e);this.traffic=null;}
+    this.garage=new GarageSystem(this.garageScene,this.camera,this.canvas,{
+      isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),finishInstall:d=>this.finishInstall(d),
+      prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
+    });
+    this.garage.root.visible=false;this.roadScene.add(this.camera);this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
+  }
+
+  setupUI(){
+    this.ui=new GameUI({continue:()=>this.start(),newGame:()=>this.newGame(),phoneChanged:o=>this.audioClick(),getPhoneContext:()=>this.getPhoneContext(),tow:()=>this.tow(),setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},uiClick:()=>this.audioClick(),
+      getPCContext:()=>this.getPCContext(),buyCar:i=>this.buyCar(i),buyPart:i=>this.buyPart(i),buyFuelCan:()=>this.buyFuelCan(),pcChanged:o=>{if(o)document.exitPointerLock?.();},returnGarage:()=>this.enterGarage('crash')});
+    const AudioCtor=AudioModule.AudioSystem||AudioModule.default;
+    try{this.audio=typeof AudioCtor==='function'?new AudioCtor({volume:this.state.settings.volume}):AudioCtor;}catch(e){console.warn('Audio init',e);}
+  }
+  setupInput(){
+    const block=new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
+    window.addEventListener('keydown',e=>{
+      if(block.has(e.code))e.preventDefault();if(!this.keys[e.code])this.pressed.add(e.code);this.keys[e.code]=true;
+      this.audio?.unlock?.();this.audio?.resume?.();
+      if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
+      if(e.code==='KeyC'&&this.mode==='driving'){this.cycleCamera();this.pressed.delete(e.code);}
+      if(e.code==='KeyR'&&this.mode==='driving'){this.recover();this.pressed.delete(e.code);}
+      if(e.code==='F1'){e.preventDefault();this.ui.showHelp();}
+    });
+    window.addEventListener('keyup',e=>{this.keys[e.code]=false;});window.addEventListener('blur',()=>{this.keys={};this.pressed.clear();this.releaseTouchInput?.();});
+    this.setupTouchInput();
+  }
+
+  setupTouchInput(){
+    const root=document.getElementById('touch-controls');if(!root)return;
+    this.touchPointers=new Map();
+    const press=(button,e)=>{const code=button.dataset.code;if(!code)return;e.preventDefault();button.setPointerCapture?.(e.pointerId);this.touchPointers.set(e.pointerId,{code,button});if(!this.keys[code])this.pressed.add(code);this.keys[code]=true;button.classList.add('active');this.audio?.unlock?.();navigator.vibrate?.(8);};
+    const release=e=>{const held=this.touchPointers.get(e.pointerId);if(!held)return;this.touchPointers.delete(e.pointerId);if(![...this.touchPointers.values()].some(v=>v.code===held.code))this.keys[held.code]=false;held.button.classList.remove('active');};
+    root.querySelectorAll('[data-code]').forEach(button=>{button.addEventListener('pointerdown',e=>press(button,e));button.addEventListener('pointerup',release);button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);button.addEventListener('contextmenu',e=>e.preventDefault());});
+    root.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('pointerdown',e=>{e.preventDefault();this.audio?.unlock?.();button.classList.add('active');setTimeout(()=>button.classList.remove('active'),100);const action=button.dataset.action;if(action==='phone'&&this.started&&!this.ui.pcOpen)this.ui.togglePhone(this.getPhoneContext());else if(action==='camera'&&this.mode==='driving')this.cycleCamera();else if(action==='recover'&&this.mode==='driving')this.recover();navigator.vibrate?.(10);}));
+    const look=document.getElementById('touch-look');let lookPointer=null,lastX=0,lastY=0;
+    look?.addEventListener('pointerdown',e=>{e.preventDefault();lookPointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;look.setPointerCapture?.(e.pointerId);});
+    look?.addEventListener('pointermove',e=>{if(e.pointerId!==lookPointer||this.mode!=='garage')return;e.preventDefault();const movementX=e.clientX-lastX,movementY=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;this.garage?.onMouse?.({movementX:movementX*1.35,movementY:movementY*1.35});});
+    const endLook=e=>{if(e.pointerId===lookPointer)lookPointer=null;};look?.addEventListener('pointerup',endLook);look?.addEventListener('pointercancel',endLook);
+    this.releaseTouchInput=()=>{this.touchPointers?.forEach(({code,button})=>{this.keys[code]=false;button.classList.remove('active');});this.touchPointers?.clear();};
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)this.releaseTouchInput();});
+  }
+
+  syncTouchUI(){
+    const root=document.getElementById('touch-controls');if(!root)return;const blocked=this.ui?.phoneOpen||this.ui?.pcOpen||!document.getElementById('run-over')?.classList.contains('hidden')||!document.getElementById('pause-help')?.classList.contains('hidden');
+    document.body.dataset.gameMode=this.mode;document.body.classList.toggle('controls-blocked',!!blocked);root.classList.toggle('hidden',!this.started||!['driving','garage'].includes(this.mode));
+    if(blocked)this.releaseTouchInput?.();
+  }
+
+  start(){this.audio?.unlock?.();this.ui.hideBoot();this.started=true;this.enterGarage('start');}
+  newGame(){
+    this.ui?.closePhone?.();this.ui?.closePC?.();try{localStorage.removeItem(this.runtimeSaveKey);this.saver?.newGame?.();}catch(e){}
+    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.admin={...this.state.admin,timeScale:1};this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
+  }
+
+  placeAtSpawn(){
+    const sp=this.map?.initialSpawn||this.map?.getInitialSpawn?.()||{position:{x:0,y:6,z:0},heading:0};const p=vec(sp.position||sp);
+    if(this.physics.setPosition)this.physics.setPosition(p.x,p.y,p.z,sp.heading||0);else if(this.physics.reset)this.physics.reset(p,sp.heading||0);else {this.physics.state.position.copy(p);this.physics.state.heading=sp.heading||0;}
+  }
+  enterGarage(reason='service'){
+    this.ui.fade(true);setTimeout(()=>{
+      if(reason==='crash'||reason==='tow'){this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};}
+      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Tatsumi workshop // Shift complete','amber');
+    },480);
+  }
+  exitGarage(){
+    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('C1 access ramp // Drive safe','amber');},480);
+  }
+
+  getInput(){
+    const throttle=this.keys.KeyW||this.keys.ArrowUp,brake=this.keys.KeyS||this.keys.ArrowDown,left=this.keys.KeyA||this.keys.ArrowLeft,right=this.keys.KeyD||this.keys.ArrowRight;
+    const canInteract=this.getTelemetry().speedKmh<18;
+    return{throttle:throttle?1:0,brake:brake?1:0,steer:(left?-1:0)+(right?1:0),handbrake:!!this.keys.Space,shiftUp:canInteract?this.take('ShiftLeft','ShiftRight'):this.take('ShiftLeft','ShiftRight','KeyE'),shiftDown:this.take('ControlLeft','ControlRight','KeyQ'),clutch:false};
+  }
+  getWalkInput(){return{forward:!!(this.keys.KeyW||this.keys.ArrowUp),backward:!!(this.keys.KeyS||this.keys.ArrowDown),left:!!this.keys.KeyA,right:!!this.keys.KeyD,sprint:!!this.keys.ShiftLeft,interactPressed:this.take('KeyE')};}
+  take(...codes){for(const c of codes)if(this.pressed.has(c)){this.pressed.delete(c);return true;}return false;}
+
+  animate(){requestAnimationFrame(()=>this.animate());let dt=Math.min(.033,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
+    if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else this.updateBoot();
+    this.render();this.pressed.clear();
+  }
+  updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
+  updateGarage(dt){
+    this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
+    this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
+    if(this.ui.phoneOpen&&this.ui.phonePage==='map'&&this.ui.lastMinimap)this.ui.openPhoneApp('map');
+  }
+
+  updateDriving(dt){
+    this.contactCooldown=Math.max(0,this.contactCooldown-dt);if(this.crash.active){this.updateCrash(dt);return;}
+    const state=this.getVehicleState(),pos=vec(state.position||state);let roadInfo=this.map?.getRoadInfo?.(pos)||this.map?.getNearestRoute?.(pos)||{};
+    roadInfo={...roadInfo,height:roadInfo.height??roadInfo.point?.y??roadInfo.center?.y,snapHeight:true,surfaceGrip:roadInfo.drivable===false?.55:1};this.currentRoadInfo=roadInfo;
+    const input=this.getInput();this.lastDriveInput=input;const settings={automatic:this.state.settings.gearbox!=='manual',gearbox:this.state.settings.gearbox,infiniteFuel:this.admin.infiniteFuel};
+    try{this.physics.update(dt,input,roadInfo,settings);}catch(e){console.error('Physics update',e);this.mode='error';throw e;}
+    if(this.admin.infiniteFuel)this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);
+    this.syncFuelFromPhysics();this.resolveMapCollision();this.traffic?.update?.(dt,this.getVehicleState());this.handleTrafficEvents();this.updatePlayerMesh();this.map?.update?.(pos,performance.now()/1000);
+    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,roadInfo);
+    if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
+  }
+
+  getVehicleState(){return this.physics.getState?.()||this.physics.state||this.physics;}
+  getTelemetry(){const t=this.physics.getTelemetry?.()||this.physics.telemetry||{};const s=this.getVehicleState();const speedMS=Math.abs(t.speedMS??t.speed??s.speed??s.velocity?.length?.()??0),gear=t.gear??s.gear??1,slip=t.slip??t.slipAngle??Math.max(Math.abs(t.frontSlipAngle||0),Math.abs(t.rearSlipAngle||0),t.frontSaturation||0,t.rearSaturation||0);return{...t,speedMS,speedKmh:t.speedKmh??speedMS*3.6,rpm:t.rpm??s.rpm??900,gear,gearLabel:t.gearLabel??(gear===0?'N':gear<0?'R':String(gear)),redline:t.redline??this.getEffectiveCar().redline??7000,fuel:t.fuel??s.fuel??this.state.fuel,fuelFraction:t.fuelFraction??((t.fuel??s.fuel??this.state.fuel)/(this.getEffectiveCar().fuelCapacity||45)),slip,throttle:t.throttle??this.lastDriveInput?.throttle??0};}
+  syncFuelFromPhysics(){const t=this.getTelemetry();if(Number.isFinite(t.fuel)){this.state.fuel=t.fuel;if(Math.random()<.004)this.persist();}}
+  setPhysicsFuel(v){if(this.physics.state)this.physics.state.fuel=v;if('fuel'in this.physics)this.physics.fuel=v;this.state.fuel=v;}
+
+  updateScoring(dt,t){
+    if(t.speedKmh>=100){const flow=(t.speedKmh-85)*.21*this.run.combo;this.run.score+=flow*dt;}
+    if(this.run.combo>1){this.run.comboTimer-=dt;if(this.run.comboTimer<=0){this.run.combo=Math.max(1,this.run.combo-dt*.85);if(this.run.combo<=1.01){this.run.combo=1;this.run.nearMisses=0;}}}
+    this.run.bestRunCombo=Math.max(this.run.bestRunCombo,this.run.combo);this.state.records.bestCombo=Math.max(this.state.records.bestCombo||1,this.run.combo);
+  }
+  handleTrafficEvents(){
+    let events=[];try{events=this.traffic?.consumeEvents?.()||this.traffic?.getEvents?.()||[];}catch(e){}
+    for(const e of events){
+      const type=(e.type||e.kind||'').toLowerCase();
+      if(type.includes('near'))this.nearMiss(e);else if(type.includes('collision')||type.includes('contact'))this.registerContact('traffic',e);
+    }
+  }
+  nearMiss(e={}){const t=this.getTelemetry();if(t.speedKmh<100)return;const distance=e.distance??e.clearance??1.2;const base=e.points??Math.round(220+(t.speedKmh-100)*4+Math.max(0,1.5-distance)*420);this.run.combo=clamp(this.run.combo+.25+(distance<.65?.2:0),1,8);this.run.comboTimer=4.5;this.run.nearMisses++;const points=base*this.run.combo;this.run.score+=points;this.ui.nearMiss(points,distance<.65);this.audio?.nearMiss?.({side:e.side==='left'?-1:1,speedKmh:t.speedKmh,closeness:e.closeness??1-distance/2.25});}
+  registerContact(kind,e={}){if(this.contactCooldown>0||this.crash.active)return;this.contactCooldown=1.1;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;if(!this.admin.infiniteLives)this.run.lives--;const impact=clamp((e.severity??e.intensity??4)/8,.4,2);this.audio?.crash?.(impact);this.ui.toast(`${kind.toUpperCase()} CONTACT // LIFE LOST`,'red');if(kind!=='wall')this.physics.resolveCollision?.({...e,normal:e.normal||new THREE.Vector3(1,0,0),kind});
+    if(this.run.lives<=0)this.beginCrash();
+  }
+  beginCrash(){this.crash={active:true,timer:0,score:this.run.score};}
+  updateCrash(dt){this.crash.timer+=dt/.28;const s=this.getVehicleState();if(s.heading!=null)s.heading+=dt*5;this.playerMesh.rotation.y+=(dt/.28)*4;const shake=Math.max(0,1-this.crash.timer/2.2)*.9;this.camera.position.x+=(Math.random()-.5)*shake;this.camera.position.y+=(Math.random()-.5)*shake;if(this.crash.timer>2.1){this.ui.showRunOver(this.crash.score);this.run.score=0;this.crash.active=false;this.mode='crashed';}}
+
+  resolveMapCollision(){
+    const s=this.getVehicleState(),position=vec(s.position||s),previous=vec(s.previousPosition||position),velocity=vec(s.velocity||{});let hit=null;
+    const wallRadius=Math.max(.62,(s.width||this.getEffectiveCar().width||1.7)*.46);
+    try{hit=this.map?.sweepWallCollision?.(previous,position,velocity,wallRadius,2.5)||this.map?.resolveWallCollision?.(position,velocity,wallRadius);}catch(e){console.warn('Wall collision check',e);}
+    if(hit&&(hit.collided??hit.hit??hit===true)){
+      if(hit.position){this.physics.position?.copy?.(hit.position);s.position?.copy?.(hit.position);}if(hit.velocity){this.physics.velocity?.copy?.(hit.velocity);s.velocity?.copy?.(hit.velocity);}
+      this.registerContact('wall',hit===true?{}:hit);
+    }
+  }
+  updateServices(t){
+    const p=vec(this.getVehicleState().position||this.getVehicleState());let prox=this.map?.getServiceAreaProximity?.(p);
+    if(Array.isArray(prox))prox=prox[0];const area=prox?.area||prox?.service||prox;const dist=prox?.distance??(area?.position?area.position.distanceTo?.(p):Infinity);const inside=!!(prox?.inside||area&&(dist<(area.radius||area.triggerRadius||22)));
+    if(inside&&area){const id=area.id||area.name;if(this.lastService!==id){this.lastService=id;this.bankScore(area.name||'SERVICE AREA');this.autoRefuel(area);}
+      if((area.garage||area.hasGarage||String(area.id).includes('garage'))&&t.speedKmh<12){this.ui.prompt('<kbd>E</kbd> ENTER WANGAN WORKS GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}
+    }else{if(this.lastService&&(!area||dist>(area.radius||30)+15))this.lastService=null;if(!this.ui.pcOpen)this.ui.prompt('',false);}
+    if(!prox){let g=false;try{g=this.map?.checkGarageTransition?.(p,t.speedKmh);}catch(e){}if(g&&t.speedKmh<12){this.ui.prompt('<kbd>E</kbd> ENTER GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}}
+  }
+  bankScore(name){if(this.run.score<1)return;const earned=Math.floor(this.run.score*(Data.ECONOMY?.scoreToMoney??Data.SCORE_TO_MONEY??.42));this.state.money+=earned;this.state.records.bestScore=Math.max(this.state.records.bestScore||0,Math.floor(this.run.score));this.state.records.totalBanked=(this.state.records.totalBanked||0)+earned;this.ui.toast(`${name.toUpperCase()} // ${Math.floor(this.run.score).toLocaleString()} BANKED = ¥${earned.toLocaleString()}`,'amber');this.run.score=0;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;this.persist();}
+  autoRefuel(area){const car=this.getEffectiveCar(),capacity=car.fuelCapacity||45,needed=Math.max(0,capacity-this.state.fuel);if(needed<1)return;const cost=Math.ceil(needed*(Data.ECONOMY?.refuelPricePerLiter||Data.ECONOMY?.fuelPerLiter||170));if(this.state.money>=cost||this.admin.infiniteMoney){if(!this.admin.infiniteMoney)this.state.money-=cost;this.setPhysicsFuel(capacity);this.fuelWarned=false;this.ui.toast(`REFUELED ${needed.toFixed(1)}L // ¥${cost.toLocaleString()}`);this.persist();}else this.ui.toast('Not enough money to refuel','red');}
+
+  updatePlayerMesh(){const s=this.getVehicleState(),p=vec(s.position||s);this.playerMesh.position.copy(p);this.playerMesh.rotation.y=(s.heading??s.yaw??0)+Math.PI;const steer=s.steerAngle??s.steering??0;for(const w of this.playerMesh.userData.frontWheels||[])w.rotation.y=-steer;}
+  updateCamera(dt,t){const s=this.getVehicleState(),p=vec(s.position||s),h=s.heading??s.yaw??0,f=new THREE.Vector3(Math.sin(h),0,Math.cos(h));let desired,look;
+    for(const mesh of this.playerMesh.userData.visualMeshes||[])mesh.visible=this.cameraMode==='chase';
+    if(this.cameraMode==='hood'){desired=p.clone().addScaledVector(f,1.65).add(new THREE.Vector3(0,1.02,0));look=p.clone().addScaledVector(f,12).add(new THREE.Vector3(0,.9,0));}
+    else if(this.cameraMode==='cockpit'){desired=p.clone().addScaledVector(f,.55).add(new THREE.Vector3(0,1.12,0));look=p.clone().addScaledVector(f,11).add(new THREE.Vector3(0,.9,0));}
+    else{const lag=6.2+t.speedKmh*.01,road=this.currentRoadInfo;desired=p.clone().addScaledVector(f,-lag).add(new THREE.Vector3(0,road?.tunnel?1.95:2.7,0));look=p.clone().addScaledVector(f,3.5+t.speedKmh*.014).add(new THREE.Vector3(0,.62,0));}
+    const a=1-Math.exp(-dt*(this.cameraMode==='chase'?8.5:18));this.camPos.lerp(desired,a);this.camLook.lerp(look,a);
+    const maxPositionLag=this.cameraMode==='chase'?2.6:.7,maxLookLag=this.cameraMode==='chase'?3:1.2;
+    if(this.camPos.distanceToSquared(desired)>maxPositionLag*maxPositionLag)this.camPos.sub(desired).setLength(maxPositionLag).add(desired);
+    if(this.camLook.distanceToSquared(look)>maxLookLag*maxLookLag)this.camLook.sub(look).setLength(maxLookLag).add(look);
+    this.camera.position.copy(this.camPos);this.camera.up.set(0,1,0);this.camera.lookAt(this.camLook);this.camera.fov=THREE.MathUtils.lerp(this.camera.fov,60+clamp(t.speedKmh/300,0,1)*17,1-Math.exp(-dt*4));this.camera.updateProjectionMatrix();
+  }
+  snapDrivingCamera(){const s=this.getVehicleState(),p=vec(s.position||s),h=s.heading??s.yaw??0,f=new THREE.Vector3(Math.sin(h),0,Math.cos(h)),road=this.map?.getRoadInfo?.(p),speed=this.getTelemetry().speedKmh||0;this.currentRoadInfo=road;
+    if(this.cameraMode==='hood'){this.camPos.copy(p).addScaledVector(f,1.65).add(new THREE.Vector3(0,1.02,0));this.camLook.copy(p).addScaledVector(f,12).add(new THREE.Vector3(0,.9,0));}
+    else if(this.cameraMode==='cockpit'){this.camPos.copy(p).addScaledVector(f,.55).add(new THREE.Vector3(0,1.12,0));this.camLook.copy(p).addScaledVector(f,11).add(new THREE.Vector3(0,.9,0));}
+    else{const lag=6.2+speed*.01;this.camPos.copy(p).addScaledVector(f,-lag).add(new THREE.Vector3(0,road?.tunnel?1.95:2.7,0));this.camLook.copy(p).addScaledVector(f,3.5+speed*.014).add(new THREE.Vector3(0,.62,0));}
+    for(const mesh of this.playerMesh.userData.visualMeshes||[])mesh.visible=this.cameraMode==='chase';this.camera.position.copy(this.camPos);this.camera.up.set(0,1,0);this.camera.fov=64;this.camera.lookAt(this.camLook);this.camera.updateProjectionMatrix();}
+  cycleCamera(){const modes=['chase','hood','cockpit'];this.cameraMode=modes[(modes.indexOf(this.cameraMode)+1)%modes.length];this.state.settings.camera=this.cameraMode;this.snapDrivingCamera();this.ui.toast(`CAMERA // ${this.cameraMode.toUpperCase()}`);this.persist();}
+  recover(){const s=this.getVehicleState(),p=vec(s.position||s);const info=this.map?.getRoadInfo?.(p)||{};const target=vec(info.center||info.position||p);target.y=(info.height??target.y)+.6;const h=info.heading??s.heading??0;if(this.physics.setPosition)this.physics.setPosition(target.x,target.y,target.z,h);else this.physics.reset?.(target,h);this.run.score=Math.max(0,this.run.score-1000);this.run.combo=1;this.ui.toast('RECOVERED // −1,000 SCORE','red');}
+
+  updateHUD(t,roadInfo){const s=this.getVehicleState();const route=roadInfo.route||roadInfo.routeName||roadInfo.routeId||'C1 INNER',area=roadInfo.district||roadInfo.segmentName||'SHUTO EXPRESSWAY';this.ui.updateHUD(t,this.run,{money:this.displayMoney(),routeName:typeof route==='string'?route:route.name,areaName:area});
+    const mm=this.map?.getMinimapData?.()||this.map?.minimapData||null,services=this.map?.getServiceAreas?.()||this.map?.serviceAreas||this.map?.services||[];if(mm)this.ui.drawMinimap(mm,{x:vec(s.position||s).x,z:vec(s.position||s).z,heading:s.heading||0},services);
+  }
+  updateAudio(t,dt){try{this.audio?.update?.({rpm:t.rpm,redlineRpm:t.redline,speedKmh:t.speedKmh,throttle:t.throttle,slip:t.slip,turbo:this.getEffectiveCar().turbo||0,running:t.fuel>0,fuel:t.fuelFraction});}catch(e){} }
+  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;this.renderer.render(scene,this.camera);}
+  resize(){const r=+this.state?.settings?.resolution||480,aspect=Math.max(.45,innerWidth/Math.max(1,innerHeight));let w,h;if(aspect>=1){w=r;h=Math.max(180,Math.round(r/aspect));}else{h=r;w=Math.max(180,Math.round(r*aspect));}this.renderer.setSize(w,h,false);this.camera.aspect=aspect;this.camera.updateProjectionMatrix();}
+  applyRetroMaterials(scene){scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if('flatShading'in m)m.flatShading=true;if(m.map){m.map.magFilter=THREE.NearestFilter;m.map.minFilter=THREE.NearestFilter;m.map.generateMipmaps=false;}m.dithering=true;if(!m.userData?.psxShader&&!m.isShaderMaterial){m.userData.psxShader=true;m.onBeforeCompile=shader=>{shader.vertexShader=shader.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\nfloat psxGrid = 210.0;\nfloat psxW = abs(gl_Position.w) < 0.0001 ? 0.0001 : gl_Position.w;\ngl_Position.xy = floor((gl_Position.xy / psxW) * psxGrid + 0.5) / psxGrid * psxW;');shader.fragmentShader=shader.fragmentShader.replace('#include <dithering_fragment>','gl_FragColor.rgb = floor(gl_FragColor.rgb * 31.0 + 0.5) / 31.0;\n#include <dithering_fragment>');};m.customProgramCacheKey=()=>`shutoko-psx-signed-${m.type}`;m.needsUpdate=true;}}});}
+
+  createCarMesh(spec,player=false){
+    const g=new THREE.Group(),visualMeshes=[],color=new THREE.Color(spec.color||'#8f2d38'),body=new THREE.MeshLambertMaterial({color,flatShading:true}),dark=new THREE.MeshLambertMaterial({color:0x0b1018,flatShading:true}),rubber=new THREE.MeshLambertMaterial({color:0x08090b,flatShading:true});
+    const d=spec.dimensions||{},L=d.length||4.25,W=d.width||1.7,H=d.height||1.3;const add=(geo,mat,x,y,z)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);g.add(m);visualMeshes.push(m);return m;};
+    add(new THREE.BoxGeometry(W,.42,L),body,0,.48,0);add(new THREE.BoxGeometry(W*.93,.18,L*.3),body,0,.74,L*-.32);const cabin=add(new THREE.BoxGeometry(W*.76,H*.45,L*.4),dark,0,1.0,L*.04);cabin.geometry.rotateX(-.03);add(new THREE.BoxGeometry(W*.7,.11,L*.32),body,0,1.3,L*.05);
+    const wg=new THREE.CylinderGeometry(.3,.3,.17,8),front=[];for(const x of [-W*.52,W*.52])for(const z of [-L*.31,L*.31]){const pivot=new THREE.Group();pivot.position.set(x,.33,z);const wh=new THREE.Mesh(wg,rubber);wh.rotation.z=Math.PI/2;pivot.add(wh);g.add(pivot);visualMeshes.push(wh);if(z<0)front.push(pivot);}
+    const headMat=new THREE.MeshBasicMaterial({color:0xffe4b0}),tailMat=new THREE.MeshBasicMaterial({color:0xff1833});for(const x of [-W*.31,W*.31])add(new THREE.BoxGeometry(.28,.13,.04),headMat,x,.63,-L*.505);for(const x of [-W*.32,W*.32])add(new THREE.BoxGeometry(.3,.13,.04),tailMat,x,.63,L*.505);
+    if(player){const left=new THREE.SpotLight(0xffe4bd,1350,58,.48,.72,1.35),right=left.clone();left.position.set(-W*.28,.72,-L*.49);right.position.set(W*.28,.72,-L*.49);left.target.position.set(-W*.28,.1,-28);right.target.position.set(W*.28,.1,-28);g.add(left,right,left.target,right.target);}
+    g.userData.frontWheels=front;g.userData.visualMeshes=visualMeshes;return g;
+  }
+
+  getOwnedBase(){const saved=this.state.ownedCar||{},id=this.state.ownedCarId||saved.carId||saved.id,base=this.catalog.find(c=>c.id===id)||saved||this.fallbackCar();return{...base,...saved,id:base.id||id,carId:id,color:saved.color||base.colors?.[0]||base.color,engine:{...(base.engine||{}),...(saved.engine||{})}};}
+  getPartsForOwned(){const id=this.state.ownedCarId;const list=typeof Data.getPartsForCar==='function'?Data.getPartsForCar(id):this.partCatalog;return(list||[]).filter(p=>!p.carIds||p.carIds.includes(id)||p.universal);}
+  getEffectiveCar(){
+    const base=this.getOwnedBase(),parts=this.getPartsForOwned().filter(p=>this.state.installedParts.includes(p.id));
+    if(typeof Data.buildVehicleStats==='function'){try{const v=Data.buildVehicleStats({...base,carId:this.state.ownedCarId,installedParts:this.state.installedParts},this.state.installedParts);return{...v,power:v.engine?.powerHp,horsepower:v.engine?.powerHp,peakTorque:v.engine?.peakTorqueNm,mass:v.massKg,fuelCapacity:v.fuelTankL,redline:v.engine?.redlineRpm,engineLayout:v.engine?.layout,gearRatios:v.transmission?.gears,finalDrive:v.transmission?.finalDrive,dimensions:{length:v.silhouette?.length,width:v.silhouette?.width,height:v.silhouette?.height},wheelbase:v.silhouette?.wheelbase,wheelRadius:v.silhouette?.wheelRadius,width:v.silhouette?.width,length:v.silhouette?.length};}catch(e){console.warn(e);}}
+    if(typeof Data.applyParts==='function'){try{return Data.applyParts(base,parts);}catch(e){}}
+    if(typeof Data.applyUpgrades==='function'){try{return Data.applyUpgrades(base,parts);}catch(e){}}
+    const s=structuredClone(base);s.power=s.power||s.horsepower||s.engine?.horsepower||90;s.mass=s.mass||1050;s.tireGrip=s.tireGrip||s.grip||1;s.brakeForce=s.brakeForce||10500;s.suspensionStiffness=s.suspensionStiffness||1;
+    for(const p of parts){const m=p.modifiers||p.delta||{};if(m.powerMultiplier)s.power*=m.powerMultiplier;if(m.power)s.power+=m.power;if(m.horsepower)s.power+=m.horsepower;if(m.massDelta)s.mass+=m.massDelta;if(m.mass&&m.mass<0)s.mass+=m.mass;if(m.gripMultiplier)s.tireGrip*=m.gripMultiplier;if(m.tireGrip)s.tireGrip+=m.tireGrip;if(m.brakeMultiplier)s.brakeForce*=m.brakeMultiplier;if(m.brakeForce&&m.brakeForce<100)s.brakeForce*=m.brakeForce;if(m.suspensionStiffness)s.suspensionStiffness*=m.suspensionStiffness;if(m.gearRatioMultiplier)s.gearRatioMultiplier=(s.gearRatioMultiplier||1)*m.gearRatioMultiplier;if(m.turbo||m.turboStage)s.turbo=Math.max(s.turbo||0,m.turbo||m.turboStage);}
+    s.horsepower=s.power;return s;
+  }
+  refreshVehicle(){const spec=this.getEffectiveCar();this.physics?.changeSpec?.(spec);this.physics?.setCarSpec?.(spec);this.audio?.setVehicle?.(spec);if(this.playerMesh){this.roadScene.remove(this.playerMesh);this.playerMesh=this.createCarMesh(spec,true);this.roadScene.add(this.playerMesh);this.applyRetroMaterials(this.playerMesh);}this.setPhysicsFuel(Math.min(this.state.fuel,spec.fuelCapacity||45));this.garage?.refreshCar(spec);}
+
+  getPhoneContext(){return{runScore:this.run.score,combo:this.run.combo,bestCombo:this.state.records.bestCombo,bestScore:this.state.records.bestScore,money:this.displayMoney(),towCost:Data.ECONOMY?.towCost||2500,settings:this.state.settings,adminUnlocked:this.admin.unlocked,admin:this.admin};}
+  getPCContext(){const owned=this.getOwnedBase(),parts=this.getPartsForOwned(),fuelCan=Data.CONSUMABLES?.[0];return{money:this.displayMoney(),owned,stats:this.getEffectiveCar(),fuel:this.state.fuel,installed:this.state.installedParts,installedNames:parts.filter(p=>this.state.installedParts.includes(p.id)).map(p=>p.name),parts,deliveries:this.state.deliveries,auctions:this.state.auctions.map(a=>({...a,mileage:a.mileage??a.mileageKm,grade:a.grade??a.conditionGrade,effectivePower:a.effectivePower??a.engine?.powerHp,car:{...(a.car||this.catalog.find(c=>c.id===a.carId)||a),color:a.color||(a.car?.color)}})),tradeValue:this.tradeValue(),fuelCan,fuelCanPrice:fuelCan?.price||1200};}
+  displayMoney(){return this.admin.infiniteMoney?99999999:this.state.money;}
+  tradeValue(){const c=this.getOwnedBase();if(typeof Data.calculateTradeValue==='function')return Math.floor(Data.calculateTradeValue({...c,carId:this.state.ownedCarId,installedParts:this.state.installedParts}));if(typeof Data.calculateTradeIn==='function')return Math.floor(Data.calculateTradeIn(c));return Math.floor((c.basePrice||c.price||90000)*.58);}
+  buyCar(i){const a=this.state.auctions[i],car=a?.car||this.catalog.find(c=>c.id===a?.carId);if(!a||!car)return;const net=Math.max(0,(a.price||car.basePrice||car.price||0)-this.tradeValue());if(!this.admin.infiniteMoney&&this.state.money<net){this.ui.toast('Insufficient funds','red');return;}if(!this.admin.infiniteMoney)this.state.money-=net;const owned=Data.carFromAuctionListing?.(a)||{...car,carId:car.id,condition:a.condition??1,mileageKm:a.mileage??a.mileageKm??0,color:a.color||car.colors?.[0]};this.state.ownedCarId=car.id;this.state.ownedCar=owned;this.state.installedParts=[];this.state.deliveries=[];this.state.fuel=owned.fuelLiters??car.fuelTankL??car.fuelCapacity??50;this.persist();this.refreshVehicle();this.garage.syncDeliveries([]);this.ui.refreshPC(this.getPCContext());this.ui.toast(`${car.name} purchased // Trade complete`,'amber');}
+  buyPart(i){const p=this.getPartsForOwned()[i];if(!p)return;if(this.state.installedParts.includes(p.id)||this.state.deliveries.some(d=>d.partId===p.id))return;if(!this.admin.infiniteMoney&&this.state.money<p.price){this.ui.toast('Insufficient funds','red');return;}if(!this.admin.infiniteMoney)this.state.money-=p.price;this.state.deliveries.push({id:`delivery-${Date.now()}-${i}`,partId:p.id,name:p.name,type:'part',readyAt:Date.now()+(this.admin.instantDelivery?0:3500)});this.persist();this.ui.refreshPC(this.getPCContext());this.ui.toast(`${p.name} ordered // Delivery incoming`);setTimeout(()=>this.makeDeliveriesReady(),3600);}
+  buyFuelCan(){const can=Data.CONSUMABLES?.[0],price=can?.price||1200;if(!this.admin.infiniteMoney&&this.state.money<price){this.ui.toast('Insufficient funds','red');return;}if(!this.admin.infiniteMoney)this.state.money-=price;this.state.deliveries.push({id:`fuel-${Date.now()}`,partId:can?.id||'fuel-can',name:can?.name||'Fuel Can',liters:can?.liters||10,type:'fuel',readyAt:Date.now()+(this.admin.instantDelivery?0:2500)});this.persist();this.ui.refreshPC(this.getPCContext());this.ui.toast('Fuel can ordered');setTimeout(()=>this.makeDeliveriesReady(),2600);}
+  availableDeliveries(){return this.state.deliveries.filter(d=>(d.readyAt||0)<=Date.now()||this.admin.instantDelivery);}
+  makeDeliveriesReady(){if(!this.garage?.enabled)return;const ready=this.availableDeliveries();const signature=ready.map(d=>d.id).join('|');if(signature!==this.deliverySignature){this.deliverySignature=signature;this.garage.syncDeliveries(ready);if(ready.length)this.ui.toast(`${ready.length} delivery box${ready.length>1?'es':''} ready`);}}
+  finishInstall(d){const idx=this.state.deliveries.findIndex(x=>x.id===d.id||x.partId===d.partId);if(idx>=0)this.state.deliveries.splice(idx,1);if(d.type==='fuel'||String(d.partId).includes('fuel-can')){const cap=this.getEffectiveCar().fuelCapacity||45,liters=d.liters||10;this.state.fuel=Math.min(cap,this.state.fuel+liters);this.setPhysicsFuel(this.state.fuel);this.ui.toast(`Fuel can poured // +${liters}L`,'amber');}else if(!this.state.installedParts.includes(d.partId)){this.state.installedParts.push(d.partId);this.ui.toast(`${d.name} installed // Stats updated`,'amber');this.refreshVehicle();}this.persist();this.deliverySignature='';this.garage.syncDeliveries(this.availableDeliveries());this.ui.refreshPC(this.getPCContext());}
+
+  changeSetting(k,v){this.state.settings[k]=v;if(k==='volume'){this.audio?.setVolume?.(v);this.audio?.setMasterVolume?.(v);}if(k==='camera'){this.cameraMode=v;if(this.mode==='driving')this.snapDrivingCamera();}if(k==='resolution')this.resize();this.persist();this.audioClick();}
+  unlockAdmin(ok){if(!ok)return;this.admin.unlocked=true;this.persist();this.ui.toast('ADMIN MODE UNLOCKED','amber');}
+  adminToggle(k,v){const prop={money:'infiniteMoney',lives:'infiniteLives',fuel:'infiniteFuel'}[k]||k;this.admin[prop]=v;this.persist();this.ui.toast(`${prop.replace(/([A-Z])/g,' $1').toUpperCase()} ${v?'ON':'OFF'}`,'amber');}
+  adminAction(a){if(a==='money')this.state.money+=100000;else if(a==='garage'){this.ui.closePhone();this.enterGarage('admin');}else if(a==='pc'){this.ui.closePhone();if(this.mode!=='garage')this.enterGarage('admin');setTimeout(()=>this.ui.openPC(this.getPCContext()),this.mode==='garage'?40:560);}else if(a==='highway'){this.ui.closePhone();if(this.mode==='garage')this.exitGarage();else{this.mode='driving';this.placeAtSpawn();this.snapDrivingCamera();this.contactCooldown=1.2;}}else if(a==='deliverybay'){this.ui.closePhone();if(this.mode==='garage'){this.makeDeliveriesReady();this.garage.position.set(-7.35,1.72,9);this.garage.yaw=Math.PI/2;this.garage.pitch=0;}}else if(a==='carbay'){this.ui.closePhone();if(this.mode==='garage'){this.garage.position.set(0,1.72,3.65);this.garage.yaw=0;this.garage.pitch=-.08;}}else if(a==='fuel'){this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);this.fuelWarned=false;}else if(a==='lives')this.run.lives=3;else if(a==='parts'){this.state.installedParts=this.getPartsForOwned().map(p=>p.id);this.refreshVehicle();}else if(a==='delivery'){this.admin.instantDelivery=true;this.state.deliveries.forEach(d=>d.readyAt=0);this.makeDeliveriesReady();}else if(a==='boost'){this.physics.setSpeed?.(69.44);this.physics.setVelocity?.(69.44);if(!this.physics.setVelocity&&this.physics.velocity){const h=this.getVehicleState().heading||0;this.physics.velocity.set(Math.sin(h)*69.44,0,Math.cos(h)*69.44);}}this.persist();if(!['garage','pc','highway','deliverybay','carbay'].includes(a))this.ui.openPhoneApp('admin');this.ui.toast(`ADMIN // ${a.toUpperCase()}`,'amber');}
+  tow(){const cost=Data.ECONOMY?.towCost||2500;if(!this.admin.infiniteMoney&&this.state.money<cost){this.ui.toast('Tow refused // Insufficient funds','red');return;}if(!this.admin.infiniteMoney)this.state.money-=cost;this.run.score=0;this.run.combo=1;this.ui.closePhone();this.persist();this.enterGarage('tow');}
+  audioClick(){this.audio?.uiClick?.();}
+}
+
+try{new ShutokoNights();}catch(error){
+  console.error(error);const loading=document.getElementById('loading');if(loading){loading.innerHTML=`<b>BOOT ERROR</b><span>${error.message}</span>`;loading.style.color='#ff3951';}
+}

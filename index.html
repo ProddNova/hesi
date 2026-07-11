@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#060a12">
+  <meta name="description" content="A procedural PSX-style night highway driving game.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <title>SHUTOKO NIGHTS</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js"}}
+  </script>
+</head>
+<body>
+  <div id="game-shell">
+    <canvas id="game-canvas" aria-label="Shutoko Nights game"></canvas>
+    <div id="crt" aria-hidden="true"></div>
+    <div id="fade"></div>
+
+    <section id="boot-screen" class="screen active">
+      <div class="boot-city"></div>
+      <div class="title-lockup">
+        <p class="eyebrow">首都高速 // TOKYO 02:17</p>
+        <h1>SHUTOKO<br><span>NIGHTS</span></h1>
+        <p class="tagline">NO FINISH LINE. JUST ONE MORE EXIT.</p>
+        <button id="continue-button" class="primary">CONTINUE</button>
+        <button id="new-game-button">NEW GAME</button>
+        <p class="micro">Best with headphones · Keyboard &amp; touch controls</p>
+      </div>
+    </section>
+
+    <section id="hud" class="hidden" aria-live="polite">
+      <div class="hud-top">
+        <div class="route-chip"><span id="route-name">C1 INNER</span><small id="area-name">KANDABASHI</small></div>
+        <div id="lives" class="lives"><i></i><i></i><i></i><span>RUN LIVES</span></div>
+        <div class="bank"><small>BANK</small><b id="hud-money">¥0</b></div>
+      </div>
+      <div class="hud-bottom">
+        <div id="minimap-wrap">
+          <canvas id="minimap" width="220" height="150"></canvas>
+          <span>N</span>
+        </div>
+        <div class="score-stack">
+          <small>UNBANKED</small>
+          <strong id="hud-score">000000</strong>
+          <div><b id="hud-combo">×1.0</b><span id="combo-label">BUILD THE RUN</span></div>
+          <div id="combo-bar"><i></i></div>
+        </div>
+        <div class="cluster">
+          <div class="tach"><i id="tach-fill"></i><em id="rpm-readout">0900</em><small>RPM</small></div>
+          <div class="speed"><strong id="speed-readout">0</strong><small>KM/H</small></div>
+          <div class="gear" id="gear-readout">N</div>
+          <div class="fuel"><span>FUEL</span><div><i id="fuel-fill"></i></div><b id="fuel-readout">100%</b></div>
+        </div>
+      </div>
+      <div id="interaction-prompt" class="prompt hidden"></div>
+      <div id="toast-stack"></div>
+      <div id="near-miss" class="event-splash">NEAR MISS <b>+0</b></div>
+    </section>
+
+    <section id="phone" class="phone hidden" aria-label="Phone">
+      <div class="phone-bezel">
+        <header><span>02:17</span><b>夜間</b><i>▮▮▮</i></header>
+        <div id="phone-home" class="phone-page active">
+          <div class="phone-wallpaper"><h2>湾岸<br>NAVI</h2><p id="phone-location">C1 INNER</p></div>
+          <div class="app-grid">
+            <button data-app="map"><i>路</i><span>Map</span></button>
+            <button data-app="tow"><i>牽</i><span>Tow</span></button>
+            <button data-app="stats"><i>記</i><span>Stats</span></button>
+            <button data-app="settings"><i>設</i><span>Settings</span></button>
+            <button data-app="admin"><i>管</i><span>Admin</span></button>
+            <button data-app="help"><i>?</i><span>Controls</span></button>
+          </div>
+        </div>
+        <div id="phone-app" class="phone-page"></div>
+        <footer><button id="phone-back">‹</button><button id="phone-home-key">●</button><button id="phone-close">×</button></footer>
+      </div>
+    </section>
+
+    <section id="pc-overlay" class="pc hidden">
+      <header>
+        <div class="pc-brand"><span>首都</span><b>WANGAN MARKET</b><small>VERIFIED NIGHT AUCTIONS</small></div>
+        <nav>
+          <button data-tab="auction" class="active">CAR AUCTION</button>
+          <button data-tab="parts">PARTS SHOP</button>
+          <button data-tab="garage">MY GARAGE</button>
+        </nav>
+        <div class="pc-balance"><small>ACCOUNT</small><b id="pc-money">¥0</b></div>
+        <button id="pc-exit">[ ESC ] EXIT</button>
+      </header>
+      <main id="pc-content"></main>
+    </section>
+
+    <section id="run-over" class="modal hidden">
+      <div class="modal-card crash-card">
+        <p class="eyebrow">RUN TERMINATED</p>
+        <h2>NO HESI.<br><span>NO MERCY.</span></h2>
+        <div><small>SCORE LOST</small><b id="lost-score">0</b></div>
+        <button id="return-garage" class="primary">RETURN TO GARAGE</button>
+      </div>
+    </section>
+
+    <section id="pause-help" class="modal hidden">
+      <div class="modal-card help-card">
+        <button id="help-close" class="modal-x">×</button>
+        <p class="eyebrow">DRIVER MANUAL</p>
+        <h2>CONTROLS</h2>
+        <div class="controls-grid">
+          <dl><dt>W / ↑</dt><dd>Throttle</dd><dt>S / ↓</dt><dd>Brake / reverse</dd><dt>A D / ← →</dt><dd>Steer</dd><dt>SPACE</dt><dd>Handbrake</dd></dl>
+          <dl><dt>SHIFT / E</dt><dd>Shift up</dd><dt>CTRL / Q</dt><dd>Shift down</dd><dt>C</dt><dd>Camera</dd><dt>F</dt><dd>Phone</dd></dl>
+          <dl><dt>GARAGE</dt><dd>WASD walk · mouse look</dd><dt>E</dt><dd>Interact / carry / install</dd><dt>ESC</dt><dd>Release mouse / leave screens</dd><dt>R</dt><dd>Recover car</dd></dl>
+        </div>
+      </div>
+    </section>
+
+    <div id="install-progress" class="install hidden"><span id="install-label">INSTALLING</span><div><i></i></div></div>
+
+    <section id="touch-controls" class="touch-controls hidden" aria-label="Touch controls">
+      <div class="touch-look garage-only" id="touch-look" aria-label="Drag to look"><span>DRAG TO LOOK</span></div>
+      <div class="touch-pad touch-steer driving-only">
+        <button data-code="KeyA" aria-label="Steer left">◀</button>
+        <button data-code="KeyD" aria-label="Steer right">▶</button>
+      </div>
+      <div class="touch-pad touch-walk garage-only">
+        <button data-code="KeyW" aria-label="Walk forward">▲</button>
+        <button data-code="KeyA" aria-label="Walk left">◀</button>
+        <button data-code="KeyS" aria-label="Walk backward">▼</button>
+        <button data-code="KeyD" aria-label="Walk right">▶</button>
+      </div>
+      <div class="touch-actions driving-only">
+        <button data-action="camera" aria-label="Change camera">CAM</button>
+        <button data-code="KeyQ" aria-label="Shift down">−</button>
+        <button data-code="KeyE" aria-label="Shift up">+</button>
+        <button data-code="Space" class="touch-handbrake" aria-label="Handbrake">HB</button>
+      </div>
+      <div class="touch-pedals driving-only">
+        <button data-code="KeyS" class="touch-brake" aria-label="Brake">BRAKE</button>
+        <button data-code="KeyW" class="touch-throttle" aria-label="Throttle">GAS</button>
+      </div>
+      <button class="touch-interact garage-only" data-code="KeyE" aria-label="Interact">USE</button>
+      <div class="touch-utility">
+        <button data-action="phone" aria-label="Open phone">PHONE</button>
+        <button data-action="recover" class="driving-only" aria-label="Recover car">RESET</button>
+      </div>
+    </section>
+
+    <div id="rotate-hint" class="rotate-hint" aria-hidden="true">
+      <span>↻</span><b>ROTATE FOR THE BEST DRIVE</b><small>Portrait still works</small>
+    </div>
+    <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
+  </div>
+
+  <script type="module" src="js/game.js?v=20260711n"></script>
+  <script>
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    }
+  </script>
+</body>
+</html>

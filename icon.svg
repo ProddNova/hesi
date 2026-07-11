@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="92" fill="#05080e"/>
+  <path d="M68 330h376l-35 78H103z" fill="#172135"/>
+  <path d="M93 305l58-91h216l56 91-31 67H123z" fill="#ff9a2e"/>
+  <path d="M173 235h166l34 70H139z" fill="#101b2a"/>
+  <path d="M158 339h196" stroke="#05080e" stroke-width="28"/>
+  <circle cx="151" cy="375" r="40" fill="#05080e" stroke="#e8e9e4" stroke-width="12"/>
+  <circle cx="361" cy="375" r="40" fill="#05080e" stroke="#e8e9e4" stroke-width="12"/>
+  <path d="M116 310h54M342 310h54" stroke="#fff0bd" stroke-width="18"/>
+  <text x="256" y="154" text-anchor="middle" fill="#e8e9e4" font-family="Arial Narrow,Arial,sans-serif" font-weight="900" font-style="italic" font-size="72">SN</text>
+</svg>
