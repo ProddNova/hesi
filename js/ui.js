@@ -148,7 +148,7 @@ export class GameUI {
       this.initPhoneMap(this.$('phone-map-canvas'));
       this.$('phone-map-center').onclick=()=>{if(this.mapView){this.mapView.followPlayer=true;}this.renderPhoneMap();this.cb.uiClick?.();};
     } else if(app==='tow') {
-      root.innerHTML=`<div class="app-view"><h2>湾岸 TOW</h2><p>Emergency recovery to Tatsumi garage. Your current run will be lost.</p><div class="phone-card"><small>SERVICE FEE</small><b>${this.money(c.towCost??2500)}</b><button id="call-tow">CALL TOW TRUCK</button></div></div>`;
+      root.innerHTML=`<div class="app-view"><h2>湾岸 TOW</h2><p>Emergency recovery to the Shiba PA garage. Your current run will be lost.</p><div class="phone-card"><small>SERVICE FEE</small><b>${this.money(c.towCost??2500)}</b><button id="call-tow">CALL TOW TRUCK</button></div></div>`;
       this.$('call-tow').onclick=()=>this.cb.tow?.();
     } else if(app==='stats') {
       root.innerHTML=`<div class="app-view"><h2>NIGHT LOG</h2><p>Driver statistics</p>${this.phoneCard('CURRENT RUN',(c.runScore??0).toLocaleString())}${this.phoneCard('LIVE COMBO',`×${(c.combo??1).toFixed(1)}`)}${this.phoneCard('BEST COMBO',`×${(c.bestCombo??1).toFixed(1)}`)}${this.phoneCard('BEST BANK',(c.bestScore??0).toLocaleString())}${this.phoneCard('BALANCE',this.money(c.money??0))}</div>`;
@@ -198,7 +198,7 @@ export class GameUI {
     canvas.height=Math.max(220,Math.round((rect.height||280)*dpr));
     this.mapView=this.mapView||{zoom:2.4,followPlayer:true,cx:0,cz:0};
     const pointers=new Map();let pinchDist=0,pinchZoom=this.mapView.zoom;
-    canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.setPointerCapture?.(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    canvas.addEventListener('pointerdown',e=>{e.preventDefault();try{canvas.setPointerCapture?.(e.pointerId);}catch(err){}pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
       if(pointers.size===2){const [a,b]=[...pointers.values()];pinchDist=Math.hypot(a.x-b.x,a.y-b.y);pinchZoom=this.mapView.zoom;}});
     canvas.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;e.preventDefault();
       const prev=pointers.get(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});

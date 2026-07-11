@@ -57,7 +57,7 @@ button{color:var(--paper);border:1px solid #4d5b70;background:rgba(8,13,23,.92);
   .touch-actions{position:absolute;right:max(20px,calc(env(safe-area-inset-right) + 14px));bottom:max(158px,calc(env(safe-area-inset-bottom) + 150px));display:grid;grid-template-columns:repeat(2,48px);gap:9px}.touch-actions button{width:48px;height:48px}.touch-handbrake{grid-column:2}
   .touch-utility{position:absolute;right:max(18px,calc(env(safe-area-inset-right) + 12px));top:max(18px,calc(env(safe-area-inset-top) + 12px));display:flex;gap:8px}.touch-utility button{width:58px;height:40px;border-radius:8px;font-size:9px}
   .touch-look{position:absolute;right:0;top:0;width:58%;height:72%;background:linear-gradient(135deg,transparent 60%,rgba(55,216,246,.05));border-bottom-left-radius:80px}.touch-look span{position:absolute;right:max(20px,calc(env(safe-area-inset-right) + 15px));top:50%;font:9px var(--mono);letter-spacing:.15em;color:rgba(255,255,255,.24)}
-  .touch-interact{position:absolute;right:max(26px,calc(env(safe-area-inset-right) + 20px));bottom:max(30px,calc(env(safe-area-inset-bottom) + 20px));width:76px;height:76px;border-color:rgba(255,154,46,.8)!important}
+  button.touch-interact{position:absolute;right:max(26px,calc(env(safe-area-inset-right) + 20px));bottom:max(30px,calc(env(safe-area-inset-bottom) + 20px));width:76px;height:76px;border-color:rgba(255,154,46,.8)!important}
   body[data-game-mode="driving"] .garage-only,body[data-game-mode="garage"] .driving-only{display:none!important}
   /* While the garage-entry prompt is up in driving mode, surface the USE button above the steer cluster. */
   body[data-game-mode="driving"].interact-available .touch-interact{display:grid!important;right:auto;left:max(24px,calc(env(safe-area-inset-left) + 18px));bottom:max(124px,calc(env(safe-area-inset-bottom) + 116px))}
@@ -73,7 +73,13 @@ button{color:var(--paper);border:1px solid #4d5b70;background:rgba(8,13,23,.92);
 @media (pointer:coarse) and (orientation:portrait) and (max-width:600px) {
   .rotate-hint{position:fixed;left:50%;top:max(90px,calc(env(safe-area-inset-top) + 70px));z-index:41;display:flex;transform:translateX(-50%);align-items:center;gap:8px;padding:7px 10px;border:1px solid rgba(255,154,46,.45);background:rgba(5,8,14,.72);animation:rotate-away 5s forwards;white-space:nowrap}.rotate-hint span{font-size:22px;color:var(--amber)}.rotate-hint b{font:9px var(--mono)}.rotate-hint small{display:none}@keyframes rotate-away{0%,70%{opacity:1}100%{opacity:0;visibility:hidden}}
   .title-lockup{left:7vw;top:46%;width:86vw}.title-lockup h1{font-size:clamp(58px,22vw,88px)}.title-lockup button{display:block;width:100%;margin:0 0 10px}.micro{margin-top:14px}
-  .cluster{transform:translateX(-50%) scale(.5)}.score-stack{left:50%;transform:translateX(-50%) scale(.66)}
+  /* Portrait: give the HUD top row the full width and drop the utility
+     buttons underneath it instead of beside it. */
+  .hud-top{right:max(10px,env(safe-area-inset-right))}
+  .touch-utility{flex-direction:column;top:max(62px,calc(env(safe-area-inset-top) + 54px))}
+  .route-chip{max-width:44vw;overflow:hidden}.route-chip span{font-size:13px;line-height:1.1;display:block}.route-chip small{font-size:7px}
+  #toast-stack{top:max(160px,calc(env(safe-area-inset-top) + 152px))}
+  .cluster{left:50%;bottom:max(96px,calc(env(safe-area-inset-bottom) + 88px));min-width:0;grid-template-columns:50px 80px 36px;padding:7px 8px 6px 14px;transform:translateX(-50%) scale(.5)}.score-stack{left:50%;transform:translateX(-50%) scale(.66)}
   .touch-steer{grid-template-columns:repeat(2,66px)}.touch-steer button{width:66px;height:66px}.touch-pedals button{width:64px}.touch-actions{bottom:max(150px,calc(env(safe-area-inset-bottom) + 142px))}
   .phone{left:max(6px,env(safe-area-inset-left));width:auto}
 }

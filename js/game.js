@@ -122,12 +122,15 @@ class ShutokoNights {
   setupTouchInput(){
     const root=document.getElementById('touch-controls');if(!root)return;
     this.touchPointers=new Map();
-    const press=(button,e)=>{const code=button.dataset.code;if(!code)return;e.preventDefault();button.setPointerCapture?.(e.pointerId);this.touchPointers.set(e.pointerId,{code,button});if(!this.keys[code])this.pressed.add(code);this.keys[code]=true;button.classList.add('active');this.audio?.unlock?.();navigator.vibrate?.(8);};
+    // setPointerCapture throws NotFoundError if the pointer already ended;
+    // an uncaught throw here silently dropped the whole press.
+    const capture=(el,id)=>{try{el.setPointerCapture?.(id);}catch(e){}};
+    const press=(button,e)=>{const code=button.dataset.code;if(!code)return;e.preventDefault();capture(button,e.pointerId);this.touchPointers.set(e.pointerId,{code,button});if(!this.keys[code])this.pressed.add(code);this.keys[code]=true;button.classList.add('active');this.audio?.unlock?.();navigator.vibrate?.(8);};
     const release=e=>{const held=this.touchPointers.get(e.pointerId);if(!held)return;this.touchPointers.delete(e.pointerId);if(![...this.touchPointers.values()].some(v=>v.code===held.code))this.keys[held.code]=false;held.button.classList.remove('active');};
     root.querySelectorAll('[data-code]').forEach(button=>{button.addEventListener('pointerdown',e=>press(button,e));button.addEventListener('pointerup',release);button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);button.addEventListener('contextmenu',e=>e.preventDefault());});
     root.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('pointerdown',e=>{e.preventDefault();this.audio?.unlock?.();button.classList.add('active');setTimeout(()=>button.classList.remove('active'),100);const action=button.dataset.action;if(action==='phone'&&this.started&&!this.ui.pcOpen)this.ui.togglePhone(this.getPhoneContext());else if(action==='camera'&&this.mode==='driving')this.cycleCamera();else if(action==='recover'&&this.mode==='driving')this.recover();navigator.vibrate?.(10);}));
     const look=document.getElementById('touch-look');let lookPointer=null,lastX=0,lastY=0;
-    look?.addEventListener('pointerdown',e=>{e.preventDefault();lookPointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;look.setPointerCapture?.(e.pointerId);});
+    look?.addEventListener('pointerdown',e=>{e.preventDefault();lookPointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;capture(look,e.pointerId);});
     look?.addEventListener('pointermove',e=>{if(e.pointerId!==lookPointer||this.mode!=='garage')return;e.preventDefault();const movementX=e.clientX-lastX,movementY=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;this.garage?.onMouse?.({movementX:movementX*1.35,movementY:movementY*1.35});});
     const endLook=e=>{if(e.pointerId===lookPointer)lookPointer=null;};look?.addEventListener('pointerup',endLook);look?.addEventListener('pointercancel',endLook);
     this.releaseTouchInput=()=>{this.touchPointers?.forEach(({code,button})=>{this.keys[code]=false;button.classList.remove('active');});this.touchPointers?.clear();};
@@ -155,7 +158,7 @@ class ShutokoNights {
   enterGarage(reason='service'){
     this.ui.fade(true);setTimeout(()=>{
       if(reason==='crash'||reason==='tow'){this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};}
-      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Tatsumi workshop // Shift complete','amber');
+      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Shiba PA workshop // Shift complete','amber');
     },480);
   }
   exitGarage(){
@@ -172,14 +175,19 @@ class ShutokoNights {
   getWalkInput(){return{forward:!!(this.keys.KeyW||this.keys.ArrowUp),backward:!!(this.keys.KeyS||this.keys.ArrowDown),left:!!this.keys.KeyA,right:!!this.keys.KeyD,sprint:!!this.keys.ShiftLeft,interactPressed:this.take('KeyE')};}
   take(...codes){for(const c of codes)if(this.pressed.has(c)){this.pressed.delete(c);return true;}return false;}
 
-  animate(){requestAnimationFrame(()=>this.animate());let dt=Math.min(.033,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
+  animate(){requestAnimationFrame(()=>this.animate());
+    // Clamp at 50 ms so a 20 fps phone still simulates at full speed (the
+    // physics integrates fixed 120 Hz substeps internally, so a large dt
+    // stays stable); anything slower degrades to slow motion rather than
+    // exploding.
+    let dt=Math.min(.05,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
     if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
     this.render();this.pressed.clear();
   }
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
-    this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
+    this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'SHIBA PA',areaName:'WANGAN WORKS'});
   }
 
   updateDriving(dt){
@@ -350,6 +358,6 @@ class ShutokoNights {
   audioClick(){this.audio?.uiClick?.();}
 }
 
-try{new ShutokoNights();}catch(error){
+try{window.shutoko=new ShutokoNights();}catch(error){
   console.error(error);const loading=document.getElementById('loading');if(loading){loading.innerHTML=`<b>BOOT ERROR</b><span>${error.message}</span>`;loading.style.color='#ff3951';}
 }
