@@ -1318,7 +1318,17 @@ export class HighwayMap {
       bridge: this._isBridge(route, projection.distance),
       speedLimit: route.speedLimit,
       junction: this._nearbyJunction(position),
+      district: this._districtLabel(route, projection.distance, position),
     };
+  }
+
+  _districtLabel(route, distance, position) {
+    const tunnel = this._isTunnel(route, distance);
+    if (tunnel) return tunnel.name.toUpperCase();
+    if (this._isBridge(route, distance)) return 'RAINBOW BRIDGE';
+    const junction = this._nearbyJunction(position);
+    if (junction) return junction.name.toUpperCase();
+    return 'SHUTO EXPRESSWAY';
   }
 
   _lotRoadInfo(position, lot) {
@@ -2763,10 +2773,7 @@ export class HighwayMap {
           const yB = topFor(spanDef.b) ?? deckY + 6;
           // parabola between the span end heights
           const sagDepth = spanDef.sag * 42;
-          const y = yA + (yB - yA) * t - sagDepth * 4 * t * (1 - t) * -1 - (spanDef.sag === 0.5 ? 0 : 0)
-            - (spanDef.sag === 0.5 ? sagDepth * 0 : 0);
           const cableY = yA + (yB - yA) * t - 4 * sagDepth * t * (1 - t);
-          void y;
           const point = center.position.clone().addScaledVector(normal, side * (route.halfWidth + 2.4));
           point.y = cableY;
           if (previous) {
@@ -2807,14 +2814,8 @@ export class HighwayMap {
       slabCenter.y -= 0.55;
       const slab = new THREE.Mesh(new THREE.BoxGeometry(area.width, 1.1, area.length), this.materials.roadService);
       slab.position.copy(slabCenter);
-      slab.quaternion.copy(orientation);
-      slab.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI * 0.5));
+      slab.quaternion.copy(orientation); // local +Z (length) runs along the lot tangent
       slab.name = `${area.name} deck`;
-      // NOTE: box length runs along Z pre-rotation; align long side with tangent
-      slab.quaternion.copy(orientation);
-      slab.scale.set(area.width / area.width, 1, 1);
-      const slabSized = new THREE.Mesh(new THREE.BoxGeometry(area.width, 1.1, area.length), this.materials.roadService);
-      void slabSized;
       this._addChunkMesh(slab, slabCenter);
 
       // support pillars when elevated
@@ -2839,13 +2840,13 @@ export class HighwayMap {
         this._instance(rail, vec(0.3, 1.2, area.length), orientation, null, 'box:fence');
       }
       for (const endSide of [-1, 1]) {
-        for (const half of [-1, 1]) {
-          const rail = area.center.clone()
-            .addScaledVector(area.tangent, endSide * (area.length * 0.5 - 0.3))
-            .addScaledVector(area.normal, half * area.width * 0.3);
-          rail.y = fenceY;
-          this._instance(rail, vec(area.width * 0.34, 1.2, 0.3), orientation, null, 'box:fence');
-        }
+        // One rail on the outward half only: the access lane crosses the lot
+        // ends on the road side, so that side stays open.
+        const rail = area.center.clone()
+          .addScaledVector(area.tangent, endSide * (area.length * 0.5 - 0.3))
+          .addScaledVector(area.normal, area.width * 0.26);
+        rail.y = fenceY;
+        this._instance(rail, vec(area.width * 0.44, 1.2, 0.3), orientation, null, 'box:fence');
       }
 
       // painted stalls: rows along the lot
