@@ -234,6 +234,10 @@ export class HighwayMap {
       marker: basic(0x57e3ff, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
       billboardGlow: basic(0xffffff),
       signGreen: basic(0x0c604e, { side: THREE.DoubleSide }),
+      signBack: basic(0x23262c),
+      chevron: this._chevronTexture()
+        ? new THREE.MeshBasicMaterial({ map: this._chevronTexture(), fog: true, toneMapped: false })
+        : basic(0xffc21f),
       // Additive decals: sodium pools under lamps + stretched wet-asphalt
       // streaks — the cheap PS2 stand-in for real reflections.
       lightPool: new THREE.MeshBasicMaterial({
@@ -247,6 +251,43 @@ export class HighwayMap {
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }),
     };
+  }
+
+  /** Yellow curve-warning chevron board texture (3 arrows pointing right). */
+  _chevronTexture() {
+    if (typeof document === 'undefined') return null;
+    if (this._chevTex) return this._chevTex;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 88;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#101114';
+    context.fillRect(0, 0, 128, 88);
+    this._roundRectPath(context, 3, 3, 122, 82, 8);
+    context.fillStyle = '#17181c';
+    context.fill();
+    context.strokeStyle = '#3a3d44';
+    context.lineWidth = 3;
+    context.stroke();
+    context.fillStyle = '#ffce24';
+    for (let i = 0; i < 3; i += 1) {
+      const x = 16 + i * 36;
+      context.beginPath();
+      context.moveTo(x, 16);
+      context.lineTo(x + 22, 44);
+      context.lineTo(x, 72);
+      context.lineTo(x + 12, 72);
+      context.lineTo(x + 34, 44);
+      context.lineTo(x + 12, 16);
+      context.closePath();
+      context.fill();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    this._ownedTextures.add(texture);
+    this._chevTex = texture;
+    return texture;
   }
 
   /** Soft radial glow sprite texture (white core, transparent edge). */
@@ -2869,7 +2910,9 @@ export class HighwayMap {
       }
     }
 
-    // Curve warning chevrons where curvature spikes.
+    // Curve warning chevron boards on the outside of every bend, one facing
+    // each travel direction (the mirrored back arrow is correct for the
+    // opposite carriageway's turn), on short posts above the parapet.
     if (!isService && !isRamp) {
       for (let distance = 60; distance < route.length; distance += 45) {
         const bank = this._bankAt(route, distance);
@@ -2877,10 +2920,15 @@ export class HighwayMap {
         const center = this._sampleCenter(route, distance, 1);
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank };
         const half = this._halfWidthAt(route, distance);
-        // chevron board on the OUTSIDE of the bend
         const side = bank > 0 ? -1 : 1;
-        const position = this._deckPoint(frame, side * (half - 0.35), 1.9);
-        this._instance(position, vec(0.18, 1.05, 1.6), yawQuaternion(center.baseTangent), 0xffc21f, 'box:amber');
+        const position = this._deckPoint(frame, side * (half - 0.3), 2.05);
+        if (this._barrierSuppressed(position, route)) continue;
+        for (const facing of [1, -1]) {
+          const board = position.clone().addScaledVector(center.baseTangent, facing * -0.04);
+          this._instance(board, vec(1.55, 1.05, 1), yawQuaternion(TMP_C.copy(center.baseTangent).multiplyScalar(facing)), null, 'plane:chevron');
+        }
+        const pole = this._deckPoint(frame, side * (half - 0.3), 1.15);
+        this._instance(pole, vec(0.12, 0.85, 0.12), null, null, 'box:concrete');
       }
     }
   }
@@ -2889,31 +2937,92 @@ export class HighwayMap {
   // Signage
   // ------------------------------------------------------------------
 
-  _signCanvas(lines, background, width, height) {
+  _roundRectPath(context, x, y, w, h, r) {
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.arcTo(x + w, y, x + w, y + h, r);
+    context.arcTo(x + w, y + h, x, y + h, r);
+    context.arcTo(x, y + h, x, y, r);
+    context.arcTo(x, y, x + w, y, r);
+    context.closePath();
+  }
+
+  /**
+   * PS2-clean sign face: rounded backlit board, crisp border, big kanji +
+   * romaji, optional route shield and per-lane down arrows.
+   */
+  _signCanvas(lines, background, width, height, opts = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext('2d');
-    context.imageSmoothingEnabled = false;
-    context.fillStyle = background;
+    // dark frame, rounded board, crisp inset border
+    context.fillStyle = '#22262c';
     context.fillRect(0, 0, width, height);
-    context.strokeStyle = '#e8f0de';
-    context.lineWidth = Math.max(3, Math.round(height * 0.045));
-    context.strokeRect(4, 4, width - 8, height - 8);
+    const radius = Math.round(height * 0.07);
+    this._roundRectPath(context, 3, 3, width - 6, height - 6, radius);
+    context.fillStyle = background;
+    context.fill();
+    this._roundRectPath(context, 10, 10, width - 20, height - 20, Math.max(2, Math.round(radius * 0.7)));
+    context.strokeStyle = 'rgba(238,243,232,0.95)';
+    context.lineWidth = Math.max(2, Math.round(height * 0.028));
+    context.stroke();
+
+    let textCenterX = width * 0.5;
+    const arrowBand = opts.arrows ? height * 0.22 : 0;
+    if (opts.shield) {
+      const shieldW = height * 0.42;
+      const shieldX = 20 + shieldW * 0.5;
+      const shieldY = height * 0.3;
+      this._roundRectPath(context, shieldX - shieldW * 0.5, shieldY - shieldW * 0.36, shieldW, shieldW * 0.72, shieldW * 0.16);
+      context.fillStyle = 'rgba(8,28,22,0.9)';
+      context.fill();
+      context.strokeStyle = '#e7ecdf';
+      context.lineWidth = Math.max(2, Math.round(height * 0.02));
+      context.stroke();
+      context.fillStyle = '#f2f5e9';
+      context.font = `bold ${Math.round(shieldW * 0.4)}px sans-serif`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(String(opts.shield), shieldX, shieldY);
+      textCenterX = width * 0.5 + shieldW * 0.3;
+    }
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     const rows = lines.length;
+    const textHeight = height - arrowBand;
     lines.forEach((line, index) => {
-      const y = height * (index + 0.55) / (rows + 0.1);
+      const y = textHeight * (index + 0.62) / (rows + 0.25);
       context.fillStyle = line.color || '#f0f3e5';
-      context.font = `bold ${Math.round(line.size || height / (rows + 0.6))}px ${line.font || 'sans-serif'}`;
-      context.fillText(line.text, width / 2, y);
+      const size = index === 0 ? textHeight / (rows + 0.55) : textHeight / (rows + 1.2);
+      context.font = `bold ${Math.round(line.size || size)}px ${line.font || 'sans-serif'}`;
+      context.fillText(line.text, textCenterX, y);
     });
+    // per-lane down arrows along the bottom of gantry boards
+    if (opts.arrows) {
+      context.fillStyle = '#f0f3e5';
+      const lanes = opts.arrows;
+      const y0 = height - arrowBand * 0.72;
+      for (let i = 0; i < lanes; i += 1) {
+        const x = width * (i + 0.5) / lanes;
+        const s = arrowBand * 0.48;
+        context.beginPath();
+        context.moveTo(x, y0 + s);
+        context.lineTo(x - s * 0.55, y0 + s * 0.3);
+        context.lineTo(x - s * 0.2, y0 + s * 0.3);
+        context.lineTo(x - s * 0.2, y0 - s * 0.45);
+        context.lineTo(x + s * 0.2, y0 - s * 0.45);
+        context.lineTo(x + s * 0.2, y0 + s * 0.3);
+        context.lineTo(x + s * 0.55, y0 + s * 0.3);
+        context.closePath();
+        context.fill();
+      }
+    }
     return canvas;
   }
 
-  _getSignMaterial(text, background = '#0c604e', wide = false) {
-    const key = `${background}:${wide}:${text}`;
+  _getSignMaterial(text, background = '#0c604e', wide = false, opts = {}) {
+    const key = `${background}:${wide}:${text}:${opts.shield || ''}:${opts.arrows || 0}`;
     if (this._signMaterials.has(key)) return this._signMaterials.get(key);
     if (typeof document === 'undefined') {
       const fallback = this.materials.signGreen.clone();
@@ -2924,53 +3033,93 @@ export class HighwayMap {
       text: row,
       font: index === 0 ? 'sans-serif' : 'monospace',
     }));
-    const canvas = this._signCanvas(lines, background, wide ? 512 : 256, wide ? 128 : 96);
+    const canvas = this._signCanvas(lines, background, wide ? 512 : 256, wide ? 160 : 112, opts);
     const texture = new THREE.CanvasTexture(canvas);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = 4;
     if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = true;
     this._ownedTextures.add(texture);
     const material = new THREE.MeshBasicMaterial({
-      map: texture, color: 0xffffff, fog: true, toneMapped: false, side: THREE.DoubleSide,
+      map: texture, color: 0xffffff, fog: true, toneMapped: false, side: THREE.FrontSide,
     });
     this._signMaterials.set(key, material);
     return material;
   }
 
-  _makeSignMesh(text, background, width, height, wide = false) {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this._getSignMaterial(text, background, wide));
+  /** Sign plane with a dark back panel so the reverse never shows mirrored text. */
+  _makeSignMesh(text, background, width, height, wide = false, opts = {}) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this._getSignMaterial(text, background, wide, opts));
     mesh.name = `sign ${text}`;
+    if (!opts.noBack) {
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.materials.signBack);
+      back.rotation.y = Math.PI;
+      back.position.z = -0.05;
+      mesh.add(back);
+    }
     return mesh;
   }
 
+  /**
+   * Overhead sign gantry: legs planted outside the barriers, a proper truss
+   * spanning the full carriageway, and one green panel per direction — both
+   * hung from the SAME beam height (the old code offset each panel by the
+   * deck bank, which put the two directions' signs at different heights).
+   */
   _buildGantry(route, distance, label, secondary = '') {
     if (this._isTunnel(route, distance)) return;
     const center = this._sampleCenter(route, distance, 1);
     const quaternion = yawQuaternion(center.baseTangent);
-    const half = this._halfWidthAt(route, distance) + 1.3;
+    const half = this._halfWidthAt(route, distance) + 1.15;
     const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
-    const beam = this._deckPoint(frame, 0, 6.4);
-    this._instance(beam, vec(half * 2, 0.4, 0.4), quaternion, null, 'box:concrete');
-    for (const side of [1, -1]) {
-      const post = this._deckPoint(frame, side * half, 3.2);
-      this._instance(post, vec(0.34, 6.4, 0.34), quaternion, null, 'box:concrete');
+    const legL = this._deckPoint(frame, half, 0);
+    const legR = this._deckPoint(frame, -half, 0);
+    const beamY = Math.max(legL.y, legR.y) + 6.3;
+    for (const leg of [legL, legR]) {
+      const bottom = leg.y - 1.45; // bolt into the deck fascia
+      const legHeight = beamY + 1.75 - bottom;
+      const legCenter = leg.clone();
+      legCenter.y = bottom + legHeight * 0.5;
+      this._instance(legCenter, vec(0.52, legHeight, 0.52), quaternion, null, 'box:concrete');
     }
-    // one green panel per carriageway
+    // truss: top/bottom chords + alternating diagonal web
+    const spanCenter = this._deckPoint(frame, 0, 0);
+    for (const chordY of [beamY + 0.22, beamY + 1.58]) {
+      const chord = spanCenter.clone();
+      chord.y = chordY;
+      this._instance(chord, vec(half * 2 + 0.6, 0.22, 0.22), quaternion, null, 'box:concrete');
+    }
+    const webCount = Math.max(4, Math.round((half * 2) / 2.6));
+    for (let i = 0; i < webCount; i += 1) {
+      const lateral = -half + ((i + 0.5) / webCount) * half * 2;
+      const web = this._deckPoint(frame, lateral, 0);
+      web.y = beamY + 0.9;
+      const tilt = new THREE.Quaternion().setFromAxisAngle(FORWARD, (i % 2 ? 1 : -1) * 0.72);
+      this._instance(web, vec(0.13, 1.65, 0.13), quaternion.clone().multiply(tilt), null, 'box:concrete');
+    }
+    // one panel per carriageway, each facing ONLY its oncoming direction
+    // (direction +1 travels on the negative-lateral side, left-hand traffic)
     const sides = route.bidirectional ? [-1, 1] : [0];
     for (const side of sides) {
       const lateral = side === 0 ? 0 : side * (route.medianWidth * 0.5 + route.lanes * route.laneWidth * 0.5);
-      const panel = this._makeSignMesh(label, '#0c604e', Math.min(10.5, half * 0.95), 2.9, true);
-      const position = this._deckPoint(frame, lateral, 8.0);
+      const facingSign = side === 0 ? -(route.oneWayDirection || 1) : side;
+      const facing = center.baseTangent.clone().multiplyScalar(facingSign);
+      const panel = this._makeSignMesh(label, '#0b5142',
+        Math.min(9.8, route.lanes * route.laneWidth + 1.2), 2.9, true,
+        { shield: route.code, arrows: route.lanes });
+      const position = this._deckPoint(frame, lateral, 0);
+      position.y = beamY + 0.9;
       panel.position.copy(position);
-      panel.quaternion.copy(quaternion);
+      panel.quaternion.copy(yawQuaternion(facing));
       this._addChunkMesh(panel, position);
       if (secondary) {
         const board = this._makeSignMesh(secondary, '#174c72');
-        const boardPos = this._deckPoint(frame, lateral, 5.35);
+        const boardPos = position.clone();
+        boardPos.y = beamY - 1.35;
         board.position.copy(boardPos);
-        board.quaternion.copy(quaternion);
+        board.quaternion.copy(yawQuaternion(facing));
         board.scale.set(0.62, 0.55, 1);
         this._addChunkMesh(board, boardPos);
       }
@@ -2986,51 +3135,77 @@ export class HighwayMap {
       for (let distance = Math.min(400, route.length * 0.3); distance < route.length - 120; distance += interval) {
         const destination = route.destinations[signIndex % Math.max(1, route.destinations.length)] || [route.name.toUpperCase(), ''];
         const [kanji, romaji] = Array.isArray(destination) ? destination : [destination, ''];
-        this._buildGantry(route, distance, `${kanji}|${route.code}  ${romaji}`);
+        this._buildGantry(route, distance, `${kanji}|${romaji}`);
         signIndex += 1;
       }
-      // km posts
+      // km posts, mounted on their own poles
       if (!isRamp) {
         for (let distance = 500; distance < route.length; distance += 1000) {
           const center = this._sampleCenter(route, distance, 1);
           if (this._isTunnel(route, distance)) continue;
           const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
           const half = this._halfWidthAt(route, distance);
-          const post = this._makeSignMesh(`${route.code} ${(distance / 1000).toFixed(1)}|km`, '#174c72', 1.7, 1.25);
-          const position = this._deckPoint(frame, half + 0.4, 2.1);
+          const position = this._deckPoint(frame, half + 0.45, 2.3);
+          if (this._barrierSuppressed(position, route)) continue;
+          const facingSign = route.bidirectional ? 1 : -(route.oneWayDirection || 1);
+          const post = this._makeSignMesh(`${route.code} ${(distance / 1000).toFixed(1)}|km`, '#174c72', 1.45, 1.1);
           post.position.copy(position);
-          post.quaternion.copy(yawQuaternion(center.baseTangent));
+          post.quaternion.copy(yawQuaternion(center.baseTangent.clone().multiplyScalar(facingSign)));
           this._addChunkMesh(post, position);
+          const pole = this._deckPoint(frame, half + 0.45, 0.85);
+          this._instance(pole, vec(0.12, 1.7, 0.12), null, null, 'box:concrete');
         }
       }
-      // orange matrix boards before junctions
+      // orange matrix boards on their own mini-gantry before junctions
       if (!isRamp && !route.closed) {
         for (const endDistance of [route.length * 0.32, route.length * 0.78]) {
           if (this._isTunnel(route, endDistance)) continue;
           const center = this._sampleCenter(route, endDistance, 1);
+          const quaternion = yawQuaternion(center.baseTangent);
           const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, endDistance) };
-          const board = this._makeSignMesh('渋滞注意|SLOW DOWN', '#241a05', 6.4, 1.7, true);
-          const position = this._deckPoint(frame, 0, 6.2);
-          board.position.copy(position);
-          board.quaternion.copy(yawQuaternion(center.baseTangent));
-          this._addChunkMesh(board, position);
-          const boardBack = this._makeSignMesh('渋滞注意|SLOW DOWN', '#241a05', 6.4, 1.7, true);
-          boardBack.position.copy(position);
-          boardBack.quaternion.copy(yawQuaternion(center.baseTangent.clone().multiplyScalar(-1)));
-          this._addChunkMesh(boardBack, position);
+          const half = this._halfWidthAt(route, endDistance) + 1.0;
+          const legL = this._deckPoint(frame, half, 0);
+          const legR = this._deckPoint(frame, -half, 0);
+          const beamY = Math.max(legL.y, legR.y) + 5.6;
+          for (const leg of [legL, legR]) {
+            const bottom = leg.y - 1.45;
+            const legCenter = leg.clone();
+            legCenter.y = bottom + (beamY + 0.5 - bottom) * 0.5;
+            this._instance(legCenter, vec(0.4, beamY + 0.5 - bottom, 0.4), quaternion, null, 'box:concrete');
+          }
+          const beam = this._deckPoint(frame, 0, 0);
+          beam.y = beamY + 0.35;
+          this._instance(beam, vec(half * 2 + 0.5, 0.3, 0.3), quaternion, null, 'box:concrete');
+          const sides = route.bidirectional ? [-1, 1] : [0];
+          for (const side of sides) {
+            const lateral = side === 0 ? 0 : side * (route.medianWidth * 0.5 + route.lanes * route.laneWidth * 0.5);
+            const facingSign = side === 0 ? -(route.oneWayDirection || 1) : side;
+            const board = this._makeSignMesh('渋滞注意|SLOW DOWN', '#241a05', 5.4, 1.5, true);
+            const position = this._deckPoint(frame, lateral, 0);
+            position.y = beamY + 1.35;
+            board.position.copy(position);
+            board.quaternion.copy(yawQuaternion(center.baseTangent.clone().multiplyScalar(facingSign)));
+            this._addChunkMesh(board, position);
+          }
         }
       }
     }
 
-    // Junction approach boards (blue, both directions) + PA advance signs.
+    // Junction name masts (double-faced boards on a planted pole).
     for (const junction of this.junctions) {
-      const board = this._makeSignMesh(`${junction.name}|JUNCTION`, '#123c78', 6.8, 2.3, true);
       const position = junction.point.clone();
-      position.y += 16;
-      board.position.copy(position);
-      this._addChunkMesh(board, position);
-      this.animatedMarkers.push(Object.assign(board, { __spin: true }));
+      position.y += 15;
+      const mast = vec(position.x, (position.y + 1.1) * 0.5 - 0.5, position.z);
+      this._instance(mast, vec(0.5, position.y + 1.1, 0.5), null, null, 'box:concreteDark');
+      for (const flip of [0, Math.PI]) {
+        const board = this._makeSignMesh(`${junction.name}|JUNCTION`, '#123c78', 6.4, 2.1, true);
+        board.position.copy(position);
+        board.quaternion.setFromAxisAngle(UP, flip);
+        board.translateZ(0.08);
+        this._addChunkMesh(board, position);
+      }
     }
+    // PA advance boards (blue P), on poles, facing their carriageway.
     for (const area of this.serviceAreas) {
       if (!area.routeId || !this.routes.has(area.routeId)) continue;
       const route = this.routes.get(area.routeId);
@@ -3041,11 +3216,14 @@ export class HighwayMap {
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
         const half = this._halfWidthAt(route, distance);
         const lateral = -area.direction * (half + 0.6);
-        const sign = this._makeSignMesh(`P ${area.name}|${ahead}m`, '#175ba5', 2.9, 1.9);
-        const position = this._deckPoint(frame, lateral, 3.1);
+        const position = this._deckPoint(frame, lateral, 3.2);
+        if (this._barrierSuppressed(position, route)) continue;
+        const sign = this._makeSignMesh(`P ${area.name}|${ahead}m`, '#175ba5', 2.7, 1.75);
         sign.position.copy(position);
-        sign.quaternion.copy(yawQuaternion(center.tangent));
+        sign.quaternion.copy(yawQuaternion(center.tangent.clone().multiplyScalar(-1)));
         this._addChunkMesh(sign, position);
+        const pole = this._deckPoint(frame, lateral, 1.2);
+        this._instance(pole, vec(0.14, 2.4, 0.14), null, null, 'box:concrete');
       }
     }
   }
