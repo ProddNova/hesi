@@ -290,6 +290,21 @@ export class HighwayMap {
     return texture;
   }
 
+  /** Paired tunnel jet fans: two ducts + ceiling mount, one instanced geometry. */
+  _jetFanGeometry() {
+    const parts = [];
+    for (const x of [-0.62, 0.62]) {
+      const duct = new THREE.CylinderGeometry(0.5, 0.5, 2.9, 8);
+      duct.rotateX(Math.PI * 0.5);
+      duct.translate(x, 0, 0);
+      parts.push(duct);
+    }
+    const mount = new THREE.BoxGeometry(1.9, 0.2, 0.6);
+    mount.translate(0, 0.68, 0);
+    parts.push(mount);
+    return this._mergeGeometries(parts);
+  }
+
   /** Soft radial glow sprite texture (white core, transparent edge). */
   _glowTexture() {
     if (typeof document === 'undefined') return null;
@@ -2333,7 +2348,10 @@ export class HighwayMap {
     const unitPlane = new THREE.PlaneGeometry(1, 1);
     const unitPool = new THREE.PlaneGeometry(1, 1);
     unitPool.rotateX(-Math.PI * 0.5);
-    this._unitGeometries = { box: unitBox, plane: unitPlane, pool: unitPool, lamppost: this._lampGeometry() };
+    this._unitGeometries = {
+      box: unitBox, plane: unitPlane, pool: unitPool,
+      lamppost: this._lampGeometry(), jetfan: this._jetFanGeometry(),
+    };
     const identityQuat = new THREE.Quaternion();
     for (const [key, types] of this._chunkInstances) {
       const chunk = this._chunkFor(key);
@@ -2868,15 +2886,22 @@ export class HighwayMap {
           this._instance(panel, vec(0.14, 2.6, lightStep - 0.9), quaternion, 0x3d444d, 'box:concrete');
         }
       }
+      // ceiling ribs give the shell its segmented interior
+      for (let distance = tunnel.startDistance + 17; distance < tunnel.endDistance; distance += 34) {
+        const center = this._sampleCenter(route, distance, 1);
+        const quaternion = yawQuaternion(center.baseTangent);
+        const half = this._halfWidthAt(route, distance);
+        const rib = center.position.clone();
+        rib.y += 5.98;
+        this._instance(rib, vec(half * 2 + 0.8, 0.22, 0.42), quaternion, null, 'box:portal');
+      }
+      // paired cylindrical jet fans
       for (let distance = tunnel.startDistance + 90; distance < tunnel.endDistance - 60; distance += 150) {
         const center = this._sampleCenter(route, distance, 1);
         const quaternion = yawQuaternion(center.baseTangent);
-        // jet fans, paired
-        for (const side of [-1.9, 1.9]) {
-          const fan = center.position.clone().addScaledVector(horizontalNormal(center.baseTangent), side);
-          fan.y += 5.1;
-          this._instance(fan, vec(1.1, 1.1, 2.9), quaternion, 0x767d88, 'box:concrete');
-        }
+        const fan = center.position.clone();
+        fan.y += 5.05;
+        this._instance(fan, vec(1, 1, 1), quaternion, null, 'jetfan:railMetal');
       }
       for (let distance = tunnel.startDistance + 150; distance < tunnel.endDistance - 100; distance += 300) {
         const center = this._sampleCenter(route, distance, 1);
@@ -2894,18 +2919,34 @@ export class HighwayMap {
         cabinet.y += 0.95;
         this._instance(cabinet, vec(0.5, 1.9, 1.2), quaternion, 0x49525e, 'box:concrete');
       }
-      // portals
+      // portals: header, flared wing walls, name board on both approaches
       for (const endDistance of [tunnel.startDistance, tunnel.endDistance]) {
         const center = this._sampleCenter(route, endDistance, 1);
         const quaternion = yawQuaternion(center.baseTangent);
+        const normal = horizontalNormal(center.baseTangent);
         const half = this._halfWidthAt(route, endDistance) + 0.6;
         const beam = center.position.clone();
-        beam.y += 6.7;
-        this._instance(beam, vec(half * 2 + 1.6, 1.6, 2.2), quaternion, null, 'box:portal');
+        beam.y += 7.0;
+        this._instance(beam, vec(half * 2 + 3.4, 2.2, 3.0), quaternion, null, 'box:portal');
         for (const side of [1, -1]) {
-          const post = center.position.clone().addScaledVector(horizontalNormal(center.baseTangent), side * (half + 0.5));
+          const post = center.position.clone().addScaledVector(normal, side * (half + 0.6));
           post.y += 3.0;
-          this._instance(post, vec(1.4, 6.4, 2.2), quaternion, null, 'box:portal');
+          this._instance(post, vec(1.5, 6.6, 3.0), quaternion, null, 'box:portal');
+          const flare = new THREE.Quaternion().setFromAxisAngle(UP, side * -0.5);
+          const wing = center.position.clone()
+            .addScaledVector(normal, side * (half + 3.1))
+            .addScaledVector(center.baseTangent, endDistance === tunnel.startDistance ? -1.7 : 1.7);
+          wing.y += 2.4;
+          this._instance(wing, vec(0.9, 5.4, 5.6), quaternion.clone().multiply(flare), null, 'box:portal');
+        }
+        if (typeof document !== 'undefined') {
+          const outward = endDistance === tunnel.startDistance ? -1 : 1;
+          const board = this._makeSignMesh(`${tunnel.name}|SHUTO EXPWY`, '#0b5142', 6.4, 1.7, true);
+          const boardPos = center.position.clone().addScaledVector(center.baseTangent, outward * 1.6);
+          boardPos.y += 7.05;
+          board.position.copy(boardPos);
+          board.quaternion.copy(yawQuaternion(TMP_C.copy(center.baseTangent).multiplyScalar(outward)));
+          this._addChunkMesh(board, boardPos);
         }
       }
     }
@@ -3315,6 +3356,17 @@ export class HighwayMap {
         }
       }
     }
+
+    // Rainbow Bridge signature: light chain along both deck edges.
+    for (let distance = startDistance - 40; distance <= endDistance + 40; distance += 16) {
+      const center = this._sampleCenter(route, distance, 1);
+      const normal = horizontalNormal(center.baseTangent);
+      for (const side of [-1, 1]) {
+        const bulb = center.position.clone().addScaledVector(normal, side * (route.halfWidth + 0.35));
+        bulb.y += 1.42;
+        this._instance(bulb, vec(0.24, 0.24, 0.24), null, null, 'box:cableLight');
+      }
+    }
   }
 
   // ------------------------------------------------------------------
@@ -3350,6 +3402,13 @@ export class HighwayMap {
             this._instance(position, vec(2.2, height + 0.8, 2.0), orientation, null, 'box:concreteDark');
           }
         }
+      }
+
+      // kerb line under the perimeter fence
+      for (const side of [-1, 1]) {
+        const kerb = area.center.clone().addScaledVector(area.normal, side * (area.width * 0.5 - 0.28));
+        kerb.y = area.elevation + 0.09;
+        this._instance(kerb, vec(0.5, 0.18, area.length), orientation, 0x8f959e, 'box:parkedBody');
       }
 
       // perimeter fence (visual; the lot corridor is the collision)
@@ -3899,10 +3958,10 @@ export class HighwayMap {
     // Rainbow Bridge and behind Daikoku.
     const random = mulberry32(this.seed ^ 0x517cc1);
     const clusters = [
-      { x: -1400, z: -4600, spread: 1500, count: 26, tall: 130 }, // skyline behind the bridge (west bank)
-      { x: 2400, z: -4400, spread: 1200, count: 18, tall: 90 },  // east bank
-      { x: -15200, z: -14900, spread: 1400, count: 16, tall: 70 }, // Daikoku shore
-      { x: 8600, z: -4300, spread: 1500, count: 16, tall: 80 },  // Tatsumi postcard
+      { x: -1400, z: -4600, spread: 1500, count: 26, tall: 130, streak: [1, -0.2] },   // west bank, faces the bridge
+      { x: 2400, z: -4400, spread: 1200, count: 18, tall: 90, streak: [-1, -0.2] },    // east bank
+      { x: -15200, z: -14900, spread: 1400, count: 16, tall: 70, streak: [-1, -0.1] }, // Daikoku shore
+      { x: 8600, z: -4300, spread: 1500, count: 16, tall: 80, streak: [0.2, -1] },     // Tatsumi postcard
     ];
     for (const cluster of clusters) {
       for (let i = 0; i < cluster.count; i += 1) {
@@ -3917,6 +3976,21 @@ export class HighwayMap {
         this._buildStructure(random, x, z, random() * Math.PI, roll < 0.5 ? 'slab' : roll < 0.8 ? 'stepped' : 'crown',
           width, height, depth, {});
         this._recordFootprint(x, z, radius);
+      }
+      // skyline reflection streaks on the bay water in front of each cluster
+      if (cluster.streak) {
+        const direction = vec(cluster.streak[0], 0, cluster.streak[1]).normalize();
+        const streakQuat = yawQuaternion(direction);
+        const perpendicular = vec(-direction.z, 0, direction.x);
+        for (let i = 0; i < 9; i += 1) {
+          const across = (i - 4) * cluster.spread * 0.1 + (random() - 0.5) * 60;
+          const position = vec(cluster.x, -0.78, cluster.z)
+            .addScaledVector(perpendicular, across)
+            .addScaledVector(direction, cluster.spread * 0.42 + random() * 240);
+          const warm = random() < 0.4;
+          this._instance(position, vec(2.4 + random() * 2, 1, 70 + random() * 90), streakQuat,
+            warm ? 0xd8c9a0 : 0x9fb8d8, 'pool:lightPool');
+        }
       }
     }
 
