@@ -539,9 +539,9 @@ export class VehiclePhysics {
     // steady-state slip allowance: a held button at 60 km/h now corners hard
     // (~0.9 g) with full grip and zero drama, and breakaway needs lift-off,
     // weight transfer or the handbrake rather than plain steering input.
-    const gripLimitedSteer = this.spec.wheelbase * this.spec.tireGrip * this._surfaceGrip * G * 0.88
-      / Math.max(1, u * u) + 0.024;
-    const speedSteerScale = THREE.MathUtils.lerp(1, 0.3, smoothstep01(speed / 50));
+    const gripLimitedSteer = this.spec.wheelbase * this.spec.tireGrip * this._surfaceGrip * G * 0.72
+      / Math.max(1, u * u) + 0.018;
+    const speedSteerScale = THREE.MathUtils.lerp(1, 0.22, smoothstep01(speed / 55));
     const steerAuthority = Math.min(this.spec.maxSteer * speedSteerScale, gripLimitedSteer, this.spec.maxSteer);
     const targetSteering = input.steer * steerAuthority;
     // Ramp to full authority over ~0.26 s so binary keyboard/touch input reads
@@ -576,8 +576,8 @@ export class VehiclePhysics {
 
     const suspensionFactor = clamp(this.spec.suspensionStiffness, 0.55, 1.65);
     const lowSpeedTireFactor = smoothstep01(speed / 2.2);
-    let fyFront = -this.spec.cornerStiffnessFront * suspensionFactor * frontSlip * lowSpeedTireFactor;
-    let fyRear = -this.spec.cornerStiffnessRear * suspensionFactor * rearSlip * lowSpeedTireFactor;
+    let fyFront = this._pacejkaLateral(frontSlip, this.spec.cornerStiffnessFront, frontLoad, muFront, suspensionFactor, lowSpeedTireFactor);
+    let fyRear = this._pacejkaLateral(rearSlip, this.spec.cornerStiffnessRear, rearLoad, muRear, suspensionFactor, lowSpeedTireFactor);
 
     const engine = this._engineForces(input, u, dt, settings);
     let driveFront = 0;
@@ -687,13 +687,15 @@ export class VehiclePhysics {
   _applyRoadHeight(surface, dt) {
     if (!Number.isFinite(surface.height) || !surface.snapHeight) return;
     const target = surface.height + this.spec.rideHeight;
-    const error = target - this.position.y;
-    this._roadHeightVelocity += (error * 95 - this._roadHeightVelocity * 17) * dt;
-    this.position.y += this._roadHeightVelocity * dt;
-    if (Math.abs(error) < 0.002) {
-      this.position.y = target;
-      this._roadHeightVelocity = 0;
-    }
+    // Road height is already an analytic spline sample from map.getRoadInfo().
+    // Do not spring against triangle seams: converge critically and snap tiny
+    // errors so 5-10 m mesh segment boundaries cannot become 'dentini'.
+    const alpha = 1 - Math.exp(-dt * 60);
+    this.position.y = Math.abs(target - this.position.y) < 0.04
+      ? THREE.MathUtils.lerp(this.position.y, target, alpha)
+      : target;
+    if (Math.abs(target - this.position.y) < 0.0015) this.position.y = target;
+    this._roadHeightVelocity = 0;
   }
 
   _engineForces(input, forwardSpeed, dt, settings) {
@@ -777,17 +779,37 @@ export class VehiclePhysics {
     else if (this.rpm < downThreshold && this.gear > 1 && Math.abs(forwardSpeed) > 4) this.shiftDown();
   }
 
+  _pacejkaLateral(slipAngle, cornerStiffness, normalLoad, mu, suspensionFactor, lowSpeedFactor) {
+    const loadRef = Math.max(1, this.spec.mass * G * 0.5);
+    // Load sensitivity: doubling vertical load does not double available mu.
+    const loadMu = mu * clamp(1.08 - 0.16 * (normalLoad / loadRef - 1), 0.78, 1.18);
+    const peak = Math.max(1, loadMu * normalLoad);
+    const stiffness = cornerStiffness * suspensionFactor * lowSpeedFactor;
+    // Simplified Pacejka Magic Formula. B is chosen so the initial slope is
+    // the authored cornering stiffness, D is the load-sensitive friction peak.
+    const B = clamp(stiffness / Math.max(1, peak * 1.18), 2.4, 14);
+    const C = 1.32;
+    const E = 0.62;
+    const x = clamp(slipAngle, -0.75, 0.75);
+    return -peak * Math.sin(C * Math.atan(B * x - E * (B * x - Math.atan(B * x))));
+  }
+
   _gripCircle(forceX, forceY, maximum, brakeDemand) {
     const requested = Math.hypot(forceX, forceY);
     if (maximum <= EPSILON || requested <= maximum) {
       return { x: forceX, y: forceY, saturation: requested / Math.max(1, maximum), lock: 0, spin: 0 };
     }
     const saturation = requested / maximum;
-    let scale = maximum / requested;
-    const lock = brakeDemand > 0.05 && Math.abs(forceX) > maximum * 0.72 ? clamp((saturation - 1) * 1.7 + brakeDemand * 0.18, 0, 1) : 0;
-    const spin = brakeDemand <= 0.05 && Math.abs(forceX) > maximum * 0.75 ? clamp((saturation - 1) * 1.4, 0, 1) : 0;
-    if (lock > 0) scale *= THREE.MathUtils.lerp(1, 0.78, lock); // Locked tires lose directional control.
-    return { x: forceX * scale, y: forceY * scale * (1 - lock * 0.52), saturation, lock, spin };
+    // Friction ellipse gives longitudinal braking/drive priority without
+    // instantly deleting lateral grip, so straight braking is stable and
+    // trail-braking progressively tightens/understeers instead of spinning.
+    const fx = clamp(forceX, -maximum, maximum);
+    const longitudinalUse = Math.abs(fx) / maximum;
+    const lateralBudget = maximum * Math.sqrt(Math.max(0, 1 - longitudinalUse * longitudinalUse));
+    const fy = clamp(forceY, -lateralBudget, lateralBudget);
+    const lock = brakeDemand > 0.05 && Math.abs(forceX) > maximum * 0.95 ? clamp((saturation - 1) * 1.2 + brakeDemand * 0.08, 0, 1) : 0;
+    const spin = brakeDemand <= 0.05 && Math.abs(forceX) > maximum * 0.96 ? clamp((saturation - 1) * 1.25, 0, 1) : 0;
+    return { x: fx, y: fy * (1 - lock * 0.35), saturation, lock, spin };
   }
 
   _resolveRoadBounds(roadInfo, from, to) {

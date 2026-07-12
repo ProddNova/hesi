@@ -171,10 +171,6 @@ export class GameUI {
   }
 
   renderAdmin(root,c) {
-    if(!c.adminUnlocked){
-      root.innerHTML='<div class="app-view"><h2>ADMIN ACCESS</h2><p>Workshop diagnostic terminal. Enter authorization PIN.</p><input id="admin-code" class="admin-code" maxlength="4" inputmode="numeric" placeholder="••••"><button id="admin-unlock" style="width:100%;margin-top:9px">AUTHORIZE</button></div>';
-      this.$('admin-unlock').onclick=()=>{const ok=this.$('admin-code').value==='1997';this.cb.adminUnlock?.(ok);if(ok)this.openPhoneApp('admin');else this.toast('ACCESS DENIED','red');};
-    } else {
       root.innerHTML=`<div class="app-view"><h2>ADMIN // ACTIVE</h2><p>Real-time test controls</p><div class="admin-grid">
       <button data-admin="money">+ ¥100,000</button><button data-admin="garage">TELEPORT GARAGE</button><button data-admin="pc">OPEN GARAGE PC</button><button data-admin="highway">START ON HIGHWAY</button><button data-admin="deliverybay">WARP TO DELIVERY</button><button data-admin="carbay">WARP TO CAR</button><button data-admin="fuel">REFILL FUEL</button><button data-admin="lives">RESET LIVES</button><button data-admin="parts">UNLOCK PARTS</button><button data-admin="delivery">INSTANT DELIVERY</button><button data-admin="boost">SET 250 KM/H</button></div>
       ${this.setting('INFINITE MONEY',`<input data-toggle="money" type="checkbox" ${c.admin?.infiniteMoney?'checked':''}>`)}
