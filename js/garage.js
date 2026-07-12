@@ -1,4 +1,4 @@
-import * as THREE from './three-fallback.js';
+import * as THREE from 'three';
 
 const V = (x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 

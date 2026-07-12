@@ -1,4 +1,4 @@
-import * as THREE from './three-fallback.js';
+import * as THREE from 'three';
 
 /**
  * Shutoko Nights world module — a scaled, topologically faithful low-poly
@@ -164,7 +164,7 @@ export class HighwayMap {
 
   _createMaterials() {
     const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({
-      color, flatShading: false, fog: true, ...extra,
+      color, flatShading: true, fog: true, ...extra,
     });
     const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({
       color, fog: true, toneMapped: false, ...extra,
@@ -1287,8 +1287,6 @@ export class HighwayMap {
       normal: laneCenterSample.normal,
       right: laneCenterSample.normal.clone(),
       up: UP.clone(),
-      // Physics samples the analytic spline deck rather than rendered triangles;
-      // this keeps seams between extruded mesh segments from kicking the car.
       surfaceNormal: UP.clone(),
       signedLateral: projection.signedLateral,
       lateralOffset: projection.signedLateral * direction, // along driver's right
@@ -1350,8 +1348,6 @@ export class HighwayMap {
       normal: area.normal.clone(),
       right: area.normal.clone(),
       up: UP.clone(),
-      // Physics samples the analytic spline deck rather than rendered triangles;
-      // this keeps seams between extruded mesh segments from kicking the car.
       surfaceNormal: UP.clone(),
       height: area.elevation,
       roadHeight: area.elevation,
