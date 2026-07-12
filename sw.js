@@ -1,7 +1,7 @@
-const CACHE = 'shutoko-nights-v5';
+const CACHE = 'shutoko-nights-v6';
 const CORE = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
-  './js/game.js', './js/map.js', './js/physics.js', './js/traffic.js', './js/data.js',
+  './js/game.js', './js/three-fallback.js', './js/map.js', './js/physics.js', './js/traffic.js', './js/data.js',
   './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js'
 ];
 

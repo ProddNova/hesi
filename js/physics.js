@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from './three-fallback.js';
 
 const G = 9.81;
 const TAU = Math.PI * 2;
