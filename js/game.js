@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260712b';
-import * as PhysicsModule from './physics.js?v=20260712b';
-import * as TrafficModule from './traffic.js?v=20260712b';
+import * as MapModule from './map.js?v=20260713a';
+import * as PhysicsModule from './physics.js?v=20260713a';
+import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
-import { GarageSystem } from './garage.js?v=20260712b';
-import { GameUI } from './ui.js?v=20260712b';
+import { GarageSystem } from './garage.js?v=20260713a';
+import { GameUI } from './ui.js?v=20260713a';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
