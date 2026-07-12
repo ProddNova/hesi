@@ -1,8 +1,8 @@
-const CACHE = 'shutoko-nights-v7';
+const CACHE = 'shutoko-nights-v8';
 const CORE = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
-  './js/game.js', './js/three-fallback.js', './js/map.js', './js/physics.js', './js/traffic.js', './js/data.js',
-  './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js'
+  './js/game-v20260712d.js', './js/three-fallback-v20260712d.js', './js/map-v20260712d.js', './js/physics-v20260712d.js', './js/traffic-v20260712d.js', './js/data.js',
+  './js/save.js', './js/audio.js', './js/garage-v20260712d.js', './js/ui-v20260712d.js'
 ];
 
 self.addEventListener('install', event => {
@@ -22,7 +22,7 @@ self.addEventListener('fetch', event => {
     }
     return response;
   }).catch(async () => {
-    const hit = await caches.match(event.request, { ignoreSearch: true });
+    const hit = await caches.match(event.request);
     if (hit) return hit;
     if (event.request.mode === 'navigate') return caches.match('./index.html');
     return Response.error();
