@@ -234,7 +234,82 @@ export class HighwayMap {
       marker: basic(0x57e3ff, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
       billboardGlow: basic(0xffffff),
       signGreen: basic(0x0c604e, { side: THREE.DoubleSide }),
+      // Additive decals: sodium pools under lamps + stretched wet-asphalt
+      // streaks — the cheap PS2 stand-in for real reflections.
+      lightPool: new THREE.MeshBasicMaterial({
+        map: this._glowTexture(), color: 0xff9b42, transparent: true, opacity: 0.34,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      }),
+      lightStreak: new THREE.MeshBasicMaterial({
+        map: this._glowTexture(), color: 0xffb066, transparent: true, opacity: 0.26,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+      }),
     };
+  }
+
+  /** Soft radial glow sprite texture (white core, transparent edge). */
+  _glowTexture() {
+    if (typeof document === 'undefined') return null;
+    if (this._glowTex) return this._glowTex;
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const context = canvas.getContext('2d');
+    const gradient = context.createRadialGradient(32, 32, 2, 32, 32, 31);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.95)');
+    gradient.addColorStop(0.35, 'rgba(255,255,255,0.5)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 64, 64);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    this._ownedTextures.add(texture);
+    this._glowTex = texture;
+    return texture;
+  }
+
+  /** Concatenate simple geometries (position+normal) into one non-indexed buffer. */
+  _mergeGeometries(geometries) {
+    const positions = [];
+    const normals = [];
+    for (const geometry of geometries) {
+      const flat = geometry.index ? geometry.toNonIndexed() : geometry;
+      positions.push(...flat.getAttribute('position').array);
+      normals.push(...flat.getAttribute('normal').array);
+      if (flat !== geometry) flat.dispose();
+      geometry.dispose();
+    }
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    merged.computeBoundingSphere();
+    return merged;
+  }
+
+  /**
+   * Proper highway lamppost: base flange, tapered pole, curved arm sweeping
+   * up-and-over, luminaire housing. Local +X is the road side; the emissive
+   * lens is instanced separately so it stays full-bright.
+   */
+  _lampGeometry() {
+    const parts = [];
+    const flange = new THREE.CylinderGeometry(0.24, 0.3, 0.24, 7);
+    flange.translate(0, 0.12, 0);
+    parts.push(flange);
+    const pole = new THREE.CylinderGeometry(0.09, 0.17, 7.6, 7);
+    pole.translate(0, 3.8, 0);
+    parts.push(pole);
+    const arm = new THREE.TorusGeometry(1.75, 0.075, 5, 8, Math.PI * 0.5);
+    arm.rotateZ(Math.PI * 0.5);
+    arm.translate(1.75, 7.6, 0);
+    parts.push(arm);
+    const housing = new THREE.BoxGeometry(1.3, 0.17, 0.4);
+    housing.translate(2.28, 9.36, 0);
+    parts.push(housing);
+    return this._mergeGeometries(parts);
   }
 
   /**
@@ -2215,7 +2290,9 @@ export class HighwayMap {
     // instanced meshes per chunk per type ("geometry:material")
     const unitBox = new THREE.BoxGeometry(1, 1, 1);
     const unitPlane = new THREE.PlaneGeometry(1, 1);
-    this._unitGeometries = { box: unitBox, plane: unitPlane };
+    const unitPool = new THREE.PlaneGeometry(1, 1);
+    unitPool.rotateX(-Math.PI * 0.5);
+    this._unitGeometries = { box: unitBox, plane: unitPlane, pool: unitPool, lamppost: this._lampGeometry() };
     const identityQuat = new THREE.Quaternion();
     for (const [key, types] of this._chunkInstances) {
       const chunk = this._chunkFor(key);
@@ -2242,7 +2319,10 @@ export class HighwayMap {
         mesh.frustumCulled = true;
         mesh.computeBoundingSphere?.();
         if (matName === 'redBlink') this.blinkers.push(mesh);
-        if (this._effectTypes?.has(geoName)) this._effectMeshes.push(mesh);
+        if (this._effectTypes?.has(matName)) {
+          this._effectMeshes.push(mesh);
+          mesh.visible = this._quality !== 'low';
+        }
         chunk.group.add(mesh);
       }
     }
@@ -2666,23 +2746,49 @@ export class HighwayMap {
       }
     }
 
-    // Sodium lamps on curved poles along every elevated/open section.
+    // Sodium lampposts: tapered pole + curved arm + luminaire (one merged
+    // instanced geometry), an emissive lens, an additive light pool on the
+    // asphalt and a stretched wet-reflection streak (hidden on Low quality).
     const lampStep = isService ? 55 : (isRamp ? 70 : 42);
+    const halfTurn = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI);
     let lampSide = 1;
     for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
       const center = this._sampleCenter(route, distance, 1);
-      const quaternion = yawQuaternion(center.baseTangent);
       const half = this._halfWidthAt(route, distance);
       if (this._isTunnel(route, distance)) continue;
       const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
       const side = route.bidirectional ? (lampSide *= -1) : 1;
-      const base = this._deckPoint(frame, side * (half - 0.45));
-      const pole = base.clone(); pole.y += 4.6;
-      this._instance(pole, vec(0.16, 9.2, 0.16), null, null, 'box:concrete');
-      const arm = base.clone().addScaledVector(frame.normal, -side * 1.6); arm.y += 9.1;
-      this._instance(arm, vec(side > 0 ? 3.4 : 3.4, 0.14, 0.14), quaternion.clone().multiply(new THREE.Quaternion().setFromAxisAngle(FORWARD, 0)), null, 'box:concrete');
-      const head = base.clone().addScaledVector(frame.normal, -side * 3.0); head.y += 8.95;
-      this._instance(head, vec(1.5, 0.2, 0.5), quaternion, null, 'box:lampSodium');
+      const base = this._deckPoint(frame, side * (half - 0.62), 0.01);
+      if (this._barrierSuppressed(base, route)) continue;
+      // local +X of the lamp geometry maps to -normal under yawQuaternion;
+      // mirror with a half turn for the other edge so the arm reaches the road
+      const quaternion = yawQuaternion(center.baseTangent);
+      if (side < 0) quaternion.multiply(halfTurn);
+      this._instance(base, vec(1, 1, 1), quaternion, null, 'lamppost:concrete');
+      const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
+      lens.y = base.y + 9.26;
+      this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
+      const pool = this._deckPoint(frame, side * (half - 3.6), 0.07);
+      this._instance(pool, vec(11, 1, 15.5), yawQuaternion(center.baseTangent), null, 'pool:lightPool');
+      const streak = this._deckPoint(frame, side * (half - 3.2), 0.1);
+      this._instance(streak, vec(1.1, 1, 30), yawQuaternion(center.baseTangent), null, 'pool:lightStreak');
+    }
+
+    // Emergency phone boxes on elevated open sections (green beacon + cabinet).
+    if (!isService && !isRamp) {
+      for (let distance = 240; distance < route.length; distance += 430) {
+        if (this._isTunnel(route, distance) || this._isBridge(route, distance)) continue;
+        const center = this._sampleCenter(route, distance, 1);
+        const half = this._halfWidthAt(route, distance);
+        const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
+        const base = this._deckPoint(frame, half - 1.05, 0.02);
+        if (this._barrierSuppressed(base, route)) continue;
+        const quaternion = yawQuaternion(center.baseTangent);
+        const cabinet = base.clone(); cabinet.y += 0.62;
+        this._instance(cabinet, vec(0.56, 1.24, 0.5), quaternion, 0x2c3440, 'box:parkedBody');
+        const beacon = base.clone(); beacon.y += 1.44;
+        this._instance(beacon, vec(0.34, 0.34, 0.34), quaternion, null, 'box:exitGreen');
+      }
     }
 
     // Barrier reflectors.
@@ -3164,14 +3270,19 @@ export class HighwayMap {
         }
       }
 
-      // sodium lot lights
+      // sodium lot lights (proper lampposts + pools); the lamp's local +X
+      // (arm side) maps to -horizontalNormal(tangent) under yawQuaternion
+      const armDirection = horizontalNormal(area.tangent, new THREE.Vector3()).multiplyScalar(-1);
       for (const along of [-area.length * 0.33, 0, area.length * 0.33]) {
         const position = area.center.clone().addScaledVector(area.tangent, along);
-        position.y = area.elevation + 4.4;
-        this._instance(position, vec(0.16, 8.8, 0.16), null, null, 'box:concrete');
-        const head = position.clone();
-        head.y = area.elevation + 8.9;
-        this._instance(head, vec(2.2, 0.2, 0.7), orientation, null, 'box:lampSodium');
+        position.y = area.elevation;
+        this._instance(position, vec(1, 1, 1), orientation, null, 'lamppost:concrete');
+        const lens = position.clone().addScaledVector(armDirection, 2.28);
+        lens.y = area.elevation + 9.26;
+        this._instance(lens, vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
+        const pool = position.clone().addScaledVector(armDirection, 3.4);
+        pool.y = area.elevation + 0.07;
+        this._instance(pool, vec(11, 1, 14), orientation, null, 'pool:lightPool');
       }
 
       // refuel pad marker
@@ -3794,6 +3905,14 @@ export class HighwayMap {
 
   build() {
     return this;
+  }
+
+  /** Quality scaling for the effect layers: Low hides the wet-asphalt streaks. */
+  setQuality(quality) {
+    if (quality === this._quality) return;
+    this._quality = quality;
+    const visible = quality !== 'low';
+    for (const mesh of this._effectMeshes) mesh.visible = visible;
   }
 
   update(playerPosition = null, timeSeconds = 0) {
