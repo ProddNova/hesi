@@ -162,3 +162,53 @@ All six blueprint stages were built. Simplifications, smallest-impact first:
 - `landmarks.mjs` — landmark screenshots + draw-call probe
 
 Run with `npm i --no-save three@0.166.1 playwright` from the repo root.
+
+---
+
+# PS1 → PS2 Visual Overhaul (2026-07-12, claude/shutoko-ps2-visual-pass)
+
+The game was mistakenly targeting a PS1 aesthetic; this pass retargets every
+visual system to PS2-era (TXR / Wangan Midnight): sharp near-native image,
+clean readable geometry, emissive night lighting. Road topology, collision,
+physics, scoring, phone Map app, controls and HUD are untouched.
+
+**Renderer:** internal resolution 0.55/0.75/1.0 × device pixels (was
+0.32/0.5/0.72), 3.2 MP cap, MSAA on; PSX vertex-snap, 31-level posterization,
+CRT overlay and nearest-filtering removed; textures bilinear + mipmaps + 4×
+anisotropy; darker blue-black ambient so emissive surfaces carry the scene.
+
+**Buildings:** canvas window-grid facade textures (per-window warm/cool,
+banded lit/dark floors) tiled with whole-window UV repeats; 8 archetypes
+(slab, stepped, lit-crown, hotel, narrow+neon, commercial+billboard, shed,
+warehouse); rooftop tanks/antennas/blinkers; footprint-grid placement pass
+(no intersections, corridor/PA clearance); two-row C1 canyon, R9 row, K1
+industrial, Wangan port warehouses, backdrop skyline on the same system.
+
+**Barriers:** jersey-profile median, concrete parapet + steel handrail on
+outer edges; barrier/lamp/reflector visuals suppressed exactly where they
+would criss-cross another carriageway (gore mouths, PA gates) — collision
+(corridor union) and wallSegments unchanged; deck pillars no longer stab
+through lower carriageways.
+
+**Gores:** every diverge/merge walks the ramp to the paved-edge split;
+chevron paint fills the wedge, yellow/black crash cushion at the tip.
+
+**Lamps/furniture:** merged lamppost geometry (flange, tapered pole, torus
+arm, luminaire) + emissive lens; additive sodium light pools + stretched
+wet-asphalt streaks (streaks off on Low); emergency phone boxes; km posts
+and P boards on poles.
+
+**Signage:** truss gantries with legs outside the barriers and both
+directions' panels at the SAME beam height (fixes the mismatched sign
+heights — the old code applied deck-bank tilt per panel); panels face only
+their carriageway; all signs have dark backs (no mirrored text); faces
+redrawn with route shields, kanji+romaji, lane arrows; textured chevron
+boards in bends; matrix boards on mini-gantries; junction masts.
+
+**Coherence:** tunnel portals with wing walls + name boards, ceiling ribs,
+cylindrical jet fans; Rainbow Bridge deck light chains; skyline reflection
+streaks on the bay; PA kerbs.
+
+**Performance (iPhone-like viewport, default traffic):** 189 draw calls /
+49.5k triangles (baseline 140 / 34.3k); at 3× traffic 213 / 50.6k (baseline
+177 / 36k). e2e 25/25, network/indicator/grip suites ALL OK.

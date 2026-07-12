@@ -108,6 +108,12 @@ export class HighwayMap {
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
     this.blinkers = [];
+    // Quality-scalable effect layers (light pools / wet-asphalt streaks):
+    // instanced meshes whose geometry name is in _effectTypes get collected so
+    // setQuality can hide them on Low.
+    this._effectTypes = new Set(['lightStreak']);
+    this._effectMeshes = [];
+    this._quality = this.options.quality === 'low' ? 'low' : 'high';
     this._signMaterials = new Map();
     this._ownedTextures = new Set();
     this._disposed = false;
@@ -163,19 +169,36 @@ export class HighwayMap {
   }
 
   _createMaterials() {
+    // PS2 target: smooth shading, clean emissive surfaces. Merged quads keep
+    // flat face normals from computeVertexNormals, curved shapes shade smooth.
     const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({
-      color, flatShading: true, fog: true, ...extra,
+      color, fog: true, ...extra,
     });
     const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({
       color, fog: true, toneMapped: false, ...extra,
     });
+    this._facadeSpecs = {};
+    const facade = (name, spec) => {
+      const texture = this._facadeTexture(spec);
+      this._facadeSpecs[name] = spec;
+      return texture
+        ? new THREE.MeshBasicMaterial({ map: texture, fog: true, toneMapped: false })
+        : lambert(0x151a24);
+    };
     return {
+      facadeOffice: facade('facadeOffice', { cols: 10, rows: 13, lit: 0.44, warm: 0.45, base: '#141823', cellW: 3.4, cellH: 3.3, seed: 0x1a2b3c }),
+      facadeDark: facade('facadeDark', { cols: 10, rows: 13, lit: 0.13, warm: 0.55, base: '#0f1219', cellW: 3.4, cellH: 3.3, seed: 0x2b3c4d }),
+      facadeHotel: facade('facadeHotel', { cols: 12, rows: 14, lit: 0.32, warm: 0.85, base: '#171a21', cellW: 2.8, cellH: 3.0, seed: 0x3c4d5e }),
+      facadeIndustrial: facade('facadeIndustrial', { cols: 7, rows: 5, lit: 0.2, warm: 0.35, base: '#171a1e', cellW: 5.5, cellH: 4.2, seed: 0x4d5e6f }),
       road: lambert(0x14171f),
       roadAlt: lambert(0x171a23),
       roadService: lambert(0x1d2029),
-      concrete: lambert(0x4c4f57),
+      // Concrete/steel carry a small emissive floor so barriers stay readable
+      // under the dark PS2 night lighting (they define the road edge at speed).
+      concrete: lambert(0x848a94, { side: THREE.DoubleSide, emissive: 0x1e2126 }),
       concreteDark: lambert(0x272a31),
-      barrier: lambert(0x585b61),
+      barrier: lambert(0x9096a0, { side: THREE.DoubleSide, emissive: 0x2e3138 }),
+      railMetal: lambert(0xaab2bc, { side: THREE.DoubleSide, emissive: 0x23262c }),
       tunnelWall: lambert(0x2c2f36, { side: THREE.DoubleSide }),
       tunnelDark: lambert(0x191c22, { side: THREE.DoubleSide }),
       portal: lambert(0x3a3d44),
@@ -190,7 +213,7 @@ export class HighwayMap {
       matrix: basic(0xff8b1f),
       redBlink: basic(0xff3040),
       building: lambert(0x11141e),
-      buildingWindow: basic(0x6b5c38),
+      neon: basic(0xffffff),
       shed: lambert(0x1a1d24),
       crane: lambert(0x233042),
       container: lambert(0x54331f),
@@ -211,7 +234,201 @@ export class HighwayMap {
       marker: basic(0x57e3ff, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
       billboardGlow: basic(0xffffff),
       signGreen: basic(0x0c604e, { side: THREE.DoubleSide }),
+      signBack: basic(0x23262c),
+      chevron: this._chevronTexture()
+        ? new THREE.MeshBasicMaterial({ map: this._chevronTexture(), fog: true, toneMapped: false })
+        : basic(0xffc21f),
+      // Additive decals: sodium pools under lamps + stretched wet-asphalt
+      // streaks — the cheap PS2 stand-in for real reflections.
+      lightPool: new THREE.MeshBasicMaterial({
+        map: this._glowTexture(), color: 0xff9b42, transparent: true, opacity: 0.34,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      }),
+      lightStreak: new THREE.MeshBasicMaterial({
+        map: this._glowTexture(), color: 0xffb066, transparent: true, opacity: 0.26,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+      }),
     };
+  }
+
+  /** Yellow curve-warning chevron board texture (3 arrows pointing right). */
+  _chevronTexture() {
+    if (typeof document === 'undefined') return null;
+    if (this._chevTex) return this._chevTex;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 88;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#101114';
+    context.fillRect(0, 0, 128, 88);
+    this._roundRectPath(context, 3, 3, 122, 82, 8);
+    context.fillStyle = '#17181c';
+    context.fill();
+    context.strokeStyle = '#3a3d44';
+    context.lineWidth = 3;
+    context.stroke();
+    context.fillStyle = '#ffce24';
+    for (let i = 0; i < 3; i += 1) {
+      const x = 16 + i * 36;
+      context.beginPath();
+      context.moveTo(x, 16);
+      context.lineTo(x + 22, 44);
+      context.lineTo(x, 72);
+      context.lineTo(x + 12, 72);
+      context.lineTo(x + 34, 44);
+      context.lineTo(x + 12, 16);
+      context.closePath();
+      context.fill();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    this._ownedTextures.add(texture);
+    this._chevTex = texture;
+    return texture;
+  }
+
+  /** Paired tunnel jet fans: two ducts + ceiling mount, one instanced geometry. */
+  _jetFanGeometry() {
+    const parts = [];
+    for (const x of [-0.62, 0.62]) {
+      const duct = new THREE.CylinderGeometry(0.5, 0.5, 2.9, 8);
+      duct.rotateX(Math.PI * 0.5);
+      duct.translate(x, 0, 0);
+      parts.push(duct);
+    }
+    const mount = new THREE.BoxGeometry(1.9, 0.2, 0.6);
+    mount.translate(0, 0.68, 0);
+    parts.push(mount);
+    return this._mergeGeometries(parts);
+  }
+
+  /** Soft radial glow sprite texture (white core, transparent edge). */
+  _glowTexture() {
+    if (typeof document === 'undefined') return null;
+    if (this._glowTex) return this._glowTex;
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const context = canvas.getContext('2d');
+    const gradient = context.createRadialGradient(32, 32, 2, 32, 32, 31);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.95)');
+    gradient.addColorStop(0.35, 'rgba(255,255,255,0.5)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 64, 64);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    this._ownedTextures.add(texture);
+    this._glowTex = texture;
+    return texture;
+  }
+
+  /** Concatenate simple geometries (position+normal) into one non-indexed buffer. */
+  _mergeGeometries(geometries) {
+    const positions = [];
+    const normals = [];
+    for (const geometry of geometries) {
+      const flat = geometry.index ? geometry.toNonIndexed() : geometry;
+      positions.push(...flat.getAttribute('position').array);
+      normals.push(...flat.getAttribute('normal').array);
+      if (flat !== geometry) flat.dispose();
+      geometry.dispose();
+    }
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    merged.computeBoundingSphere();
+    return merged;
+  }
+
+  /**
+   * Proper highway lamppost: base flange, tapered pole, curved arm sweeping
+   * up-and-over, luminaire housing. Local +X is the road side; the emissive
+   * lens is instanced separately so it stays full-bright.
+   */
+  _lampGeometry() {
+    const parts = [];
+    const flange = new THREE.CylinderGeometry(0.24, 0.3, 0.24, 7);
+    flange.translate(0, 0.12, 0);
+    parts.push(flange);
+    const pole = new THREE.CylinderGeometry(0.09, 0.17, 7.6, 7);
+    pole.translate(0, 3.8, 0);
+    parts.push(pole);
+    const arm = new THREE.TorusGeometry(1.75, 0.075, 5, 8, Math.PI * 0.5);
+    arm.rotateZ(Math.PI * 0.5);
+    arm.translate(1.75, 7.6, 0);
+    parts.push(arm);
+    const housing = new THREE.BoxGeometry(1.3, 0.17, 0.4);
+    housing.translate(2.28, 9.36, 0);
+    parts.push(housing);
+    return this._mergeGeometries(parts);
+  }
+
+  /**
+   * Night facade texture: a grid of small emissive windows with a believable
+   * random lit pattern (warm/cool whites, dim TVs, dark floors) on a dark
+   * wall. Tiled per building with whole-window UV repeats so grids stay
+   * aligned to the silhouette — the classic PS2 Tokyo-at-night look.
+   */
+  _facadeTexture(spec) {
+    if (typeof document === 'undefined') return null;
+    const random = mulberry32(this.seed ^ spec.seed);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext('2d');
+    context.fillStyle = spec.base;
+    context.fillRect(0, 0, 256, 256);
+    const cellW = 256 / spec.cols;
+    const cellH = 256 / spec.rows;
+    // faint floor slabs + mullions so unlit walls still read as structure
+    context.fillStyle = 'rgba(255,255,255,0.05)';
+    for (let row = 0; row <= spec.rows; row += 1) context.fillRect(0, Math.round(row * cellH), 256, 1);
+    context.fillStyle = 'rgba(0,0,0,0.35)';
+    for (let col = 0; col <= spec.cols; col += 1) context.fillRect(Math.round(col * cellW), 0, 1, 256);
+    // some floors go fully dark / fully lit so towers band like real offices
+    const floorBias = [];
+    for (let row = 0; row < spec.rows; row += 1) {
+      const roll = random();
+      floorBias.push(roll < 0.14 ? 0 : roll > 0.86 ? 2.4 : 1);
+    }
+    for (let row = 0; row < spec.rows; row += 1) {
+      for (let col = 0; col < spec.cols; col += 1) {
+        const x = Math.round(col * cellW + cellW * 0.2);
+        const y = Math.round(row * cellH + cellH * 0.26);
+        const w = Math.max(2, Math.round(cellW * 0.6));
+        const h = Math.max(2, Math.round(cellH * 0.5));
+        const roll = random();
+        let fill;
+        if (roll < spec.lit * floorBias[row]) {
+          const warm = random() < spec.warm;
+          const dim = random() < 0.25 ? 0.55 : 1;
+          fill = warm
+            ? `rgba(255,${205 + Math.floor(random() * 30)},${145 + Math.floor(random() * 45)},${dim})`
+            : `rgba(${185 + Math.floor(random() * 35)},${212 + Math.floor(random() * 25)},255,${dim})`;
+        } else if (roll < spec.lit * floorBias[row] + 0.06) {
+          fill = 'rgba(110,125,160,0.4)';
+        } else {
+          fill = `rgba(6,8,13,${0.8 + random() * 0.2})`;
+        }
+        context.fillStyle = fill;
+        context.fillRect(x, y, w, h);
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    this._ownedTextures.add(texture);
+    return texture;
   }
 
   // ------------------------------------------------------------------
@@ -2050,13 +2267,16 @@ export class HighwayMap {
     const key = this._chunkKey(position.x, position.z);
     if (!this._chunkBuckets.has(key)) this._chunkBuckets.set(key, new Map());
     const buckets = this._chunkBuckets.get(key);
-    if (!buckets.has(materialName)) buckets.set(materialName, { positions: [], indices: [] });
+    if (!buckets.has(materialName)) buckets.set(materialName, { positions: [], indices: [], uvs: [] });
     return buckets.get(materialName);
   }
 
-  _pushQuad(bucket, a, b, c, d) {
+  /** Push a quad a→b→c→d. Optional uv = [u0, v0, u1, v1]: a=(u0,v0), b=(u1,v0), c=(u1,v1), d=(u0,v1). */
+  _pushQuad(bucket, a, b, c, d, uv = null) {
     const start = bucket.positions.length / 3;
     bucket.positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, d.x, d.y, d.z);
+    const [u0, v0, u1, v1] = uv || [0, 0, 1, 1];
+    bucket.uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
     bucket.indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
   }
 
@@ -2110,6 +2330,7 @@ export class HighwayMap {
         if (!bucket.positions.length) continue;
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
+        if (bucket.uvs.length) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
         geometry.setIndex(bucket.indices.length > 65535 * 3 || bucket.positions.length / 3 > 65535
           ? new THREE.Uint32BufferAttribute(bucket.indices, 1)
           : new THREE.Uint16BufferAttribute(bucket.indices, 1));
@@ -2125,7 +2346,12 @@ export class HighwayMap {
     // instanced meshes per chunk per type ("geometry:material")
     const unitBox = new THREE.BoxGeometry(1, 1, 1);
     const unitPlane = new THREE.PlaneGeometry(1, 1);
-    this._unitGeometries = { box: unitBox, plane: unitPlane };
+    const unitPool = new THREE.PlaneGeometry(1, 1);
+    unitPool.rotateX(-Math.PI * 0.5);
+    this._unitGeometries = {
+      box: unitBox, plane: unitPlane, pool: unitPool,
+      lamppost: this._lampGeometry(), jetfan: this._jetFanGeometry(),
+    };
     const identityQuat = new THREE.Quaternion();
     for (const [key, types] of this._chunkInstances) {
       const chunk = this._chunkFor(key);
@@ -2151,6 +2377,11 @@ export class HighwayMap {
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.frustumCulled = true;
         mesh.computeBoundingSphere?.();
+        if (matName === 'redBlink') this.blinkers.push(mesh);
+        if (this._effectTypes?.has(matName)) {
+          this._effectMeshes.push(mesh);
+          mesh.visible = this._quality !== 'low';
+        }
         chunk.group.add(mesh);
       }
     }
@@ -2168,6 +2399,7 @@ export class HighwayMap {
       this._buildRouteGeometry(route);
       this._queueRouteDetails(route);
     }
+    this._dressGores();
     this._buildBridge();
     this._buildSignage();
     this._buildServiceAreaDressing();
@@ -2245,6 +2477,30 @@ export class HighwayMap {
     return point;
   }
 
+  /**
+   * True when an outer-barrier element at `point` would sit on ANOTHER
+   * carriageway's drivable surface or double up its rail — i.e. exactly the
+   * gore mouths, merge throats and PA gates where rails used to criss-cross.
+   * Ramps/service lanes yield to mainlines where the corridors coincide.
+   * Purely visual: collision (the corridor union) is untouched.
+   */
+  _barrierSuppressed(point, route) {
+    const yields = route.kind === 'ramp' || route.kind === 'service';
+    const candidates = this._candidateRoutes(point);
+    for (const { route: other, index } of candidates.values()) {
+      if (other === route) continue;
+      const projection = this._projectToRoute(other, point, index);
+      const half = this._halfWidthAt(other, projection.distance);
+      const abs = Math.abs(projection.signedLateral);
+      const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral;
+      if (Math.abs(point.y - deckY) > 4) continue;
+      if (abs < half - 0.2) return true;
+      if (yields && other.kind !== 'ramp' && other.kind !== 'service' && abs < half + 1.2) return true;
+    }
+    if (this._lotAt(point, 1.5)) return true;
+    return false;
+  }
+
   _buildRouteGeometry(route) {
     const roadMaterialName = route.kind === 'service' ? 'roadService'
       : (this.routeOrder.indexOf(route.id) % 2 ? 'roadAlt' : 'road');
@@ -2252,7 +2508,8 @@ export class HighwayMap {
     const medianHeight = 1.0;
 
     this._forEachFrameSegment(route, (a, b) => {
-      const mid = TMP_A.copy(a.position).lerp(b.position, 0.5);
+      // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
+      const mid = a.position.clone().lerp(b.position, 0.5);
       const bucketRoad = this._bucket(mid, roadMaterialName);
       const leftA = this._deckPoint(a, a.half);
       const leftB = this._deckPoint(b, b.half);
@@ -2273,48 +2530,79 @@ export class HighwayMap {
       this._pushQuad(bucketFascia, dropRA, dropRB, rightB, rightA);
       if (elevated) this._pushQuad(bucketFascia, dropLA, dropLB, dropRB, dropRA); // underside
 
-      // outer barriers — always, both sides, every metre of the network
+      // Outer barriers — concrete parapet with a leaned inner face, capped
+      // top and a steel handrail, PS2-highway style. Every metre of the
+      // network keeps its wallSegments record (collision metadata identical);
+      // only the VISUAL is omitted where a segment would criss-cross another
+      // carriageway at a gore mouth or PA gate.
       const bucketBarrier = this._bucket(mid, 'barrier');
+      const bucketRail = this._bucket(mid, 'railMetal');
       for (const side of [1, -1]) {
-        const baseA = this._deckPoint(a, side * (a.half - 0.18), 0.03);
-        const baseB = this._deckPoint(b, side * (b.half - 0.18), 0.03);
-        const topA = baseA.clone(); topA.y += barrierHeight;
-        const topB = baseB.clone(); topB.y += barrierHeight;
-        if (side > 0) this._pushQuad(bucketBarrier, baseA, baseB, topB, topA);
-        else this._pushQuad(bucketBarrier, baseB, baseA, topA, topB);
-        // outward face so barriers read from outside/below too
-        const outA = this._deckPoint(a, side * a.half, 0.03);
-        const outB = this._deckPoint(b, side * b.half, 0.03);
-        const outTopA = outA.clone(); outTopA.y += barrierHeight;
-        const outTopB = outB.clone(); outTopB.y += barrierHeight;
-        if (side > 0) this._pushQuad(bucketBarrier, outB, outA, outTopA, outTopB);
-        else this._pushQuad(bucketBarrier, outA, outB, outTopB, outTopA);
-        this._pushQuad(bucketBarrier, topA, topB, outTopB, outTopA);
+        const baseA = this._deckPoint(a, side * (a.half - 0.42), 0.02);
+        const baseB = this._deckPoint(b, side * (b.half - 0.42), 0.02);
         this.wallSegments.push({
           routeId: route.id, type: 'outer', side,
           start: baseA.clone(), end: baseB.clone(), height: barrierHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
         });
+        const probe = TMP_B.copy(baseA).lerp(baseB, 0.5);
+        if (this._barrierSuppressed(probe, route)) continue;
+        const lean = 0.85;
+        const innerTopA = this._deckPoint(a, side * (a.half - 0.3), lean);
+        const innerTopB = this._deckPoint(b, side * (b.half - 0.3), lean);
+        const capA = this._deckPoint(a, side * (a.half - 0.06), lean + 0.06);
+        const capB = this._deckPoint(b, side * (b.half - 0.06), lean + 0.06);
+        const outA = this._deckPoint(a, side * a.half, 0.0);
+        const outB = this._deckPoint(b, side * b.half, 0.0);
+        if (side > 0) {
+          this._pushQuad(bucketBarrier, baseA, baseB, innerTopB, innerTopA);
+          this._pushQuad(bucketBarrier, innerTopA, innerTopB, capB, capA);
+          this._pushQuad(bucketBarrier, capB, outB, outA, capA);
+        } else {
+          this._pushQuad(bucketBarrier, baseB, baseA, innerTopA, innerTopB);
+          this._pushQuad(bucketBarrier, innerTopB, innerTopA, capA, capB);
+          this._pushQuad(bucketBarrier, capA, outA, outB, capB);
+        }
+        // steel handrail on top of the parapet (skipped inside tunnels)
+        if (!a.tunnel) {
+          const railA = this._deckPoint(a, side * (a.half - 0.18), 1.12);
+          const railB = this._deckPoint(b, side * (b.half - 0.18), 1.12);
+          const railTopA = railA.clone(); railTopA.y += 0.09;
+          const railTopB = railB.clone(); railTopB.y += 0.09;
+          if (side > 0) this._pushQuad(bucketRail, railA, railB, railTopB, railTopA);
+          else this._pushQuad(bucketRail, railB, railA, railTopA, railTopB);
+          const railInA = this._deckPoint(a, side * (a.half - 0.26), 1.21);
+          const railInB = this._deckPoint(b, side * (b.half - 0.26), 1.21);
+          this._pushQuad(bucketRail, railTopA, railTopB, railInB, railInA);
+        }
       }
 
-      // median barrier
+      // Median barrier — proper jersey profile: wide base, sloped waist,
+      // tapered neck, narrow cap.
       if (route.bidirectional) {
-        const half = route.medianWidth * 0.5 - 0.35;
         const bucketMedian = this._bucket(mid, 'concrete');
-        const lA = this._deckPoint(a, half, 0.03);
-        const lB = this._deckPoint(b, half, 0.03);
-        const rA = this._deckPoint(a, -half, 0.03);
-        const rB = this._deckPoint(b, -half, 0.03);
-        const lTopA = lA.clone(); lTopA.y += medianHeight;
-        const lTopB = lB.clone(); lTopB.y += medianHeight;
-        const rTopA = rA.clone(); rTopA.y += medianHeight;
-        const rTopB = rB.clone(); rTopB.y += medianHeight;
-        this._pushQuad(bucketMedian, lA, lB, lTopB, lTopA);
-        this._pushQuad(bucketMedian, rB, rA, rTopA, rTopB);
-        this._pushQuad(bucketMedian, lTopA, lTopB, rTopB, rTopA);
+        const profile = [[0.36, 0.02], [0.3, 0.3], [0.11, 0.92]];
+        for (const side of [1, -1]) {
+          for (let i = 0; i < profile.length - 1; i += 1) {
+            const [w0, h0] = profile[i];
+            const [w1, h1] = profile[i + 1];
+            const lowA = this._deckPoint(a, side * w0, h0);
+            const lowB = this._deckPoint(b, side * w0, h0);
+            const highA = this._deckPoint(a, side * w1, h1);
+            const highB = this._deckPoint(b, side * w1, h1);
+            if (side > 0) this._pushQuad(bucketMedian, lowA, lowB, highB, highA);
+            else this._pushQuad(bucketMedian, lowB, lowA, highA, highB);
+          }
+        }
+        const [wTop, hTop] = profile[profile.length - 1];
+        const capLA = this._deckPoint(a, wTop, hTop + 0.04);
+        const capLB = this._deckPoint(b, wTop, hTop + 0.04);
+        const capRA = this._deckPoint(a, -wTop, hTop + 0.04);
+        const capRB = this._deckPoint(b, -wTop, hTop + 0.04);
+        this._pushQuad(bucketMedian, capLA, capLB, capRB, capRA);
         this.wallSegments.push({
           routeId: route.id, type: 'median', side: 0,
-          start: lA.clone(), end: lB.clone(), height: medianHeight,
+          start: this._deckPoint(a, 0.36, 0.02), end: this._deckPoint(b, 0.36, 0.02), height: medianHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
         });
       }
@@ -2340,6 +2628,12 @@ export class HighwayMap {
 
     // dead-end cap + crash cushions
     if (route.deadEnd) {
+      this._buildDeadEnd(route);
+    }
+  }
+
+  _buildDeadEnd(route) {
+    {
       const endFrame = route.renderFrames[route.renderFrames.length - 1];
       const bucket = this._bucket(endFrame.position, 'barrier');
       const left = this._deckPoint(endFrame, endFrame.half);
@@ -2362,6 +2656,76 @@ export class HighwayMap {
       sign.position.copy(signPos);
       sign.quaternion.copy(yawQuaternion(endFrame.tangent.clone().multiplyScalar(-1)));
       this._addChunkMesh(sign, signPos);
+    }
+  }
+
+  /**
+   * Junction gore dressing. For every diverge/merge between a mainline and a
+   * ramp: find the physical split point (where the two paved edges separate),
+   * paint the chevron wedge between the mouth and the split, and terminate
+   * the barrier V with a yellow/black crash cushion.
+   */
+  _dressGores() {
+    for (const edge of this.edges) {
+      if (edge.kind !== 'diverge' && edge.kind !== 'merge') continue;
+      const rampRef = edge.kind === 'diverge' ? edge.to : edge.from;
+      const mainRef = edge.kind === 'diverge' ? edge.from : edge.to;
+      const ramp = this.routes.get(rampRef.routeId);
+      const main = this.routes.get(mainRef.routeId);
+      if (!ramp || !main || ramp === main) continue;
+      if (ramp.kind !== 'ramp' && ramp.kind !== 'service') continue;
+      const fromStart = edge.kind === 'diverge';
+
+      // walk the ramp away from the shared mouth until the paved edges split
+      let tip = null;
+      const stripes = [];
+      for (let s = 24; s <= Math.min(320, ramp.length - 6); s += 9) {
+        const rampDist = fromStart ? s : ramp.length - s;
+        if (rampDist < 2 || rampDist > ramp.length - 2) break;
+        const sample = this._sampleCenter(ramp, rampDist, 1);
+        const projection = this._projectToRoute(main, sample.position);
+        if (Math.abs(sample.position.y - projection.point.y) > 5) break;
+        const halfMain = this._halfWidthAt(main, projection.distance);
+        const gap = Math.abs(projection.signedLateral) + ramp.halfWidth - halfMain;
+        const sideSign = projection.signedLateral >= 0 ? 1 : -1;
+        const mainEdge = projection.point.clone().addScaledVector(projection.normal, sideSign * (halfMain - 0.55));
+        const toMain = projection.point.clone().sub(sample.position).setY(0);
+        if (toMain.lengthSq() < EPSILON) toMain.copy(projection.normal).multiplyScalar(-sideSign);
+        toMain.normalize();
+        const rampEdge = sample.position.clone().addScaledVector(toMain, ramp.halfWidth - 0.55);
+        const wedge = mainEdge.clone().lerp(rampEdge, 0.5);
+        const wedgeWidth = mainEdge.distanceTo(rampEdge);
+        if (gap > 1.2) {
+          tip = { wedge, tangent: sample.tangent.clone() };
+          break;
+        }
+        if (wedgeWidth > 1.1) stripes.push({ wedge, tangent: sample.tangent.clone(), width: wedgeWidth });
+      }
+
+      // chevron paint across the wedge
+      let flip = 1;
+      for (const stripe of stripes) {
+        const position = stripe.wedge.clone();
+        position.y += 0.06;
+        const skew = new THREE.Quaternion().setFromAxisAngle(UP, flip * 0.62);
+        flip *= -1;
+        const quaternion = yawQuaternion(stripe.tangent).multiply(skew);
+        this._instance(position, vec(0.3, 0.025, Math.min(4.2, stripe.width * 1.15)), quaternion, null, 'box:marking');
+      }
+
+      // crash cushion at the barrier split
+      if (tip) {
+        const quaternion = yawQuaternion(tip.tangent);
+        const base = tip.wedge.clone();
+        base.y += 0.55;
+        this._instance(base, vec(1.15, 1.05, 1.7), quaternion, null, 'box:cushion');
+        const stripe = base.clone();
+        stripe.y += 0.12;
+        this._instance(stripe, vec(1.2, 0.3, 1.75), quaternion, 0x16171b, 'box:parkedBody');
+        const marker = base.clone();
+        marker.y += 0.95;
+        this._instance(marker, vec(0.5, 0.55, 0.35), quaternion, 0xffd24a, 'box:reflector');
+      }
     }
   }
 
@@ -2419,6 +2783,16 @@ export class HighwayMap {
         const center = this._sampleCenter(route, distance, 1);
         if (center.position.y < 3.5 || this._isTunnel(route, distance)) continue;
         if (this._isBridge(route, distance)) continue;
+        // Never stab a pillar through a lower carriageway at a grade-separated
+        // crossing — those spans borrow the neighbours' pillars.
+        let piercesDeck = false;
+        for (const { route: other, index } of this._candidateRoutes(center.position).values()) {
+          if (other === route) continue;
+          const projection = this._projectToRoute(other, center.position, index);
+          if (Math.abs(projection.signedLateral) < this._halfWidthAt(other, projection.distance) + 1.6
+            && projection.point.y < center.position.y - 2.5) { piercesDeck = true; break; }
+        }
+        if (piercesDeck) continue;
         const height = center.position.y - 1.1;
         const position = center.position.clone();
         position.y = height * 0.5 - 0.4;
@@ -2431,23 +2805,49 @@ export class HighwayMap {
       }
     }
 
-    // Sodium lamps on curved poles along every elevated/open section.
+    // Sodium lampposts: tapered pole + curved arm + luminaire (one merged
+    // instanced geometry), an emissive lens, an additive light pool on the
+    // asphalt and a stretched wet-reflection streak (hidden on Low quality).
     const lampStep = isService ? 55 : (isRamp ? 70 : 42);
+    const halfTurn = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI);
     let lampSide = 1;
     for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
       const center = this._sampleCenter(route, distance, 1);
-      const quaternion = yawQuaternion(center.baseTangent);
       const half = this._halfWidthAt(route, distance);
       if (this._isTunnel(route, distance)) continue;
       const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
       const side = route.bidirectional ? (lampSide *= -1) : 1;
-      const base = this._deckPoint(frame, side * (half - 0.45));
-      const pole = base.clone(); pole.y += 4.6;
-      this._instance(pole, vec(0.16, 9.2, 0.16), null, null, 'box:concrete');
-      const arm = base.clone().addScaledVector(frame.normal, -side * 1.6); arm.y += 9.1;
-      this._instance(arm, vec(side > 0 ? 3.4 : 3.4, 0.14, 0.14), quaternion.clone().multiply(new THREE.Quaternion().setFromAxisAngle(FORWARD, 0)), null, 'box:concrete');
-      const head = base.clone().addScaledVector(frame.normal, -side * 3.0); head.y += 8.95;
-      this._instance(head, vec(1.5, 0.2, 0.5), quaternion, null, 'box:lampSodium');
+      const base = this._deckPoint(frame, side * (half - 0.62), 0.01);
+      if (this._barrierSuppressed(base, route)) continue;
+      // local +X of the lamp geometry maps to -normal under yawQuaternion;
+      // mirror with a half turn for the other edge so the arm reaches the road
+      const quaternion = yawQuaternion(center.baseTangent);
+      if (side < 0) quaternion.multiply(halfTurn);
+      this._instance(base, vec(1, 1, 1), quaternion, null, 'lamppost:concrete');
+      const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
+      lens.y = base.y + 9.26;
+      this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
+      const pool = this._deckPoint(frame, side * (half - 3.6), 0.07);
+      this._instance(pool, vec(11, 1, 15.5), yawQuaternion(center.baseTangent), null, 'pool:lightPool');
+      const streak = this._deckPoint(frame, side * (half - 3.2), 0.1);
+      this._instance(streak, vec(1.1, 1, 30), yawQuaternion(center.baseTangent), null, 'pool:lightStreak');
+    }
+
+    // Emergency phone boxes on elevated open sections (green beacon + cabinet).
+    if (!isService && !isRamp) {
+      for (let distance = 240; distance < route.length; distance += 430) {
+        if (this._isTunnel(route, distance) || this._isBridge(route, distance)) continue;
+        const center = this._sampleCenter(route, distance, 1);
+        const half = this._halfWidthAt(route, distance);
+        const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
+        const base = this._deckPoint(frame, half - 1.05, 0.02);
+        if (this._barrierSuppressed(base, route)) continue;
+        const quaternion = yawQuaternion(center.baseTangent);
+        const cabinet = base.clone(); cabinet.y += 0.62;
+        this._instance(cabinet, vec(0.56, 1.24, 0.5), quaternion, 0x2c3440, 'box:parkedBody');
+        const beacon = base.clone(); beacon.y += 1.44;
+        this._instance(beacon, vec(0.34, 0.34, 0.34), quaternion, null, 'box:exitGreen');
+      }
     }
 
     // Barrier reflectors.
@@ -2458,7 +2858,8 @@ export class HighwayMap {
         const quaternion = yawQuaternion(center.baseTangent);
         const half = this._halfWidthAt(route, distance);
         for (const side of [-1, 1]) {
-          const position = this._deckPoint(frame, side * (half - 0.22), 0.78);
+          const position = this._deckPoint(frame, side * (half - 0.18), 0.97);
+          if (this._barrierSuppressed(position, route)) continue;
           this._instance(position, vec(0.12, 0.13, 0.3), quaternion, side > 0 ? 0xffb45b : 0xe7efff, 'box:reflector');
         }
       }
@@ -2485,15 +2886,22 @@ export class HighwayMap {
           this._instance(panel, vec(0.14, 2.6, lightStep - 0.9), quaternion, 0x3d444d, 'box:concrete');
         }
       }
+      // ceiling ribs give the shell its segmented interior
+      for (let distance = tunnel.startDistance + 17; distance < tunnel.endDistance; distance += 34) {
+        const center = this._sampleCenter(route, distance, 1);
+        const quaternion = yawQuaternion(center.baseTangent);
+        const half = this._halfWidthAt(route, distance);
+        const rib = center.position.clone();
+        rib.y += 5.98;
+        this._instance(rib, vec(half * 2 + 0.8, 0.22, 0.42), quaternion, null, 'box:portal');
+      }
+      // paired cylindrical jet fans
       for (let distance = tunnel.startDistance + 90; distance < tunnel.endDistance - 60; distance += 150) {
         const center = this._sampleCenter(route, distance, 1);
         const quaternion = yawQuaternion(center.baseTangent);
-        // jet fans, paired
-        for (const side of [-1.9, 1.9]) {
-          const fan = center.position.clone().addScaledVector(horizontalNormal(center.baseTangent), side);
-          fan.y += 5.1;
-          this._instance(fan, vec(1.1, 1.1, 2.9), quaternion, 0x767d88, 'box:concrete');
-        }
+        const fan = center.position.clone();
+        fan.y += 5.05;
+        this._instance(fan, vec(1, 1, 1), quaternion, null, 'jetfan:railMetal');
       }
       for (let distance = tunnel.startDistance + 150; distance < tunnel.endDistance - 100; distance += 300) {
         const center = this._sampleCenter(route, distance, 1);
@@ -2511,23 +2919,41 @@ export class HighwayMap {
         cabinet.y += 0.95;
         this._instance(cabinet, vec(0.5, 1.9, 1.2), quaternion, 0x49525e, 'box:concrete');
       }
-      // portals
+      // portals: header, flared wing walls, name board on both approaches
       for (const endDistance of [tunnel.startDistance, tunnel.endDistance]) {
         const center = this._sampleCenter(route, endDistance, 1);
         const quaternion = yawQuaternion(center.baseTangent);
+        const normal = horizontalNormal(center.baseTangent);
         const half = this._halfWidthAt(route, endDistance) + 0.6;
         const beam = center.position.clone();
-        beam.y += 6.7;
-        this._instance(beam, vec(half * 2 + 1.6, 1.6, 2.2), quaternion, null, 'box:portal');
+        beam.y += 7.0;
+        this._instance(beam, vec(half * 2 + 3.4, 2.2, 3.0), quaternion, null, 'box:portal');
         for (const side of [1, -1]) {
-          const post = center.position.clone().addScaledVector(horizontalNormal(center.baseTangent), side * (half + 0.5));
+          const post = center.position.clone().addScaledVector(normal, side * (half + 0.6));
           post.y += 3.0;
-          this._instance(post, vec(1.4, 6.4, 2.2), quaternion, null, 'box:portal');
+          this._instance(post, vec(1.5, 6.6, 3.0), quaternion, null, 'box:portal');
+          const flare = new THREE.Quaternion().setFromAxisAngle(UP, side * -0.5);
+          const wing = center.position.clone()
+            .addScaledVector(normal, side * (half + 3.1))
+            .addScaledVector(center.baseTangent, endDistance === tunnel.startDistance ? -1.7 : 1.7);
+          wing.y += 2.4;
+          this._instance(wing, vec(0.9, 5.4, 5.6), quaternion.clone().multiply(flare), null, 'box:portal');
+        }
+        if (typeof document !== 'undefined') {
+          const outward = endDistance === tunnel.startDistance ? -1 : 1;
+          const board = this._makeSignMesh(`${tunnel.name}|SHUTO EXPWY`, '#0b5142', 6.4, 1.7, true);
+          const boardPos = center.position.clone().addScaledVector(center.baseTangent, outward * 1.6);
+          boardPos.y += 7.05;
+          board.position.copy(boardPos);
+          board.quaternion.copy(yawQuaternion(TMP_C.copy(center.baseTangent).multiplyScalar(outward)));
+          this._addChunkMesh(board, boardPos);
         }
       }
     }
 
-    // Curve warning chevrons where curvature spikes.
+    // Curve warning chevron boards on the outside of every bend, one facing
+    // each travel direction (the mirrored back arrow is correct for the
+    // opposite carriageway's turn), on short posts above the parapet.
     if (!isService && !isRamp) {
       for (let distance = 60; distance < route.length; distance += 45) {
         const bank = this._bankAt(route, distance);
@@ -2535,10 +2961,15 @@ export class HighwayMap {
         const center = this._sampleCenter(route, distance, 1);
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank };
         const half = this._halfWidthAt(route, distance);
-        // chevron board on the OUTSIDE of the bend
         const side = bank > 0 ? -1 : 1;
-        const position = this._deckPoint(frame, side * (half - 0.35), 1.9);
-        this._instance(position, vec(0.18, 1.05, 1.6), yawQuaternion(center.baseTangent), 0xffc21f, 'box:amber');
+        const position = this._deckPoint(frame, side * (half - 0.3), 2.05);
+        if (this._barrierSuppressed(position, route)) continue;
+        for (const facing of [1, -1]) {
+          const board = position.clone().addScaledVector(center.baseTangent, facing * -0.04);
+          this._instance(board, vec(1.55, 1.05, 1), yawQuaternion(TMP_C.copy(center.baseTangent).multiplyScalar(facing)), null, 'plane:chevron');
+        }
+        const pole = this._deckPoint(frame, side * (half - 0.3), 1.15);
+        this._instance(pole, vec(0.12, 0.85, 0.12), null, null, 'box:concrete');
       }
     }
   }
@@ -2547,31 +2978,92 @@ export class HighwayMap {
   // Signage
   // ------------------------------------------------------------------
 
-  _signCanvas(lines, background, width, height) {
+  _roundRectPath(context, x, y, w, h, r) {
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.arcTo(x + w, y, x + w, y + h, r);
+    context.arcTo(x + w, y + h, x, y + h, r);
+    context.arcTo(x, y + h, x, y, r);
+    context.arcTo(x, y, x + w, y, r);
+    context.closePath();
+  }
+
+  /**
+   * PS2-clean sign face: rounded backlit board, crisp border, big kanji +
+   * romaji, optional route shield and per-lane down arrows.
+   */
+  _signCanvas(lines, background, width, height, opts = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext('2d');
-    context.imageSmoothingEnabled = false;
-    context.fillStyle = background;
+    // dark frame, rounded board, crisp inset border
+    context.fillStyle = '#22262c';
     context.fillRect(0, 0, width, height);
-    context.strokeStyle = '#e8f0de';
-    context.lineWidth = Math.max(3, Math.round(height * 0.045));
-    context.strokeRect(4, 4, width - 8, height - 8);
+    const radius = Math.round(height * 0.07);
+    this._roundRectPath(context, 3, 3, width - 6, height - 6, radius);
+    context.fillStyle = background;
+    context.fill();
+    this._roundRectPath(context, 10, 10, width - 20, height - 20, Math.max(2, Math.round(radius * 0.7)));
+    context.strokeStyle = 'rgba(238,243,232,0.95)';
+    context.lineWidth = Math.max(2, Math.round(height * 0.028));
+    context.stroke();
+
+    let textCenterX = width * 0.5;
+    const arrowBand = opts.arrows ? height * 0.22 : 0;
+    if (opts.shield) {
+      const shieldW = height * 0.42;
+      const shieldX = 20 + shieldW * 0.5;
+      const shieldY = height * 0.3;
+      this._roundRectPath(context, shieldX - shieldW * 0.5, shieldY - shieldW * 0.36, shieldW, shieldW * 0.72, shieldW * 0.16);
+      context.fillStyle = 'rgba(8,28,22,0.9)';
+      context.fill();
+      context.strokeStyle = '#e7ecdf';
+      context.lineWidth = Math.max(2, Math.round(height * 0.02));
+      context.stroke();
+      context.fillStyle = '#f2f5e9';
+      context.font = `bold ${Math.round(shieldW * 0.4)}px sans-serif`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(String(opts.shield), shieldX, shieldY);
+      textCenterX = width * 0.5 + shieldW * 0.3;
+    }
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     const rows = lines.length;
+    const textHeight = height - arrowBand;
     lines.forEach((line, index) => {
-      const y = height * (index + 0.55) / (rows + 0.1);
+      const y = textHeight * (index + 0.62) / (rows + 0.25);
       context.fillStyle = line.color || '#f0f3e5';
-      context.font = `bold ${Math.round(line.size || height / (rows + 0.6))}px ${line.font || 'sans-serif'}`;
-      context.fillText(line.text, width / 2, y);
+      const size = index === 0 ? textHeight / (rows + 0.55) : textHeight / (rows + 1.2);
+      context.font = `bold ${Math.round(line.size || size)}px ${line.font || 'sans-serif'}`;
+      context.fillText(line.text, textCenterX, y);
     });
+    // per-lane down arrows along the bottom of gantry boards
+    if (opts.arrows) {
+      context.fillStyle = '#f0f3e5';
+      const lanes = opts.arrows;
+      const y0 = height - arrowBand * 0.72;
+      for (let i = 0; i < lanes; i += 1) {
+        const x = width * (i + 0.5) / lanes;
+        const s = arrowBand * 0.48;
+        context.beginPath();
+        context.moveTo(x, y0 + s);
+        context.lineTo(x - s * 0.55, y0 + s * 0.3);
+        context.lineTo(x - s * 0.2, y0 + s * 0.3);
+        context.lineTo(x - s * 0.2, y0 - s * 0.45);
+        context.lineTo(x + s * 0.2, y0 - s * 0.45);
+        context.lineTo(x + s * 0.2, y0 + s * 0.3);
+        context.lineTo(x + s * 0.55, y0 + s * 0.3);
+        context.closePath();
+        context.fill();
+      }
+    }
     return canvas;
   }
 
-  _getSignMaterial(text, background = '#0c604e', wide = false) {
-    const key = `${background}:${wide}:${text}`;
+  _getSignMaterial(text, background = '#0c604e', wide = false, opts = {}) {
+    const key = `${background}:${wide}:${text}:${opts.shield || ''}:${opts.arrows || 0}`;
     if (this._signMaterials.has(key)) return this._signMaterials.get(key);
     if (typeof document === 'undefined') {
       const fallback = this.materials.signGreen.clone();
@@ -2582,53 +3074,93 @@ export class HighwayMap {
       text: row,
       font: index === 0 ? 'sans-serif' : 'monospace',
     }));
-    const canvas = this._signCanvas(lines, background, wide ? 512 : 256, wide ? 128 : 96);
+    const canvas = this._signCanvas(lines, background, wide ? 512 : 256, wide ? 160 : 112, opts);
     const texture = new THREE.CanvasTexture(canvas);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = 4;
     if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = true;
     this._ownedTextures.add(texture);
     const material = new THREE.MeshBasicMaterial({
-      map: texture, color: 0xffffff, fog: true, toneMapped: false, side: THREE.DoubleSide,
+      map: texture, color: 0xffffff, fog: true, toneMapped: false, side: THREE.FrontSide,
     });
     this._signMaterials.set(key, material);
     return material;
   }
 
-  _makeSignMesh(text, background, width, height, wide = false) {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this._getSignMaterial(text, background, wide));
+  /** Sign plane with a dark back panel so the reverse never shows mirrored text. */
+  _makeSignMesh(text, background, width, height, wide = false, opts = {}) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this._getSignMaterial(text, background, wide, opts));
     mesh.name = `sign ${text}`;
+    if (!opts.noBack) {
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.materials.signBack);
+      back.rotation.y = Math.PI;
+      back.position.z = -0.05;
+      mesh.add(back);
+    }
     return mesh;
   }
 
+  /**
+   * Overhead sign gantry: legs planted outside the barriers, a proper truss
+   * spanning the full carriageway, and one green panel per direction — both
+   * hung from the SAME beam height (the old code offset each panel by the
+   * deck bank, which put the two directions' signs at different heights).
+   */
   _buildGantry(route, distance, label, secondary = '') {
     if (this._isTunnel(route, distance)) return;
     const center = this._sampleCenter(route, distance, 1);
     const quaternion = yawQuaternion(center.baseTangent);
-    const half = this._halfWidthAt(route, distance) + 1.3;
+    const half = this._halfWidthAt(route, distance) + 1.15;
     const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
-    const beam = this._deckPoint(frame, 0, 6.4);
-    this._instance(beam, vec(half * 2, 0.4, 0.4), quaternion, null, 'box:concrete');
-    for (const side of [1, -1]) {
-      const post = this._deckPoint(frame, side * half, 3.2);
-      this._instance(post, vec(0.34, 6.4, 0.34), quaternion, null, 'box:concrete');
+    const legL = this._deckPoint(frame, half, 0);
+    const legR = this._deckPoint(frame, -half, 0);
+    const beamY = Math.max(legL.y, legR.y) + 6.3;
+    for (const leg of [legL, legR]) {
+      const bottom = leg.y - 1.45; // bolt into the deck fascia
+      const legHeight = beamY + 1.75 - bottom;
+      const legCenter = leg.clone();
+      legCenter.y = bottom + legHeight * 0.5;
+      this._instance(legCenter, vec(0.52, legHeight, 0.52), quaternion, null, 'box:concrete');
     }
-    // one green panel per carriageway
+    // truss: top/bottom chords + alternating diagonal web
+    const spanCenter = this._deckPoint(frame, 0, 0);
+    for (const chordY of [beamY + 0.22, beamY + 1.58]) {
+      const chord = spanCenter.clone();
+      chord.y = chordY;
+      this._instance(chord, vec(half * 2 + 0.6, 0.22, 0.22), quaternion, null, 'box:concrete');
+    }
+    const webCount = Math.max(4, Math.round((half * 2) / 2.6));
+    for (let i = 0; i < webCount; i += 1) {
+      const lateral = -half + ((i + 0.5) / webCount) * half * 2;
+      const web = this._deckPoint(frame, lateral, 0);
+      web.y = beamY + 0.9;
+      const tilt = new THREE.Quaternion().setFromAxisAngle(FORWARD, (i % 2 ? 1 : -1) * 0.72);
+      this._instance(web, vec(0.13, 1.65, 0.13), quaternion.clone().multiply(tilt), null, 'box:concrete');
+    }
+    // one panel per carriageway, each facing ONLY its oncoming direction
+    // (direction +1 travels on the negative-lateral side, left-hand traffic)
     const sides = route.bidirectional ? [-1, 1] : [0];
     for (const side of sides) {
       const lateral = side === 0 ? 0 : side * (route.medianWidth * 0.5 + route.lanes * route.laneWidth * 0.5);
-      const panel = this._makeSignMesh(label, '#0c604e', Math.min(10.5, half * 0.95), 2.9, true);
-      const position = this._deckPoint(frame, lateral, 8.0);
+      const facingSign = side === 0 ? -(route.oneWayDirection || 1) : side;
+      const facing = center.baseTangent.clone().multiplyScalar(facingSign);
+      const panel = this._makeSignMesh(label, '#0b5142',
+        Math.min(9.8, route.lanes * route.laneWidth + 1.2), 2.9, true,
+        { shield: route.code, arrows: route.lanes });
+      const position = this._deckPoint(frame, lateral, 0);
+      position.y = beamY + 0.9;
       panel.position.copy(position);
-      panel.quaternion.copy(quaternion);
+      panel.quaternion.copy(yawQuaternion(facing));
       this._addChunkMesh(panel, position);
       if (secondary) {
         const board = this._makeSignMesh(secondary, '#174c72');
-        const boardPos = this._deckPoint(frame, lateral, 5.35);
+        const boardPos = position.clone();
+        boardPos.y = beamY - 1.35;
         board.position.copy(boardPos);
-        board.quaternion.copy(quaternion);
+        board.quaternion.copy(yawQuaternion(facing));
         board.scale.set(0.62, 0.55, 1);
         this._addChunkMesh(board, boardPos);
       }
@@ -2644,51 +3176,77 @@ export class HighwayMap {
       for (let distance = Math.min(400, route.length * 0.3); distance < route.length - 120; distance += interval) {
         const destination = route.destinations[signIndex % Math.max(1, route.destinations.length)] || [route.name.toUpperCase(), ''];
         const [kanji, romaji] = Array.isArray(destination) ? destination : [destination, ''];
-        this._buildGantry(route, distance, `${kanji}|${route.code}  ${romaji}`);
+        this._buildGantry(route, distance, `${kanji}|${romaji}`);
         signIndex += 1;
       }
-      // km posts
+      // km posts, mounted on their own poles
       if (!isRamp) {
         for (let distance = 500; distance < route.length; distance += 1000) {
           const center = this._sampleCenter(route, distance, 1);
           if (this._isTunnel(route, distance)) continue;
           const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
           const half = this._halfWidthAt(route, distance);
-          const post = this._makeSignMesh(`${route.code} ${(distance / 1000).toFixed(1)}|km`, '#174c72', 1.7, 1.25);
-          const position = this._deckPoint(frame, half + 0.4, 2.1);
+          const position = this._deckPoint(frame, half + 0.45, 2.3);
+          if (this._barrierSuppressed(position, route)) continue;
+          const facingSign = route.bidirectional ? 1 : -(route.oneWayDirection || 1);
+          const post = this._makeSignMesh(`${route.code} ${(distance / 1000).toFixed(1)}|km`, '#174c72', 1.45, 1.1);
           post.position.copy(position);
-          post.quaternion.copy(yawQuaternion(center.baseTangent));
+          post.quaternion.copy(yawQuaternion(center.baseTangent.clone().multiplyScalar(facingSign)));
           this._addChunkMesh(post, position);
+          const pole = this._deckPoint(frame, half + 0.45, 0.85);
+          this._instance(pole, vec(0.12, 1.7, 0.12), null, null, 'box:concrete');
         }
       }
-      // orange matrix boards before junctions
+      // orange matrix boards on their own mini-gantry before junctions
       if (!isRamp && !route.closed) {
         for (const endDistance of [route.length * 0.32, route.length * 0.78]) {
           if (this._isTunnel(route, endDistance)) continue;
           const center = this._sampleCenter(route, endDistance, 1);
+          const quaternion = yawQuaternion(center.baseTangent);
           const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, endDistance) };
-          const board = this._makeSignMesh('渋滞注意|SLOW DOWN', '#241a05', 6.4, 1.7, true);
-          const position = this._deckPoint(frame, 0, 6.2);
-          board.position.copy(position);
-          board.quaternion.copy(yawQuaternion(center.baseTangent));
-          this._addChunkMesh(board, position);
-          const boardBack = this._makeSignMesh('渋滞注意|SLOW DOWN', '#241a05', 6.4, 1.7, true);
-          boardBack.position.copy(position);
-          boardBack.quaternion.copy(yawQuaternion(center.baseTangent.clone().multiplyScalar(-1)));
-          this._addChunkMesh(boardBack, position);
+          const half = this._halfWidthAt(route, endDistance) + 1.0;
+          const legL = this._deckPoint(frame, half, 0);
+          const legR = this._deckPoint(frame, -half, 0);
+          const beamY = Math.max(legL.y, legR.y) + 5.6;
+          for (const leg of [legL, legR]) {
+            const bottom = leg.y - 1.45;
+            const legCenter = leg.clone();
+            legCenter.y = bottom + (beamY + 0.5 - bottom) * 0.5;
+            this._instance(legCenter, vec(0.4, beamY + 0.5 - bottom, 0.4), quaternion, null, 'box:concrete');
+          }
+          const beam = this._deckPoint(frame, 0, 0);
+          beam.y = beamY + 0.35;
+          this._instance(beam, vec(half * 2 + 0.5, 0.3, 0.3), quaternion, null, 'box:concrete');
+          const sides = route.bidirectional ? [-1, 1] : [0];
+          for (const side of sides) {
+            const lateral = side === 0 ? 0 : side * (route.medianWidth * 0.5 + route.lanes * route.laneWidth * 0.5);
+            const facingSign = side === 0 ? -(route.oneWayDirection || 1) : side;
+            const board = this._makeSignMesh('渋滞注意|SLOW DOWN', '#241a05', 5.4, 1.5, true);
+            const position = this._deckPoint(frame, lateral, 0);
+            position.y = beamY + 1.35;
+            board.position.copy(position);
+            board.quaternion.copy(yawQuaternion(center.baseTangent.clone().multiplyScalar(facingSign)));
+            this._addChunkMesh(board, position);
+          }
         }
       }
     }
 
-    // Junction approach boards (blue, both directions) + PA advance signs.
+    // Junction name masts (double-faced boards on a planted pole).
     for (const junction of this.junctions) {
-      const board = this._makeSignMesh(`${junction.name}|JUNCTION`, '#123c78', 6.8, 2.3, true);
       const position = junction.point.clone();
-      position.y += 16;
-      board.position.copy(position);
-      this._addChunkMesh(board, position);
-      this.animatedMarkers.push(Object.assign(board, { __spin: true }));
+      position.y += 15;
+      const mast = vec(position.x, (position.y + 1.1) * 0.5 - 0.5, position.z);
+      this._instance(mast, vec(0.5, position.y + 1.1, 0.5), null, null, 'box:concreteDark');
+      for (const flip of [0, Math.PI]) {
+        const board = this._makeSignMesh(`${junction.name}|JUNCTION`, '#123c78', 6.4, 2.1, true);
+        board.position.copy(position);
+        board.quaternion.setFromAxisAngle(UP, flip);
+        board.translateZ(0.08);
+        this._addChunkMesh(board, position);
+      }
     }
+    // PA advance boards (blue P), on poles, facing their carriageway.
     for (const area of this.serviceAreas) {
       if (!area.routeId || !this.routes.has(area.routeId)) continue;
       const route = this.routes.get(area.routeId);
@@ -2699,11 +3257,14 @@ export class HighwayMap {
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
         const half = this._halfWidthAt(route, distance);
         const lateral = -area.direction * (half + 0.6);
-        const sign = this._makeSignMesh(`P ${area.name}|${ahead}m`, '#175ba5', 2.9, 1.9);
-        const position = this._deckPoint(frame, lateral, 3.1);
+        const position = this._deckPoint(frame, lateral, 3.2);
+        if (this._barrierSuppressed(position, route)) continue;
+        const sign = this._makeSignMesh(`P ${area.name}|${ahead}m`, '#175ba5', 2.7, 1.75);
         sign.position.copy(position);
-        sign.quaternion.copy(yawQuaternion(center.tangent));
+        sign.quaternion.copy(yawQuaternion(center.tangent.clone().multiplyScalar(-1)));
         this._addChunkMesh(sign, position);
+        const pole = this._deckPoint(frame, lateral, 1.2);
+        this._instance(pole, vec(0.14, 2.4, 0.14), null, null, 'box:concrete');
       }
     }
   }
@@ -2795,6 +3356,17 @@ export class HighwayMap {
         }
       }
     }
+
+    // Rainbow Bridge signature: light chain along both deck edges.
+    for (let distance = startDistance - 40; distance <= endDistance + 40; distance += 16) {
+      const center = this._sampleCenter(route, distance, 1);
+      const normal = horizontalNormal(center.baseTangent);
+      for (const side of [-1, 1]) {
+        const bulb = center.position.clone().addScaledVector(normal, side * (route.halfWidth + 0.35));
+        bulb.y += 1.42;
+        this._instance(bulb, vec(0.24, 0.24, 0.24), null, null, 'box:cableLight');
+      }
+    }
   }
 
   // ------------------------------------------------------------------
@@ -2830,6 +3402,13 @@ export class HighwayMap {
             this._instance(position, vec(2.2, height + 0.8, 2.0), orientation, null, 'box:concreteDark');
           }
         }
+      }
+
+      // kerb line under the perimeter fence
+      for (const side of [-1, 1]) {
+        const kerb = area.center.clone().addScaledVector(area.normal, side * (area.width * 0.5 - 0.28));
+        kerb.y = area.elevation + 0.09;
+        this._instance(kerb, vec(0.5, 0.18, area.length), orientation, 0x8f959e, 'box:parkedBody');
       }
 
       // perimeter fence (visual; the lot corridor is the collision)
@@ -2928,14 +3507,19 @@ export class HighwayMap {
         }
       }
 
-      // sodium lot lights
+      // sodium lot lights (proper lampposts + pools); the lamp's local +X
+      // (arm side) maps to -horizontalNormal(tangent) under yawQuaternion
+      const armDirection = horizontalNormal(area.tangent, new THREE.Vector3()).multiplyScalar(-1);
       for (const along of [-area.length * 0.33, 0, area.length * 0.33]) {
         const position = area.center.clone().addScaledVector(area.tangent, along);
-        position.y = area.elevation + 4.4;
-        this._instance(position, vec(0.16, 8.8, 0.16), null, null, 'box:concrete');
-        const head = position.clone();
-        head.y = area.elevation + 8.9;
-        this._instance(head, vec(2.2, 0.2, 0.7), orientation, null, 'box:lampSodium');
+        position.y = area.elevation;
+        this._instance(position, vec(1, 1, 1), orientation, null, 'lamppost:concrete');
+        const lens = position.clone().addScaledVector(armDirection, 2.28);
+        lens.y = area.elevation + 9.26;
+        this._instance(lens, vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
+        const pool = position.clone().addScaledVector(armDirection, 3.4);
+        pool.y = area.elevation + 0.07;
+        this._instance(pool, vec(11, 1, 14), orientation, null, 'pool:lightPool');
       }
 
       // refuel pad marker
@@ -3003,87 +3587,302 @@ export class HighwayMap {
     return Math.sqrt(bestSq);
   }
 
+  /** Circle-footprint placement test: no building intersections, no clipping into corridors or PA lots. */
+  _canPlaceBuilding(x, z, radius, routeClearance = 15) {
+    const probe = new THREE.Vector3(x, 0, z);
+    if (this._distanceToRouteXZ(probe) < routeClearance + radius) return false;
+    if (this._lotAt(probe, radius + 6)) return false;
+    const cell = 140;
+    const cx = Math.floor(x / cell);
+    const cz = Math.floor(z / cell);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        const bucket = this._footprints.get(`${cx + dx},${cz + dz}`);
+        if (!bucket) continue;
+        for (const footprint of bucket) {
+          const ddx = footprint.x - x;
+          const ddz = footprint.z - z;
+          const limit = radius + footprint.r;
+          if (ddx * ddx + ddz * ddz < limit * limit) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  _recordFootprint(x, z, r) {
+    const cell = 140;
+    const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+    if (!this._footprints.has(key)) this._footprints.set(key, []);
+    this._footprints.get(key).push({ x, z, r });
+  }
+
+  /**
+   * Textured building box: 4 facade quads with whole-window UV repeats into
+   * the chunk bucket for `matName`, dark roof quad. Returns the top Y.
+   */
+  _pushBuildingBox(matName, random, x, z, baseY, width, height, depth, yaw) {
+    const spec = this._facadeSpecs[matName] || { cols: 10, rows: 13, cellW: 3.4, cellH: 3.3 };
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const hw = width * 0.5;
+    const hd = depth * 0.5;
+    const corners = [
+      [x - rx * hw - fx * hd, z - rz * hw - fz * hd],
+      [x + rx * hw - fx * hd, z + rz * hw - fz * hd],
+      [x + rx * hw + fx * hd, z + rz * hw + fz * hd],
+      [x - rx * hw + fx * hd, z - rz * hw + fz * hd],
+    ];
+    const centerVec = vec(x, baseY, z);
+    const bucket = this._bucket(centerVec, matName);
+    const floors = Math.max(2, Math.round(height / spec.cellH));
+    const v1 = floors / spec.rows;
+    for (let i = 0; i < 4; i += 1) {
+      const p0 = corners[i];
+      const p1 = corners[(i + 1) % 4];
+      const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+      const windows = Math.max(2, Math.round(len / spec.cellW));
+      const u1 = windows / spec.cols;
+      const offU = Math.floor(random() * spec.cols) / spec.cols;
+      const offV = Math.floor(random() * spec.rows) / spec.rows;
+      this._pushQuad(bucket,
+        vec(p1[0], baseY, p1[1]), vec(p0[0], baseY, p0[1]),
+        vec(p0[0], baseY + height, p0[1]), vec(p1[0], baseY + height, p1[1]),
+        [offU, offV, offU + u1, offV + v1]);
+    }
+    const roof = this._bucket(centerVec, 'building');
+    this._pushQuad(roof,
+      vec(corners[3][0], baseY + height, corners[3][1]),
+      vec(corners[2][0], baseY + height, corners[2][1]),
+      vec(corners[1][0], baseY + height, corners[1][1]),
+      vec(corners[0][0], baseY + height, corners[0][1]));
+    return baseY + height;
+  }
+
+  static BILLBOARDS = [
+    ['月光タイヤ', 'GEKKO TIRES', '#7a1f4d'], ['NIGHTFUEL', '夜間燃料', '#173f78'],
+    ['ハイパー缶コーヒー', 'KAN COFFEE', '#7a4d15'], ['首都高保険', 'EXPRESSWAY INS.', '#1f6a54'],
+    ['ネオン電機', 'NEON DENKI', '#28246e'], ['湾岸ホテル', 'BAY HOTEL', '#5e1f78'],
+    ['真夜中運輸', 'MIDNIGHT EXPRESS', '#6e2424'], ['スターダスト録音', 'STARDUST AUDIO', '#1f5c78'],
+  ];
+
+  /**
+   * One dressed building. Archetypes: slab office tower, stepped tower,
+   * narrow mixed-use w/ neon, low commercial w/ rooftop billboard, crown
+   * (lit top floor), hotel/residential, industrial shed, port warehouse.
+   * `opts.face` is the unit vector pointing from the building toward the road
+   * (signage/shopfront orientation).
+   */
+  _buildStructure(random, x, z, yaw, archetype, width, height, depth, opts = {}) {
+    const baseY = opts.baseY ?? -0.1;
+    const face = opts.face || null;
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const local = (dx, dz, y) => vec(x + rx * dx + fx * dz, y, z + rz * dx + fz * dz);
+    const faceHalf = face
+      ? Math.abs(face.x * rx + face.z * rz) * width * 0.5 + Math.abs(face.x * fx + face.z * fz) * depth * 0.5
+      : 0;
+    const faceLen = face
+      ? Math.abs(face.x * fx + face.z * fz) * width + Math.abs(face.x * rx + face.z * rz) * depth
+      : width;
+    const topY = baseY + height;
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
+
+    const blinker = (y = topY + 0.8) => this._instance(vec(x, y, z), vec(1.15, 1.15, 1.15), null, null, 'box:redBlink');
+    const waterTank = () => this._instance(
+      local((random() - 0.5) * width * 0.4, (random() - 0.5) * depth * 0.4, topY + 1.25),
+      vec(2.6, 2.5, 2.6), yawQuat, null, 'box:concreteDark');
+    const antenna = () => {
+      const h = 4.5 + random() * 5;
+      this._instance(local((random() - 0.5) * width * 0.5, (random() - 0.5) * depth * 0.5, topY + h * 0.5),
+        vec(0.28, h, 0.28), null, null, 'box:concrete');
+    };
+    const rooftopBillboard = () => {
+      if (!face || typeof document === 'undefined') return;
+      const [kanji, romaji, color] = HighwayMap.BILLBOARDS[Math.floor(random() * HighwayMap.BILLBOARDS.length)];
+      const w = Math.min(16, faceLen * 0.8);
+      const h = w * 0.34;
+      const board = this._makeSignMesh(`${kanji}|${romaji}`, color, w, h, true);
+      const pos = vec(x, topY + h * 0.5 + 1.1, z);
+      board.position.copy(pos);
+      board.quaternion.copy(yawQuaternion(face));
+      this._addChunkMesh(board, pos);
+      for (const side of [-1, 1]) {
+        this._instance(vec(x + face.x * -0.4, topY + 0.7, z + face.z * -0.4)
+          .add(vec(-face.z * side * w * 0.3, 0, face.x * side * w * 0.3)),
+        vec(0.26, 1.6, 0.26), null, null, 'box:concreteDark');
+      }
+    };
+    const wallBillboard = () => {
+      if (!face || typeof document === 'undefined') return;
+      const [kanji, romaji, color] = HighwayMap.BILLBOARDS[Math.floor(random() * HighwayMap.BILLBOARDS.length)];
+      const w = Math.min(15, faceLen * 0.72);
+      const board = this._makeSignMesh(`${kanji}|${romaji}`, color, w, w * 0.36, true);
+      const pos = vec(x + face.x * (faceHalf + 0.5), baseY + height * 0.62, z + face.z * (faceHalf + 0.5));
+      board.position.copy(pos);
+      board.quaternion.copy(yawQuaternion(face));
+      this._addChunkMesh(board, pos);
+    };
+
+    switch (archetype) {
+      case 'stepped': {
+        this._pushBuildingBox('facadeOffice', random, x, z, baseY, width, height * 0.58, depth, yaw);
+        this._pushBuildingBox('facadeOffice', random, x, z, baseY + height * 0.58, width * 0.76, height * 0.26, depth * 0.76, yaw);
+        this._pushBuildingBox('facadeDark', random, x, z, baseY + height * 0.84, width * 0.52, height * 0.16, depth * 0.52, yaw);
+        if (height > 88) blinker(); else antenna();
+        break;
+      }
+      case 'crown': {
+        this._pushBuildingBox(random() < 0.7 ? 'facadeOffice' : 'facadeDark', random, x, z, baseY, width, height, depth, yaw);
+        this._instance(vec(x, topY - 0.95, z), vec(width + 0.35, 1.5, depth + 0.35), yawQuat, 0xffedc2, 'box:neon');
+        if (height > 88) blinker(topY + 0.9);
+        waterTank();
+        break;
+      }
+      case 'narrow': {
+        this._pushBuildingBox('facadeHotel', random, x, z, baseY, width, height, depth, yaw);
+        if (face) {
+          const colors = [0xff5f7a, 0x67d7ff, 0xffc65b, 0x7dffb8, 0xff8de5];
+          this._instance(vec(x + face.x * (faceHalf + 0.45), baseY + height * 0.5, z + face.z * (faceHalf + 0.45)),
+            vec(0.75, height * 0.6, 0.75), yawQuat, colors[Math.floor(random() * colors.length)], 'box:neon');
+        }
+        antenna();
+        break;
+      }
+      case 'commercial': {
+        this._pushBuildingBox('facadeOffice', random, x, z, baseY, width, height, depth, yaw);
+        if (face) {
+          this._instance(vec(x + face.x * (faceHalf + 0.22), baseY + 1.5, z + face.z * (faceHalf + 0.22)),
+            vec(faceLen * 0.8, 2.4, 0.3), yawQuaternion(TMP_C.set(-face.z, 0, face.x)), 0xffd9a0, 'box:neon');
+        }
+        if (random() < 0.6) rooftopBillboard();
+        break;
+      }
+      case 'hotel': {
+        this._pushBuildingBox('facadeHotel', random, x, z, baseY, width, height, depth, yaw);
+        waterTank();
+        if (height > 88) blinker();
+        break;
+      }
+      case 'shed': {
+        this._pushBuildingBox('facadeIndustrial', random, x, z, baseY, width, height, depth, yaw);
+        for (let i = 0; i < 2; i += 1) {
+          this._instance(local((random() - 0.5) * width * 0.5, (random() - 0.5) * depth * 0.5, topY + 0.5),
+            vec(1.4, 1, 1.4), yawQuat, null, 'box:concreteDark');
+        }
+        break;
+      }
+      case 'warehouse': {
+        this._pushBuildingBox('facadeIndustrial', random, x, z, baseY, width, height, depth, yaw);
+        if (face) {
+          const doors = 2 + Math.floor(random() * 2);
+          for (let i = 0; i < doors; i += 1) {
+            const along = (i - (doors - 1) * 0.5) * (faceLen / (doors + 0.5));
+            this._instance(vec(x + face.x * (faceHalf + 0.2) - face.z * along, baseY + 1.9, z + face.z * (faceHalf + 0.2) + face.x * along),
+              vec(3.4, 3.6, 0.28), yawQuaternion(TMP_C.set(-face.z, 0, face.x)), 0xffc890, 'box:neon');
+          }
+        }
+        break;
+      }
+      case 'slab':
+      default: {
+        this._pushBuildingBox(random() < 0.62 ? 'facadeOffice' : 'facadeDark', random, x, z, baseY, width, height, depth, yaw);
+        if (random() < 0.55) waterTank();
+        if (random() < 0.5) antenna();
+        if (height > 92) blinker();
+        if (height > 34 && random() < 0.14) wallBillboard();
+        break;
+      }
+    }
+  }
+
   _buildCity() {
     const random = mulberry32(this.seed ^ 0xa73b91);
-    const palette = [0x111622, 0x151925, 0x1a1c28, 0x10141d, 0x20202a];
-    const windowColors = [0x665a39, 0x33445f, 0x584a2e];
+    this._footprints = new Map();
 
-    // C1 canyon: mid/tall buildings tight against both sides of the loop.
+    // --- C1 canyon: two rows of towers hard against both sides of the loop
+    // so the C1 reads as a lit canyon with no bare gaps.
     const c1 = this.routes.get('c1');
-    for (let distance = 0; distance < c1.length; distance += 52) {
+    for (let distance = 0; distance < c1.length; distance += 44) {
       const center = this._sampleCenter(c1, distance, 1);
       if (this._isTunnel(c1, distance)) continue;
       const normal = horizontalNormal(center.baseTangent);
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
       for (const side of [-1, 1]) {
-        if (random() < 0.18) continue;
-        const setback = 28 + random() * 55;
-        const width = 22 + random() * 34;
-        const depth = 22 + random() * 30;
-        const height = 22 + Math.pow(random(), 1.6) * 105;
-        const position = center.position.clone().addScaledVector(normal, side * (c1.halfWidth + setback + width * 0.5));
-        if (this._distanceToRouteXZ(position) < c1.halfWidth + 10) continue;
-        position.y = height * 0.5 - 0.1;
-        const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.floor(random() * 4) * Math.PI * 0.5 + (random() - 0.5) * 0.1);
-        this._instance(position, vec(width, height, depth), yaw, palette[Math.floor(random() * palette.length)], 'box:building');
-        // lit window bands
-        const bands = 1 + Math.floor(random() * 3);
-        for (let bandIndex = 0; bandIndex < bands; bandIndex += 1) {
-          const band = position.clone();
-          band.y = 6 + random() * Math.max(6, height - 12);
-          this._instance(band, vec(width + 0.4, 0.8, depth + 0.4), yaw, windowColors[Math.floor(random() * windowColors.length)], 'box:buildingWindow');
-        }
-        // billboard facing the road on some buildings
-        if (random() < 0.16 && height > 30) {
-          const billboardTexts = [
-            ['月光タイヤ', 'GEKKO TIRES'], ['NIGHTFUEL', '夜間燃料'], ['ハイパー缶コーヒー', 'KAN COFFEE'],
-            ['首都高保険', 'EXPRESSWAY INS.'], ['ネオン電機', 'NEON DENKI'], ['湾岸ホテル', 'BAY HOTEL'],
-          ];
-          const [kanji, romaji] = billboardTexts[Math.floor(random() * billboardTexts.length)];
-          const colors = ['#7a1f4d', '#173f78', '#7a4d15', '#1f6a54'];
-          const board = this._makeSignMesh(`${kanji}|${romaji}`, colors[Math.floor(random() * colors.length)], 16, 6, true);
-          const boardPos = center.position.clone().addScaledVector(normal, side * (c1.halfWidth + setback - 2));
-          boardPos.y = height * 0.55 + 6;
-          board.position.copy(boardPos);
-          board.quaternion.copy(yawQuaternion(normal.clone().multiplyScalar(-side)));
-          this._addChunkMesh(board, boardPos);
-        }
-        // red blinker on tall towers
-        if (height > 95 && random() < 0.7) {
-          const blinker = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), this.materials.redBlink.clone());
-          blinker.position.copy(position);
-          blinker.position.y = height + 1;
-          this._addChunkMesh(blinker, blinker.position);
-          this.blinkers.push(blinker);
+        for (const row of [0, 1]) {
+          if (random() < (row ? 0.22 : 0.08)) continue;
+          const setback = row ? 64 + random() * 62 : 22 + random() * 26;
+          const width = row ? 26 + random() * 28 : 17 + random() * 18;
+          const depth = row ? 22 + random() * 26 : 16 + random() * 16;
+          const height = row ? 30 + Math.pow(random(), 1.5) * 108 : 18 + Math.pow(random(), 1.4) * 58;
+          const position = center.position.clone().addScaledVector(normal, side * (c1.halfWidth + setback + width * 0.5));
+          const radius = Math.max(width, depth) * 0.62;
+          if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+          const yaw = heading + (random() - 0.5) * 0.07 + (random() < 0.22 ? Math.PI * 0.5 : 0);
+          const roll = random();
+          const archetype = row
+            ? (roll < 0.34 ? 'slab' : roll < 0.58 ? 'stepped' : roll < 0.74 ? 'crown' : 'hotel')
+            : (roll < 0.28 ? 'slab' : roll < 0.46 ? 'narrow' : roll < 0.66 ? 'commercial' : roll < 0.85 ? 'hotel' : 'stepped');
+          this._buildStructure(random, position.x, position.z, yaw, archetype, width, height, depth, {
+            face: normal.clone().multiplyScalar(-side),
+          });
+          this._recordFootprint(position.x, position.z, radius);
         }
       }
     }
 
-    // K1 industrial: low sheds, canals, smokestacks with red blinkers.
+    // --- Route 9 Fukagawa: a lighter mixed row so the connector is not bare.
+    const r9 = this.routes.get('r9');
+    for (let distance = 200; distance < r9.length - 200; distance += 70) {
+      const center = this._sampleCenter(r9, distance, 1);
+      const normal = horizontalNormal(center.baseTangent);
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+      for (const side of [-1, 1]) {
+        if (random() < 0.4) continue;
+        const setback = 26 + random() * 60;
+        const width = 18 + random() * 22;
+        const depth = 16 + random() * 20;
+        const height = 14 + Math.pow(random(), 1.5) * 46;
+        const position = center.position.clone().addScaledVector(normal, side * (r9.halfWidth + setback + width * 0.5));
+        const radius = Math.max(width, depth) * 0.62;
+        if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+        const roll = random();
+        this._buildStructure(random, position.x, position.z, heading + (random() - 0.5) * 0.1,
+          roll < 0.4 ? 'slab' : roll < 0.6 ? 'hotel' : roll < 0.8 ? 'commercial' : 'narrow',
+          width, height, depth, { face: normal.clone().multiplyScalar(-side) });
+        this._recordFootprint(position.x, position.z, radius);
+      }
+    }
+
+    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers.
     const k1 = this.routes.get('k1');
-    for (let distance = 0; distance < k1.length; distance += 64) {
+    for (let distance = 0; distance < k1.length; distance += 56) {
       const center = this._sampleCenter(k1, distance, 1);
       const normal = horizontalNormal(center.baseTangent);
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
       for (const side of [-1, 1]) {
-        if (random() < 0.3) continue;
-        const setback = 26 + random() * 90;
-        const width = 26 + random() * 48;
-        const depth = 20 + random() * 34;
-        const height = 7 + random() * 14;
+        if (random() < 0.26) continue;
+        const setback = 24 + random() * 92;
+        const width = 26 + random() * 42;
+        const depth = 20 + random() * 30;
+        const height = 7 + random() * 12;
         const position = center.position.clone().addScaledVector(normal, side * (k1.halfWidth + setback + width * 0.5));
-        if (this._distanceToRouteXZ(position) < k1.halfWidth + 8) continue;
-        position.y = height * 0.5 - 0.1;
-        const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.floor(random() * 4) * Math.PI * 0.5);
-        this._instance(position, vec(width, height, depth), yaw, palette[Math.floor(random() * palette.length)], 'box:shed');
-        if (random() < 0.12) {
+        const radius = Math.max(width, depth) * 0.6;
+        if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+        this._buildStructure(random, position.x, position.z, heading + (random() < 0.3 ? Math.PI * 0.5 : 0),
+          random() < 0.72 ? 'shed' : 'warehouse', width, height, depth,
+          { face: normal.clone().multiplyScalar(-side) });
+        this._recordFootprint(position.x, position.z, radius);
+        if (random() < 0.11) {
           const stackHeight = 34 + random() * 30;
           const stack = position.clone();
           stack.y = stackHeight * 0.5;
           this._instance(stack, vec(3.2, stackHeight, 3.2), null, null, 'box:concreteDark');
-          const blinker = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1), this.materials.redBlink.clone());
-          blinker.position.copy(position);
-          blinker.position.y = stackHeight + 0.8;
-          this._addChunkMesh(blinker, blinker.position);
-          this.blinkers.push(blinker);
+          this._instance(vec(position.x, stackHeight + 0.8, position.z), vec(1.1, 1.1, 1.1), null, null, 'box:redBlink');
         }
       }
     }
@@ -3136,14 +3935,18 @@ export class HighwayMap {
           this.blinkers.push(blinker);
         }
       }
-      if (random() < 0.3) {
+      if (random() < 0.32) {
         const setback = 90 + random() * 220;
-        const width = 40 + random() * 70;
-        const height = 10 + random() * 12;
+        const width = 40 + random() * 55;
+        const depth = 24 + random() * 26;
+        const height = 10 + random() * 10;
         const position = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback + width * 0.5));
-        if (this._distanceToRouteXZ(position) > wangan.halfWidth + 14) {
-          position.y = height * 0.5;
-          this._instance(position, vec(width, height, 24 + random() * 26), yawQuaternion(center.baseTangent), palette[Math.floor(random() * palette.length)], 'box:shed');
+        const radius = Math.max(width, depth) * 0.6;
+        if (this._canPlaceBuilding(position.x, position.z, radius)) {
+          const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+          this._buildStructure(random, position.x, position.z, heading, 'warehouse', width, height, depth,
+            { face: normal.clone().multiplyScalar(-landSide) });
+          this._recordFootprint(position.x, position.z, radius);
         }
       }
     }
@@ -3155,27 +3958,38 @@ export class HighwayMap {
     // Rainbow Bridge and behind Daikoku.
     const random = mulberry32(this.seed ^ 0x517cc1);
     const clusters = [
-      { x: -1400, z: -4600, spread: 1500, count: 26, tall: 130 }, // skyline behind the bridge (west bank)
-      { x: 2400, z: -4400, spread: 1200, count: 18, tall: 90 },  // east bank
-      { x: -15200, z: -14900, spread: 1400, count: 16, tall: 70 }, // Daikoku shore
-      { x: 8600, z: -4300, spread: 1500, count: 16, tall: 80 },  // Tatsumi postcard
+      { x: -1400, z: -4600, spread: 1500, count: 26, tall: 130, streak: [1, -0.2] },   // west bank, faces the bridge
+      { x: 2400, z: -4400, spread: 1200, count: 18, tall: 90, streak: [-1, -0.2] },    // east bank
+      { x: -15200, z: -14900, spread: 1400, count: 16, tall: 70, streak: [-1, -0.1] }, // Daikoku shore
+      { x: 8600, z: -4300, spread: 1500, count: 16, tall: 80, streak: [0.2, -1] },     // Tatsumi postcard
     ];
     for (const cluster of clusters) {
       for (let i = 0; i < cluster.count; i += 1) {
-        const position = vec(
-          cluster.x + (random() - 0.5) * cluster.spread,
-          0,
-          cluster.z + (random() - 0.5) * cluster.spread * 0.6,
-        );
-        if (this._distanceToRouteXZ(position) < 60) continue;
-        const width = 30 + random() * 45;
+        const x = cluster.x + (random() - 0.5) * cluster.spread;
+        const z = cluster.z + (random() - 0.5) * cluster.spread * 0.6;
+        const width = 30 + random() * 42;
+        const depth = width * (0.7 + random() * 0.5);
         const height = 24 + Math.pow(random(), 1.4) * cluster.tall;
-        position.y = height * 0.5;
-        this._instance(position, vec(width, height, width * (0.7 + random() * 0.5)), null, 0x0e1119, 'box:building');
-        for (let band = 0; band < 2; band += 1) {
-          const bandPos = position.clone();
-          bandPos.y = 5 + random() * Math.max(5, height - 10);
-          this._instance(bandPos, vec(width + 0.4, 0.7, width * 0.8), null, random() < 0.6 ? 0x665a39 : 0x33445f, 'box:buildingWindow');
+        const radius = Math.max(width, depth) * 0.6;
+        if (!this._canPlaceBuilding(x, z, radius, 60)) continue;
+        const roll = random();
+        this._buildStructure(random, x, z, random() * Math.PI, roll < 0.5 ? 'slab' : roll < 0.8 ? 'stepped' : 'crown',
+          width, height, depth, {});
+        this._recordFootprint(x, z, radius);
+      }
+      // skyline reflection streaks on the bay water in front of each cluster
+      if (cluster.streak) {
+        const direction = vec(cluster.streak[0], 0, cluster.streak[1]).normalize();
+        const streakQuat = yawQuaternion(direction);
+        const perpendicular = vec(-direction.z, 0, direction.x);
+        for (let i = 0; i < 9; i += 1) {
+          const across = (i - 4) * cluster.spread * 0.1 + (random() - 0.5) * 60;
+          const position = vec(cluster.x, -0.78, cluster.z)
+            .addScaledVector(perpendicular, across)
+            .addScaledVector(direction, cluster.spread * 0.42 + random() * 240);
+          const warm = random() < 0.4;
+          this._instance(position, vec(2.4 + random() * 2, 1, 70 + random() * 90), streakQuat,
+            warm ? 0xd8c9a0 : 0x9fb8d8, 'pool:lightPool');
         }
       }
     }
@@ -3343,6 +4157,14 @@ export class HighwayMap {
 
   build() {
     return this;
+  }
+
+  /** Quality scaling for the effect layers: Low hides the wet-asphalt streaks. */
+  setQuality(quality) {
+    if (quality === this._quality) return;
+    this._quality = quality;
+    const visible = quality !== 'low';
+    for (const mesh of this._effectMeshes) mesh.visible = visible;
   }
 
   update(playerPosition = null, timeSeconds = 0) {
