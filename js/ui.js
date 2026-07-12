@@ -158,7 +158,7 @@ export class GameUI {
         ${this.setting('MASTER VOLUME',`<input id="set-volume" type="range" min="0" max="1" step=".05" value="${s.volume??.65}">`)}
         ${this.setting('CAMERA',`<select id="set-camera"><option value="chase">Chase</option><option value="hood">Hood</option><option value="cockpit">Cockpit</option></select>`)}
         ${this.setting('GEARBOX',`<select id="set-gearbox"><option value="auto">Automatic</option><option value="manual">Manual</option></select>`)}
-        ${this.setting('RENDER QUALITY',`<select id="set-quality"><option value="low">Low · chunky PSX</option><option value="medium">Medium · default</option><option value="high">High · sharp</option></select>`)}
+        ${this.setting('RENDER QUALITY',`<select id="set-quality"><option value="low">Low · performance</option><option value="medium">Medium · default</option><option value="high">High · native res</option></select>`)}
         <button id="phone-newgame">WIPE SAVE / NEW GAME</button></div>`;
       this.$('set-camera').value=s.camera||'chase';this.$('set-gearbox').value=s.gearbox||'auto';this.$('set-quality').value=['low','medium','high'].includes(s.quality)?s.quality:'medium';
       ['volume','camera','gearbox','quality'].forEach(k=>this.$(`set-${k}`).onchange=e=>this.cb.setting?.(k,k==='volume'?+e.target.value:e.target.value));

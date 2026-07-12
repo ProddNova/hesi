@@ -17,9 +17,10 @@ const vec=p=>p?.isVector3?p:new THREE.Vector3(p?.x||0,p?.y||0,p?.z||0);
 class ShutokoNights {
   constructor(){
     this.canvas=document.getElementById('game-canvas');
-    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:false,powerPreference:'high-performance',alpha:false});
+    // MSAA is close to free on Apple tile-based GPUs and the PS2 target needs
+    // clean edges at near-native resolution.
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:true,powerPreference:'high-performance',alpha:false});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.shadowMap.enabled=false;
-    this.psxGridUniform={value:270};
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
     this.camera=new THREE.PerspectiveCamera(64,16/9,.3,1250);
@@ -72,12 +73,14 @@ class ShutokoNights {
   fallbackCar(){return{id:'koten-90',name:'Koten Maru 90',year:1988,starter:true,color:'#7d3037',price:85000,power:90,torque:128,mass:1040,drivetrain:'RWD',engineLayout:'I4',redline:6500,idleRPM:850,gearRatios:[3.35,1.95,1.29,.96,.78],finalDrive:4.1,tireGrip:1.02,brakeForce:10500,suspensionStiffness:1,fuelCapacity:45,dimensions:{length:4.25,width:1.67,height:1.32}};}
 
   setupLights(){
+    // PS2 night mood: dark blue-black sky, low ambient so emissive windows,
+    // lamps and light pools carry the scene instead of flat grey fill.
     this.roadScene.background=new THREE.Color(0x02050c);this.roadScene.fog=new THREE.FogExp2(0x07101c,.0015);
-    this.roadScene.add(new THREE.HemisphereLight(0x496581,0x121522,2.15));this.roadScene.add(new THREE.AmbientLight(0x60718e,.72));const moon=new THREE.DirectionalLight(0x8da4c8,1.05);moon.position.set(-200,300,-100);this.roadScene.add(moon);
+    this.roadScene.add(new THREE.HemisphereLight(0x35476b,0x0c101c,1.35));this.roadScene.add(new THREE.AmbientLight(0x3c4a66,.5));const moon=new THREE.DirectionalLight(0x8da4c8,.85);moon.position.set(-200,300,-100);this.roadScene.add(moon);
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
   buildWorld(){
-    try{this.map=new HighwayMap(this.roadScene,{quality:'psx'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    try{this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
     // union for continuous collision so barriers are solid at any speed.
@@ -301,26 +304,23 @@ class ShutokoNights {
     const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';
   }
   resize(){
-    // Internal resolution as a fraction of true device pixels: Medium is the
-    // "modern PSX indie" target (~half device res); Low is the chunky retro
-    // fallback; High is near-native for powerful devices.
-    const q=this.renderQuality(),scale={low:.32,medium:.5,high:.72}[q]||.5;
+    // PS2-era target: near-native internal resolution. Low keeps weaker
+    // devices playable, High is true device pixels.
+    const q=this.renderQuality(),scale={low:.55,medium:.75,high:1}[q]||.75;
     const dpr=Math.min(window.devicePixelRatio||1,3);
     let w=Math.round(innerWidth*dpr*scale),h=Math.round(innerHeight*dpr*scale);
-    const maxPixels=1600000;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    // ~3.2 MP cap keeps 3x-DPR phones inside the fill-rate budget.
+    const maxPixels=3200000;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     this.renderer.setSize(w,h,false);
     this.camera.aspect=innerWidth/Math.max(1,innerHeight);this.camera.updateProjectionMatrix();
-    // Vertex-snap grid follows the render height so the retro wobble stays
-    // subtle instead of scaling up with resolution.
-    this.psxGridUniform.value=Math.max(160,Math.round(h*.72));
-    this.canvas.style.imageRendering=q==='low'?'pixelated':'auto';
+    this.canvas.style.imageRendering='auto';
+    this.map?.setQuality?.(q);
   }
-  applyRetroMaterials(scene){scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if('flatShading'in m)m.flatShading=true;if(m.map){m.map.magFilter=THREE.NearestFilter;m.map.minFilter=THREE.NearestFilter;m.map.generateMipmaps=false;}m.dithering=true;if(!m.userData?.psxShader&&!m.isShaderMaterial){m.userData.psxShader=true;const grid=this.psxGridUniform;m.onBeforeCompile=shader=>{shader.uniforms.psxGrid=grid;
-    // Snap only vertices safely in front of the camera: snapping vertices at or
-    // behind the near plane (w <= 0) hurled triangles across the screen.
-    shader.vertexShader='uniform float psxGrid;\n'+shader.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\nif (gl_Position.w > 0.4) {\n  gl_Position.xy = floor((gl_Position.xy / gl_Position.w) * psxGrid + 0.5) / psxGrid * gl_Position.w;\n}');
-    shader.fragmentShader=shader.fragmentShader.replace('#include <dithering_fragment>','gl_FragColor.rgb = floor(gl_FragColor.rgb * 31.0 + 0.5) / 31.0;\n#include <dithering_fragment>');};m.customProgramCacheKey=()=>`shutoko-psx-v2-${m.type}`;m.needsUpdate=true;}}});}
+  // The old PSX pass (vertex snap, 31-level posterize, nearest-filter mush) is
+  // gone. This pass only normalizes textures for the clean PS2 look: bilinear
+  // filtering + mipmaps + a touch of anisotropy so signs stay legible.
+  applyRetroMaterials(scene){const maxAniso=this.renderer.capabilities.getMaxAnisotropy?.()||1;scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if(m.map){m.map.magFilter=THREE.LinearFilter;m.map.minFilter=THREE.LinearMipmapLinearFilter;m.map.generateMipmaps=true;m.map.anisotropy=Math.min(4,maxAniso);m.map.needsUpdate=true;}m.dithering=true;}});}
 
   createCarMesh(spec,player=false){
     const g=new THREE.Group(),visualMeshes=[],color=new THREE.Color(spec.color||'#8f2d38'),body=new THREE.MeshLambertMaterial({color,flatShading:true}),dark=new THREE.MeshLambertMaterial({color:0x0b1018,flatShading:true}),rubber=new THREE.MeshLambertMaterial({color:0x08090b,flatShading:true});
