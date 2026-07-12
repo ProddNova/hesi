@@ -78,6 +78,14 @@ class ShutokoNights {
   }
   buildWorld(){
     try{this.map=new HighwayMap(this.roadScene,{quality:'psx'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    // Live road adapter: physics substeps query fresh geometry every 1/120 s
+    // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
+    // union for continuous collision so barriers are solid at any speed.
+    this.roadAdapter={
+      getRoadInfo:(p)=>{const info=this.map?.getRoadInfo?.(p,this.currentRoadInfo?.routeId)||null;if(!info)return{onRoad:false,drivable:false,surfaceGrip:.55,snapHeight:false};this.currentRoadInfo=info;this.roadAdapter.onRoad=info.drivable!==false;return{...info,height:info.height??info.point?.y,snapHeight:true,surfaceGrip:info.drivable===false?.55:(info.surfaceGrip??1)};},
+      sweep:(from,to,radius)=>{const hit=this.map?.sweepWallCollision?.(from,to,null,Math.max(.62,radius),1.5);if(!hit?.hit)return null;return{hit:true,normal:hit.normal,correctedPosition:hit.position,penetration:0,kind:'wall',restitution:.12,friction:.4};},
+      onRoad:true,
+    };
     const effective=this.getEffectiveCar();this.audio?.setVehicle?.(effective);
     this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
     this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);
@@ -196,13 +204,16 @@ class ShutokoNights {
     // driving as before.
     if(this.isTouchDevice&&(this.ui.phoneOpen||this.ui.pcOpen)&&!this.crash.active){const tel=this.getTelemetry();this.updateAudio({...tel,throttle:0,slip:0},dt);return;}
     this.contactCooldown=Math.max(0,this.contactCooldown-dt);if(this.crash.active){this.updateCrash(dt);return;}
-    const state=this.getVehicleState(),pos=vec(state.position||state);let roadInfo=this.map?.getRoadInfo?.(pos)||this.map?.getNearestRoute?.(pos)||{};
-    roadInfo={...roadInfo,height:roadInfo.height??roadInfo.point?.y??roadInfo.center?.y,snapHeight:true,surfaceGrip:roadInfo.drivable===false?.55:1};this.currentRoadInfo=roadInfo;
+    const state=this.getVehicleState(),pos=vec(state.position||state);
+    const roadInfo=(this.roadAdapter?this.roadAdapter.getRoadInfo(pos):null)||this.map?.getRoadInfo?.(pos)||{};
     const input=this.getInput();this.lastDriveInput=input;const settings={automatic:this.state.settings.gearbox!=='manual',gearbox:this.state.settings.gearbox,infiniteFuel:this.admin.infiniteFuel};
-    try{this.physics.update(dt,input,roadInfo,settings);}catch(e){console.error('Physics update',e);this.mode='error';throw e;}
+    try{this.physics.update(dt,input,this.roadAdapter||roadInfo,settings);}catch(e){console.error('Physics update',e);this.mode='error';throw e;}
+    // Wall contacts are now resolved inside the physics substeps (swept CCD);
+    // pull the events out for scoring so scrapes/hits still cost combo/lives.
+    for(const ev of this.physics.consumeEvents?.()||[]){if(ev.type==='collision'&&(ev.kind==='wall'||ev.kind==='impact'))this.registerContact('wall',{severity:ev.severity,normal:ev.normal});}
     if(this.admin.infiniteFuel)this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);
     this.syncFuelFromPhysics();this.resolveMapCollision();this.traffic?.update?.(dt,this.getVehicleState());this.handleTrafficEvents();this.updatePlayerMesh();this.map?.update?.(pos,performance.now()/1000);
-    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,roadInfo);
+    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
   }
 
