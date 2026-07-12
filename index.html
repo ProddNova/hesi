@@ -171,7 +171,7 @@
     window.addEventListener('error', event => showBootError(event.message || 'Unable to start game'));
     window.addEventListener('unhandledrejection', event => showBootError(event.reason?.message || 'Unable to start game'));
   </script>
-  <script type="module" src="js/game.js?v=20260712c"></script>
+  <script type="module" src="js/game-v20260712d.js"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
