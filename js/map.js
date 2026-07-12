@@ -2260,6 +2260,7 @@ export class HighwayMap {
       this._buildRouteGeometry(route);
       this._queueRouteDetails(route);
     }
+    this._dressGores();
     this._buildBridge();
     this._buildSignage();
     this._buildServiceAreaDressing();
@@ -2488,6 +2489,12 @@ export class HighwayMap {
 
     // dead-end cap + crash cushions
     if (route.deadEnd) {
+      this._buildDeadEnd(route);
+    }
+  }
+
+  _buildDeadEnd(route) {
+    {
       const endFrame = route.renderFrames[route.renderFrames.length - 1];
       const bucket = this._bucket(endFrame.position, 'barrier');
       const left = this._deckPoint(endFrame, endFrame.half);
@@ -2510,6 +2517,76 @@ export class HighwayMap {
       sign.position.copy(signPos);
       sign.quaternion.copy(yawQuaternion(endFrame.tangent.clone().multiplyScalar(-1)));
       this._addChunkMesh(sign, signPos);
+    }
+  }
+
+  /**
+   * Junction gore dressing. For every diverge/merge between a mainline and a
+   * ramp: find the physical split point (where the two paved edges separate),
+   * paint the chevron wedge between the mouth and the split, and terminate
+   * the barrier V with a yellow/black crash cushion.
+   */
+  _dressGores() {
+    for (const edge of this.edges) {
+      if (edge.kind !== 'diverge' && edge.kind !== 'merge') continue;
+      const rampRef = edge.kind === 'diverge' ? edge.to : edge.from;
+      const mainRef = edge.kind === 'diverge' ? edge.from : edge.to;
+      const ramp = this.routes.get(rampRef.routeId);
+      const main = this.routes.get(mainRef.routeId);
+      if (!ramp || !main || ramp === main) continue;
+      if (ramp.kind !== 'ramp' && ramp.kind !== 'service') continue;
+      const fromStart = edge.kind === 'diverge';
+
+      // walk the ramp away from the shared mouth until the paved edges split
+      let tip = null;
+      const stripes = [];
+      for (let s = 24; s <= Math.min(320, ramp.length - 6); s += 9) {
+        const rampDist = fromStart ? s : ramp.length - s;
+        if (rampDist < 2 || rampDist > ramp.length - 2) break;
+        const sample = this._sampleCenter(ramp, rampDist, 1);
+        const projection = this._projectToRoute(main, sample.position);
+        if (Math.abs(sample.position.y - projection.point.y) > 5) break;
+        const halfMain = this._halfWidthAt(main, projection.distance);
+        const gap = Math.abs(projection.signedLateral) + ramp.halfWidth - halfMain;
+        const sideSign = projection.signedLateral >= 0 ? 1 : -1;
+        const mainEdge = projection.point.clone().addScaledVector(projection.normal, sideSign * (halfMain - 0.55));
+        const toMain = projection.point.clone().sub(sample.position).setY(0);
+        if (toMain.lengthSq() < EPSILON) toMain.copy(projection.normal).multiplyScalar(-sideSign);
+        toMain.normalize();
+        const rampEdge = sample.position.clone().addScaledVector(toMain, ramp.halfWidth - 0.55);
+        const wedge = mainEdge.clone().lerp(rampEdge, 0.5);
+        const wedgeWidth = mainEdge.distanceTo(rampEdge);
+        if (gap > 1.2) {
+          tip = { wedge, tangent: sample.tangent.clone() };
+          break;
+        }
+        if (wedgeWidth > 1.1) stripes.push({ wedge, tangent: sample.tangent.clone(), width: wedgeWidth });
+      }
+
+      // chevron paint across the wedge
+      let flip = 1;
+      for (const stripe of stripes) {
+        const position = stripe.wedge.clone();
+        position.y += 0.06;
+        const skew = new THREE.Quaternion().setFromAxisAngle(UP, flip * 0.62);
+        flip *= -1;
+        const quaternion = yawQuaternion(stripe.tangent).multiply(skew);
+        this._instance(position, vec(0.3, 0.025, Math.min(4.2, stripe.width * 1.15)), quaternion, null, 'box:marking');
+      }
+
+      // crash cushion at the barrier split
+      if (tip) {
+        const quaternion = yawQuaternion(tip.tangent);
+        const base = tip.wedge.clone();
+        base.y += 0.55;
+        this._instance(base, vec(1.15, 1.05, 1.7), quaternion, null, 'box:cushion');
+        const stripe = base.clone();
+        stripe.y += 0.12;
+        this._instance(stripe, vec(1.2, 0.3, 1.75), quaternion, 0x16171b, 'box:parkedBody');
+        const marker = base.clone();
+        marker.y += 0.95;
+        this._instance(marker, vec(0.5, 0.55, 0.35), quaternion, 0xffd24a, 'box:reflector');
+      }
     }
   }
 
