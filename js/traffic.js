@@ -1,4 +1,4 @@
-import * as THREE from './three-fallback.js';
+import * as THREE from 'three';
 
 const clamp = THREE.MathUtils.clamp;
 const EPSILON = 1e-6;
