@@ -156,7 +156,22 @@
     <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260712b"></script>
+  <script>
+    function showBootError(message) {
+      const loading = document.getElementById('loading');
+      if (!loading) return;
+      loading.replaceChildren();
+      const title = document.createElement('b');
+      const detail = document.createElement('span');
+      title.textContent = 'BOOT ERROR';
+      detail.textContent = message;
+      loading.append(title, detail);
+      loading.style.color = '#ff3951';
+    }
+    window.addEventListener('error', event => showBootError(event.message || 'Unable to start game'));
+    window.addEventListener('unhandledrejection', event => showBootError(event.reason?.message || 'Unable to start game'));
+  </script>
+  <script type="module" src="js/game.js?v=20260712c"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));

@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from './three-fallback.js';
 
 /**
  * Shutoko Nights world module — a scaled, topologically faithful low-poly
