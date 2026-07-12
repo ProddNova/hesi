@@ -534,16 +534,19 @@ export class VehiclePhysics {
 
     if (this.transmissionMode === 'automatic') this._automaticGearbox(input, u);
 
-    // Speed-sensitive steering sized to what the tires can actually use: the
-    // Ackermann angle for ~1.35x the grip-limited lateral acceleration plus a
-    // small slip allowance. Full lock stays available at parking speeds, while
-    // an on/off touch button at 200 km/h can no longer request an instant spin.
-    const gripLimitedSteer = this.spec.wheelbase * this.spec.tireGrip * this._surfaceGrip * G * 1.15
-      / Math.max(1, u * u) + 0.022;
+    // Speed-sensitive steering sized to what the tires can actually use. The
+    // cap sits just UNDER the grip-limited Ackermann angle (0.88x) plus the
+    // steady-state slip allowance: a held button at 60 km/h now corners hard
+    // (~0.9 g) with full grip and zero drama, and breakaway needs lift-off,
+    // weight transfer or the handbrake rather than plain steering input.
+    const gripLimitedSteer = this.spec.wheelbase * this.spec.tireGrip * this._surfaceGrip * G * 0.88
+      / Math.max(1, u * u) + 0.024;
     const speedSteerScale = THREE.MathUtils.lerp(1, 0.3, smoothstep01(speed / 50));
     const steerAuthority = Math.min(this.spec.maxSteer * speedSteerScale, gripLimitedSteer, this.spec.maxSteer);
     const targetSteering = input.steer * steerAuthority;
-    const steerRate = (2.2 + 5.5 / (1 + speed * 0.2)) * dt;
+    // Ramp to full authority over ~0.26 s so binary keyboard/touch input reads
+    // as a progressive turn-in instead of a step to the tires' limit.
+    const steerRate = Math.max(0.55, steerAuthority / 0.26) * dt;
     this.steering += clamp(targetSteering - this.steering, -steerRate, steerRate);
     if (Math.abs(input.steer) < 0.02) this.steering *= Math.exp(-dt * (5.5 + speed * 0.035));
 

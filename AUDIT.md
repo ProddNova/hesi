@@ -1,3 +1,103 @@
+# Shutoko Nights — Map Rebuild Audit (Phase 0, 2026-07-11, second pass)
+
+Audit performed before the Shutoko map rebuild / world dressing / traffic /
+physics fix pass. Findings drive the work in this branch
+(`claude/shutoko-map-physics-rebuild`). The older full-codebase audit from the
+mobile-polish pass is preserved below.
+
+## Map module (js/map.js — the rewrite target)
+
+- Single `HighwayMap` class (~2,240 lines): six Catmull-Rom routes (`c1`,
+  `wangan`, `yokohane`, `shinjuku`, `rainbow`, `bay_link`) in a generic layout
+  that shares nothing with the real Shutoko beyond names. All geometry is
+  built eagerly into one `THREE.Group`; no chunking/LOD (fog + far plane do
+  all the hiding).
+- **Junctions are just points where splines touch.** `_connectRoutes` records
+  a point + radius; junction "platforms" are flat cylinders, and — critically —
+  `getWallCollisionBounds` returns `disabled: !!junction`, i.e. **walls are
+  turned off inside every junction radius**. That is both the "junction lanes
+  cross each other" complaint (routes pass through each other at grade at
+  similar Y) and an escape hatch through which a fast car can leave the world.
+- Elevations are gently rolling (28–83 m) with no levels, no over/underpasses;
+  "tunnels" are shells placed on top of the deck (the road never dips).
+- Parking areas are floating box decks beside the road with a one-way access
+  spline whose entry/exit only roughly touch the mainline; guardrail gates are
+  authored per-PA with magic offsets (the "broken exits").
+- Public API surface that game.js / traffic.js / ui.js consume (must be
+  preserved by the rewrite): `sampleLane`, `getRoadInfo`, `getNearestRoute`,
+  `advanceAlongRoute`, `advanceTraffic`, `getTrafficLanes/-Spawn`,
+  `sampleTrafficLane`, `getAdjacent-/getNextTrafficLane`, `projectToTrafficLane`,
+  `getServiceAreas/-Proximity`, `isPointDrivable`, `getGarageTransition`,
+  `resolveWallCollision`, `sweepWallCollision`, `getWallSegments`,
+  `getMinimapData`, `worldToMinimap`, `getNetworkStats`, `getInitialSpawn`,
+  `update`, `dispose`, plus fields `initialSpawn`, `serviceAreas`, `routes`,
+  `junctions`, `minimapData`, `trafficLanes`.
+
+## Physics findings (js/physics.js — surgical fixes only)
+
+1. **Low-speed slide at 60 km/h.** Steering authority is capped at the
+   Ackermann angle for **1.15×** the grip-limited lateral acceleration
+   (`gripLimitedSteer`, physics.js:541). Steering input is binary (keyboard /
+   touch buttons), and the steer rate reaches that cap in ~50 ms. So *any*
+   full press at *any* speed requests ~115 % of what the tires can do —
+   fronts and then rears saturate instantly and the car "drifts" at 60 km/h.
+   Fix: cap authority just *below* the grip limit (~0.92×) with the existing
+   slip-angle allowance, and slow the ramp so breakaway is progressive.
+2. **Tunneling through walls.** The frame-level sweep (game.js
+   `resolveMapCollision` → `map.sweepWallCollision`, 2.5 m steps) is sound,
+   but resolution can (a) hit a junction zone where bounds are `disabled`,
+   (b) latch onto the *wrong deck* near crossings since `getNearestRoute` is
+   3-D nearest with a soft ±8 m vertical window, or (c) find no route at all
+   (`maxDistance` 90) once the first frame outside the corridor has passed.
+   Fix comes with the new map: corridor-union bounds that are never disabled,
+   elevation-aware route matching, plus per-substep CCD via a live adapter.
+3. **Stuck inside guardrails.** `_resolveRoadBounds` (physics.js:790) clamps
+   `info.lateralOffset` against `info.halfWidth` **every 1/120 s substep using
+   the same stale roadInfo snapshot** taken before the frame moved the car. A
+   0.5 m penetration report is therefore re-applied up to 8× per frame, each
+   time shoving the car 0.5 m sideways along a stale `right` vector — the car
+   gets rammed *through* or *pinned inside* the barrier. Fix: pass a live
+   `getRoadInfo`/`sweep` adapter (already supported by `_readRoadSurface`) so
+   every substep sees fresh geometry, and resolve penetration along the
+   surface normal with an epsilon so contact always ends free.
+4. Fixed timestep is verified OK: `update()` substeps at ≥120 Hz regardless
+   of frame dt (50 ms clamp in game.js), and NaN/velocity guards recover to a
+   safe pose. Post-impact yaw damping from the previous pass is retained.
+
+## Traffic findings (js/traffic.js)
+
+- **Indicators inverted.** `_considerLaneChange` sets `indicator = direction`
+  (lane-index delta) and `_setLights` matches it to lamp meshes whose `side`
+  is a local-X sign. Local +X on the traffic mesh is the car's **left** (the
+  same right-handed-basis trap the steering audit found), while lane index
+  increases toward the **outer/left** edge only for direction +1 travel — for
+  direction −1 carriageways the world side flips but the lamp side does not.
+  Net effect: blinker side disagrees with the actual move on half the network.
+  Fix with an explicit lane-sign convention in the new map + a headless test
+  asserting lamp world-side == lane-change world-side.
+- Route-following itself is sound (lane sampling via the map adapter), but
+  route transfers clamp lane index into the next route (3-lane → 1-lane ramp
+  = up to ~7 m instant lateral teleport, visibly clipping the gore barrier).
+  Needs a short lateral blend after every transfer.
+- Density: default 30 cars (touch) at 0.78 density within an 850 m spawn
+  radius across both carriageways — far too sparse for No Hesi. `setDensity`
+  exists but is clamped to 2 and exposed nowhere. Admin slider (0.5×–3×)
+  plus a higher default and a per-car draw-call diet (9 → ~5 meshes via
+  vertex-color merges) are needed to hold iPhone frame rate at max density.
+
+## Garage findings (js/garage.js)
+
+- `build()` has several exactly-coplanar face pairs that z-fight: the ceiling
+  beams at z=±14 share the z=−13.825/+13.825 plane with the wall faces; the
+  shutter slats (z 13.535–13.805) intersect the shutter body face at 13.695;
+  wall stripe faces sit 5 mm from panel faces which flicker at PSX precision;
+  the back-wall/side-wall corners interpenetrate. Rebuild the shell with a
+  consistent clearance constant while keeping every interaction point (PC at
+  (7.5, −9.3), exit at (0, 12.6→13), car at origin, delivery zone at
+  (−7.2, 10.3), walk clamp ±10.25/±13.1) byte-identical for the logic.
+
+---
+
 # Shutoko Nights — Codebase Audit & Fix Log (2026-07-11)
 
 Full-codebase audit performed before any change (Phase 0), then fixed in

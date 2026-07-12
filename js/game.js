@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260712a';
-import * as PhysicsModule from './physics.js?v=20260712a';
-import * as TrafficModule from './traffic.js?v=20260712a';
+import * as MapModule from './map.js?v=20260712b';
+import * as PhysicsModule from './physics.js?v=20260712b';
+import * as TrafficModule from './traffic.js?v=20260712b';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
-import { GarageSystem } from './garage.js?v=20260712a';
-import { GameUI } from './ui.js?v=20260712a';
+import { GarageSystem } from './garage.js?v=20260712b';
+import { GameUI } from './ui.js?v=20260712b';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
@@ -27,7 +27,7 @@ class ShutokoNights {
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
-    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1};
+    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
     this.resize();window.addEventListener('resize',()=>this.resize());
     // iOS Safari: orientation changes and browser-chrome show/hide don't always
@@ -49,7 +49,7 @@ class ShutokoNights {
     if(!Array.isArray(this.partCatalog)&&typeof this.partCatalog==='object')this.partCatalog=Object.values(this.partCatalog).flat();
     const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar();
     const starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};
-    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
     this.state=this.normalizeState(raw||defaults,defaults);
     if(!this.state.auctions.length)this.state.auctions=this.generateAuctions(this.state.auctionSeed);
     this.admin={...this.admin,...this.state.admin};this.cameraMode=this.state.settings.camera||'chase';this.persist();
@@ -77,11 +77,19 @@ class ShutokoNights {
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
   buildWorld(){
-    try{this.map=new HighwayMap(this.roadScene,{quality:'psx'});this.map.build?.();const openSpawn=this.map.sampleLane?.('wangan',1800,1,1);if(openSpawn?.position){openSpawn.position.y+=.65;openSpawn.label='Wangan outbound garage merge';this.map.initialSpawn=openSpawn;}}catch(e){console.error('Map init',e);this.map=null;}
+    try{this.map=new HighwayMap(this.roadScene,{quality:'psx'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    // Live road adapter: physics substeps query fresh geometry every 1/120 s
+    // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
+    // union for continuous collision so barriers are solid at any speed.
+    this.roadAdapter={
+      getRoadInfo:(p)=>{const info=this.map?.getRoadInfo?.(p,this.currentRoadInfo?.routeId)||null;if(!info)return{onRoad:false,drivable:false,surfaceGrip:.55,snapHeight:false};this.currentRoadInfo=info;this.roadAdapter.onRoad=info.drivable!==false;return{...info,height:info.height??info.point?.y,snapHeight:true,surfaceGrip:info.drivable===false?.55:(info.surfaceGrip??1)};},
+      sweep:(from,to,radius)=>{const hit=this.map?.sweepWallCollision?.(from,to,null,Math.max(.62,radius),1.5);if(!hit?.hit)return null;return{hit:true,normal:hit.normal,correctedPosition:hit.position,penetration:0,kind:'wall',restitution:.12,friction:.4};},
+      onRoad:true,
+    };
     const effective=this.getEffectiveCar();this.audio?.setVehicle?.(effective);
     this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
     this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);
-    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?30:42,density:this.isTouchDevice?.78:1});}catch(e){console.error('Traffic init',e);this.traffic=null;}
+    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?44:56,density:1,maxVehicles:84});this.traffic.setDensity?.(this.admin.trafficDensity||1);}catch(e){console.error('Traffic init',e);this.traffic=null;}
     this.garage=new GarageSystem(this.garageScene,this.camera,this.canvas,{
       isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),finishInstall:d=>this.finishInstall(d),
       prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
@@ -91,7 +99,7 @@ class ShutokoNights {
 
   setupUI(){
     this.ui=new GameUI({continue:()=>this.start(),newGame:()=>this.newGame(),phoneChanged:o=>this.audioClick(),getPhoneContext:()=>this.getPhoneContext(),tow:()=>this.tow(),
-      getMinimap:()=>{const s=this.getVehicleState(),p=vec(s.position||s);return{data:this.map?.getMinimapData?.()||null,player:{x:p.x,z:p.z,heading:s.heading||0},services:this.map?.getServiceAreas?.()||[]};},setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},uiClick:()=>this.audioClick(),
+      getMinimap:()=>{const s=this.getVehicleState(),p=vec(s.position||s);return{data:this.map?.getMinimapData?.()||null,player:{x:p.x,z:p.z,heading:s.heading||0},services:this.map?.getServiceAreas?.()||[]};},setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},adminTraffic:v=>{this.admin.trafficDensity=v;this.traffic?.setDensity?.(v);this.persist();this.ui.toast(`TRAFFIC DENSITY ${v}×`,'amber');},uiClick:()=>this.audioClick(),
       getPCContext:()=>this.getPCContext(),buyCar:i=>this.buyCar(i),buyPart:i=>this.buyPart(i),buyFuelCan:()=>this.buyFuelCan(),pcChanged:o=>{if(o)document.exitPointerLock?.();},returnGarage:()=>this.enterGarage('crash')});
     const AudioCtor=AudioModule.AudioSystem||AudioModule.default;
     try{this.audio=typeof AudioCtor==='function'?new AudioCtor({volume:this.state.settings.volume}):AudioCtor;}catch(e){console.warn('Audio init',e);}
@@ -147,7 +155,7 @@ class ShutokoNights {
   start(){this.audio?.unlock?.();this.ui.hideBoot();this.started=true;this.enterGarage('start');}
   newGame(){
     this.ui?.closePhone?.();this.ui?.closePC?.();try{localStorage.removeItem(this.runtimeSaveKey);this.saver?.newGame?.();}catch(e){}
-    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
     this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.admin={...this.state.admin,timeScale:1};this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
   }
 
@@ -196,13 +204,16 @@ class ShutokoNights {
     // driving as before.
     if(this.isTouchDevice&&(this.ui.phoneOpen||this.ui.pcOpen)&&!this.crash.active){const tel=this.getTelemetry();this.updateAudio({...tel,throttle:0,slip:0},dt);return;}
     this.contactCooldown=Math.max(0,this.contactCooldown-dt);if(this.crash.active){this.updateCrash(dt);return;}
-    const state=this.getVehicleState(),pos=vec(state.position||state);let roadInfo=this.map?.getRoadInfo?.(pos)||this.map?.getNearestRoute?.(pos)||{};
-    roadInfo={...roadInfo,height:roadInfo.height??roadInfo.point?.y??roadInfo.center?.y,snapHeight:true,surfaceGrip:roadInfo.drivable===false?.55:1};this.currentRoadInfo=roadInfo;
+    const state=this.getVehicleState(),pos=vec(state.position||state);
+    const roadInfo=(this.roadAdapter?this.roadAdapter.getRoadInfo(pos):null)||this.map?.getRoadInfo?.(pos)||{};
     const input=this.getInput();this.lastDriveInput=input;const settings={automatic:this.state.settings.gearbox!=='manual',gearbox:this.state.settings.gearbox,infiniteFuel:this.admin.infiniteFuel};
-    try{this.physics.update(dt,input,roadInfo,settings);}catch(e){console.error('Physics update',e);this.mode='error';throw e;}
+    try{this.physics.update(dt,input,this.roadAdapter||roadInfo,settings);}catch(e){console.error('Physics update',e);this.mode='error';throw e;}
+    // Wall contacts are now resolved inside the physics substeps (swept CCD);
+    // pull the events out for scoring so scrapes/hits still cost combo/lives.
+    for(const ev of this.physics.consumeEvents?.()||[]){if(ev.type==='collision'&&(ev.kind==='wall'||ev.kind==='impact'))this.registerContact('wall',{severity:ev.severity,normal:ev.normal});}
     if(this.admin.infiniteFuel)this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);
     this.syncFuelFromPhysics();this.resolveMapCollision();this.traffic?.update?.(dt,this.getVehicleState());this.handleTrafficEvents();this.updatePlayerMesh();this.map?.update?.(pos,performance.now()/1000);
-    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,roadInfo);
+    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
   }
 

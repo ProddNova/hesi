@@ -15,32 +15,43 @@ export class GarageSystem {
   mesh(geo,mat,pos,rot=V()){const o=new THREE.Mesh(geo,mat);o.position.copy(pos);o.rotation.set(rot.x,rot.y,rot.z);this.root.add(o);return o;}
 
   build(){
+    // Room shell rebuilt with explicit clearances: no coplanar faces anywhere
+    // (the old build z-fought at the front/back beams, shutter slats and wall
+    // panels). All interaction points are unchanged: PC (7.5,-9.3), exit
+    // (0,12.6+), car footprint at the origin, delivery zone (-7.2,10.3),
+    // walk clamps +/-10.25 x and +/-13.1 z.
     this.scene.background=new THREE.Color(0x05070b);this.scene.fog=new THREE.Fog(0x05070b,18,36);
     this.root=new THREE.Group();this.scene.add(this.root);
-    const floor=this.mesh(new THREE.PlaneGeometry(22,28,11,14),this.mat(0x22272c),V(0,0,0),V(-Math.PI/2,0,0));
+    this.mesh(new THREE.PlaneGeometry(22,28,11,14),this.mat(0x22272c),V(0,0,0),V(-Math.PI/2,0,0));
     const grid=new THREE.GridHelper(22,22,0x474b4e,0x2d3235);grid.position.y=.008;this.root.add(grid);
-    this.mesh(new THREE.BoxGeometry(22,.4,.35),this.mat(0x30343a),V(0,5.1,-14));
-    this.mesh(new THREE.BoxGeometry(22,.4,.35),this.mat(0x30343a),V(0,5.1,14));
-    this.mesh(new THREE.BoxGeometry(.35,10,28),this.mat(0x252a2f),V(-11,5,0));
-    this.mesh(new THREE.BoxGeometry(.35,10,28),this.mat(0x252a2f),V(11,5,0));
-    this.mesh(new THREE.BoxGeometry(22,10,.35),this.mat(0x22272a),V(0,5,-14));
-    this.mesh(new THREE.BoxGeometry(22,.35,28),this.mat(0x15191d),V(0,10,0));
-    // Lower wall stripe and wall panels.
-    this.mesh(new THREE.BoxGeometry(.06,1.6,27),this.mat(0x7b2729),V(-10.8,1.15,0));
-    this.mesh(new THREE.BoxGeometry(.06,1.6,27),this.mat(0x7b2729),V(10.8,1.15,0));
-    for(let z=-11;z<13;z+=4){
-      this.mesh(new THREE.BoxGeometry(.07,3.2,3.5),this.mat(0x33383d),V(-10.78,6.4,z));
-      this.mesh(new THREE.BoxGeometry(.07,3.2,3.5),this.mat(0x33383d),V(10.78,6.4,z));
+    // Structural shell: side walls (inner face x=+/-10.825), back wall (inner
+    // face z=-13.825), ceiling resting ON the wall tops (bottom face y=10.02).
+    this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(-11,5,0));
+    this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(11,5,0));
+    this.mesh(new THREE.BoxGeometry(21.65,10,.35),this.mat(0x22272a),V(0,5,-14));
+    this.mesh(new THREE.BoxGeometry(22.7,.35,28.7),this.mat(0x15191d),V(0,10.2,0));
+    // Front wall around the shutter opening (|x|<4, y<5): two piers + lintel,
+    // all clear of the shutter body.
+    this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(-7.325,5,14));
+    this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(7.325,5,14));
+    this.mesh(new THREE.BoxGeometry(8.3,5,.35),this.mat(0x22272a),V(0,7.5,14));
+    // Interior trim: beams pulled 0.25 m proud of the walls, stripes/panels
+    // layered at distinct depths and heights.
+    this.mesh(new THREE.BoxGeometry(21.4,.4,.3),this.mat(0x30343a),V(0,5.1,-13.55));
+    this.mesh(new THREE.BoxGeometry(21.4,.4,.3),this.mat(0x30343a),V(0,5.1,13.55));
+    for(const s of [-1,1]){
+      this.mesh(new THREE.BoxGeometry(.06,1.6,27),this.mat(0x7b2729),V(s*10.77,1.15,0));
+      for(let z=-11;z<13;z+=4)this.mesh(new THREE.BoxGeometry(.07,3.2,3.5),this.mat(0x33383d),V(s*10.77,6.4,z));
     }
-    // Fluorescent fixtures and stark PSX lighting.
+    // Fluorescent fixtures hang 0.33 m below the ceiling underside.
     for(const z of [-9,-3,3,9]) for(const x of [-5.5,5.5]){
-      this.mesh(new THREE.BoxGeometry(4,.1,.35),this.mat(0xeaf5e5,0xeaf5e5,2),V(x,9.72,z));
+      this.mesh(new THREE.BoxGeometry(4,.1,.35),this.mat(0xeaf5e5,0xeaf5e5,2),V(x,9.69,z));
       const light=new THREE.PointLight(0xd8e8dc,12,14,1.8);light.position.set(x,8.8,z);this.root.add(light);
     }
     const warm=new THREE.PointLight(0xff762e,10,11,1.6);warm.position.set(-8,4,-10);this.root.add(warm);
-    // Shutter, exterior slit and exit marker.
-    this.shutter=this.mesh(new THREE.BoxGeometry(8,5,.25,1,10,1),this.mat(0x42484d),V(0,2.5,13.82));
-    for(let y=.35;y<5;y+=.46)this.mesh(new THREE.BoxGeometry(7.8,.025,.27),this.mat(0x171b1f),V(0,y,13.67));
+    // Shutter inside the front opening; slats 25 mm proud of the shutter face.
+    this.shutter=this.mesh(new THREE.BoxGeometry(7.9,5,.25),this.mat(0x42484d),V(0,2.5,13.82));
+    for(let y=.35;y<5;y+=.46)this.mesh(new THREE.BoxGeometry(7.7,.025,.06),this.mat(0x171b1f),V(0,y,13.64));
     this.exitGlow=this.mesh(new THREE.PlaneGeometry(4.5,2.2),new THREE.MeshBasicMaterial({color:0xff8d2c,transparent:true,opacity:.12,side:THREE.DoubleSide}),V(0,1.1,13.48),V(0,0,0));
     // Workbench, tools and compressor.
     this.mesh(new THREE.BoxGeometry(7,.25,1.8),this.mat(0x584333),V(-7.2,1.1,-8));
@@ -57,8 +68,8 @@ export class GarageSystem {
     // Delivery area paint and sign.
     const zone=this.mesh(new THREE.PlaneGeometry(6,5),new THREE.MeshBasicMaterial({color:0xe7b941,transparent:true,opacity:.15,side:THREE.DoubleSide}),V(-7.2,.015,10.3),V(-Math.PI/2,0,0));
     const edge=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(6,.03,5)),new THREE.LineBasicMaterial({color:0xe8c14a}));edge.position.set(-7.2,.03,10.3);this.root.add(edge);
-    this.addSign('DELIVERY / 配達',V(-10.75,4,9.8),Math.PI/2,0xe9b947);
-    this.addSign('WANGAN WORKS',V(-10.75,5,-2),Math.PI/2,0xe7e9e2);
+    this.addSign('DELIVERY / 配達',V(-10.68,4,9.8),Math.PI/2,0xe9b947);
+    this.addSign('WANGAN WORKS',V(-10.68,5,-2),Math.PI/2,0xe7e9e2);
     this.parkedGroup=new THREE.Group();this.parkedGroup.position.set(0,.05,0);this.root.add(this.parkedGroup);
     this.carryAnchor=new THREE.Group();this.carryAnchor.position.set(.45,-.45,-1);this.camera.add(this.carryAnchor);this.scene.add(this.camera);
   }
