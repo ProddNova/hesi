@@ -1,4 +1,4 @@
-import * as THREE from './three-fallback.js';
+import * as THREE from './three-fallback.js?v=20260712b';
 import * as MapModule from './map.js?v=20260712b';
 import * as PhysicsModule from './physics.js?v=20260712b';
 import * as TrafficModule from './traffic.js?v=20260712b';

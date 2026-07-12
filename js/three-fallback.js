@@ -14,7 +14,7 @@ async function loadThree([source, ...rest]) {
 
 const THREE = await loadThree(SOURCES);
 
-export const {
+const {
   AmbientLight,
   BoxGeometry,
   BufferAttribute,
@@ -55,5 +55,47 @@ export const {
   Vector3,
   WebGLRenderer,
 } = THREE;
+
+export {
+  AmbientLight,
+  BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
+  CanvasTexture,
+  CatmullRomCurve3,
+  Clock,
+  Color,
+  CylinderGeometry,
+  DirectionalLight,
+  DoubleSide,
+  EdgesGeometry,
+  Float32BufferAttribute,
+  Fog,
+  FogExp2,
+  GridHelper,
+  Group,
+  HemisphereLight,
+  InstancedMesh,
+  LineBasicMaterial,
+  LineSegments,
+  MathUtils,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  MeshLambertMaterial,
+  NearestFilter,
+  PerspectiveCamera,
+  PlaneGeometry,
+  PointLight,
+  Quaternion,
+  SRGBColorSpace,
+  Scene,
+  SpotLight,
+  TorusGeometry,
+  Uint16BufferAttribute,
+  Uint32BufferAttribute,
+  Vector3,
+  WebGLRenderer,
+};
 
 export default THREE;
