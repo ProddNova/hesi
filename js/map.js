@@ -193,9 +193,12 @@ export class HighwayMap {
       road: lambert(0x14171f),
       roadAlt: lambert(0x171a23),
       roadService: lambert(0x1d2029),
-      concrete: lambert(0x4c4f57),
+      // Concrete/steel carry a small emissive floor so barriers stay readable
+      // under the dark PS2 night lighting (they define the road edge at speed).
+      concrete: lambert(0x848a94, { side: THREE.DoubleSide, emissive: 0x1e2126 }),
       concreteDark: lambert(0x272a31),
-      barrier: lambert(0x585b61),
+      barrier: lambert(0x9096a0, { side: THREE.DoubleSide, emissive: 0x2e3138 }),
+      railMetal: lambert(0xaab2bc, { side: THREE.DoubleSide, emissive: 0x23262c }),
       tunnelWall: lambert(0x2c2f36, { side: THREE.DoubleSide }),
       tunnelDark: lambert(0x191c22, { side: THREE.DoubleSide }),
       portal: lambert(0x3a3d44),
@@ -2334,6 +2337,30 @@ export class HighwayMap {
     return point;
   }
 
+  /**
+   * True when an outer-barrier element at `point` would sit on ANOTHER
+   * carriageway's drivable surface or double up its rail — i.e. exactly the
+   * gore mouths, merge throats and PA gates where rails used to criss-cross.
+   * Ramps/service lanes yield to mainlines where the corridors coincide.
+   * Purely visual: collision (the corridor union) is untouched.
+   */
+  _barrierSuppressed(point, route) {
+    const yields = route.kind === 'ramp' || route.kind === 'service';
+    const candidates = this._candidateRoutes(point);
+    for (const { route: other, index } of candidates.values()) {
+      if (other === route) continue;
+      const projection = this._projectToRoute(other, point, index);
+      const half = this._halfWidthAt(other, projection.distance);
+      const abs = Math.abs(projection.signedLateral);
+      const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral;
+      if (Math.abs(point.y - deckY) > 4) continue;
+      if (abs < half - 0.2) return true;
+      if (yields && other.kind !== 'ramp' && other.kind !== 'service' && abs < half + 1.2) return true;
+    }
+    if (this._lotAt(point, 1.5)) return true;
+    return false;
+  }
+
   _buildRouteGeometry(route) {
     const roadMaterialName = route.kind === 'service' ? 'roadService'
       : (this.routeOrder.indexOf(route.id) % 2 ? 'roadAlt' : 'road');
@@ -2341,7 +2368,8 @@ export class HighwayMap {
     const medianHeight = 1.0;
 
     this._forEachFrameSegment(route, (a, b) => {
-      const mid = TMP_A.copy(a.position).lerp(b.position, 0.5);
+      // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
+      const mid = a.position.clone().lerp(b.position, 0.5);
       const bucketRoad = this._bucket(mid, roadMaterialName);
       const leftA = this._deckPoint(a, a.half);
       const leftB = this._deckPoint(b, b.half);
@@ -2362,48 +2390,79 @@ export class HighwayMap {
       this._pushQuad(bucketFascia, dropRA, dropRB, rightB, rightA);
       if (elevated) this._pushQuad(bucketFascia, dropLA, dropLB, dropRB, dropRA); // underside
 
-      // outer barriers — always, both sides, every metre of the network
+      // Outer barriers — concrete parapet with a leaned inner face, capped
+      // top and a steel handrail, PS2-highway style. Every metre of the
+      // network keeps its wallSegments record (collision metadata identical);
+      // only the VISUAL is omitted where a segment would criss-cross another
+      // carriageway at a gore mouth or PA gate.
       const bucketBarrier = this._bucket(mid, 'barrier');
+      const bucketRail = this._bucket(mid, 'railMetal');
       for (const side of [1, -1]) {
-        const baseA = this._deckPoint(a, side * (a.half - 0.18), 0.03);
-        const baseB = this._deckPoint(b, side * (b.half - 0.18), 0.03);
-        const topA = baseA.clone(); topA.y += barrierHeight;
-        const topB = baseB.clone(); topB.y += barrierHeight;
-        if (side > 0) this._pushQuad(bucketBarrier, baseA, baseB, topB, topA);
-        else this._pushQuad(bucketBarrier, baseB, baseA, topA, topB);
-        // outward face so barriers read from outside/below too
-        const outA = this._deckPoint(a, side * a.half, 0.03);
-        const outB = this._deckPoint(b, side * b.half, 0.03);
-        const outTopA = outA.clone(); outTopA.y += barrierHeight;
-        const outTopB = outB.clone(); outTopB.y += barrierHeight;
-        if (side > 0) this._pushQuad(bucketBarrier, outB, outA, outTopA, outTopB);
-        else this._pushQuad(bucketBarrier, outA, outB, outTopB, outTopA);
-        this._pushQuad(bucketBarrier, topA, topB, outTopB, outTopA);
+        const baseA = this._deckPoint(a, side * (a.half - 0.42), 0.02);
+        const baseB = this._deckPoint(b, side * (b.half - 0.42), 0.02);
         this.wallSegments.push({
           routeId: route.id, type: 'outer', side,
           start: baseA.clone(), end: baseB.clone(), height: barrierHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
         });
+        const probe = TMP_B.copy(baseA).lerp(baseB, 0.5);
+        if (this._barrierSuppressed(probe, route)) continue;
+        const lean = 0.85;
+        const innerTopA = this._deckPoint(a, side * (a.half - 0.3), lean);
+        const innerTopB = this._deckPoint(b, side * (b.half - 0.3), lean);
+        const capA = this._deckPoint(a, side * (a.half - 0.06), lean + 0.06);
+        const capB = this._deckPoint(b, side * (b.half - 0.06), lean + 0.06);
+        const outA = this._deckPoint(a, side * a.half, 0.0);
+        const outB = this._deckPoint(b, side * b.half, 0.0);
+        if (side > 0) {
+          this._pushQuad(bucketBarrier, baseA, baseB, innerTopB, innerTopA);
+          this._pushQuad(bucketBarrier, innerTopA, innerTopB, capB, capA);
+          this._pushQuad(bucketBarrier, capB, outB, outA, capA);
+        } else {
+          this._pushQuad(bucketBarrier, baseB, baseA, innerTopA, innerTopB);
+          this._pushQuad(bucketBarrier, innerTopB, innerTopA, capA, capB);
+          this._pushQuad(bucketBarrier, capA, outA, outB, capB);
+        }
+        // steel handrail on top of the parapet (skipped inside tunnels)
+        if (!a.tunnel) {
+          const railA = this._deckPoint(a, side * (a.half - 0.18), 1.12);
+          const railB = this._deckPoint(b, side * (b.half - 0.18), 1.12);
+          const railTopA = railA.clone(); railTopA.y += 0.09;
+          const railTopB = railB.clone(); railTopB.y += 0.09;
+          if (side > 0) this._pushQuad(bucketRail, railA, railB, railTopB, railTopA);
+          else this._pushQuad(bucketRail, railB, railA, railTopA, railTopB);
+          const railInA = this._deckPoint(a, side * (a.half - 0.26), 1.21);
+          const railInB = this._deckPoint(b, side * (b.half - 0.26), 1.21);
+          this._pushQuad(bucketRail, railTopA, railTopB, railInB, railInA);
+        }
       }
 
-      // median barrier
+      // Median barrier — proper jersey profile: wide base, sloped waist,
+      // tapered neck, narrow cap.
       if (route.bidirectional) {
-        const half = route.medianWidth * 0.5 - 0.35;
         const bucketMedian = this._bucket(mid, 'concrete');
-        const lA = this._deckPoint(a, half, 0.03);
-        const lB = this._deckPoint(b, half, 0.03);
-        const rA = this._deckPoint(a, -half, 0.03);
-        const rB = this._deckPoint(b, -half, 0.03);
-        const lTopA = lA.clone(); lTopA.y += medianHeight;
-        const lTopB = lB.clone(); lTopB.y += medianHeight;
-        const rTopA = rA.clone(); rTopA.y += medianHeight;
-        const rTopB = rB.clone(); rTopB.y += medianHeight;
-        this._pushQuad(bucketMedian, lA, lB, lTopB, lTopA);
-        this._pushQuad(bucketMedian, rB, rA, rTopA, rTopB);
-        this._pushQuad(bucketMedian, lTopA, lTopB, rTopB, rTopA);
+        const profile = [[0.36, 0.02], [0.3, 0.3], [0.11, 0.92]];
+        for (const side of [1, -1]) {
+          for (let i = 0; i < profile.length - 1; i += 1) {
+            const [w0, h0] = profile[i];
+            const [w1, h1] = profile[i + 1];
+            const lowA = this._deckPoint(a, side * w0, h0);
+            const lowB = this._deckPoint(b, side * w0, h0);
+            const highA = this._deckPoint(a, side * w1, h1);
+            const highB = this._deckPoint(b, side * w1, h1);
+            if (side > 0) this._pushQuad(bucketMedian, lowA, lowB, highB, highA);
+            else this._pushQuad(bucketMedian, lowB, lowA, highA, highB);
+          }
+        }
+        const [wTop, hTop] = profile[profile.length - 1];
+        const capLA = this._deckPoint(a, wTop, hTop + 0.04);
+        const capLB = this._deckPoint(b, wTop, hTop + 0.04);
+        const capRA = this._deckPoint(a, -wTop, hTop + 0.04);
+        const capRB = this._deckPoint(b, -wTop, hTop + 0.04);
+        this._pushQuad(bucketMedian, capLA, capLB, capRB, capRA);
         this.wallSegments.push({
           routeId: route.id, type: 'median', side: 0,
-          start: lA.clone(), end: lB.clone(), height: medianHeight,
+          start: this._deckPoint(a, 0.36, 0.02), end: this._deckPoint(b, 0.36, 0.02), height: medianHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
         });
       }
@@ -2508,6 +2567,16 @@ export class HighwayMap {
         const center = this._sampleCenter(route, distance, 1);
         if (center.position.y < 3.5 || this._isTunnel(route, distance)) continue;
         if (this._isBridge(route, distance)) continue;
+        // Never stab a pillar through a lower carriageway at a grade-separated
+        // crossing — those spans borrow the neighbours' pillars.
+        let piercesDeck = false;
+        for (const { route: other, index } of this._candidateRoutes(center.position).values()) {
+          if (other === route) continue;
+          const projection = this._projectToRoute(other, center.position, index);
+          if (Math.abs(projection.signedLateral) < this._halfWidthAt(other, projection.distance) + 1.6
+            && projection.point.y < center.position.y - 2.5) { piercesDeck = true; break; }
+        }
+        if (piercesDeck) continue;
         const height = center.position.y - 1.1;
         const position = center.position.clone();
         position.y = height * 0.5 - 0.4;
@@ -2547,7 +2616,8 @@ export class HighwayMap {
         const quaternion = yawQuaternion(center.baseTangent);
         const half = this._halfWidthAt(route, distance);
         for (const side of [-1, 1]) {
-          const position = this._deckPoint(frame, side * (half - 0.22), 0.78);
+          const position = this._deckPoint(frame, side * (half - 0.18), 0.97);
+          if (this._barrierSuppressed(position, route)) continue;
           this._instance(position, vec(0.12, 0.13, 0.3), quaternion, side > 0 ? 0xffb45b : 0xe7efff, 'box:reflector');
         }
       }
