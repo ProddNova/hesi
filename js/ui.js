@@ -180,10 +180,12 @@ export class GameUI {
       ${this.setting('INFINITE MONEY',`<input data-toggle="money" type="checkbox" ${c.admin?.infiniteMoney?'checked':''}>`)}
       ${this.setting('INFINITE LIVES',`<input data-toggle="lives" type="checkbox" ${c.admin?.infiniteLives?'checked':''}>`)}
       ${this.setting('INFINITE FUEL',`<input data-toggle="fuel" type="checkbox" ${c.admin?.infiniteFuel?'checked':''}>`)}
-      ${this.setting('TIME SCALE',`<select id="admin-time"><option value=".5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>`)}</div>`;
+      ${this.setting('TIME SCALE',`<select id="admin-time"><option value=".5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>`)}
+      ${this.setting('TRAFFIC DENSITY',`<select id="admin-traffic"><option value=".5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option></select>`)}</div>`;
       root.querySelectorAll('[data-admin]').forEach(b=>b.onclick=()=>this.cb.adminAction?.(b.dataset.admin));
       root.querySelectorAll('[data-toggle]').forEach(i=>i.onchange=()=>this.cb.adminToggle?.(i.dataset.toggle,i.checked));
       this.$('admin-time').value=String(c.admin?.timeScale||1);this.$('admin-time').onchange=e=>this.cb.adminTime?.(+e.target.value);
+      this.$('admin-traffic').value=String(c.admin?.trafficDensity||1);this.$('admin-traffic').onchange=e=>this.cb.adminTraffic?.(+e.target.value);
     }
   }
   phoneCard(label,value){return `<div class="phone-card"><small>${label}</small><b>${value}</b></div>`;}

@@ -27,7 +27,7 @@ class ShutokoNights {
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
-    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1};
+    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
     this.resize();window.addEventListener('resize',()=>this.resize());
     // iOS Safari: orientation changes and browser-chrome show/hide don't always
@@ -49,7 +49,7 @@ class ShutokoNights {
     if(!Array.isArray(this.partCatalog)&&typeof this.partCatalog==='object')this.partCatalog=Object.values(this.partCatalog).flat();
     const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar();
     const starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};
-    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
     this.state=this.normalizeState(raw||defaults,defaults);
     if(!this.state.auctions.length)this.state.auctions=this.generateAuctions(this.state.auctionSeed);
     this.admin={...this.admin,...this.state.admin};this.cameraMode=this.state.settings.camera||'chase';this.persist();
@@ -77,11 +77,11 @@ class ShutokoNights {
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
   buildWorld(){
-    try{this.map=new HighwayMap(this.roadScene,{quality:'psx'});this.map.build?.();const openSpawn=this.map.sampleLane?.('wangan',1800,1,1);if(openSpawn?.position){openSpawn.position.y+=.65;openSpawn.label='Wangan outbound garage merge';this.map.initialSpawn=openSpawn;}}catch(e){console.error('Map init',e);this.map=null;}
+    try{this.map=new HighwayMap(this.roadScene,{quality:'psx'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     const effective=this.getEffectiveCar();this.audio?.setVehicle?.(effective);
     this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
     this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);
-    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?30:42,density:this.isTouchDevice?.78:1});}catch(e){console.error('Traffic init',e);this.traffic=null;}
+    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?44:56,density:1,maxVehicles:84});this.traffic.setDensity?.(this.admin.trafficDensity||1);}catch(e){console.error('Traffic init',e);this.traffic=null;}
     this.garage=new GarageSystem(this.garageScene,this.camera,this.canvas,{
       isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),finishInstall:d=>this.finishInstall(d),
       prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
@@ -91,7 +91,7 @@ class ShutokoNights {
 
   setupUI(){
     this.ui=new GameUI({continue:()=>this.start(),newGame:()=>this.newGame(),phoneChanged:o=>this.audioClick(),getPhoneContext:()=>this.getPhoneContext(),tow:()=>this.tow(),
-      getMinimap:()=>{const s=this.getVehicleState(),p=vec(s.position||s);return{data:this.map?.getMinimapData?.()||null,player:{x:p.x,z:p.z,heading:s.heading||0},services:this.map?.getServiceAreas?.()||[]};},setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},uiClick:()=>this.audioClick(),
+      getMinimap:()=>{const s=this.getVehicleState(),p=vec(s.position||s);return{data:this.map?.getMinimapData?.()||null,player:{x:p.x,z:p.z,heading:s.heading||0},services:this.map?.getServiceAreas?.()||[]};},setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},adminTraffic:v=>{this.admin.trafficDensity=v;this.traffic?.setDensity?.(v);this.persist();this.ui.toast(`TRAFFIC DENSITY ${v}×`,'amber');},uiClick:()=>this.audioClick(),
       getPCContext:()=>this.getPCContext(),buyCar:i=>this.buyCar(i),buyPart:i=>this.buyPart(i),buyFuelCan:()=>this.buyFuelCan(),pcChanged:o=>{if(o)document.exitPointerLock?.();},returnGarage:()=>this.enterGarage('crash')});
     const AudioCtor=AudioModule.AudioSystem||AudioModule.default;
     try{this.audio=typeof AudioCtor==='function'?new AudioCtor({volume:this.state.settings.volume}):AudioCtor;}catch(e){console.warn('Audio init',e);}
@@ -147,7 +147,7 @@ class ShutokoNights {
   start(){this.audio?.unlock?.();this.ui.hideBoot();this.started=true;this.enterGarage('start');}
   newGame(){
     this.ui?.closePhone?.();this.ui?.closePC?.();try{localStorage.removeItem(this.runtimeSaveKey);this.saver?.newGame?.();}catch(e){}
-    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1}};
+    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium'},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
     this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.admin={...this.state.admin,timeScale:1};this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
   }
 
