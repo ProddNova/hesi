@@ -108,6 +108,12 @@ export class HighwayMap {
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
     this.blinkers = [];
+    // Quality-scalable effect layers (light pools / wet-asphalt streaks):
+    // instanced meshes whose geometry name is in _effectTypes get collected so
+    // setQuality can hide them on Low.
+    this._effectTypes = new Set(['lightStreak']);
+    this._effectMeshes = [];
+    this._quality = this.options.quality === 'low' ? 'low' : 'high';
     this._signMaterials = new Map();
     this._ownedTextures = new Set();
     this._disposed = false;
@@ -163,13 +169,27 @@ export class HighwayMap {
   }
 
   _createMaterials() {
+    // PS2 target: smooth shading, clean emissive surfaces. Merged quads keep
+    // flat face normals from computeVertexNormals, curved shapes shade smooth.
     const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({
-      color, flatShading: true, fog: true, ...extra,
+      color, fog: true, ...extra,
     });
     const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({
       color, fog: true, toneMapped: false, ...extra,
     });
+    this._facadeSpecs = {};
+    const facade = (name, spec) => {
+      const texture = this._facadeTexture(spec);
+      this._facadeSpecs[name] = spec;
+      return texture
+        ? new THREE.MeshBasicMaterial({ map: texture, fog: true, toneMapped: false })
+        : lambert(0x151a24);
+    };
     return {
+      facadeOffice: facade('facadeOffice', { cols: 10, rows: 13, lit: 0.44, warm: 0.45, base: '#141823', cellW: 3.4, cellH: 3.3, seed: 0x1a2b3c }),
+      facadeDark: facade('facadeDark', { cols: 10, rows: 13, lit: 0.13, warm: 0.55, base: '#0f1219', cellW: 3.4, cellH: 3.3, seed: 0x2b3c4d }),
+      facadeHotel: facade('facadeHotel', { cols: 12, rows: 14, lit: 0.32, warm: 0.85, base: '#171a21', cellW: 2.8, cellH: 3.0, seed: 0x3c4d5e }),
+      facadeIndustrial: facade('facadeIndustrial', { cols: 7, rows: 5, lit: 0.2, warm: 0.35, base: '#171a1e', cellW: 5.5, cellH: 4.2, seed: 0x4d5e6f }),
       road: lambert(0x14171f),
       roadAlt: lambert(0x171a23),
       roadService: lambert(0x1d2029),
@@ -190,7 +210,7 @@ export class HighwayMap {
       matrix: basic(0xff8b1f),
       redBlink: basic(0xff3040),
       building: lambert(0x11141e),
-      buildingWindow: basic(0x6b5c38),
+      neon: basic(0xffffff),
       shed: lambert(0x1a1d24),
       crane: lambert(0x233042),
       container: lambert(0x54331f),
@@ -212,6 +232,69 @@ export class HighwayMap {
       billboardGlow: basic(0xffffff),
       signGreen: basic(0x0c604e, { side: THREE.DoubleSide }),
     };
+  }
+
+  /**
+   * Night facade texture: a grid of small emissive windows with a believable
+   * random lit pattern (warm/cool whites, dim TVs, dark floors) on a dark
+   * wall. Tiled per building with whole-window UV repeats so grids stay
+   * aligned to the silhouette — the classic PS2 Tokyo-at-night look.
+   */
+  _facadeTexture(spec) {
+    if (typeof document === 'undefined') return null;
+    const random = mulberry32(this.seed ^ spec.seed);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext('2d');
+    context.fillStyle = spec.base;
+    context.fillRect(0, 0, 256, 256);
+    const cellW = 256 / spec.cols;
+    const cellH = 256 / spec.rows;
+    // faint floor slabs + mullions so unlit walls still read as structure
+    context.fillStyle = 'rgba(255,255,255,0.05)';
+    for (let row = 0; row <= spec.rows; row += 1) context.fillRect(0, Math.round(row * cellH), 256, 1);
+    context.fillStyle = 'rgba(0,0,0,0.35)';
+    for (let col = 0; col <= spec.cols; col += 1) context.fillRect(Math.round(col * cellW), 0, 1, 256);
+    // some floors go fully dark / fully lit so towers band like real offices
+    const floorBias = [];
+    for (let row = 0; row < spec.rows; row += 1) {
+      const roll = random();
+      floorBias.push(roll < 0.14 ? 0 : roll > 0.86 ? 2.4 : 1);
+    }
+    for (let row = 0; row < spec.rows; row += 1) {
+      for (let col = 0; col < spec.cols; col += 1) {
+        const x = Math.round(col * cellW + cellW * 0.2);
+        const y = Math.round(row * cellH + cellH * 0.26);
+        const w = Math.max(2, Math.round(cellW * 0.6));
+        const h = Math.max(2, Math.round(cellH * 0.5));
+        const roll = random();
+        let fill;
+        if (roll < spec.lit * floorBias[row]) {
+          const warm = random() < spec.warm;
+          const dim = random() < 0.25 ? 0.55 : 1;
+          fill = warm
+            ? `rgba(255,${205 + Math.floor(random() * 30)},${145 + Math.floor(random() * 45)},${dim})`
+            : `rgba(${185 + Math.floor(random() * 35)},${212 + Math.floor(random() * 25)},255,${dim})`;
+        } else if (roll < spec.lit * floorBias[row] + 0.06) {
+          fill = 'rgba(110,125,160,0.4)';
+        } else {
+          fill = `rgba(6,8,13,${0.8 + random() * 0.2})`;
+        }
+        context.fillStyle = fill;
+        context.fillRect(x, y, w, h);
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    this._ownedTextures.add(texture);
+    return texture;
   }
 
   // ------------------------------------------------------------------
@@ -2050,13 +2133,16 @@ export class HighwayMap {
     const key = this._chunkKey(position.x, position.z);
     if (!this._chunkBuckets.has(key)) this._chunkBuckets.set(key, new Map());
     const buckets = this._chunkBuckets.get(key);
-    if (!buckets.has(materialName)) buckets.set(materialName, { positions: [], indices: [] });
+    if (!buckets.has(materialName)) buckets.set(materialName, { positions: [], indices: [], uvs: [] });
     return buckets.get(materialName);
   }
 
-  _pushQuad(bucket, a, b, c, d) {
+  /** Push a quad a→b→c→d. Optional uv = [u0, v0, u1, v1]: a=(u0,v0), b=(u1,v0), c=(u1,v1), d=(u0,v1). */
+  _pushQuad(bucket, a, b, c, d, uv = null) {
     const start = bucket.positions.length / 3;
     bucket.positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, d.x, d.y, d.z);
+    const [u0, v0, u1, v1] = uv || [0, 0, 1, 1];
+    bucket.uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
     bucket.indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
   }
 
@@ -2110,6 +2196,7 @@ export class HighwayMap {
         if (!bucket.positions.length) continue;
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
+        if (bucket.uvs.length) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
         geometry.setIndex(bucket.indices.length > 65535 * 3 || bucket.positions.length / 3 > 65535
           ? new THREE.Uint32BufferAttribute(bucket.indices, 1)
           : new THREE.Uint16BufferAttribute(bucket.indices, 1));
@@ -2151,6 +2238,8 @@ export class HighwayMap {
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.frustumCulled = true;
         mesh.computeBoundingSphere?.();
+        if (matName === 'redBlink') this.blinkers.push(mesh);
+        if (this._effectTypes?.has(geoName)) this._effectMeshes.push(mesh);
         chunk.group.add(mesh);
       }
     }
@@ -3003,87 +3092,302 @@ export class HighwayMap {
     return Math.sqrt(bestSq);
   }
 
+  /** Circle-footprint placement test: no building intersections, no clipping into corridors or PA lots. */
+  _canPlaceBuilding(x, z, radius, routeClearance = 15) {
+    const probe = new THREE.Vector3(x, 0, z);
+    if (this._distanceToRouteXZ(probe) < routeClearance + radius) return false;
+    if (this._lotAt(probe, radius + 6)) return false;
+    const cell = 140;
+    const cx = Math.floor(x / cell);
+    const cz = Math.floor(z / cell);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        const bucket = this._footprints.get(`${cx + dx},${cz + dz}`);
+        if (!bucket) continue;
+        for (const footprint of bucket) {
+          const ddx = footprint.x - x;
+          const ddz = footprint.z - z;
+          const limit = radius + footprint.r;
+          if (ddx * ddx + ddz * ddz < limit * limit) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  _recordFootprint(x, z, r) {
+    const cell = 140;
+    const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+    if (!this._footprints.has(key)) this._footprints.set(key, []);
+    this._footprints.get(key).push({ x, z, r });
+  }
+
+  /**
+   * Textured building box: 4 facade quads with whole-window UV repeats into
+   * the chunk bucket for `matName`, dark roof quad. Returns the top Y.
+   */
+  _pushBuildingBox(matName, random, x, z, baseY, width, height, depth, yaw) {
+    const spec = this._facadeSpecs[matName] || { cols: 10, rows: 13, cellW: 3.4, cellH: 3.3 };
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const hw = width * 0.5;
+    const hd = depth * 0.5;
+    const corners = [
+      [x - rx * hw - fx * hd, z - rz * hw - fz * hd],
+      [x + rx * hw - fx * hd, z + rz * hw - fz * hd],
+      [x + rx * hw + fx * hd, z + rz * hw + fz * hd],
+      [x - rx * hw + fx * hd, z - rz * hw + fz * hd],
+    ];
+    const centerVec = vec(x, baseY, z);
+    const bucket = this._bucket(centerVec, matName);
+    const floors = Math.max(2, Math.round(height / spec.cellH));
+    const v1 = floors / spec.rows;
+    for (let i = 0; i < 4; i += 1) {
+      const p0 = corners[i];
+      const p1 = corners[(i + 1) % 4];
+      const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+      const windows = Math.max(2, Math.round(len / spec.cellW));
+      const u1 = windows / spec.cols;
+      const offU = Math.floor(random() * spec.cols) / spec.cols;
+      const offV = Math.floor(random() * spec.rows) / spec.rows;
+      this._pushQuad(bucket,
+        vec(p1[0], baseY, p1[1]), vec(p0[0], baseY, p0[1]),
+        vec(p0[0], baseY + height, p0[1]), vec(p1[0], baseY + height, p1[1]),
+        [offU, offV, offU + u1, offV + v1]);
+    }
+    const roof = this._bucket(centerVec, 'building');
+    this._pushQuad(roof,
+      vec(corners[3][0], baseY + height, corners[3][1]),
+      vec(corners[2][0], baseY + height, corners[2][1]),
+      vec(corners[1][0], baseY + height, corners[1][1]),
+      vec(corners[0][0], baseY + height, corners[0][1]));
+    return baseY + height;
+  }
+
+  static BILLBOARDS = [
+    ['月光タイヤ', 'GEKKO TIRES', '#7a1f4d'], ['NIGHTFUEL', '夜間燃料', '#173f78'],
+    ['ハイパー缶コーヒー', 'KAN COFFEE', '#7a4d15'], ['首都高保険', 'EXPRESSWAY INS.', '#1f6a54'],
+    ['ネオン電機', 'NEON DENKI', '#28246e'], ['湾岸ホテル', 'BAY HOTEL', '#5e1f78'],
+    ['真夜中運輸', 'MIDNIGHT EXPRESS', '#6e2424'], ['スターダスト録音', 'STARDUST AUDIO', '#1f5c78'],
+  ];
+
+  /**
+   * One dressed building. Archetypes: slab office tower, stepped tower,
+   * narrow mixed-use w/ neon, low commercial w/ rooftop billboard, crown
+   * (lit top floor), hotel/residential, industrial shed, port warehouse.
+   * `opts.face` is the unit vector pointing from the building toward the road
+   * (signage/shopfront orientation).
+   */
+  _buildStructure(random, x, z, yaw, archetype, width, height, depth, opts = {}) {
+    const baseY = opts.baseY ?? -0.1;
+    const face = opts.face || null;
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const local = (dx, dz, y) => vec(x + rx * dx + fx * dz, y, z + rz * dx + fz * dz);
+    const faceHalf = face
+      ? Math.abs(face.x * rx + face.z * rz) * width * 0.5 + Math.abs(face.x * fx + face.z * fz) * depth * 0.5
+      : 0;
+    const faceLen = face
+      ? Math.abs(face.x * fx + face.z * fz) * width + Math.abs(face.x * rx + face.z * rz) * depth
+      : width;
+    const topY = baseY + height;
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
+
+    const blinker = (y = topY + 0.8) => this._instance(vec(x, y, z), vec(1.15, 1.15, 1.15), null, null, 'box:redBlink');
+    const waterTank = () => this._instance(
+      local((random() - 0.5) * width * 0.4, (random() - 0.5) * depth * 0.4, topY + 1.25),
+      vec(2.6, 2.5, 2.6), yawQuat, null, 'box:concreteDark');
+    const antenna = () => {
+      const h = 4.5 + random() * 5;
+      this._instance(local((random() - 0.5) * width * 0.5, (random() - 0.5) * depth * 0.5, topY + h * 0.5),
+        vec(0.28, h, 0.28), null, null, 'box:concrete');
+    };
+    const rooftopBillboard = () => {
+      if (!face || typeof document === 'undefined') return;
+      const [kanji, romaji, color] = HighwayMap.BILLBOARDS[Math.floor(random() * HighwayMap.BILLBOARDS.length)];
+      const w = Math.min(16, faceLen * 0.8);
+      const h = w * 0.34;
+      const board = this._makeSignMesh(`${kanji}|${romaji}`, color, w, h, true);
+      const pos = vec(x, topY + h * 0.5 + 1.1, z);
+      board.position.copy(pos);
+      board.quaternion.copy(yawQuaternion(face));
+      this._addChunkMesh(board, pos);
+      for (const side of [-1, 1]) {
+        this._instance(vec(x + face.x * -0.4, topY + 0.7, z + face.z * -0.4)
+          .add(vec(-face.z * side * w * 0.3, 0, face.x * side * w * 0.3)),
+        vec(0.26, 1.6, 0.26), null, null, 'box:concreteDark');
+      }
+    };
+    const wallBillboard = () => {
+      if (!face || typeof document === 'undefined') return;
+      const [kanji, romaji, color] = HighwayMap.BILLBOARDS[Math.floor(random() * HighwayMap.BILLBOARDS.length)];
+      const w = Math.min(15, faceLen * 0.72);
+      const board = this._makeSignMesh(`${kanji}|${romaji}`, color, w, w * 0.36, true);
+      const pos = vec(x + face.x * (faceHalf + 0.5), baseY + height * 0.62, z + face.z * (faceHalf + 0.5));
+      board.position.copy(pos);
+      board.quaternion.copy(yawQuaternion(face));
+      this._addChunkMesh(board, pos);
+    };
+
+    switch (archetype) {
+      case 'stepped': {
+        this._pushBuildingBox('facadeOffice', random, x, z, baseY, width, height * 0.58, depth, yaw);
+        this._pushBuildingBox('facadeOffice', random, x, z, baseY + height * 0.58, width * 0.76, height * 0.26, depth * 0.76, yaw);
+        this._pushBuildingBox('facadeDark', random, x, z, baseY + height * 0.84, width * 0.52, height * 0.16, depth * 0.52, yaw);
+        if (height > 88) blinker(); else antenna();
+        break;
+      }
+      case 'crown': {
+        this._pushBuildingBox(random() < 0.7 ? 'facadeOffice' : 'facadeDark', random, x, z, baseY, width, height, depth, yaw);
+        this._instance(vec(x, topY - 0.95, z), vec(width + 0.35, 1.5, depth + 0.35), yawQuat, 0xffedc2, 'box:neon');
+        if (height > 88) blinker(topY + 0.9);
+        waterTank();
+        break;
+      }
+      case 'narrow': {
+        this._pushBuildingBox('facadeHotel', random, x, z, baseY, width, height, depth, yaw);
+        if (face) {
+          const colors = [0xff5f7a, 0x67d7ff, 0xffc65b, 0x7dffb8, 0xff8de5];
+          this._instance(vec(x + face.x * (faceHalf + 0.45), baseY + height * 0.5, z + face.z * (faceHalf + 0.45)),
+            vec(0.75, height * 0.6, 0.75), yawQuat, colors[Math.floor(random() * colors.length)], 'box:neon');
+        }
+        antenna();
+        break;
+      }
+      case 'commercial': {
+        this._pushBuildingBox('facadeOffice', random, x, z, baseY, width, height, depth, yaw);
+        if (face) {
+          this._instance(vec(x + face.x * (faceHalf + 0.22), baseY + 1.5, z + face.z * (faceHalf + 0.22)),
+            vec(faceLen * 0.8, 2.4, 0.3), yawQuaternion(TMP_C.set(-face.z, 0, face.x)), 0xffd9a0, 'box:neon');
+        }
+        if (random() < 0.6) rooftopBillboard();
+        break;
+      }
+      case 'hotel': {
+        this._pushBuildingBox('facadeHotel', random, x, z, baseY, width, height, depth, yaw);
+        waterTank();
+        if (height > 88) blinker();
+        break;
+      }
+      case 'shed': {
+        this._pushBuildingBox('facadeIndustrial', random, x, z, baseY, width, height, depth, yaw);
+        for (let i = 0; i < 2; i += 1) {
+          this._instance(local((random() - 0.5) * width * 0.5, (random() - 0.5) * depth * 0.5, topY + 0.5),
+            vec(1.4, 1, 1.4), yawQuat, null, 'box:concreteDark');
+        }
+        break;
+      }
+      case 'warehouse': {
+        this._pushBuildingBox('facadeIndustrial', random, x, z, baseY, width, height, depth, yaw);
+        if (face) {
+          const doors = 2 + Math.floor(random() * 2);
+          for (let i = 0; i < doors; i += 1) {
+            const along = (i - (doors - 1) * 0.5) * (faceLen / (doors + 0.5));
+            this._instance(vec(x + face.x * (faceHalf + 0.2) - face.z * along, baseY + 1.9, z + face.z * (faceHalf + 0.2) + face.x * along),
+              vec(3.4, 3.6, 0.28), yawQuaternion(TMP_C.set(-face.z, 0, face.x)), 0xffc890, 'box:neon');
+          }
+        }
+        break;
+      }
+      case 'slab':
+      default: {
+        this._pushBuildingBox(random() < 0.62 ? 'facadeOffice' : 'facadeDark', random, x, z, baseY, width, height, depth, yaw);
+        if (random() < 0.55) waterTank();
+        if (random() < 0.5) antenna();
+        if (height > 92) blinker();
+        if (height > 34 && random() < 0.14) wallBillboard();
+        break;
+      }
+    }
+  }
+
   _buildCity() {
     const random = mulberry32(this.seed ^ 0xa73b91);
-    const palette = [0x111622, 0x151925, 0x1a1c28, 0x10141d, 0x20202a];
-    const windowColors = [0x665a39, 0x33445f, 0x584a2e];
+    this._footprints = new Map();
 
-    // C1 canyon: mid/tall buildings tight against both sides of the loop.
+    // --- C1 canyon: two rows of towers hard against both sides of the loop
+    // so the C1 reads as a lit canyon with no bare gaps.
     const c1 = this.routes.get('c1');
-    for (let distance = 0; distance < c1.length; distance += 52) {
+    for (let distance = 0; distance < c1.length; distance += 44) {
       const center = this._sampleCenter(c1, distance, 1);
       if (this._isTunnel(c1, distance)) continue;
       const normal = horizontalNormal(center.baseTangent);
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
       for (const side of [-1, 1]) {
-        if (random() < 0.18) continue;
-        const setback = 28 + random() * 55;
-        const width = 22 + random() * 34;
-        const depth = 22 + random() * 30;
-        const height = 22 + Math.pow(random(), 1.6) * 105;
-        const position = center.position.clone().addScaledVector(normal, side * (c1.halfWidth + setback + width * 0.5));
-        if (this._distanceToRouteXZ(position) < c1.halfWidth + 10) continue;
-        position.y = height * 0.5 - 0.1;
-        const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.floor(random() * 4) * Math.PI * 0.5 + (random() - 0.5) * 0.1);
-        this._instance(position, vec(width, height, depth), yaw, palette[Math.floor(random() * palette.length)], 'box:building');
-        // lit window bands
-        const bands = 1 + Math.floor(random() * 3);
-        for (let bandIndex = 0; bandIndex < bands; bandIndex += 1) {
-          const band = position.clone();
-          band.y = 6 + random() * Math.max(6, height - 12);
-          this._instance(band, vec(width + 0.4, 0.8, depth + 0.4), yaw, windowColors[Math.floor(random() * windowColors.length)], 'box:buildingWindow');
-        }
-        // billboard facing the road on some buildings
-        if (random() < 0.16 && height > 30) {
-          const billboardTexts = [
-            ['月光タイヤ', 'GEKKO TIRES'], ['NIGHTFUEL', '夜間燃料'], ['ハイパー缶コーヒー', 'KAN COFFEE'],
-            ['首都高保険', 'EXPRESSWAY INS.'], ['ネオン電機', 'NEON DENKI'], ['湾岸ホテル', 'BAY HOTEL'],
-          ];
-          const [kanji, romaji] = billboardTexts[Math.floor(random() * billboardTexts.length)];
-          const colors = ['#7a1f4d', '#173f78', '#7a4d15', '#1f6a54'];
-          const board = this._makeSignMesh(`${kanji}|${romaji}`, colors[Math.floor(random() * colors.length)], 16, 6, true);
-          const boardPos = center.position.clone().addScaledVector(normal, side * (c1.halfWidth + setback - 2));
-          boardPos.y = height * 0.55 + 6;
-          board.position.copy(boardPos);
-          board.quaternion.copy(yawQuaternion(normal.clone().multiplyScalar(-side)));
-          this._addChunkMesh(board, boardPos);
-        }
-        // red blinker on tall towers
-        if (height > 95 && random() < 0.7) {
-          const blinker = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), this.materials.redBlink.clone());
-          blinker.position.copy(position);
-          blinker.position.y = height + 1;
-          this._addChunkMesh(blinker, blinker.position);
-          this.blinkers.push(blinker);
+        for (const row of [0, 1]) {
+          if (random() < (row ? 0.22 : 0.08)) continue;
+          const setback = row ? 64 + random() * 62 : 22 + random() * 26;
+          const width = row ? 26 + random() * 28 : 17 + random() * 18;
+          const depth = row ? 22 + random() * 26 : 16 + random() * 16;
+          const height = row ? 30 + Math.pow(random(), 1.5) * 108 : 18 + Math.pow(random(), 1.4) * 58;
+          const position = center.position.clone().addScaledVector(normal, side * (c1.halfWidth + setback + width * 0.5));
+          const radius = Math.max(width, depth) * 0.62;
+          if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+          const yaw = heading + (random() - 0.5) * 0.07 + (random() < 0.22 ? Math.PI * 0.5 : 0);
+          const roll = random();
+          const archetype = row
+            ? (roll < 0.34 ? 'slab' : roll < 0.58 ? 'stepped' : roll < 0.74 ? 'crown' : 'hotel')
+            : (roll < 0.28 ? 'slab' : roll < 0.46 ? 'narrow' : roll < 0.66 ? 'commercial' : roll < 0.85 ? 'hotel' : 'stepped');
+          this._buildStructure(random, position.x, position.z, yaw, archetype, width, height, depth, {
+            face: normal.clone().multiplyScalar(-side),
+          });
+          this._recordFootprint(position.x, position.z, radius);
         }
       }
     }
 
-    // K1 industrial: low sheds, canals, smokestacks with red blinkers.
+    // --- Route 9 Fukagawa: a lighter mixed row so the connector is not bare.
+    const r9 = this.routes.get('r9');
+    for (let distance = 200; distance < r9.length - 200; distance += 70) {
+      const center = this._sampleCenter(r9, distance, 1);
+      const normal = horizontalNormal(center.baseTangent);
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+      for (const side of [-1, 1]) {
+        if (random() < 0.4) continue;
+        const setback = 26 + random() * 60;
+        const width = 18 + random() * 22;
+        const depth = 16 + random() * 20;
+        const height = 14 + Math.pow(random(), 1.5) * 46;
+        const position = center.position.clone().addScaledVector(normal, side * (r9.halfWidth + setback + width * 0.5));
+        const radius = Math.max(width, depth) * 0.62;
+        if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+        const roll = random();
+        this._buildStructure(random, position.x, position.z, heading + (random() - 0.5) * 0.1,
+          roll < 0.4 ? 'slab' : roll < 0.6 ? 'hotel' : roll < 0.8 ? 'commercial' : 'narrow',
+          width, height, depth, { face: normal.clone().multiplyScalar(-side) });
+        this._recordFootprint(position.x, position.z, radius);
+      }
+    }
+
+    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers.
     const k1 = this.routes.get('k1');
-    for (let distance = 0; distance < k1.length; distance += 64) {
+    for (let distance = 0; distance < k1.length; distance += 56) {
       const center = this._sampleCenter(k1, distance, 1);
       const normal = horizontalNormal(center.baseTangent);
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
       for (const side of [-1, 1]) {
-        if (random() < 0.3) continue;
-        const setback = 26 + random() * 90;
-        const width = 26 + random() * 48;
-        const depth = 20 + random() * 34;
-        const height = 7 + random() * 14;
+        if (random() < 0.26) continue;
+        const setback = 24 + random() * 92;
+        const width = 26 + random() * 42;
+        const depth = 20 + random() * 30;
+        const height = 7 + random() * 12;
         const position = center.position.clone().addScaledVector(normal, side * (k1.halfWidth + setback + width * 0.5));
-        if (this._distanceToRouteXZ(position) < k1.halfWidth + 8) continue;
-        position.y = height * 0.5 - 0.1;
-        const yaw = new THREE.Quaternion().setFromAxisAngle(UP, Math.floor(random() * 4) * Math.PI * 0.5);
-        this._instance(position, vec(width, height, depth), yaw, palette[Math.floor(random() * palette.length)], 'box:shed');
-        if (random() < 0.12) {
+        const radius = Math.max(width, depth) * 0.6;
+        if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+        this._buildStructure(random, position.x, position.z, heading + (random() < 0.3 ? Math.PI * 0.5 : 0),
+          random() < 0.72 ? 'shed' : 'warehouse', width, height, depth,
+          { face: normal.clone().multiplyScalar(-side) });
+        this._recordFootprint(position.x, position.z, radius);
+        if (random() < 0.11) {
           const stackHeight = 34 + random() * 30;
           const stack = position.clone();
           stack.y = stackHeight * 0.5;
           this._instance(stack, vec(3.2, stackHeight, 3.2), null, null, 'box:concreteDark');
-          const blinker = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1), this.materials.redBlink.clone());
-          blinker.position.copy(position);
-          blinker.position.y = stackHeight + 0.8;
-          this._addChunkMesh(blinker, blinker.position);
-          this.blinkers.push(blinker);
+          this._instance(vec(position.x, stackHeight + 0.8, position.z), vec(1.1, 1.1, 1.1), null, null, 'box:redBlink');
         }
       }
     }
@@ -3136,14 +3440,18 @@ export class HighwayMap {
           this.blinkers.push(blinker);
         }
       }
-      if (random() < 0.3) {
+      if (random() < 0.32) {
         const setback = 90 + random() * 220;
-        const width = 40 + random() * 70;
-        const height = 10 + random() * 12;
+        const width = 40 + random() * 55;
+        const depth = 24 + random() * 26;
+        const height = 10 + random() * 10;
         const position = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback + width * 0.5));
-        if (this._distanceToRouteXZ(position) > wangan.halfWidth + 14) {
-          position.y = height * 0.5;
-          this._instance(position, vec(width, height, 24 + random() * 26), yawQuaternion(center.baseTangent), palette[Math.floor(random() * palette.length)], 'box:shed');
+        const radius = Math.max(width, depth) * 0.6;
+        if (this._canPlaceBuilding(position.x, position.z, radius)) {
+          const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+          this._buildStructure(random, position.x, position.z, heading, 'warehouse', width, height, depth,
+            { face: normal.clone().multiplyScalar(-landSide) });
+          this._recordFootprint(position.x, position.z, radius);
         }
       }
     }
@@ -3162,21 +3470,17 @@ export class HighwayMap {
     ];
     for (const cluster of clusters) {
       for (let i = 0; i < cluster.count; i += 1) {
-        const position = vec(
-          cluster.x + (random() - 0.5) * cluster.spread,
-          0,
-          cluster.z + (random() - 0.5) * cluster.spread * 0.6,
-        );
-        if (this._distanceToRouteXZ(position) < 60) continue;
-        const width = 30 + random() * 45;
+        const x = cluster.x + (random() - 0.5) * cluster.spread;
+        const z = cluster.z + (random() - 0.5) * cluster.spread * 0.6;
+        const width = 30 + random() * 42;
+        const depth = width * (0.7 + random() * 0.5);
         const height = 24 + Math.pow(random(), 1.4) * cluster.tall;
-        position.y = height * 0.5;
-        this._instance(position, vec(width, height, width * (0.7 + random() * 0.5)), null, 0x0e1119, 'box:building');
-        for (let band = 0; band < 2; band += 1) {
-          const bandPos = position.clone();
-          bandPos.y = 5 + random() * Math.max(5, height - 10);
-          this._instance(bandPos, vec(width + 0.4, 0.7, width * 0.8), null, random() < 0.6 ? 0x665a39 : 0x33445f, 'box:buildingWindow');
-        }
+        const radius = Math.max(width, depth) * 0.6;
+        if (!this._canPlaceBuilding(x, z, radius, 60)) continue;
+        const roll = random();
+        this._buildStructure(random, x, z, random() * Math.PI, roll < 0.5 ? 'slab' : roll < 0.8 ? 'stepped' : 'crown',
+          width, height, depth, {});
+        this._recordFootprint(x, z, radius);
       }
     }
 
