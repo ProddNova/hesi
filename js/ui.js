@@ -90,7 +90,7 @@ export class GameUI {
     const pad = largeCanvas ? 22 : 12;
     const scale = Math.min((w-pad*2)/Math.max(1,bounds.maxX-bounds.minX),(h-pad*2)/Math.max(1,bounds.maxZ-bounds.minZ));
     const tx = x => w/2+(x-(bounds.minX+bounds.maxX)/2)*scale;
-    const ty = z => h/2+(z-(bounds.minZ+bounds.maxZ)/2)*scale;
+    const ty = z => h/2-(z-(bounds.minZ+bounds.maxZ)/2)*scale; // +Z = north = up
     routes.forEach((r, idx) => {
       const pts = r.points || r;
       c.beginPath();
@@ -106,9 +106,9 @@ export class GameUI {
     });
     if (player) {
       const x=tx(player.x), y=ty(player.z);
-      // heading 0 faces +Z which is +y (down) on the canvas, so the up-drawn
-      // arrow needs a half-turn base rotation.
-      c.save(); c.translate(x,y); c.rotate(Math.PI-(player.heading ?? 0));
+      // North-up canvas (y = -z): heading 0 (+Z) points straight up, so the
+      // up-drawn arrow rotates by the heading directly.
+      c.save(); c.translate(x,y); c.rotate(player.heading ?? 0);
       c.fillStyle='#fff'; c.beginPath(); c.moveTo(0,-7);c.lineTo(5,5);c.lineTo(0,2);c.lineTo(-5,5);c.closePath();c.fill(); c.restore();
     }
   }
@@ -204,7 +204,7 @@ export class GameUI {
       if(pointers.size===2){const [a,b]=[...pointers.values()];pinchDist=Math.hypot(a.x-b.x,a.y-b.y);pinchZoom=this.mapView.zoom;}});
     canvas.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;e.preventDefault();
       const prev=pointers.get(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-      if(pointers.size===1&&this._mapRenderScale){this.mapView.followPlayer=false;this.mapView.cx-=(e.clientX-prev.x)*dpr/this._mapRenderScale;this.mapView.cz-=(e.clientY-prev.y)*dpr/this._mapRenderScale;this.renderPhoneMap();}
+      if(pointers.size===1&&this._mapRenderScale){this.mapView.followPlayer=false;this.mapView.cx-=(e.clientX-prev.x)*dpr/this._mapRenderScale;this.mapView.cz+=(e.clientY-prev.y)*dpr/this._mapRenderScale;this.renderPhoneMap();}
       else if(pointers.size===2){const [a,b]=[...pointers.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);this.mapView.zoom=Math.min(16,Math.max(.8,pinchZoom*d/Math.max(24,pinchDist)));this.renderPhoneMap();}});
     const up=e=>{if(!pointers.has(e.pointerId))return;pointers.delete(e.pointerId);
       const now=performance.now();
@@ -227,7 +227,7 @@ export class GameUI {
     else if(!view.cx&&!view.cz){view.cx=(b.minX+b.maxX)/2;view.cz=(b.minZ+b.maxZ)/2;}
     const baseScale=Math.min(w/Math.max(1,b.maxX-b.minX),h/Math.max(1,b.maxZ-b.minZ));
     const scale=baseScale*view.zoom;this._mapRenderScale=scale;
-    const tx=x=>w/2+(x-view.cx)*scale, ty=z=>h/2+(z-view.cz)*scale;
+    const tx=x=>w/2+(x-view.cx)*scale, ty=z=>h/2-(z-view.cz)*scale; // north-up
     for(const r of data.routes){
       const pts=r.points||[];if(!pts.length)continue;
       c.beginPath();pts.forEach((p,i)=>i?c.lineTo(tx(p.x),ty(p.z)):c.moveTo(tx(p.x),ty(p.z)));
@@ -244,7 +244,7 @@ export class GameUI {
     if(data.garage){const x=tx(data.garage.x),y=ty(data.garage.z);c.strokeStyle='#ff9a2e';c.lineWidth=2;c.strokeRect(x-6,y-6,12,12);c.fillStyle='#ff9a2e';c.font=`${fontPx}px monospace`;c.fillText('GARAGE',x+9,y+4);}
     if(player){
       const x=tx(player.x),y=ty(player.z);
-      c.save();c.translate(x,y);c.rotate(Math.PI-(player.heading??0));
+      c.save();c.translate(x,y);c.rotate(player.heading??0);
       c.fillStyle='#fff';c.strokeStyle='#05080e';c.lineWidth=2;
       c.beginPath();c.moveTo(0,-9);c.lineTo(6,7);c.lineTo(0,3);c.lineTo(-6,7);c.closePath();c.stroke();c.fill();c.restore();
     }
