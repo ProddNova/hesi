@@ -82,7 +82,9 @@ class ShutokoNights {
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
   buildWorld(){
+    const mapBuildStarted=performance.now();
     try{this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
     // union for continuous collision so barriers are solid at any speed.
