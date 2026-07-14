@@ -1,2 +1,3 @@
 node_modules/
 .devtests/shots/
+tools/cache/
