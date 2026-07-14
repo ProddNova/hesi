@@ -1,122 +1,113 @@
-[overlap-clearance] same-level overlap r9_1 d=1782 with ramp_25 d=748 plan -0.5 m, vertical 1.1 m at (3070, -851)
-[overlap-clearance] same-level overlap r9_1 d=1791 with ramp_25 d=739 plan -2.6 m, vertical 1.6 m at (3078, -855)
-[overlap-clearance] same-level overlap r9_1 d=1800 with ramp_25 d=731 plan -5.3 m, vertical 2.1 m at (3086, -859)
-[overlap-clearance] same-level overlap r9_1 d=1809 with ramp_25 d=722 plan -6.8 m, vertical 2.6 m at (3093, -864)
-[overlap-clearance] same-level overlap r9_1 d=1818 with ramp_25 d=714 plan -3.2 m, vertical 3.1 m at (3101, -869)
-[overlap-clearance] same-level overlap r1_2 d=1620 with r1_3 d=12010 plan -0.5 m, vertical 5.5 m at (-1585, -13690)
-[overlap-clearance] same-level overlap r1_3 d=12906 with ramp_12 d=344 plan -5.4 m, vertical 1.4 m at (-2204, -14268)
-[overlap-clearance] same-level overlap r6_0 d=1242 with ramp_18 d=345 plan -0.7 m, vertical 3.7 m at (1380, 135)
-[overlap-clearance] same-level overlap r6_0 d=1251 with ramp_18 d=354 plan -3.5 m, vertical 3.6 m at (1388, 139)
-[overlap-clearance] same-level overlap r6_0 d=1260 with ramp_18 d=362 plan -6.7 m, vertical 3.6 m at (1396, 143)
-[overlap-clearance] same-level overlap r6_0 d=1269 with ramp_18 d=371 plan -4.9 m, vertical 3.6 m at (1404, 147)
-[overlap-clearance] same-level overlap r6_0 d=1269 with ramp_21 d=375 plan -1.2 m, vertical 5.3 m at (1404, 147)
-[overlap-clearance] same-level overlap r6_0 d=1278 with ramp_18 d=379 plan -1.3 m, vertical 3.6 m at (1412, 151)
-[overlap-clearance] same-level overlap k5_1 d=234 with wangan_1 d=31011 plan -5.8 m, vertical 3.8 m at (-8215, -24287)
-[overlap-clearance] same-level overlap k5_1 d=234 with ramp_41 d=629 plan -7.7 m, vertical 3.8 m at (-8215, -24287)
-[overlap-clearance] same-level overlap k5_1 d=243 with wangan_1 d=31009 plan -8.4 m, vertical 4.3 m at (-8221, -24280)
-[overlap-clearance] same-level overlap k5_1 d=243 with ramp_41 d=627 plan -2.2 m, vertical 4.3 m at (-8221, -24280)
-[overlap-clearance] same-level overlap ramp_1 d=333 with shibaura_pa_access d=695 plan -4.8 m, vertical 5.5 m at (-1134, -3818)
-[overlap-clearance] same-level overlap daikoku_pa_access d=1881 with k5_0 d=3416 plan -3.4 m, vertical 4.2 m at (-8146, -24333)
-[overlap-clearance] same-level overlap daikoku_pa_access d=1890 with k5_0 d=3418 plan -3.9 m, vertical 3.9 m at (-8149, -24341)
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.28 m over 2 m @74
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.30 m over 2 m @76
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.32 m over 2 m @78
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.33 m over 2 m @80
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.33 m over 2 m @82
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.33 m over 2 m @84
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.33 m over 2 m @86
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.32 m over 2 m @88
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.30 m over 2 m @90
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step 0.27 m over 2 m @92
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.28 m over 2 m @114
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.31 m over 2 m @116
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.34 m over 2 m @118
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.35 m over 2 m @120
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.36 m over 2 m @122
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.37 m over 2 m @124
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.36 m over 2 m @126
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.35 m over 2 m @128
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.32 m over 2 m @130
-[ramp-drive] diverge k5_1@3383 -> ramp_17 [branch]: height step -0.29 m over 2 m @132
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.28 m over 2 m @704
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.32 m over 2 m @706
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.36 m over 2 m @708
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.40 m over 2 m @710
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.42 m over 2 m @712
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.44 m over 2 m @714
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.46 m over 2 m @716
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.46 m over 2 m @718
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.46 m over 2 m @720
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.45 m over 2 m @722
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.43 m over 2 m @724
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.41 m over 2 m @726
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.38 m over 2 m @728
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.34 m over 2 m @730
-[ramp-drive] merge ramp_17 -> k1_1@5105 [ramp end]: height step -0.30 m over 2 m @732
+[overlap-clearance] same-level overlap r9_1 d=1791 with ramp_25 d=729 plan -3.3 m, vertical 1.7 m at (3080, -856)
+[overlap-clearance] same-level overlap r9_1 d=1800 with ramp_25 d=720 plan -6.2 m, vertical 2.2 m at (3088, -861)
+[overlap-clearance] same-level overlap r9_1 d=1809 with ramp_25 d=712 plan -5.4 m, vertical 2.8 m at (3095, -866)
+[overlap-clearance] same-level overlap r9_1 d=1818 with ramp_25 d=703 plan -1.5 m, vertical 3.3 m at (3103, -872)
+[overlap-clearance] same-level overlap r1_3 d=12897 with ramp_12 d=342 plan -5.5 m, vertical 1.5 m at (-2203, -14265)
+[overlap-clearance] same-level overlap r1_3 d=12906 with ramp_12 d=350 plan -5.2 m, vertical 1.3 m at (-2206, -14273)
+[overlap-clearance] same-level overlap r6_0 d=1242 with ramp_18 d=346 plan -1.3 m, vertical 3.6 m at (1382, 135)
+[overlap-clearance] same-level overlap r6_0 d=1251 with ramp_18 d=355 plan -4.0 m, vertical 3.6 m at (1390, 139)
+[overlap-clearance] same-level overlap r6_0 d=1260 with ramp_18 d=364 plan -7.3 m, vertical 3.6 m at (1398, 144)
+[overlap-clearance] same-level overlap r6_0 d=1269 with ramp_18 d=372 plan -4.3 m, vertical 3.6 m at (1406, 148)
+[overlap-clearance] same-level overlap r6_0 d=1269 with ramp_21 d=376 plan -0.9 m, vertical 5.2 m at (1406, 148)
+[overlap-clearance] same-level overlap r6_0 d=1278 with ramp_18 d=380 plan -0.7 m, vertical 3.6 m at (1414, 152)
+[overlap-clearance] same-level overlap k5_1 d=234 with wangan_1 d=31009 plan -5.9 m, vertical 3.8 m at (-8215, -24287)
+[overlap-clearance] same-level overlap k5_1 d=234 with ramp_41 d=629 plan -7.9 m, vertical 3.8 m at (-8215, -24287)
+[overlap-clearance] same-level overlap k5_1 d=243 with wangan_1 d=31007 plan -8.4 m, vertical 4.3 m at (-8221, -24280)
+[overlap-clearance] same-level overlap k5_1 d=243 with ramp_41 d=627 plan -2.1 m, vertical 4.3 m at (-8221, -24280)
+[overlap-clearance] same-level overlap daikoku_pa_access d=1881 with k5_0 d=3414 plan -3.8 m, vertical 4.2 m at (-8146, -24333)
+[overlap-clearance] same-level overlap daikoku_pa_access d=1890 with k5_0 d=3417 plan -3.5 m, vertical 3.9 m at (-8149, -24342)
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.27 m over 2 m @74
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.29 m over 2 m @76
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.31 m over 2 m @78
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.33 m over 2 m @80
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.33 m over 2 m @82
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.33 m over 2 m @84
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.33 m over 2 m @86
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.32 m over 2 m @88
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.31 m over 2 m @90
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.29 m over 2 m @92
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.26 m over 2 m @112
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.30 m over 2 m @114
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.34 m over 2 m @116
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.36 m over 2 m @118
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.37 m over 2 m @120
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.37 m over 2 m @122
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.36 m over 2 m @124
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.32 m over 2 m @126
+[ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step -0.29 m over 2 m @128
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.28 m over 2 m @702
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.33 m over 2 m @704
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.39 m over 2 m @706
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.42 m over 2 m @708
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.42 m over 2 m @710
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.38 m over 2 m @712
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.46 m over 2 m @714
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.48 m over 2 m @716
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.49 m over 2 m @718
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.48 m over 2 m @720
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.46 m over 2 m @722
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.42 m over 2 m @724
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.36 m over 2 m @726
+[ramp-drive] merge ramp_17 -> k1_1@5100 [ramp end]: height step -0.30 m over 2 m @728
 [ramp-drive] diverge r6_3@4 -> ramp_27 [branch]: height step -0.27 m over 2 m @56
 [ramp-drive] diverge r6_3@4 -> ramp_27 [branch]: height step -0.28 m over 2 m @58
-[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.45 m over 2 m @2
-[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.46 m over 2 m @4
-[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.47 m over 2 m @6
-[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.47 m over 2 m @8
-[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.46 m over 2 m @10
-[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.45 m over 2 m @12
+[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.44 m over 2 m @2
+[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.45 m over 2 m @4
+[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.46 m over 2 m @6
+[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.46 m over 2 m @8
+[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.45 m over 2 m @10
+[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.44 m over 2 m @12
 [ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.43 m over 2 m @14
 [ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.39 m over 2 m @16
-[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.32 m over 2 m @18
-[ramp-drive] continuation ramp_39 -> ramp_46: transfer jump 8.0 m
-[ramp-drive] diverge wangan_1@30421 -> daikoku_pa_access: transfer jump 8.6 m
-[ramp-drive] merge daikoku_pa_access -> k5_1@509 [ramp end]: height step 0.28 m over 2 m @1941
-[smoothness] ramp_17: height discontinuity 0.16 m @78
+[ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.33 m over 2 m @18
+[ramp-drive] continuation ramp_39 -> ramp_46: transfer jump 8.2 m
+[ramp-drive] diverge wangan_1@30419 -> daikoku_pa_access: transfer jump 8.6 m
+[ramp-drive] merge daikoku_pa_access -> k5_1@509 [ramp end]: height step 0.28 m over 2 m @1940
 [smoothness] ramp_17: height discontinuity 0.16 m @79
-[smoothness] ramp_17: height discontinuity 0.17 m @80
+[smoothness] ramp_17: height discontinuity 0.16 m @80
 [smoothness] ramp_17: height discontinuity 0.17 m @81
 [smoothness] ramp_17: height discontinuity 0.17 m @82
 [smoothness] ramp_17: height discontinuity 0.17 m @83
 [smoothness] ramp_17: height discontinuity 0.17 m @84
-[smoothness] ramp_17: height discontinuity 0.16 m @85
-[smoothness] ramp_17: height discontinuity 0.16 m @86
-[smoothness] ramp_17: height discontinuity 0.16 m @116
-[smoothness] ramp_17: height discontinuity 0.17 m @117
-[smoothness] ramp_17: height discontinuity 0.17 m @118
+[smoothness] ramp_17: height discontinuity 0.17 m @85
+[smoothness] ramp_17: height discontinuity 0.17 m @86
+[smoothness] ramp_17: height discontinuity 0.16 m @87
+[smoothness] ramp_17: height discontinuity 0.17 m @115
+[smoothness] ramp_17: height discontinuity 0.17 m @116
+[smoothness] ramp_17: height discontinuity 0.18 m @117
+[smoothness] ramp_17: height discontinuity 0.18 m @118
 [smoothness] ramp_17: height discontinuity 0.18 m @119
-[smoothness] ramp_17: height discontinuity 0.18 m @120
+[smoothness] ramp_17: height discontinuity 0.19 m @120
 [smoothness] ramp_17: height discontinuity 0.18 m @121
 [smoothness] ramp_17: height discontinuity 0.18 m @122
 [smoothness] ramp_17: height discontinuity 0.18 m @123
 [smoothness] ramp_17: height discontinuity 0.18 m @124
-[smoothness] ramp_17: height discontinuity 0.18 m @125
-[smoothness] ramp_17: height discontinuity 0.18 m @126
-[smoothness] ramp_17: height discontinuity 0.17 m @127
-[smoothness] ramp_17: height discontinuity 0.17 m @128
-[smoothness] ramp_17: height discontinuity 0.17 m @129
-[smoothness] ramp_17: height discontinuity 0.17 m @706
-[smoothness] ramp_17: height discontinuity 0.18 m @707
-[smoothness] ramp_17: height discontinuity 0.19 m @708
-[smoothness] ramp_17: height discontinuity 0.20 m @709
-[smoothness] ramp_17: height discontinuity 0.20 m @710
-[smoothness] ramp_17: height discontinuity 0.21 m @711
-[smoothness] ramp_17: height discontinuity 0.22 m @712
-[smoothness] ramp_17: height discontinuity 0.22 m @713
+[smoothness] ramp_17: height discontinuity 0.17 m @125
+[smoothness] ramp_17: height discontinuity 0.17 m @704
+[smoothness] ramp_17: height discontinuity 0.19 m @705
+[smoothness] ramp_17: height discontinuity 0.20 m @706
+[smoothness] ramp_17: height discontinuity 0.21 m @707
+[smoothness] ramp_17: height discontinuity 0.21 m @708
+[smoothness] ramp_17: height discontinuity 0.22 m @709
+[smoothness] ramp_17: height discontinuity 0.21 m @710
+[smoothness] ramp_17: height discontinuity 0.20 m @711
+[smoothness] ramp_17: height discontinuity 0.18 m @712
+[smoothness] ramp_17: height discontinuity 0.24 m @713
 [smoothness] ramp_17: height discontinuity 0.22 m @714
 [smoothness] ramp_17: height discontinuity 0.23 m @715
-[smoothness] ramp_17: height discontinuity 0.23 m @716
-[smoothness] ramp_17: height discontinuity 0.23 m @717
-[smoothness] ramp_17: height discontinuity 0.23 m @718
-[smoothness] ramp_17: height discontinuity 0.23 m @719
-[smoothness] ramp_17: height discontinuity 0.23 m @720
-[smoothness] ramp_17: height discontinuity 0.23 m @721
+[smoothness] ramp_17: height discontinuity 0.24 m @716
+[smoothness] ramp_17: height discontinuity 0.24 m @717
+[smoothness] ramp_17: height discontinuity 0.25 m @718
+[smoothness] ramp_17: height discontinuity 0.24 m @719
+[smoothness] ramp_17: height discontinuity 0.24 m @720
+[smoothness] ramp_17: height discontinuity 0.24 m @721
 [smoothness] ramp_17: height discontinuity 0.22 m @722
 [smoothness] ramp_17: height discontinuity 0.22 m @723
-[smoothness] ramp_17: height discontinuity 0.21 m @724
-[smoothness] ramp_17: height discontinuity 0.21 m @725
-[smoothness] ramp_17: height discontinuity 0.20 m @726
-[smoothness] ramp_17: height discontinuity 0.19 m @727
-[smoothness] ramp_17: height discontinuity 0.18 m @728
-[smoothness] ramp_17: height discontinuity 0.17 m @729
-[smoothness] ramp_17: height discontinuity 0.16 m @730
+[smoothness] ramp_17: height discontinuity 0.20 m @724
+[smoothness] ramp_17: height discontinuity 0.19 m @725
+[smoothness] ramp_17: height discontinuity 0.17 m @726
 [smoothness] ramp_46: height discontinuity 0.22 m @1
-[smoothness] ramp_46: height discontinuity 0.23 m @2
+[smoothness] ramp_46: height discontinuity 0.22 m @2
 [smoothness] ramp_46: height discontinuity 0.23 m @3
 [smoothness] ramp_46: height discontinuity 0.23 m @4
 [smoothness] ramp_46: height discontinuity 0.23 m @5
@@ -125,12 +116,12 @@
 [smoothness] ramp_46: height discontinuity 0.23 m @8
 [smoothness] ramp_46: height discontinuity 0.23 m @9
 [smoothness] ramp_46: height discontinuity 0.23 m @10
-[smoothness] ramp_46: height discontinuity 0.23 m @11
+[smoothness] ramp_46: height discontinuity 0.22 m @11
 [smoothness] ramp_46: height discontinuity 0.22 m @12
 [smoothness] ramp_46: height discontinuity 0.22 m @13
 [smoothness] ramp_46: height discontinuity 0.21 m @14
 [smoothness] ramp_46: height discontinuity 0.20 m @15
 [smoothness] ramp_46: height discontinuity 0.19 m @16
-[smoothness] ramp_46: height discontinuity 0.17 m @17
-[smoothness] daikoku_pa_access: height discontinuity 0.23 m @843
-[smoothness] daikoku_pa_access: height discontinuity 0.38 m @844
+[smoothness] ramp_46: height discontinuity 0.18 m @17
+[smoothness] daikoku_pa_access: height discontinuity 0.30 m @843
+[smoothness] daikoku_pa_access: height discontinuity 0.29 m @844

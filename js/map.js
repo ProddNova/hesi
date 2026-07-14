@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import ROUTE_DATA from '../data/routes.js';
+// Offline-faired centrelines (tools/build-smoothed-routes.mjs): same schema
+// as data/routes.js but with the extractor's chord-polygon noise removed in
+// XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
+// any extractor run).
+import ROUTE_DATA from '../data/routes-smoothed.js';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from

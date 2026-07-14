@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Centreline debug overlay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161a; color: #dde; font: 13px/1.4 ui-monospace, Consolas, monospace; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; padding: 8px 12px; background: #1d2026ee; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; z-index: 2; }
+  #bar label { user-select: none; cursor: pointer; }
+  #legend { position: fixed; bottom: 10px; left: 12px; background: #1d2026cc; padding: 8px 12px; border-radius: 6px; z-index: 2; }
+  .sw { display: inline-block; width: 22px; height: 3px; vertical-align: middle; margin-right: 6px; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  select, button { background: #2a2e36; color: #dde; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>Centreline debug overlay</b>
+  <select id="route"></select>
+  <label><input type="checkbox" id="lyRaw" checked> raw OSM polyline + points</label>
+  <label><input type="checkbox" id="lyCur" checked> current spline (through raw)</label>
+  <label><input type="checkbox" id="lyPro" checked> processed centreline</label>
+  <label><input type="checkbox" id="lyCurv" checked> curvature intensity</label>
+  <label><input type="checkbox" id="lyCurvOld"> curvature of current</label>
+  <button id="fit">fit route</button>
+  <span id="status"></span>
+</div>
+<div id="legend">
+  <div><span class="sw" style="background:#888"></span>raw OSM polyline (dots: points)</div>
+  <div><span class="sw" style="background:#e08020"></span>current spline — centripetal CR through raw</div>
+  <div><span class="sw" style="background:#27c65a"></span>processed centreline (routes-smoothed)</div>
+  <div><span class="sw" style="background:linear-gradient(90deg,#3355ff,#14161a,#ff4444)"></span>curvature: blue right / red left, brighter = tighter</div>
+</div>
+<canvas id="cv"></canvas>
+<script>
+(async () => {
+  const raw = await (await fetch('../data/routes.json')).json();
+  const smooth = await (await fetch('../data/routes-smoothed.json')).json();
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const params = new URLSearchParams(location.search);
+
+  // ---------------- centripetal Catmull-Rom (Barry–Goldman) ----------------
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[2] - b[2]);
+  function crSample(points, closed, step = 3) {
+    const P = points;
+    const n = P.length;
+    if (n < 2) return [];
+    const out = [];
+    const idx = (i) => closed ? ((i % n) + n) % n : Math.max(0, Math.min(n - 1, i));
+    const spans = closed ? n : n - 1;
+    for (let s = 0; s < spans; s += 1) {
+      const p0 = P[idx(s - 1)]; const p1 = P[idx(s)]; const p2 = P[idx(s + 1)]; const p3 = P[idx(s + 2)];
+      const t0 = 0;
+      const t1 = t0 + Math.sqrt(dist(p0, p1)) || t0 + 1e-3;
+      const t2 = t1 + Math.sqrt(dist(p1, p2)) || t1 + 1e-3;
+      const t3 = t2 + Math.sqrt(dist(p2, p3)) || t2 + 1e-3;
+      const len = dist(p1, p2);
+      const steps = Math.max(2, Math.ceil(len / step));
+      for (let k = 0; k < steps; k += 1) {
+        const t = t1 + ((t2 - t1) * k) / steps;
+        const lerp = (a, b, ta, tb) => {
+          const f = tb - ta < 1e-9 ? 0 : (t - ta) / (tb - ta);
+          return [a[0] + (b[0] - a[0]) * f, 0, a[2] + (b[2] - a[2]) * f];
+        };
+        const A1 = lerp(p0, p1, t0, t1); const A2 = lerp(p1, p2, t1, t2); const A3 = lerp(p2, p3, t2, t3);
+        const B1 = lerp(A1, A2, t0, t2); const B2 = lerp(A2, A3, t1, t3);
+        out.push(lerp(B1, B2, t1, t2));
+      }
+    }
+    out.push([...P[closed ? 0 : n - 1]]);
+    return out;
+  }
+  function curvature(samples, k = 4) {
+    const kap = new Array(samples.length).fill(0);
+    for (let i = k; i < samples.length - k; i += 1) {
+      const p0 = samples[i - k]; const p1 = samples[i]; const p2 = samples[i + k];
+      const a = dist(p0, p1); const b = dist(p1, p2); const c = dist(p0, p2);
+      if (a < 1e-9 || b < 1e-9 || c < 1e-9) continue;
+      const cross = (p1[0] - p0[0]) * (p2[2] - p1[2]) - (p1[2] - p0[2]) * (p2[0] - p1[0]);
+      kap[i] = (2 * cross) / (a * b * c);
+    }
+    return kap;
+  }
+
+  // ---------------------------- view state ----------------------------
+  const view = { cx: 0, cz: 0, scale: 1 }; // scale: px per metre
+  const routeSel = document.getElementById('route');
+  for (const r of raw.routes) {
+    const o = document.createElement('option');
+    o.value = r.id;
+    o.textContent = `${r.id} — ${r.name || ''}`;
+    routeSel.appendChild(o);
+  }
+  routeSel.value = params.get('route') || 'r11_0';
+
+  let cache = null;
+  function routeData() {
+    const id = routeSel.value;
+    if (cache && cache.id === id) return cache;
+    const r = raw.routes.find((x) => x.id === id);
+    const s = smooth.routes.find((x) => x.id === id);
+    const cur = crSample(r.points, !!r.closed);
+    const pro = crSample(s.points, !!s.closed);
+    cache = { id, r, s, cur, pro, kCur: curvature(cur), kPro: curvature(pro) };
+    return cache;
+  }
+
+  function fitRoute() {
+    const { r } = routeData();
+    let minX = Infinity; let maxX = -Infinity; let minZ = Infinity; let maxZ = -Infinity;
+    for (const p of r.points) {
+      minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+      minZ = Math.min(minZ, p[2]); maxZ = Math.max(maxZ, p[2]);
+    }
+    view.cx = (minX + maxX) / 2; view.cz = (minZ + maxZ) / 2;
+    view.scale = Math.min(cv.width / (maxX - minX + 80), cv.height / (maxZ - minZ + 80));
+    draw();
+  }
+
+  const px = (p) => [(p[0] - view.cx) * view.scale + cv.width / 2, (p[2] - view.cz) * view.scale + cv.height / 2];
+
+  function polyline(samples, color, width) {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    let started = false;
+    for (const p of samples) {
+      const [x, y] = px(p);
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  function draw() {
+    cv.width = window.innerWidth; cv.height = window.innerHeight;
+    ctx.fillStyle = '#14161a'; ctx.fillRect(0, 0, cv.width, cv.height);
+    const { r, s, cur, pro, kCur, kPro } = routeData();
+
+    // curvature halo (under the lines)
+    const halo = (samples, kap) => {
+      for (let i = 0; i < samples.length; i += 2) {
+        const k = kap[i];
+        const mag = Math.min(1, Math.abs(k) * 600);
+        if (mag < 0.04) continue;
+        const [x, y] = px(samples[i]);
+        if (x < -20 || y < -20 || x > cv.width + 20 || y > cv.height + 20) continue;
+        ctx.fillStyle = k > 0 ? `rgba(255,68,68,${(0.15 + 0.55 * mag).toFixed(2)})` : `rgba(80,110,255,${(0.15 + 0.55 * mag).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(x, y, 2 + 7 * mag, 0, Math.PI * 2); ctx.fill();
+      }
+    };
+    if (document.getElementById('lyCurvOld').checked) halo(cur, kCur);
+    if (document.getElementById('lyCurv').checked) halo(pro, kPro);
+
+    if (document.getElementById('lyRaw').checked) {
+      polyline(r.points, '#777', 1.2);
+      ctx.fillStyle = '#ccc';
+      for (const p of r.points) {
+        const [x, y] = px(p);
+        if (x < 0 || y < 0 || x > cv.width || y > cv.height) continue;
+        ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, view.scale * 0.35), 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    if (document.getElementById('lyCur').checked) polyline(cur, '#e08020', 1.8);
+    if (document.getElementById('lyPro').checked) polyline(pro, '#27c65a', 1.8);
+
+    // scale bar
+    const metres = Math.pow(10, Math.floor(Math.log10(120 / view.scale)));
+    ctx.strokeStyle = '#dde'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cv.width - 40 - metres * view.scale, cv.height - 24); ctx.lineTo(cv.width - 40, cv.height - 24); ctx.stroke();
+    ctx.fillStyle = '#dde'; ctx.textAlign = 'right';
+    ctx.fillText(`${metres} m`, cv.width - 40, cv.height - 32);
+    document.getElementById('status').textContent =
+      `${r.id}: raw ${r.points.length} pts / processed ${s.points.length} pts · ${Math.round(r.length)} m`;
+  }
+
+  // pan / zoom
+  let drag = null;
+  cv.addEventListener('mousedown', (e) => { drag = { x: e.clientX, y: e.clientY }; });
+  window.addEventListener('mouseup', () => { drag = null; });
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    view.cx -= (e.clientX - drag.x) / view.scale;
+    view.cz -= (e.clientY - drag.y) / view.scale;
+    drag = { x: e.clientX, y: e.clientY };
+    draw();
+  });
+  cv.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const f = e.deltaY < 0 ? 1.25 : 0.8;
+    view.scale *= f;
+    draw();
+  }, { passive: false });
+  routeSel.addEventListener('change', fitRoute);
+  for (const id of ['lyRaw', 'lyCur', 'lyPro', 'lyCurv', 'lyCurvOld']) {
+    document.getElementById(id).addEventListener('change', draw);
+  }
+  document.getElementById('fit').addEventListener('click', fitRoute);
+  window.addEventListener('resize', draw);
+
+  cv.width = window.innerWidth; cv.height = window.innerHeight;
+  if (params.get('cx')) {
+    view.cx = Number(params.get('cx'));
+    view.cz = Number(params.get('cz'));
+    view.scale = cv.width / Number(params.get('m') || 500);
+    for (const [k, el] of [['raw', 'lyRaw'], ['cur', 'lyCur'], ['pro', 'lyPro'], ['curv', 'lyCurv'], ['curvold', 'lyCurvOld']]) {
+      if (params.has(k)) document.getElementById(el).checked = params.get(k) !== '0';
+    }
+    draw();
+  } else {
+    fitRoute();
+  }
+})();
+</script>
+</body>
+</html>
