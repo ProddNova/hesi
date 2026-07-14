@@ -5,11 +5,13 @@
  */
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(ROOT, '.devtests', 'shots');
+await mkdir(OUT, { recursive: true });
 const SUFFIX = process.argv[2] ? `-${process.argv[2]}` : '';
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 
@@ -33,8 +35,12 @@ await context.route('https://cdn.jsdelivr.net/**', async (route) => {
 });
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());
+page.on('console', (message) => {
+  if (message.type() === 'error') console.error('browser:', message.text());
+});
+page.on('pageerror', (error) => console.error('pageerror:', String(error)));
 await page.goto(`http://127.0.0.1:${port}/`);
-await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 30000 });
+await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 60000 });
 await page.tap('#new-game-button');
 await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeout: 8000 });
 await page.evaluate(() => window.shutoko.exitGarage());
@@ -49,6 +55,22 @@ const spots = [
   { name: 'wangan-dashes', route: 'wangan_1', frac: 0.22, back: 24, up: 5.5, pitch: -0.22 },
 ];
 for (const spot of spots) {
+  const chaseMissing = await page.evaluate((s) => {
+    const g = window.shutoko;
+    let route;
+    try { route = g.map.getRoute(s.route); } catch { return s.route; }
+    if (g.debug.noclip) g.setNoclip(false);
+    const d = s.d ?? route.length * s.frac;
+    const lane = g.map.sampleLane(route.id, d, 0, 1);
+    g.physics.setPosition(lane.position.x, lane.position.y + 0.6, lane.position.z, lane.heading);
+    g.physics.setSpeed(0);
+    g.snapDrivingCamera();
+    return null;
+  }, spot);
+  if (!chaseMissing) {
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: join(OUT, `M-${spot.name}-chase${SUFFIX}.png`) });
+  }
   const missing = await page.evaluate((s) => {
     const g = window.shutoko;
     let route;
@@ -66,7 +88,7 @@ for (const spot of spots) {
   if (missing) { console.log(`SKIP ${spot.name}: no route ${missing}`); continue; }
   await page.waitForTimeout(900);
   await page.screenshot({ path: join(OUT, `M-${spot.name}${SUFFIX}.png`) });
-  console.log(`shot M-${spot.name}${SUFFIX}.png`);
+  console.log(`shot M-${spot.name}-chase${SUFFIX}.png + M-${spot.name}${SUFFIX}.png`);
 }
 await browser.close();
 server.close();

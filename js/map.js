@@ -2593,40 +2593,53 @@ export class HighwayMap {
    */
   _prepareRenderFrames(route) {
     const step = route.kind === 'service' ? 14 : (route.kind === 'ramp' ? 16 : (route.kind === 'loop' ? 24 : 30));
-    const MAX_VERTICAL = 0.045;
-    const MAX_HORIZONTAL = 0.18;
-    const MIN_SEGMENT = 1.6;
-    // Below this span, keep splitting only for VERTICAL error (the physics
-    // height is what the car rides) plus a loose lateral cap for the tight
-    // synthetic turnaround loops — plan faceting finer than ~8 m reads
-    // smooth anyway and segments cost barrier probes.
-    const FINE_SPAN = 8;
-    const chordError = (a, b, mid) => {
+    const MAX_VERTICAL = 0.035;
+    const MAX_LATERAL = 0.3;
+    const MAX_TANGENT_ANGLE = THREE.MathUtils.degToRad(3);
+    const MAX_SEGMENT = 24;
+    const MIN_SEGMENT = 1.5;
+    const spanError = (a, b, samples) => {
       let vertical = 0;
-      let horizontal = 0;
-      for (const side of [-1, 0, 1]) {
-        const pa = this._deckPoint(a, side * a.half);
-        const pb = this._deckPoint(b, side * b.half);
-        const pm = this._deckPoint(mid, side * mid.half);
-        const chord = pa.lerp(pb, 0.5);
-        vertical = Math.max(vertical, Math.abs(pm.y - chord.y));
-        horizontal = Math.max(horizontal, Math.hypot(pm.x - chord.x, pm.z - chord.z));
+      let lateral = 0;
+      const startPoints = [-1, 0, 1].map((side) => this._deckPoint(a, side * a.half));
+      const endPoints = [-1, 0, 1].map((side) => this._deckPoint(b, side * b.half));
+      for (const sample of samples) {
+        for (let track = 0; track < 3; track += 1) {
+          const side = track - 1;
+          const analytic = this._deckPoint(sample.frame, side * sample.frame.half);
+          const chord = startPoints[track].clone().lerp(endPoints[track], sample.t);
+          vertical = Math.max(vertical, Math.abs(analytic.y - chord.y));
+          lateral = Math.max(lateral, Math.hypot(analytic.x - chord.x, analytic.z - chord.z));
+        }
       }
-      return { vertical, horizontal };
+      return { vertical, lateral };
     };
+    const tangentAngle = (a, b) => Math.acos(clamp(a.tangent.dot(b.tangent), -1, 1));
     const frames = route.renderFrames;
     frames.length = 0;
-    const refine = (a, b, depth) => {
+    const refine = (a, b, depth, knownMid = null) => {
       const span = b.distance - a.distance;
-      if (depth <= 0 || span < MIN_SEGMENT * 2) return;
-      const mid = this._frameAt(route, (a.distance + b.distance) / 2);
-      mid.distance = (a.distance + b.distance) / 2; // keep monotonic past a closed wrap
-      const error = chordError(a, b, mid);
-      const maxHorizontal = span >= FINE_SPAN ? MAX_HORIZONTAL : 1.0;
-      if (error.vertical <= MAX_VERTICAL && error.horizontal <= maxHorizontal) return;
-      refine(a, mid, depth - 1);
+      if (depth <= 0 || span <= MIN_SEGMENT * 2) return;
+      const samples = [0.25, 0.5, 0.75].map((t) => {
+        const distance = a.distance + span * t;
+        const frame = t === 0.5 && knownMid ? knownMid : this._frameAt(route, distance);
+        frame.distance = distance; // keep monotonic across a closed-route wrap
+        return { t, frame };
+      });
+      const error = spanError(a, b, samples);
+      const tangentSamples = [a, ...samples.map((sample) => sample.frame), b];
+      let angle = tangentAngle(a, b);
+      for (let i = 1; i < tangentSamples.length; i += 1) {
+        angle = Math.max(angle, tangentAngle(tangentSamples[i - 1], tangentSamples[i]));
+      }
+      if (span <= MAX_SEGMENT
+        && error.vertical <= MAX_VERTICAL
+        && error.lateral <= MAX_LATERAL
+        && angle <= MAX_TANGENT_ANGLE) return;
+      const mid = samples[1].frame;
+      refine(a, mid, depth - 1, samples[0].frame);
       frames.push(mid);
-      refine(mid, b, depth - 1);
+      refine(mid, b, depth - 1, samples[2].frame);
     };
     const segmentCount = Math.max(3, Math.ceil(route.length / step));
     let previous = null;
@@ -2635,7 +2648,7 @@ export class HighwayMap {
       const isWrap = route.closed && i === segmentCount;
       const frame = this._frameAt(route, isWrap ? 0 : distance);
       if (isWrap) frame.distance = route.length;
-      if (previous) refine(previous, frame, 5);
+      if (previous) refine(previous, frame, 7);
       if (!isWrap && i < segmentCount + (route.closed ? 0 : 1)) frames.push(frame);
       previous = frame;
     }
@@ -2679,10 +2692,21 @@ export class HighwayMap {
       const la = lateralAt(a);
       const lb = lateralAt(b);
       if (la === null || lb === null) continue;
-      if (Math.abs(la) + halfWidth > a.half - 0.3 || Math.abs(lb) + halfWidth > b.half - 0.3) continue;
       const span = Math.max(segEnd - segStart, EPSILON);
-      const t0 = (lo - segStart) / span;
-      const t1 = (hi - segStart) / span;
+      let t0 = (lo - segStart) / span;
+      let t1 = (hi - segStart) / span;
+      // A lane boundary can enter/leave the paved deck during a width taper.
+      // Clip at that exact crossing instead of discarding this entire render
+      // span merely because one endpoint is too narrow.
+      const clearanceA = a.half - 0.3 - halfWidth - Math.abs(la);
+      const clearanceB = b.half - 0.3 - halfWidth - Math.abs(lb);
+      if (clearanceA < 0 && clearanceB < 0) continue;
+      if ((clearanceA < 0) !== (clearanceB < 0)) {
+        const crossing = clamp(clearanceA / (clearanceA - clearanceB), 0, 1);
+        if (clearanceA < 0) t0 = Math.max(t0, crossing);
+        else t1 = Math.min(t1, crossing);
+      }
+      if (t1 - t0 < 1e-4) continue;
       const innerA = this._deckPoint(a, la - halfWidth, lift);
       const outerA = this._deckPoint(a, la + halfWidth, lift);
       const innerB = this._deckPoint(b, lb - halfWidth, lift);
@@ -2693,6 +2717,19 @@ export class HighwayMap {
       const outer1 = outerA.lerp(outerB, t1);
       const bucket = this._bucket(TMP_A.copy(inner0).lerp(outer1, 0.5), materialName);
       this._pushQuad(bucket, outer0, outer1, inner1, inner0); // up-facing, like the deck
+    }
+  }
+
+  /** Paint dashes from one route-absolute phase; frames/chunks never reset it. */
+  _paintDashedStrip(route, materialName, lateralAt, width, period, dashLength, phase = 0) {
+    const first = Math.ceil((-dashLength * 0.5 - phase) / period);
+    const last = Math.floor((route.length + dashLength * 0.5 - phase) / period);
+    for (let index = first; index <= last; index += 1) {
+      const center = phase + index * period;
+      this._paintStrip(route, materialName,
+        Math.max(0, center - dashLength * 0.5),
+        Math.min(route.length, center + dashLength * 0.5),
+        lateralAt, width);
     }
   }
 
@@ -2988,11 +3025,8 @@ export class HighwayMap {
     } else {
       for (let lane = 1; lane < route.lanes; lane += 1) dividerOffsets.push((lane - route.lanes * 0.5) * route.laneWidth);
     }
-    for (let distance = 6; distance < route.length; distance += dashStep) {
-      for (const offset of dividerOffsets) {
-        this._paintStrip(route, 'marking',
-          distance - dashLength * 0.5, distance + dashLength * 0.5, () => offset, 0.14);
-      }
+    for (const offset of dividerOffsets) {
+      this._paintDashedStrip(route, 'marking', () => offset, 0.14, dashStep, dashLength, 6);
     }
     for (const side of [1, -1]) {
       this._paintStrip(route, 'marking', 0, route.length,

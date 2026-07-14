@@ -127,3 +127,44 @@ One shared sampler now feeds every rendered road surface (`js/map.js`):
   single-sided buckets would let several materials drop DoubleSide.
 - Guardrail/prop/signage placement still uses per-station yaw frames
   (fine for vertical posts); junction topology untouched.
+
+## Curve smoothness + dash continuity follow-up (2026-07-14)
+
+The remaining visible faceting came from `_prepareRenderFrames` testing
+only the 50% point of each span and then relaxing lateral error from
+0.18 m to 1.0 m below 8 m. Quarter-shaped S-curves and uneven curvature
+could therefore pass the test, while long nearly planar grades could keep
+the original ~30 m station spacing. The worst still-refinable tangent
+change was 25.08° over 7.99 m (`ramp_25`); the longest span was 29.999 m.
+
+The refinement test now evaluates 25%, 50% and 75% against the rendered
+chord at the centre and both deck edges. It bounds vertical error to
+0.035 m, plan/lateral error to 0.30 m and full-3D tangent change to 3°,
+with 24 m maximum and ~1.5 m minimum segment safeguards. Parent quarter
+samples are reused as child midpoints to avoid redundant spline work.
+The final network has 48,969 render frames. Its worst span is 23.97 m;
+the worst still-refinable tangent change is 2.98°, vertical error 0.03496 m
+and lateral error 0.29998 m. The literal 156.06° maximum is unchanged at
+the same 1.97 m `k5_uturn_4` source-data kink: it is already below the
+minimum render span and is not a long faceted chord.
+
+Dash audit: the prior route loop already used route distance, so no chunk
+phase restart was found. The focused probe records all 17,378 generated
+dash intervals and reports zero phase errors. The visible intermittent
+loss was narrow paint following the same under-refined chords (most
+noticeable through curves); `_paintDashedStrip` now makes the route-absolute
+phase contract explicit. A separate latent loss path was fixed in
+`_paintStrip`: when a lane boundary crosses a width taper, the valid part
+of the span is clipped at the width crossing rather than dropping the
+whole span because one endpoint is too narrow.
+
+Verification at this checkpoint:
+
+- `node .devtests/road-surface-probe.mjs`: PASS (3.52 s representative
+  headless build; repeated values are recorded by the performance pass).
+- `node .devtests/osm-validate.mjs`: unchanged known counts — rail 2 /
+  overlap 21 / ramp-drive 47 / smoothness 50; geometry hygiene 0.
+- `node .devtests/e2e.mjs`: 25/25 in the mobile touch viewport.
+- Chase + noclip screenshots: `.devtests/shots/M-*-before.png`,
+  `.devtests/shots/M-*-after.png` and `.devtests/shots/M-*-chase-after.png`
+  for C1, Wangan, the R6 S-bend, ramp_17 and the Rainbow ascent.

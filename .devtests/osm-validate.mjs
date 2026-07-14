@@ -21,6 +21,7 @@
  * Run:  node .devtests/osm-validate.mjs
  */
 import * as THREE from 'three';
+import { fileURLToPath } from 'node:url';
 
 const failures = [];
 const sections = [];
@@ -345,7 +346,7 @@ for (const entry of sections) {
 console.log(`meshes ${meshCount}, triangles ${Math.round(triangleCount)}`);
 if (failedTotal) {
   const { writeFileSync } = await import('node:fs');
-  const out = new URL('./osm-validate-failures.txt', import.meta.url).pathname;
+  const out = fileURLToPath(new URL('./osm-validate-failures.txt', import.meta.url));
   writeFileSync(out, failures.join('\n'));
   console.log(`\n${failures.length} failures written to ${out}`);
   console.log('FIRST FAILURES:');
