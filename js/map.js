@@ -584,9 +584,6 @@ export class HighwayMap {
       lanes: routeData.lanes || (routeData.kind === 'ramp' ? 1 : 2),
       laneWidth: LANE_W,
       speedLimit: routeData.speedLimit || 60,
-      // dense (<= 40 m) extracted points: minimal tension tracks the data
-      // instead of overshooting between nodes
-      tension: 0.05,
       points,
       destinations: routeData.destinations || [],
       tunnelRanges: routeData.tunnels || [],
@@ -733,7 +730,12 @@ export class HighwayMap {
 
   _registerRoute(config) {
     const points = config.points.map((point) => point.clone());
-    const curve = new THREE.CatmullRomCurve3(points, !!config.closed, 'catmullrom', config.tension ?? 0.14);
+    // Centripetal parameterisation: interpolates every control point with
+    // no overshoot/loops on uneven spacing, and — unlike the old near-zero
+    // tension uniform spline — spreads curvature smoothly between points
+    // instead of degenerating each span into a straight chord with a corner
+    // at the control point (the faceted-centreline root cause).
+    const curve = new THREE.CatmullRomCurve3(points, !!config.closed, 'centripetal');
     curve.arcLengthDivisions = Math.max(240, Math.ceil(this._polylineLength(points, !!config.closed) / 14));
     curve.updateArcLengths();
     const length = curve.getLength();

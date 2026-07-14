@@ -217,3 +217,52 @@ Final validation:
 - `node .devtests/osm-validate.mjs`: unchanged known failures -- rail 2 /
   overlap 21 / ramp-drive 47 / smoothness 50; geometry hygiene 0. No unrelated
   OSM/data fix was made.
+
+## Faceted analytic centreline — ROOT CAUSE fix (2026-07-15)
+
+Route 11 still showed long straight sections joined by visible corners after
+both render-frame subdivision passes. Audit at the exact screenshot spot
+(`r11_0` 2100–2650 m, control points every 20–40 m) sampled the ANALYTIC
+`route.curve` every 1 m and proved the curve itself was faceted — render
+refinement had been faithfully reproducing an already-angular centreline:
+
+- current uniform Catmull-Rom at `tension 0.05` (OSM routes; 0.14 default):
+  bending concentrated in 1–3 m spikes of up to **7.68 deg/m at each control
+  point**, separated by 15–56 m dead-straight chords inside the bend;
+- same points with centripetal parameterisation: the same ~89 deg of total
+  bend spreads at <= 1.09 deg/m with no straight chords inside the bend.
+
+Cause: three.js `'catmullrom'` builds Hermite tangents as
+`tension * (p2 - p0)`, so near-zero tension (chosen earlier to stop uniform-CR
+overshoot between unevenly spaced nodes) collapses every span toward its
+straight chord with a corner at the control point. The render subdivision
+passes could never fix this — the faceting was in the curve, not the mesh.
+
+Fix (`_registerRoute`): build every route curve as **centripetal Catmull-Rom**
+over the exact same control points. Centripetal parameterisation is
+shape-preserving on uneven spacing (no overshoot, loops or cusps — the
+original reason for the low tension), still interpolates every control point
+exactly (endpoints and junction anchor points unchanged), and spreads
+curvature smoothly between points. The `tension` config knob was removed. One
+authoritative curve continues to feed physics, deck, markings, fascia and
+barriers, so alignment holds by construction.
+
+Verified:
+
+- `node .devtests/road-surface-probe.mjs`: PASS — and the smoother curve
+  needs far less subdivision: 19,032 render frames / 42,564 surface frames
+  (was 48,969 / 81,679), headless build ~2.0 s (was ~3.5 s), same error
+  bounds (worst 0.0598 m lateral / 0.0300 m vertical / 0.75 deg refinable);
+- `node .devtests/road-silhouette-shots.mjs centripetal`: the Route 11 Daiba
+  bend now reads as one continuous arc (`S-r11-daiba-broad-curve-centripetal`
+  vs the chorded `-final`); C1 and R6 shots equally continuous;
+- `node .devtests/e2e.mjs`: **25/25**;
+- `node .devtests/performance.mjs`: PASS (frame p50 50.1 ms on the probe's
+  throttled mobile profile, within limits);
+- `node .devtests/osm-validate.mjs`: rail-continuity **2 → 0**, overlap
+  21 → 20, ramp-drive 47 → 49, smoothness 50 → 67. Every added failure is a
+  height-step in the SAME documented extractor data-kink families (`ramp_17`
+  / Hakozaki, `ramp_46`, `daikoku_pa_access` anchored zones) — the smoother
+  plan curve shifts where the 1 m sampler lands on those existing bumps. The
+  two `transfer jump` entries pre-exist at identical magnitudes (verified
+  against a baseline run of the previous commit). No new failure class.
