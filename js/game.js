@@ -28,7 +28,7 @@ class ShutokoNights {
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
-    this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,worldRefresh:0};
+    this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
     this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
     this.setupDebugMenu();
@@ -123,6 +123,7 @@ class ShutokoNights {
     });
     window.addEventListener('keyup',e=>{this.keys[e.code]=false;});window.addEventListener('blur',()=>{this.keys={};this.pressed.clear();this.releaseTouchInput?.();});
     document.addEventListener('mousemove',e=>{if(this.debug?.noclip&&document.pointerLockElement===this.canvas&&!this.debug.menuOpen){this.debug.yaw-=e.movementX*.0022;this.debug.pitch=clamp(this.debug.pitch-e.movementY*.0022,-Math.PI*.49,Math.PI*.49);}});
+    document.addEventListener('wheel',e=>{if(!this.debug?.noclip||this.debug.menuOpen)return;e.preventDefault();const factor=e.deltaY<0?1.18:1/1.18;this.debug.moveSpeed=clamp(this.debug.moveSpeed*factor,5,400);this.updateDroneSpeedHUD();},{passive:false});
     this.canvas.addEventListener('click',()=>{if(this.debug?.noclip&&!this.debug.menuOpen&&document.pointerLockElement!==this.canvas)this.requestDronePointerLock();});
     // iOS Safari: block pinch zoom, long-press callout/selection and double-tap zoom on the game surface.
     for(const type of ['gesturestart','gesturechange','gestureend'])document.addEventListener(type,e=>e.preventDefault());
@@ -229,7 +230,7 @@ class ShutokoNights {
   }
 
   setupDebugMenu(){
-    this.debug.root=document.getElementById('debug-menu');this.debug.droneHUD=document.getElementById('debug-drone-hud');
+    this.debug.root=document.getElementById('debug-menu');this.debug.droneHUD=document.getElementById('debug-drone-hud');this.debug.speedHUD=document.getElementById('debug-drone-speed');this.updateDroneSpeedHUD();
     this.debug.overlay=new THREE.Group();this.debug.overlay.name='Debug hitboxes';this.debug.overlay.renderOrder=999;this.roadScene.add(this.debug.overlay);this.debug.layers={};
     const bind=(id,fn)=>document.getElementById(id)?.addEventListener('change',e=>fn(e.target.checked));
     bind('debug-noclip',v=>this.setNoclip(v));bind('debug-traffic',v=>this.setTrafficDisabled(v));
@@ -242,6 +243,7 @@ class ShutokoNights {
     this.keys={};this.pressed.clear();if(open)document.exitPointerLock?.();else if(this.debug.noclip)this.requestDronePointerLock();
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
+  updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}
   setTrafficDisabled(disabled){
     this.debug.trafficDisabled=!!disabled;if(disabled)this.traffic?.clear?.();
     const input=document.getElementById('debug-traffic');if(input)input.checked=!!disabled;
@@ -262,7 +264,7 @@ class ShutokoNights {
   updateNoclip(dt){
     if(!this.debug.menuOpen){
       const turn=1.35*dt;if(this.keys.ArrowLeft)this.debug.yaw+=turn;if(this.keys.ArrowRight)this.debug.yaw-=turn;if(this.keys.ArrowUp)this.debug.pitch=clamp(this.debug.pitch+turn,-Math.PI*.49,Math.PI*.49);if(this.keys.ArrowDown)this.debug.pitch=clamp(this.debug.pitch-turn,-Math.PI*.49,Math.PI*.49);
-      const forward=new THREE.Vector3(Math.sin(this.debug.yaw),0,Math.cos(this.debug.yaw)),right=new THREE.Vector3(Math.cos(this.debug.yaw),0,-Math.sin(this.debug.yaw));let speed=(this.keys.ShiftLeft||this.keys.ShiftRight)?190:55;
+      const forward=new THREE.Vector3(Math.sin(this.debug.yaw),0,Math.cos(this.debug.yaw)),right=new THREE.Vector3(-Math.cos(this.debug.yaw),0,Math.sin(this.debug.yaw));const speed=this.debug.moveSpeed*((this.keys.ShiftLeft||this.keys.ShiftRight)?3.5:1);
       const move=new THREE.Vector3();if(this.keys.KeyW)move.add(forward);if(this.keys.KeyS)move.sub(forward);if(this.keys.KeyD)move.add(right);if(this.keys.KeyA)move.sub(right);if(this.keys.Space||this.keys.KeyE)move.y+=1;if(this.keys.ControlLeft||this.keys.ControlRight||this.keys.KeyQ)move.y-=1;if(move.lengthSq())this.debug.position.addScaledVector(move.normalize(),speed*dt);
     }
     const cp=Math.cos(this.debug.pitch),look=new THREE.Vector3(Math.sin(this.debug.yaw)*cp,Math.sin(this.debug.pitch),Math.cos(this.debug.yaw)*cp);this.camera.position.copy(this.debug.position);this.camera.up.set(0,1,0);this.camera.lookAt(this.debug.position.clone().add(look));this.camera.fov=64;this.camera.updateProjectionMatrix();

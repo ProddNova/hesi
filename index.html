@@ -132,10 +132,10 @@
           <label><input type="checkbox" data-debug-hitbox="world"><span>Visible world bounds</span></label>
           <button id="debug-hitboxes-all">TOGGLE ALL</button>
         </details>
-        <div class="debug-controls"><b>DRONE CONTROLS</b><span>WASD move · mouse / arrows look</span><span>SPACE up · CTRL down · SHIFT boost</span></div>
+        <div class="debug-controls"><b>DRONE CONTROLS</b><span>WASD move · mouse / arrows look</span><span>WHEEL speed · SPACE/CTRL height · SHIFT boost</span></div>
       </div>
     </aside>
-    <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span>WASD · SPACE/CTRL · SHIFT</span><small>0 MENU</small></div>
+    <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span id="debug-drone-speed">55 M/S</span><span>WHEEL SPEED · SHIFT BOOST</span><small>0 MENU</small></div>
 
     <div id="install-progress" class="install hidden"><span id="install-label">INSTALLING</span><div><i></i></div></div>
 
@@ -174,7 +174,7 @@
     <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260714b"></script>
+  <script type="module" src="js/game.js?v=20260714c"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
