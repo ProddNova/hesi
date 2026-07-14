@@ -557,14 +557,16 @@ export class HighwayMap {
     let mergeInfo = null;
 
     if (!routeData.closed) {
-      const anchorSpan = Math.min(95, Math.max(30, routeData.length * 0.22));
+      const endDrop = Math.abs(routeData.points[0][1] - routeData.points[routeData.points.length - 1][1]);
+      const steep = endDrop > routeData.length * 0.05;
+      const anchorSpan = steep ? 30 : Math.min(95, Math.max(30, routeData.length * 0.22));
       if (startEdge && startEdge.kind === 'diverge' && this.routes.has(startEdge.from.route)) {
         divergeInfo = this._anchorEndpoint(points, routeData, startEdge, 'start', anchorSpan);
-        points = divergeInfo.points;
+        if (divergeInfo) points = divergeInfo.points;
       }
       if (endEdge && endEdge.kind === 'merge' && this.routes.has(endEdge.to.route)) {
         mergeInfo = this._anchorEndpoint(points, routeData, endEdge, 'end', anchorSpan);
-        points = mergeInfo.points;
+        if (mergeInfo) points = mergeInfo.points;
       }
     }
 
@@ -582,6 +584,9 @@ export class HighwayMap {
       lanes: routeData.lanes || (routeData.kind === 'ramp' ? 1 : 2),
       laneWidth: LANE_W,
       speedLimit: routeData.speedLimit || 60,
+      // dense (<= 40 m) extracted points: minimal tension tracks the data
+      // instead of overshooting between nodes
+      tension: 0.05,
       points,
       destinations: routeData.destinations || [],
       tunnelRanges: routeData.tunnels || [],
@@ -599,7 +604,7 @@ export class HighwayMap {
         probability: route.kind === 'ramp' ? 0.3 : 0.45,
       });
       edge.side = divergeInfo.side;
-      startEdgeOfMark(startEdge);
+      if (startEdge) startEdge._handled = true;
     }
     if (mergeInfo) {
       const edge = this._addEdge({
@@ -611,13 +616,9 @@ export class HighwayMap {
       edge.side = mergeInfo.side;
       // vehicles arriving from a side merge land in the lane on that side
       edge.mergeLane = mergeInfo.side < 0 ? null : 0;
-      startEdgeOfMark(endEdge);
+      if (endEdge) endEdge._handled = true;
     }
     return route;
-
-    function startEdgeOfMark(edge) {
-      if (edge) edge._handled = true;
-    }
   }
 
   /**
@@ -630,7 +631,15 @@ export class HighwayMap {
     const host = this.routes.get(which === 'start' ? edge.from.route : edge.to.route);
     const connection = vec(edge.point[0], 0, edge.point[1]);
     const projection = this._projectToRoute(host, connection);
-    const hostDistanceAtMouth = projection.distance;
+    let hostDistanceAtMouth = projection.distance;
+    // The taper needs real room on the host: keep the mouth stations away
+    // from an open host's ends.
+    if (!host.closed) {
+      const low = which === 'start' ? 34 : anchorSpan + 6;
+      const high = which === 'start' ? host.length - anchorSpan - 6 : host.length - 34;
+      if (high <= low) return null; // host too short — keep raw geometry
+      hostDistanceAtMouth = clamp(hostDistanceAtMouth, low, high);
+    }
 
     // Which side does the branch leave/arrive on? Probe its own geometry
     // ~45 m from the shared node, measured against the host's base normal.
@@ -641,33 +650,50 @@ export class HighwayMap {
     const lateral = side * Math.max(0.6, hostHalf - 2.0);
 
     const edgePoint = (distance) => {
-      const sample = this._sampleCenter(host, distance, 1);
+      const sample = this._sampleCenter(host, this._normalizeDistance(host, distance), 1);
       return sample.position.clone().addScaledVector(sample.normal, lateral);
     };
 
-    // Drop the raw points that hug the host inside the taper zone.
-    const kept = this._dropPolylineNear(points, which, anchorSpan + 25);
+    // BLENDED TAPER: over the first 2*anchorSpan of the branch, each point
+    // is a smoothstep mix of the host's outer edge (at the matching
+    // station) and the raw geometry — a true transition curve with no
+    // corner anywhere. Beyond the blend, raw geometry continues untouched.
+    const blendLength = anchorSpan * 2;
+    const ordered = which === 'start' ? points : [...points].reverse();
+    const alongSign = which === 'start' ? 1 : -1;
+    const blended = [];
+    let travelled = 0;
+    let restFrom = ordered.length;
+    for (let i = 0; i < ordered.length; i += 1) {
+      if (i > 0) travelled += ordered[i].distanceTo(ordered[i - 1]);
+      if (travelled > blendLength) { restFrom = i; break; }
+      const t = travelled / blendLength;
+      const smooth = t * t * (3 - 2 * t);
+      const station = hostDistanceAtMouth + alongSign * travelled;
+      const hostEdge = edgePoint(station);
+      const rawY = ordered[i].y;
+      const mixed = hostEdge.lerp(ordered[i], smooth);
+      // PLAN blend only: the extractor already holds the branch's heights
+      // to the host's deck profile through the taper — data heights are
+      // the validated truth.
+      mixed.y = rawY;
+      blended.push(mixed);
+    }
+    const rest = ordered.slice(restFrom);
+    const lead = edgePoint(hostDistanceAtMouth - alongSign * 30);
+    const merged = [lead, ...blended, ...rest];
+    const result = which === 'start' ? merged : merged.reverse();
 
     if (which === 'start') {
-      const prefix = [
-        edgePoint(this._normalizeDistance(host, hostDistanceAtMouth - 30)),
-        edgePoint(this._normalizeDistance(host, hostDistanceAtMouth + anchorSpan * 0.5)),
-        edgePoint(this._normalizeDistance(host, hostDistanceAtMouth + anchorSpan)),
-      ];
       return {
-        points: prefix.concat(kept),
+        points: result,
         hostId: host.id,
         hostDistance: this._normalizeDistance(host, hostDistanceAtMouth - 30),
         side,
       };
     }
-    const suffix = [
-      edgePoint(this._normalizeDistance(host, hostDistanceAtMouth - anchorSpan)),
-      edgePoint(this._normalizeDistance(host, hostDistanceAtMouth - anchorSpan * 0.5)),
-      edgePoint(this._normalizeDistance(host, hostDistanceAtMouth + 30)),
-    ];
     return {
-      points: kept.concat(suffix),
+      points: result,
       hostId: host.id,
       hostDistance: this._normalizeDistance(host, hostDistanceAtMouth + 30),
       side,
@@ -828,35 +854,172 @@ export class HighwayMap {
       const projection = this._projectToRoute(route, vec(def.x, 0, def.z));
       const distance = projection.distance;
       const sample = this._sampleCenter(route, distance, 1);
-      const sideSign = def.side === 'right' ? 1 : -1; // along the base normal (driver's right)
+      // Base normal = tangent x up = the driver's LEFT: geographic 'left'
+      // from the extractor is +1 along it. If the OSM-preferred side would
+      // drop the lot onto another carriageway (the centroid is often a tiny
+      // on-road feature), flip to the clear side.
+      const offset = Math.max(route.halfWidth + def.width * 0.5 + 8, Math.abs(projection.signedLateral));
+      // Sample the whole candidate lot footprint against every other
+      // corridor (at lot elevation, so grade-separated decks overhead
+      // do not count as conflicts).
+      const clearanceOn = (sign) => {
+        let nearest = Infinity;
+        for (const alongFraction of [-0.42, -0.2, 0, 0.2, 0.42]) {
+          for (const acrossFraction of [-0.4, 0, 0.4]) {
+            const candidate = sample.position.clone()
+              .addScaledVector(sample.tangent, alongFraction * def.length)
+              .addScaledVector(sample.normal, sign * (offset + acrossFraction * def.width));
+            for (const { route: other, index } of this._candidateRoutes(candidate).values()) {
+              if (other === route) continue;
+              const otherProjection = this._projectToRoute(other, candidate, index);
+              if (otherProjection.endOvershoot > 4) continue;
+              if (def.grounded && otherProjection.point.y > 8) continue; // deck overhead
+              nearest = Math.min(nearest, Math.abs(otherProjection.signedLateral));
+            }
+          }
+        }
+        return nearest;
+      };
+      let sideSign = def.side === 'left' ? 1 : -1;
+      const need = 10;
+      const preferred = clearanceOn(sideSign);
+      if (preferred < need && clearanceOn(-sideSign) > preferred) {
+        console.warn(`Shutoko map: flipping ${def.id} to the clear side`);
+        sideSign = -sideSign;
+      }
       const outward = sample.normal.clone().multiplyScalar(sideSign);
-      const offset = Math.max(route.halfWidth + def.width * 0.5 + 12, Math.abs(projection.signedLateral));
-      const grounded = offset > 45; // big standoff => the real lot is at ground level
+      const grounded = !!def.grounded;
       const center = sample.position.clone().addScaledVector(outward, offset);
       const elevation = grounded ? 1.35 : sample.position.y + 0.15;
       center.y = elevation;
       const tangent = sample.tangent.clone();
 
-      const legLength = def.length * 0.5 + 330;
-      const inSample = this._sampleCenter(route, this._normalizeDistance(route, distance - legLength), 1);
-      const outSample = this._sampleCenter(route, this._normalizeDistance(route, distance + legLength), 1);
-      const laneEdge = Math.max(0.8, route.halfWidth - 1.6);
+      // Entry and exit hosts are chosen independently: a roadside PA uses
+      // its own carriageway for both, but a JCT-island PA (Daikoku) enters
+      // from one road and exits onto another, exactly like the real lot.
+      const lotEntry = center.clone().addScaledVector(tangent, -def.length * 0.52);
+      const lotExit = center.clone().addScaledVector(tangent, def.length * 0.52);
+      const pickHost = (target, need) => {
+        let bestHost = null;
+        for (const candidate of this.routes.values()) {
+          if (candidate.kind === 'service' || candidate.synthetic) continue;
+          const candidateProjection = this._projectToRoute(candidate, target);
+          if (candidateProjection.endOvershoot > 40) continue;
+          const planDistance = Math.hypot(
+            candidateProjection.point.x - target.x,
+            candidateProjection.point.z - target.z,
+          );
+          if (planDistance > 420) continue;
+          const room = candidate.closed
+            ? Infinity
+            : (need === 'before' ? candidateProjection.distance : candidate.length - candidateProjection.distance);
+          const score = planDistance
+            + (room < 320 ? 4000 : 0)
+            + Math.abs(candidateProjection.point.y - elevation) * 2
+            + (candidate === route ? -60 : 0);
+          if (!bestHost || score < bestHost.score) {
+            bestHost = { route: candidate, distance: candidateProjection.distance, score, room };
+          }
+        }
+        return bestHost;
+      };
+      const entryHost = pickHost(lotEntry, 'before') || { route, distance, room: distance };
+      const exitHost = pickHost(lotExit, 'after') || { route, distance, room: route.length - distance };
+
+      // Mouths on the hosts' outer edges (the side facing the lot).
+      const mouth = (host, atDistance, toward) => {
+        const hostSample = this._sampleCenter(host.route, this._normalizeDistance(host.route, atDistance), 1);
+        const towardLot = TMP_A.copy(toward).sub(hostSample.position);
+        const mouthSide = towardLot.dot(hostSample.normal) >= 0 ? 1 : -1;
+        const lateral = mouthSide * Math.max(0.8, host.route.halfWidth - 1.6);
+        return {
+          point: hostSample.position.clone().addScaledVector(hostSample.normal, lateral),
+          tangent: hostSample.tangent.clone(),
+        };
+      };
+      const entryLeg = Math.min(entryHost.room - 90, 360);
+      const exitLeg = Math.min(exitHost.room - 90, 360);
+      const entryStart = this._normalizeDistance(entryHost.route, entryHost.distance - entryLeg);
+      const exitEnd = this._normalizeDistance(exitHost.route, exitHost.distance + exitLeg);
+      const inMouthA = mouth(entryHost, entryStart, lotEntry);
+      const inMouthB = mouth(entryHost, entryStart + 60, lotEntry);
+      const outMouthA = mouth(exitHost, exitEnd - 60, lotExit);
+      const outMouthB = mouth(exitHost, exitEnd, lotExit);
+
+      // Descent/ascent paths; when the drop outruns a ~5 % grade over the
+      // direct run, wind a spiral at the lot end to earn the length (the
+      // Daikoku spiral, rediscovered by the generator).
+      const spiralPoints = (from, to, approachTangent) => {
+        // Tangent-entry helix: the circle sits perpendicular off the
+        // approach direction, so entering it needs no kink; sweep enough
+        // turns to keep the descent under ~5 %.
+        const points = [];
+        const drop = Math.abs(from.y - to.y);
+        const direct = Math.hypot(to.x - from.x, to.z - from.z);
+        const neededRun = drop / 0.05;
+        if (neededRun <= direct + 60) return points;
+        const radius = 82;
+        const dirX = approachTangent.x;
+        const dirZ = approachTangent.z;
+        const norm = Math.hypot(dirX, dirZ) || 1;
+        // choose the perpendicular that curls toward the target
+        const perpAx = -dirZ / norm;
+        const perpAz = dirX / norm;
+        const towardX = to.x - from.x;
+        const towardZ = to.z - from.z;
+        const side = (perpAx * towardX + perpAz * towardZ) >= 0 ? 1 : -1;
+        const centerX = from.x + perpAx * side * radius;
+        const centerZ = from.z + perpAz * side * radius;
+        const startAngle = Math.atan2(from.x - centerX, from.z - centerZ);
+        const turns = clamp((neededRun - direct * 0.5) / (Math.PI * 2 * radius), 0.75, 2.2);
+        const steps = Math.max(10, Math.round(turns * 14));
+        for (let i = 1; i <= steps; i += 1) {
+          const t = i / steps;
+          const angle = startAngle + t * turns * Math.PI * 2 * -side;
+          points.push(vec(
+            centerX + Math.sin(angle) * radius,
+            from.y + (to.y - from.y) * t,
+            centerZ + Math.cos(angle) * radius,
+          ));
+        }
+        return points;
+      };
+
+      const entrySpiral = spiralPoints(inMouthB.point, lotEntry, inMouthB.tangent);
+      const exitSpiral = spiralPoints(lotExit, outMouthA.point, tangent);
       const accessPoints = [
-        inSample.position.clone().addScaledVector(inSample.normal, sideSign * laneEdge),
-        this._sampleCenter(route, this._normalizeDistance(route, distance - (def.length * 0.5 + 170)), 1).position.clone()
-          .addScaledVector(outward, route.halfWidth + 7),
-        center.clone().addScaledVector(tangent, -def.length * 0.42).addScaledVector(outward, -def.width * 0.18),
+        inMouthA.point,
+        inMouthB.point,
+        ...entrySpiral,
+        lotEntry.clone().addScaledVector(outward, -def.width * 0.1),
         center.clone().addScaledVector(outward, -def.width * 0.16),
-        center.clone().addScaledVector(tangent, def.length * 0.42).addScaledVector(outward, -def.width * 0.18),
-        this._sampleCenter(route, this._normalizeDistance(route, distance + (def.length * 0.5 + 170)), 1).position.clone()
-          .addScaledVector(outward, route.halfWidth + 7),
-        outSample.position.clone().addScaledVector(outSample.normal, sideSign * laneEdge),
+        lotExit.clone().addScaledVector(outward, -def.width * 0.1),
+        ...exitSpiral,
+        outMouthA.point,
+        outMouthB.point,
       ];
-      for (let i = 2; i <= 4; i += 1) accessPoints[i].y = elevation;
-      accessPoints[0].y = inSample.position.y;
-      accessPoints[1].y = (inSample.position.y + elevation) * 0.5;
-      accessPoints[5].y = (outSample.position.y + elevation) * 0.5;
-      accessPoints[accessPoints.length - 1].y = outSample.position.y;
+      // Elevation profile: host decks at the mouths, lot level between,
+      // linear in path length across each leg.
+      accessPoints[0].y = this._sampleCenter(entryHost.route, entryStart, 1).position.y;
+      accessPoints[1].y = this._sampleCenter(entryHost.route, this._normalizeDistance(entryHost.route, entryStart + 60), 1).position.y;
+      accessPoints[accessPoints.length - 2].y = this._sampleCenter(exitHost.route, this._normalizeDistance(exitHost.route, exitEnd - 60), 1).position.y;
+      accessPoints[accessPoints.length - 1].y = this._sampleCenter(exitHost.route, exitEnd, 1).position.y;
+      const smoothLeg = (fromIndex, toIndex) => {
+        let total = 0;
+        for (let i = fromIndex + 1; i <= toIndex; i += 1) total += accessPoints[i].distanceTo(accessPoints[i - 1]);
+        let travelled = 0;
+        const yA = accessPoints[fromIndex].y;
+        const yB = accessPoints[toIndex].y;
+        for (let i = fromIndex + 1; i < toIndex; i += 1) {
+          travelled += accessPoints[i].distanceTo(accessPoints[i - 1]);
+          accessPoints[i].y = yA + (yB - yA) * (total > 0 ? travelled / total : 0);
+        }
+      };
+      // legs: mouth pair -> first lot point, last lot point -> mouth pair
+      const lotStartIndex = 2 + entrySpiral.length;
+      for (let i = lotStartIndex; i <= lotStartIndex + 2; i += 1) accessPoints[i].y = elevation;
+      smoothLeg(1, lotStartIndex);
+      smoothLeg(lotStartIndex + 2, accessPoints.length - 2);
 
       const accessRoute = this._registerRoute({
         id: `${def.id}_access`, code: 'PA', name: `${def.name} lane`, kind: 'service',
@@ -866,13 +1029,13 @@ export class HighwayMap {
         destinations: [[def.name.toUpperCase(), 'パーキング']],
       });
       this._addEdge({
-        from: { routeId: def.routeId, distance: this._normalizeDistance(route, distance - legLength), direction: 1 },
+        from: { routeId: entryHost.route.id, distance: entryStart, direction: 1 },
         to: { routeId: accessRoute.id, distance: 0, direction: 1 },
         kind: 'diverge', name: `${def.name} entry`, probability: 0,
       });
       this._addEdge({
         from: { routeId: accessRoute.id, distance: 'end', direction: 1 },
-        to: { routeId: def.routeId, distance: this._normalizeDistance(route, distance + legLength), direction: 1 },
+        to: { routeId: exitHost.route.id, distance: exitEnd, direction: 1 },
         kind: 'merge', name: `${def.name} exit`,
       });
 
@@ -1027,11 +1190,21 @@ export class HighwayMap {
     const tangent = route.curve.getTangentAt(bestU).normalize();
     const normal = horizontalNormal(tangent);
     const delta = TMP_A.copy(position).sub(point);
+    // Longitudinal overrun past an OPEN route end: the projection clamps to
+    // the endpoint, so a point far beyond it along the tangent would read as
+    // "laterally inside". Corridor logic must know about the overrun.
+    let endOvershoot = 0;
+    if (!route.closed) {
+      const along = delta.x * tangent.x + delta.z * tangent.z;
+      if (bestU >= 1 - EPSILON && along > 0) endOvershoot = along;
+      else if (bestU <= EPSILON && along < 0) endOvershoot = -along;
+    }
     return {
       route, routeId: route.id, u: bestU, distance: bestU * route.length,
       point, position: point, tangent, normal,
       signedLateral: delta.dot(normal),
       verticalDistance: delta.y,
+      endOvershoot,
       worldDistance: Math.sqrt(point.distanceToSquared(position)),
       distanceSq: point.distanceToSquared(position),
     };
@@ -1231,9 +1404,20 @@ export class HighwayMap {
     const candidates = this._candidateRoutes(position);
     const corridors = [];
     for (const { route, index } of candidates.values()) {
-      const projection = this._projectToRoute(route, position, index);
+      let projection = this._projectToRoute(route, position, index);
+      // The spatial grid seeds by XZ distance: on plan-self-crossing routes
+      // (spirals, stacked loops) that can lock onto the wrong level — retry
+      // with a full 3D scan before trusting a big vertical mismatch.
+      if (Math.abs(position.y - projection.point.y) > 8) {
+        projection = this._projectToRoute(route, position);
+      }
       const half = this._halfWidthAt(route, projection.distance);
       if (Math.abs(projection.signedLateral) > half + lateralMargin + 14) continue;
+      // Past an OPEN end the corridor no longer exists (the continuation
+      // route's corridor takes over); past a CLOSED end the end wall
+      // correction still applies, so keep the corridor.
+      if (projection.endOvershoot > 4
+        && this._endIsOpen(route, projection.u > 0.5 ? 1 : -1)) continue;
       const bank = this._bankAt(route, projection.distance);
       const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
       const vertical = position.y - deckY;
@@ -2358,6 +2542,7 @@ export class HighwayMap {
     for (const { route: other, index } of candidates.values()) {
       if (other === route) continue;
       const projection = this._projectToRoute(other, point, index);
+      if (projection.endOvershoot > 2) continue; // beyond the other surface's end
       const half = this._halfWidthAt(other, projection.distance);
       const abs = Math.abs(projection.signedLateral);
       const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral;

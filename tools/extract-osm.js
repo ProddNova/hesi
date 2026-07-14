@@ -66,7 +66,7 @@ const GROUPS = [
     id: 'wangan', code: 'B', name: 'Wangan Bayshore', nameJa: '湾岸線',
     kind: 'arterial', match: /湾岸線/, ref: /^B$/, speedLimit: 100,
     // Tatsumi (NE) to just past Daikoku (SW). Trim the Bayshore beyond.
-    clip: { minLat: 35.451, maxLat: 35.662, maxLon: 139.824 },
+    clip: { minLat: 35.446, maxLat: 35.662, maxLon: 139.824 },
     destinations: [['湾岸線', 'WANGAN LINE'], ['大黒', 'DAIKOKU'], ['羽田', 'HANEDA'], ['空港中央', 'AIRPORT']],
   },
   {
@@ -92,7 +92,7 @@ const GROUPS = [
     id: 'k1', code: 'K1', name: 'K1 Yokohane', nameJa: '横羽線',
     kind: 'arterial', match: /横羽線/, ref: /^K1$/, speedLimit: 80,
     // Haneda down to Namamugi JCT (where K5 splits for Daikoku).
-    clip: { minLat: 35.478 },
+    clip: { minLat: 35.470 },
     destinations: [['横羽線', 'K1 YOKOHANE'], ['大黒', 'DAIKOKU'], ['羽田', 'HANEDA'], ['横浜', 'YOKOHAMA']],
   },
   {
@@ -105,10 +105,12 @@ const GROUPS = [
 // Parking areas. OSM centroids are used when found (matched by name);
 // the coordinates below are fallbacks and sanity anchors.
 const SERVICE_AREAS = [
-  { id: 'shibaura_pa', name: 'Shibaura PA', nameJa: '芝浦', match: /芝浦.*(パーキング|PA)/, lat: 35.6427, lon: 139.7550, groups: ['r11'], hasGarage: true, density: 'medium', width: 118, length: 250 },
-  { id: 'tatsumi_pa', name: 'Tatsumi PA', nameJa: '辰巳', match: /辰巳第一.*(パーキング|PA)/, lat: 35.6482, lon: 139.8109, groups: ['r9', 'wangan'], density: 'light', width: 100, length: 215 },
-  { id: 'heiwajima_pa', name: 'Heiwajima PA', nameJa: '平和島', match: /平和島.*(パーキング|PA)/, lat: 35.5787, lon: 139.7428, groups: ['r1'], density: 'light', width: 104, length: 225 },
-  { id: 'daikoku_pa', name: 'Daikoku PA', nameJa: '大黒', match: /大黒.*(パーキング|PA)/, lat: 35.4590, lon: 139.6846, groups: ['wangan', 'k5'], density: 'packed', width: 150, length: 230 },
+  // grounded: the real lot sits at ground level (access legs descend);
+  // otherwise the lot rides the viaduct deck beside its carriageway.
+  { id: 'shibaura_pa', name: 'Shibaura PA', nameJa: '芝浦', match: /芝浦.*(パーキング|PA)/, lat: 35.6427, lon: 139.7550, groups: ['r11'], hasGarage: true, density: 'medium', width: 64, length: 260, grounded: false },
+  { id: 'tatsumi_pa', name: 'Tatsumi PA', nameJa: '辰巳', match: /辰巳第一.*(パーキング|PA)/, lat: 35.6484, lon: 139.8103, groups: ['r9'], density: 'light', width: 78, length: 220, grounded: false },
+  { id: 'heiwajima_pa', name: 'Heiwajima PA', nameJa: '平和島', match: /平和島.*(パーキング|PA)/, lat: 35.5787, lon: 139.7428, groups: ['r1'], density: 'light', width: 70, length: 225, grounded: false },
+  { id: 'daikoku_pa', name: 'Daikoku PA', nameJa: '大黒', match: /大黒.*(パーキング|PA)/, lat: 35.4590, lon: 139.6846, groups: ['wangan', 'k5'], density: 'packed', width: 150, length: 230, grounded: true },
 ];
 
 // Land slabs (dressing only; water fills everything else). Authored in
@@ -186,9 +188,14 @@ function segmentIntersection(a0, a1, b0, b1) {
   return { t, u, x: a0[0] + d1x * t, z: a0[1] + d1z * t };
 }
 
-/** Douglas-Peucker on [x,z] with a parallel payload array kept in sync. */
+/**
+ * Douglas-Peucker on [x,z] + elevation (first payload array), with the
+ * remaining payload arrays kept in sync. Elevation counts toward the
+ * deviation so clearance bumps and grade breaks survive simplification.
+ */
 function simplifyDP(points, payloads, tolerance) {
   if (points.length <= 2) return { points: points.slice(), payloads: payloads.map((p) => p.slice()) };
+  const elevation = payloads[0];
   const keep = new Array(points.length).fill(false);
   keep[0] = keep[points.length - 1] = true;
   const stack = [[0, points.length - 1]];
@@ -197,7 +204,9 @@ function simplifyDP(points, payloads, tolerance) {
     let worst = -1;
     let worstD = tolerance;
     for (let i = a + 1; i < b; i += 1) {
-      const { d } = pointSegment(points[i][0], points[i][1], points[a][0], points[a][1], points[b][0], points[b][1]);
+      const seg = pointSegment(points[i][0], points[i][1], points[a][0], points[a][1], points[b][0], points[b][1]);
+      const yOnSegment = elevation[a] + (elevation[b] - elevation[a]) * seg.t;
+      const d = Math.hypot(seg.d, elevation[i] - yOnSegment);
       if (d > worstD) { worstD = d; worst = i; }
     }
     if (worst >= 0) {
@@ -635,26 +644,67 @@ async function main() {
     return null;
   };
 
+  // A ramp is kept iff it lies on a directed path from the subset back to
+  // the subset: its head must be reachable FROM a mainline node and its
+  // tail must reach one. Chains connect where they share endpoint/interior
+  // nodes with each other or with mainline chains.
   const keptLinks = new Set();
-  let changed = true;
-  const linkEndpointNodes = (record) => [record.nodeIds[0], record.nodeIds[record.nodeIds.length - 1]];
-  const attachedNodeSet = new Set(mainlineNodeSet);
-  while (changed) {
-    changed = false;
-    for (let i = 0; i < linkRecords.length; i += 1) {
-      if (keptLinks.has(i)) continue;
-      const record = linkRecords[i];
-      const [head, tail] = linkEndpointNodes(record);
-      const headAttached = attachedNodeSet.has(head);
-      const tailAttached = attachedNodeSet.has(tail);
-      const paId = nearPa(record);
-      if ((headAttached && tailAttached) || (paId && (headAttached || tailAttached))) {
-        keptLinks.add(i);
-        record.paId = paId;
-        for (const nodeId of record.nodeIds) attachedNodeSet.add(nodeId);
-        changed = true;
+  {
+    const nodeOfLink = new Map(); // node id -> {starts:[i], ends:[i], touches:[i]}
+    const noteNode = (nodeId) => {
+      if (!nodeOfLink.has(nodeId)) nodeOfLink.set(nodeId, { starts: [], ends: [] });
+      return nodeOfLink.get(nodeId);
+    };
+    linkRecords.forEach((record, i) => {
+      noteNode(record.nodeIds[0]).starts.push(i);
+      noteNode(record.nodeIds[record.nodeIds.length - 1]).ends.push(i);
+    });
+    // forward: nodes fed from the mainline network
+    const forward = new Set();
+    const backward = new Set();
+    const forwardQueue = [];
+    const backwardQueue = [];
+    for (const record of linkRecords) {
+      // interior link nodes shared with mainline chains count as attachments
+      for (const nodeId of record.nodeIds) {
+        if (mainlineNodeSet.has(nodeId)) {
+          if (!forward.has(nodeId)) { forward.add(nodeId); forwardQueue.push(nodeId); }
+          if (!backward.has(nodeId)) { backward.add(nodeId); backwardQueue.push(nodeId); }
+        }
       }
     }
+    // Entering a chain (at its head, or merging mid-chain) feeds only the
+    // nodes DOWNSTREAM of the entry; mirrored for the backward pass.
+    while (forwardQueue.length) {
+      const nodeId = forwardQueue.pop();
+      for (const record of linkRecords) {
+        const k = record.nodeIds.indexOf(nodeId);
+        if (k < 0 || k === record.nodeIds.length - 1) continue;
+        for (let n = k + 1; n < record.nodeIds.length; n += 1) {
+          const next = record.nodeIds[n];
+          if (!forward.has(next)) { forward.add(next); forwardQueue.push(next); }
+        }
+      }
+    }
+    while (backwardQueue.length) {
+      const nodeId = backwardQueue.pop();
+      for (const record of linkRecords) {
+        const k = record.nodeIds.indexOf(nodeId);
+        if (k <= 0) continue;
+        for (let n = 0; n < k; n += 1) {
+          const previous = record.nodeIds[n];
+          if (!backward.has(previous)) { backward.add(previous); backwardQueue.push(previous); }
+        }
+      }
+    }
+    linkRecords.forEach((record, i) => {
+      const head = record.nodeIds[0];
+      const tail = record.nodeIds[record.nodeIds.length - 1];
+      if (forward.has(head) && backward.has(tail)) {
+        keptLinks.add(i);
+        record.paId = nearPa(record);
+      }
+    });
   }
   let rampIndex = 0;
   for (const index of [...keptLinks].sort((a, b) => a - b)) {
@@ -715,12 +765,11 @@ async function main() {
   // -- graph surgery -------------------------------------------------------------
   pruneExternalStubs(chains, connections);
   stitchDanglingEnds(chains, connections, registerChain);
+  pruneDanglingRamps(chains, connections);
+  slotForkMouths(chains, connections);
 
   // -- elevation solve ---------------------------------------------------------
   solveElevations(chains, connections);
-
-  // -- vertical clearance at plan crossings -------------------------------------
-  enforceClearance(chains, connections);
 
   // -- plan separation between parallel carriageways ----------------------------
   enforceSeparation(chains, connections);
@@ -754,6 +803,47 @@ async function main() {
   }
   console.log(`  simplified ${pointsBefore} -> ${pointsAfter} points (${(100 * pointsAfter / pointsBefore).toFixed(1)} %)`);
 
+  // Re-subdivide long segments (<= 40 m spacing): DP removed collinear
+  // points, but the game fits a Catmull-Rom through these — dense nodes
+  // bound its overshoot so deck grades stay true to the data.
+  let subdivided = 0;
+  for (const chain of chains) {
+    const pts = [];
+    const elev = [];
+    const tunnelFlags = [];
+    const bridgeFlags = [];
+    const count = chain.pts.length;
+    const segments = chain.closed ? count : count - 1;
+    for (let i = 0; i < count; i += 1) {
+      pts.push(chain.pts[i]);
+      elev.push(chain.elev[i]);
+      tunnelFlags.push(chain.tunnelFlags[i]);
+      bridgeFlags.push(chain.bridgeFlags[i]);
+      if (i >= segments) continue;
+      const j = (i + 1) % count;
+      const span = Math.hypot(chain.pts[j][0] - chain.pts[i][0], chain.pts[j][1] - chain.pts[i][1]);
+      const cuts = Math.floor(span / 40);
+      for (let c = 1; c <= cuts; c += 1) {
+        const t = c / (cuts + 1);
+        pts.push([
+          chain.pts[i][0] + (chain.pts[j][0] - chain.pts[i][0]) * t,
+          chain.pts[i][1] + (chain.pts[j][1] - chain.pts[i][1]) * t,
+        ]);
+        elev.push(chain.elev[i] + (chain.elev[j] - chain.elev[i]) * t);
+        tunnelFlags.push(chain.tunnelFlags[i] && chain.tunnelFlags[j]);
+        bridgeFlags.push(chain.bridgeFlags[i] && chain.bridgeFlags[j]);
+        subdivided += 1;
+      }
+    }
+    chain.pts = pts;
+    chain.elev = elev;
+    chain.tunnelFlags = tunnelFlags;
+    chain.bridgeFlags = bridgeFlags;
+    chain.arc = arcLengths(chain.closed ? chain.pts.concat([chain.pts[0]]) : chain.pts);
+    if (chain.closed) chain.arc.pop();
+  }
+  console.log(`  subdivided: +${subdivided} points (max 40 m spacing)`);
+
   // Re-resolve connection distances on simplified geometry via node position.
   for (const connection of connections) {
     const node = connection.nodeId ? nodes.get(connection.nodeId) : null;
@@ -762,6 +852,17 @@ async function main() {
     connection.fromDistance = projectToChain(connection.fromChain, x, z).distance;
     connection.toDistance = projectToChain(connection.toChain, x, z).distance;
   }
+
+  // -- vertical clearance at plan crossings (on FINAL geometry, so the
+  //    simplifier can never erase a bump), re-pinning connection endpoints
+  //    after each round so bumps never open a step at a transfer ----------------
+  for (let round = 0; round < 3; round += 1) {
+    enforceClearance(chains, connections);
+    pinConnectionElevations(chains, connections);
+  }
+  finalGradePolish(chains);
+  pinConnectionElevations(chains, connections);
+  finalGradePolish(chains);
 
   // -- synthetic U-turns at subset cut ends --------------------------------------
   synthesizeUturns(chains, connections, registerChain);
@@ -1151,6 +1252,103 @@ function makeConnector(chain, target, id) {
   };
 }
 
+/**
+ * Ramps must be complete paths: fed at the head, flowing out at the tail.
+ * Anything else (feeder pruned, subset boundary) is a drive-into-nothing
+ * hazard — drop it, repeatedly, since removals can dangle neighbours.
+ */
+function pruneDanglingRamps(chains, connections) {
+  let removed = 0;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const chain of [...chains]) {
+      if (chain.kind !== 'ramp' || chain.synthetic) continue;
+      const length = chain.arc[chain.arc.length - 1];
+      const headFed = connections.some((connection) => connection.toChain === chain && connection.toDistance < 60);
+      const tailOut = connections.some((connection) => connection.fromChain === chain && connection.fromDistance > length - 60);
+      if (headFed && tailOut) continue;
+      removeChain(chains, connections, chain);
+      console.log(`  pruned dangling ramp ${chain.id} (${Math.round(length)} m)`);
+      removed += 1;
+      changed = true;
+    }
+  }
+  if (removed) console.log(`  pruned ${removed} dangling ramp(s)`);
+}
+
+/**
+ * Bifurcations / confluences: where one carriageway END splits into two (or
+ * more) continuing chains, the raw OSM chains all start at the SAME node —
+ * a fork from the centreline, i.e. exactly the "ramp rises in the middle of
+ * the road" bug. Slot each branch mouth laterally across the host's width
+ * (leftmost branch takes the left half, rightmost the right half), blended
+ * over ~80 m, so the carriageway splits from the sides. Mirrored for
+ * multiple chains converging into one head.
+ */
+function slotForkMouths(chains, connections) {
+  const groups = new Map(); // key -> {host, atEnd, branches:[{chain, which}]}
+  for (const connection of connections) {
+    if (connection.kind !== 'continuation') continue;
+    const fromLength = connection.fromChain.arc[connection.fromChain.arc.length - 1];
+    const fromAtEnd = connection.fromDistance > fromLength - 60;
+    const toAtStart = connection.toDistance < 60;
+    if (!fromAtEnd || !toAtStart) continue;
+    const forkKey = `F:${connection.fromChain.id}`;
+    if (!groups.has(forkKey)) groups.set(forkKey, { host: connection.fromChain, mode: 'fork', branches: [] });
+    groups.get(forkKey).branches.push(connection.toChain);
+    const joinKey = `J:${connection.toChain.id}`;
+    if (!groups.has(joinKey)) groups.set(joinKey, { host: connection.toChain, mode: 'join', branches: [] });
+    groups.get(joinKey).branches.push(connection.fromChain);
+  }
+  let slotted = 0;
+  for (const group of groups.values()) {
+    if (group.branches.length < 2) continue;
+    const host = group.host;
+    const hostLength = host.arc[host.arc.length - 1];
+    const hostSample = sampleChain(host, group.mode === 'fork' ? hostLength - 8 : 8);
+    const normalX = -hostSample.tz;
+    const normalZ = hostSample.tx;
+    const width = chainHalfWidth(host);
+    // order branches by where they head relative to the host normal
+    const measures = group.branches.map((branch) => {
+      const probe = group.mode === 'fork'
+        ? sampleChain(branch, Math.min(45, branch.arc[branch.arc.length - 1] * 0.4))
+        : sampleChain(branch, Math.max(branch.arc[branch.arc.length - 1] - 45, branch.arc[branch.arc.length - 1] * 0.6));
+      const anchor = group.mode === 'fork' ? host.pts[host.pts.length - 1] : host.pts[0];
+      const lateral = (probe.x - anchor[0]) * normalX + (probe.z - anchor[1]) * normalZ;
+      return { branch, lateral };
+    }).sort((a, b) => a.lateral - b.lateral);
+    measures.forEach((entry, index) => {
+      const slot = ((index + 0.5) / measures.length - 0.5) * width; // e.g. 2 branches: ±width/4
+      const branch = entry.branch;
+      const falloff = 80;
+      if (group.mode === 'fork') {
+        for (let i = 0; i < branch.pts.length; i += 1) {
+          const along = branch.arc[i];
+          if (along > falloff) break;
+          const w = 0.5 + 0.5 * Math.cos((along / falloff) * Math.PI);
+          branch.pts[i][0] += normalX * slot * w;
+          branch.pts[i][1] += normalZ * slot * w;
+        }
+      } else {
+        const branchLength = branch.arc[branch.arc.length - 1];
+        for (let i = branch.pts.length - 1; i >= 0; i -= 1) {
+          const along = branchLength - branch.arc[i];
+          if (along > falloff) break;
+          const w = 0.5 + 0.5 * Math.cos((along / falloff) * Math.PI);
+          branch.pts[i][0] += normalX * slot * w;
+          branch.pts[i][1] += normalZ * slot * w;
+        }
+      }
+      branch.arc = arcLengths(branch.closed ? branch.pts.concat([branch.pts[0]]) : branch.pts);
+      if (branch.closed) branch.arc.pop();
+      slotted += 1;
+    });
+  }
+  if (slotted) console.log(`  slotted ${slotted} fork/confluence mouth(s)`);
+}
+
 /** Keep only chains weakly connected to the anchor chain. */
 function pruneDisconnected(chains, connections, anchorId) {
   const anchor = chains.find((chain) => chain.id === anchorId) || chains[0];
@@ -1221,7 +1419,7 @@ function smoothChainElevation(chain, connections) {
   }
   // window smoothing (moving average over ~180 m), several relaxation passes
   const smoothed = chain.elev.slice();
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < 8; pass += 1) {
     for (let i = 0; i < count; i += 1) {
       if (pinned[i]) continue;
       const prev = (i - 1 + count) % count;
@@ -1230,8 +1428,10 @@ function smoothChainElevation(chain, connections) {
       const dPrev = Math.max(1, Math.abs(arc[i] - arc[prev]));
       const dNext = Math.max(1, Math.abs(arc[next] - arc[i]));
       const target = (smoothed[prev] * dNext + smoothed[next] * dPrev) / (dPrev + dNext);
-      // tunnels/bridges keep 60 % of their authored level, open road relaxes fully
-      const anchored = chain.tunnelFlags[i] || chain.bridgeFlags[i] ? 0.45 : 0.85;
+      // Ramps relax fully — their profile is dictated by what they connect,
+      // not by per-way tags. Mainline tunnels/bridges keep their level.
+      const anchored = chain.kind === 'ramp' ? 0.9
+        : (chain.tunnelFlags[i] || chain.bridgeFlags[i] ? 0.45 : 0.85);
       smoothed[i] = smoothed[i] * (1 - anchored) + target * anchored;
     }
   }
@@ -1258,7 +1458,7 @@ function chainHalfWidth(chain) {
   return chain.lanes * LANE_W * 0.5 + shoulder;
 }
 
-function connectedNear(connections, a, b, distA, distB, radius = 260) {
+function connectedNear(connections, a, b, distA, distB, radius = 170) {
   for (const connection of connections) {
     const pair = (connection.fromChain === a && connection.toChain === b)
       || (connection.fromChain === b && connection.toChain === a);
@@ -1267,19 +1467,61 @@ function connectedNear(connections, a, b, distA, distB, radius = 260) {
     const db = connection.fromChain === b ? connection.fromDistance : connection.toDistance;
     if (Math.abs(da - distA) < radius && Math.abs(db - distB) < radius) return true;
   }
+  // Siblings: both chains connect to a COMMON third chain right here (fork
+  // branches / merge feeders sharing a throat) — their mouths overlap by
+  // construction and must not be pushed apart.
+  const near = (connection, chain, at) => {
+    if (connection.fromChain === chain && Math.abs(connection.fromDistance - at) < radius + 60) return connection.toChain === chain ? null : { other: connection.toChain, otherAt: connection.toDistance };
+    if (connection.toChain === chain && Math.abs(connection.toDistance - at) < radius + 60) return { other: connection.fromChain, otherAt: connection.fromDistance };
+    return null;
+  };
+  for (const c1 of connections) {
+    const linkA = near(c1, a, distA);
+    if (!linkA) continue;
+    for (const c2 of connections) {
+      const linkB = near(c2, b, distB);
+      if (!linkB) continue;
+      if (linkA.other === linkB.other && Math.abs(linkA.otherAt - linkB.otherAt) < 320) return true;
+    }
+  }
   return false;
 }
 
 function enforceClearance(chains, connections) {
-  // Where two chains cross in plan, force |Δy| >= MIN_CLEARANCE by locally
-  // lifting the higher / dropping the lower with a smooth 160 m falloff.
+  // Where two chains cross in plan — including SHALLOW crossings and
+  // stacked runs that never properly intersect a segment pair — force
+  // |Δy| >= MIN_CLEARANCE by lifting the higher / dropping the lower.
   let adjusted = 0;
-  for (let iteration = 0; iteration < 4; iteration += 1) {
+  for (let iteration = 0; iteration < 8; iteration += 1) {
     let violations = 0;
     for (let i = 0; i < chains.length; i += 1) {
       for (let j = i + 1; j < chains.length; j += 1) {
         const a = chains[i];
         const b = chains[j];
+        // stacked / near-miss scan: centreline within 3 m in plan
+        for (let si = 0; si < a.pts.length; si += 1) {
+          const projection = projectToChain(b, a.pts[si][0], a.pts[si][1]);
+          if (projection.d > 6) continue;
+          const sample = sampleChain(b, projection.distance);
+          const gap = Math.abs(a.elev[si] - sample.y);
+          if (gap >= MIN_CLEARANCE) continue;
+          const da = a.arc[si];
+          if (connectedNear(connections, a, b, da, projection.distance, 110)) continue;
+          violations += 1;
+          const need = (MIN_CLEARANCE - gap) * 1.3 + 0.4;
+          const upper = a.elev[si] >= sample.y ? a : b;
+          const lower = a.elev[si] >= sample.y ? b : a;
+          const upperDist = a.elev[si] >= sample.y ? da : projection.distance;
+          const lowerDist = a.elev[si] >= sample.y ? projection.distance : da;
+          const freedomOf = (chain, at) => {
+            const total = chain.arc[chain.arc.length - 1];
+            return (chain.closed ? 400 : Math.min(at, total - at, 400)) + 20;
+          };
+          const upperShare = freedomOf(upper, upperDist) / (freedomOf(upper, upperDist) + freedomOf(lower, lowerDist));
+          bumpElevation(upper, upperDist, +need * upperShare, 260);
+          bumpElevation(lower, lowerDist, -need * (1 - upperShare), 260);
+          adjusted += 1;
+        }
         for (let si = 0; si < a.pts.length - 1; si += 1) {
           for (let sj = 0; sj < b.pts.length - 1; sj += 1) {
             const hit = segmentIntersection(a.pts[si], a.pts[si + 1], b.pts[sj], b.pts[sj + 1]);
@@ -1292,21 +1534,184 @@ function enforceClearance(chains, connections) {
             const gap = Math.abs(ya - yb);
             if (gap >= MIN_CLEARANCE) continue;
             violations += 1;
-            const need = (MIN_CLEARANCE - gap) * 0.55 + 0.3;
+            const need = (MIN_CLEARANCE - gap) * 1.3 + 0.4;
             const upper = ya >= yb ? a : b;
             const lower = ya >= yb ? b : a;
             const upperDist = ya >= yb ? da : db;
             const lowerDist = ya >= yb ? db : da;
-            bumpElevation(upper, upperDist, +need);
-            bumpElevation(lower, lowerDist, -need);
+            // Split the correction by each chain's freedom to move: a chain
+            // crossing close to a pinned endpoint takes less of the bump.
+            const freedom = (chain, at) => {
+              const total = chain.arc[chain.arc.length - 1];
+              return chain.closed ? 400 : Math.min(at, total - at, 400);
+            };
+            const upperFreedom = freedom(upper, upperDist) + 20;
+            const lowerFreedom = freedom(lower, lowerDist) + 20;
+            const upperShare = upperFreedom / (upperFreedom + lowerFreedom);
+            bumpElevation(upper, upperDist, +need * upperShare, 260);
+            bumpElevation(lower, lowerDist, -need * (1 - upperShare), 260);
             adjusted += 1;
           }
         }
       }
     }
     if (!violations) break;
+    if (iteration === 7 && violations) console.warn(`  ! clearance: ${violations} residual violation(s)`);
   }
   if (adjusted) console.log(`  clearance: adjusted ${adjusted} crossing(s)`);
+}
+
+/** Blend one endpoint of a chain to targetY with a smooth falloff inland. */
+function pinWithFalloff(chain, which, targetY, falloff = 130) {
+  const count = chain.pts.length;
+  const length = chain.arc[count - 1];
+  const endIndex = which === 'start' ? 0 : count - 1;
+  const delta = targetY - chain.elev[endIndex];
+  if (Math.abs(delta) < 0.02) return;
+  for (let i = 0; i < count; i += 1) {
+    const along = which === 'start' ? chain.arc[i] : length - chain.arc[i];
+    if (along > falloff) continue;
+    const w = 0.5 + 0.5 * Math.cos((along / falloff) * Math.PI);
+    chain.elev[i] += delta * w;
+  }
+}
+
+/**
+ * Final elevation polish: relax any interior point whose local grade
+ * exceeds 5.5 % toward its neighbours' interpolation. Endpoints stay put
+ * (they are pinned to their transfer decks). Kills spline-scale kinks and
+ * the oscillations that clearance bumps can leave on long ramps.
+ */
+function finalGradePolish(chains) {
+  for (const chain of chains) {
+    const count = chain.pts.length;
+    if (count < 3) continue;
+    // Hard LOCAL grade clamp with both endpoints held: iterated forward /
+    // backward sweeps, restoring the (transfer-pinned) endpoints each
+    // round. Converges to a profile whose every segment respects the grade
+    // limit while still landing on both decks.
+    {
+      // A connector whose PINNED anchor decks differ by more than 5.8 % of
+      // the free run between them is steep BY TOPOLOGY (Hakozaki, Namamugi):
+      // allow its true uniform grade rather than leaving a cliff at the
+      // pinned boundary. The requirement is measured over each free span
+      // between pinned zones, not just the endpoints.
+      let required = 0;
+      if (!chain.closed) {
+        const anchored = (i) => i === 0 || i === count - 1 || !!chain._pinned?.[i];
+        let spanStart = 0;
+        for (let i = 1; i < count; i += 1) {
+          if (!anchored(i)) continue;
+          if (i - spanStart >= 1) {
+            const run = Math.max(1, chain.arc[i] - chain.arc[spanStart]);
+            required = Math.max(required, Math.abs(chain.elev[i] - chain.elev[spanStart]) / run);
+          }
+          spanStart = i;
+        }
+      }
+      const limit = Math.max(0.058, required * 1.12);
+      const yStart = chain.elev[0];
+      const yEnd = chain.elev[count - 1];
+      const sweep = (indexFrom, indexTo, step) => {
+        for (let i = indexFrom; i !== indexTo; i += step) {
+          if (chain._pinned?.[i]) continue;
+          const previous = i - step;
+          const run = Math.max(1, Math.abs(chain.arc[i] - chain.arc[previous]));
+          const low = chain.elev[previous] - run * limit;
+          const high = chain.elev[previous] + run * limit;
+          chain.elev[i] = Math.max(low, Math.min(high, chain.elev[i]));
+        }
+      };
+      for (let round = 0; round < 14; round += 1) {
+        if (!chain.closed) {
+          chain.elev[0] = yStart;
+          sweep(1, count, 1);
+          chain.elev[count - 1] = yEnd;
+          sweep(count - 2, -1, -1);
+          chain.elev[0] = yStart;
+        } else {
+          sweep(1, count, 1);
+          sweep(count - 2, -1, -1);
+        }
+      }
+    }
+    for (let pass = 0; pass < 40; pass += 1) {
+      let touched = 0;
+      for (let i = 0; i < count; i += 1) {
+        if (!chain.closed && (i === 0 || i === count - 1)) continue;
+        if (chain._pinned?.[i]) continue;
+        const prev = (i - 1 + count) % count;
+        const next = (i + 1) % count;
+        const dPrev = Math.max(1, Math.abs(chain.arc[i] - chain.arc[prev]));
+        const dNext = Math.max(1, Math.abs(chain.arc[next] - chain.arc[i]));
+        const gradePrev = Math.abs(chain.elev[i] - chain.elev[prev]) / dPrev;
+        const gradeNext = Math.abs(chain.elev[next] - chain.elev[i]) / dNext;
+        if (gradePrev < 0.064 && gradeNext < 0.064) continue;
+        const target = (chain.elev[prev] * dNext + chain.elev[next] * dPrev) / (dPrev + dNext);
+        chain.elev[i] = chain.elev[i] * 0.45 + target * 0.55;
+        touched += 1;
+      }
+      if (!touched) break;
+    }
+  }
+}
+
+/**
+ * Hold one end of a chain glued to its HOST's deck profile for `span`
+ * metres — the taper zone runs parallel to the host, so its elevation is
+ * the host's at the corresponding station, not a constant.
+ */
+function holdEndZone(chain, which, host, hostDistance, span) {
+  const count = chain.pts.length;
+  const length = chain.arc[count - 1];
+  const hostLength = host.arc[host.arc.length - 1];
+  if (!chain._pinned || chain._pinned.length !== count) chain._pinned = new Array(count).fill(false);
+  for (let i = 0; i < count; i += 1) {
+    const along = which === 'start' ? chain.arc[i] : length - chain.arc[i];
+    if (along <= span) {
+      const station = which === 'start' ? hostDistance + along : hostDistance - along;
+      chain.elev[i] = sampleChain(host, Math.max(0, Math.min(hostLength, station))).y;
+      chain._pinned[i] = true;
+    }
+  }
+}
+
+/**
+ * Re-glue connection endpoints to the deck they transfer onto. Branch ends
+ * that the generator re-anchors alongside their host (diverge starts, merge
+ * ends) are held FLAT at deck level through the taper zone, so the glued
+ * parallel run and the data profile agree; the descent happens after.
+ */
+function pinConnectionElevations(chains, connections) {
+  // Phase 1: settle continuation TARGET starts (a confluence has several
+  // feeders — the target's deck is the consensus every feeder then glues to).
+  for (const connection of connections) {
+    const { fromChain, toChain } = connection;
+    if (connection.kind === 'continuation' && connection.toDistance < 60 && !toChain.closed) {
+      pinWithFalloff(toChain, 'start', sampleChain(fromChain, connection.fromDistance).y);
+    }
+  }
+  // Phase 2: glue branch endpoints to their (settled) hosts.
+  for (const connection of connections) {
+    const { fromChain, toChain } = connection;
+    const fromLength = fromChain.arc[fromChain.arc.length - 1];
+    const holdSpan = (chain) => {
+      const length = chain.arc[chain.arc.length - 1];
+      const drop = Math.abs(chain.elev[0] - chain.elev[chain.elev.length - 1]);
+      // steep short connectors keep the glued taper minimal so the climb
+      // has room to stay under grade
+      const room = (length - drop / 0.058) * 0.45;
+      return Math.max(44, Math.min(150, length * 0.28, room));
+    };
+    if (connection.kind === 'merge' && connection.fromDistance > fromLength - 60 && !fromChain.closed) {
+      holdEndZone(fromChain, 'end', toChain, connection.toDistance, holdSpan(fromChain));
+    } else if (connection.kind === 'continuation' && connection.fromDistance > fromLength - 60 && !fromChain.closed) {
+      pinWithFalloff(fromChain, 'end', sampleChain(toChain, connection.toDistance).y);
+    }
+    if (connection.kind === 'diverge' && connection.toDistance < 60 && !toChain.closed) {
+      holdEndZone(toChain, 'start', fromChain, connection.fromDistance, holdSpan(toChain));
+    }
+  }
 }
 
 function bumpElevation(chain, atDistance, delta, falloff = 170) {
@@ -1320,33 +1725,48 @@ function bumpElevation(chain, atDistance, delta, falloff = 170) {
       along = Math.min(along, total - along);
     }
     if (along > falloff) continue;
+    if (chain._pinned?.[i]) continue;
     const w = 0.5 + 0.5 * Math.cos((along / falloff) * Math.PI);
-    // never drag a tunnel above ground or a bridge below its zone
     chain.elev[i] += delta * w;
   }
 }
 
 function enforceSeparation(chains, connections) {
-  // Same-level parallel corridors must not overlap in plan (opposing
+  // Same-level PARALLEL corridors must not overlap in plan (opposing
   // carriageways drawn close together in OSM). Push both apart along the
   // mutual normal. Gores (connected regions) are exempt — corridor overlap
-  // is how merges/diverges seal themselves.
+  // is how merges/diverges seal themselves — and transversal crossings are
+  // the clearance pass's job, not a lateral push.
+  // connected chain ends must not drift: nudges fade to zero there
+  for (const chain of chains) chain._planHold = { start: false, end: false };
+  for (const connection of connections) {
+    const fromLength = connection.fromChain.arc[connection.fromChain.arc.length - 1];
+    if (connection.fromDistance < 60) connection.fromChain._planHold.start = true;
+    if (connection.fromDistance > fromLength - 60) connection.fromChain._planHold.end = true;
+    const toLength = connection.toChain.arc[connection.toChain.arc.length - 1];
+    if (connection.toDistance < 60) connection.toChain._planHold.start = true;
+    if (connection.toDistance > toLength - 60) connection.toChain._planHold.end = true;
+  }
   let pushes = 0;
-  for (let iteration = 0; iteration < 3; iteration += 1) {
+  let residual = 0;
+  for (let iteration = 0; iteration < 8; iteration += 1) {
     let overlaps = 0;
     for (let i = 0; i < chains.length; i += 1) {
       for (let j = i + 1; j < chains.length; j += 1) {
         const a = chains[i];
         const b = chains[j];
-        const need = chainHalfWidth(a) + chainHalfWidth(b) + 0.6;
+        const need = chainHalfWidth(a) + chainHalfWidth(b) + 4.0; // spline overshoot + skew margin
         for (let si = 0; si < a.pts.length; si += 1) {
           const projection = projectToChain(b, a.pts[si][0], a.pts[si][1]);
           if (projection.d >= need) continue;
           const ya = a.elev[si];
           const sample = sampleChain(b, projection.distance);
-          if (Math.abs(ya - sample.y) > 4.5) continue; // different decks
+          if (Math.abs(ya - sample.y) > 5.5) continue; // different decks
           const da = a.arc[si];
-          if (connectedNear(connections, a, b, da, projection.distance, 320)) continue;
+          const tangent = sampleChain(a, da);
+          const parallel = Math.abs(tangent.tx * sample.tx + tangent.tz * sample.tz);
+          if (parallel < 0.45) continue; // true crossings — vertical clearance handles them
+          if (connectedNear(connections, a, b, da, projection.distance, 150)) continue;
           overlaps += 1;
           const push = (need - projection.d) * 0.5 + 0.05;
           let nx = a.pts[si][0] - sample.x;
@@ -1363,16 +1783,21 @@ function enforceSeparation(chains, connections) {
       chain.arc = arcLengths(chain.closed ? chain.pts.concat([chain.pts[0]]) : chain.pts);
       if (chain.closed) chain.arc.pop();
     }
+    residual = overlaps;
     if (!overlaps) break;
   }
-  if (pushes) console.log(`  separation: nudged ${pushes} overlap sample(s)`);
+  if (pushes) console.log(`  separation: nudged ${pushes} overlap sample(s), residual ${residual}`);
 }
 
 function nudgeChain(chain, atDistance, dx, dz, falloff = 120) {
+  const length = chain.arc[chain.arc.length - 1];
   for (let i = 0; i < chain.pts.length; i += 1) {
     const along = Math.abs(chain.arc[i] - atDistance);
     if (along > falloff) continue;
-    const w = 0.5 + 0.5 * Math.cos((along / falloff) * Math.PI);
+    let w = 0.5 + 0.5 * Math.cos((along / falloff) * Math.PI);
+    // fade to zero toward connected ends so seams never tear
+    if (chain._planHold?.start) w *= Math.min(1, chain.arc[i] / 130);
+    if (chain._planHold?.end) w *= Math.min(1, (length - chain.arc[i]) / 130);
     chain.pts[i][0] += dx * w;
     chain.pts[i][1] += dz * w;
   }
@@ -1415,13 +1840,14 @@ function synthesizeUturns(chains, connections, registerChain) {
     const fx = tangent.tx;
     const fz = tangent.tz;
     const gap = Math.hypot(start[0] - end[0], start[1] - end[1]);
-    const handle = Math.max(110, gap * 2.2);
+    const drop = Math.abs(startY - endY);
+    // teardrop path length ~ 1.2*handle + gap; keep the descent under ~5.5 %
+    const handle = Math.max(110, gap * 2.2, (drop / 0.055 - gap) / 1.2);
     const c1x = end[0] + fx * handle;
     const c1z = end[1] + fz * handle;
     const c2x = start[0] + fx * handle;
     const c2z = start[1] + fz * handle;
     const pts = [];
-    const elev = [];
     const steps = 22;
     for (let i = 0; i <= steps; i += 1) {
       const t = i / steps;
@@ -1429,8 +1855,14 @@ function synthesizeUturns(chains, connections, registerChain) {
       const x = mt * mt * mt * end[0] + 3 * mt * mt * t * c1x + 3 * mt * t * t * c2x + t * t * t * start[0];
       const z = mt * mt * mt * end[1] + 3 * mt * mt * t * c1z + 3 * mt * t * t * c2z + t * t * t * start[1];
       pts.push([x, z]);
-      elev.push(endY + (startY - endY) * t);
     }
+    // elevation eased by ARC length (Bezier steps are not equal-length)
+    const arcs = arcLengths(pts);
+    const totalArc = arcs[arcs.length - 1];
+    const elev = arcs.map((along) => {
+      const t = totalArc > 0 ? along / totalArc : 0;
+      return endY + (startY - endY) * t;
+    });
     const uturn = {
       id: `${chain.group}_uturn_${made}`,
       group: chain.group,
@@ -1440,7 +1872,9 @@ function synthesizeUturns(chains, connections, registerChain) {
       elev,
       tunnelFlags: pts.map(() => false),
       bridgeFlags: pts.map(() => false),
-      lanes: 1,
+      // full host width: no squeeze-taper on the mainline's last metres —
+      // lanes funnel INSIDE the loop instead of into a wall before it
+      lanes: Math.min(chain.lanes, other.lanes),
       speedLimit: 40,
       closed: false,
       synthetic: true,
@@ -1585,17 +2019,34 @@ function buildServiceAreas(chains, paCentroids) {
   const areas = [];
   for (const pa of SERVICE_AREAS) {
     const [x, z] = paCentroids.get(pa.id);
-    // anchor: nearest mainline chain of the allowed groups
+    // Anchor scoring: the PA's access legs must FIT on the chain (enough
+    // room before and after the lot), and a grounded lot prefers a low
+    // deck (short descent). Long ramps are valid hosts — Daikoku PA is
+    // really fed from the JCT loops, not from the Bayshore viaduct.
     let best = null;
     for (const chain of chains) {
-      if (chain.kind !== 'mainline' || !pa.groups.includes(chain.group)) continue;
+      const eligible = (chain.kind === 'mainline' && pa.groups.includes(chain.group))
+        || (chain.kind === 'ramp' && !chain.synthetic && chain.arc[chain.arc.length - 1] > 900);
+      if (!eligible) continue;
       const projection = projectToChain(chain, x, z);
-      if (!best || projection.d < best.projection.d) best = { chain, projection };
+      if (projection.d > 600) continue;
+      const deckY = sampleChain(chain, projection.distance).y;
+      const lotY = pa.grounded ? 1.4 : deckY;
+      const legNeed = pa.length * 0.5 + Math.max(330, Math.abs(deckY - lotY) / 0.05);
+      const length = chain.arc[chain.arc.length - 1];
+      const fits = chain.closed
+        || (projection.distance > legNeed + 60 && length - projection.distance > legNeed + 60);
+      const score = projection.d
+        + Math.max(0, deckY - lotY) * (pa.grounded ? 6 : 0)
+        + (fits ? 0 : 4000)
+        + (chain.kind === 'ramp' ? 120 : 0);
+      if (!best || score < best.score) best = { chain, projection, score, fits };
     }
     if (!best) {
       console.warn(`  ! no anchor chain for ${pa.id}`);
       continue;
     }
+    if (!best.fits) console.warn(`  ! ${pa.id}: access legs will not fully fit on ${best.chain.id}`);
     const sample = sampleChain(best.chain, best.projection.distance);
     // side of the anchor chain the lot sits on: sign of cross(tangent, toLot)
     const toLotX = x - sample.x;
@@ -1615,6 +2066,7 @@ function buildServiceAreas(chains, paCentroids) {
       density: pa.density,
       width: pa.width,
       length: pa.length,
+      grounded: !!pa.grounded,
     });
     console.log(`  PA ${pa.id}: anchored to ${best.chain.id} @ ${best.projection.distance.toFixed(0)} m (${best.projection.d.toFixed(0)} m ${cross > 0 ? 'left' : 'right'})`);
   }
