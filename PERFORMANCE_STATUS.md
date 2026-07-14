@@ -68,3 +68,36 @@ stops at the performance foundation.
 Real-device iPhone validation remains a manual release check because
 SwiftShader timing is useful for regression comparison, not a proxy for an
 iPhone GPU or thermal behavior.
+
+## Dense silhouette follow-up (2026-07-14)
+
+The seamless-road pass adds a dedicated `surfaceFrames` level while retaining
+the 48,969-frame coarse level for non-silhouette consumers. Low quality uses
+the same dense road silhouette; it still removes wet-road effects rather than
+coarsening the drivable surface.
+
+The performance probe now reports true stored triangles by counting each
+shared `BufferGeometry` once. It also retains the older per-mesh triangle
+reference count for comparison, enforces the requested 170 draw-call ceiling,
+and fails above 2 million stored triangles.
+
+Same-machine comparison from requested start `1dd0812` to the final pass:
+
+| Metric | `1dd0812` | Dense silhouette | Result |
+|---|---:|---:|---|
+| Headless map build, median of 3 | 2,068.9 ms | 2,829.8 ms | PASS (<4 s) |
+| Browser map build | 1,888.5 ms | 2,381.8 ms | recorded |
+| Visible triangles | 56,708 | 66,286 | PASS (<70k probe; <90k target) |
+| Draw calls | 165 | 170 | PASS (<=170) |
+| Full-scene triangle references | 1,643,936 | 2,004,340 | context |
+| Full-scene stored triangles | not previously reported | 1,959,082 | PASS (<2m) |
+| Renderer geometries / textures | 413 / 31 | 423 / 31 | bounded |
+| Visible / total chunks | 11 / 234 | 11 / 234 | unchanged |
+| Active traffic | 44 | 44 | matched |
+| Frame mean / p50 / p95 | 69.07 / 66.7 / 83.4 ms | 62.59 / 66.6 / 66.7 ms | no SwiftShader regression |
+
+Final `node .devtests/performance.mjs`: PASS. The map-build increase buys the
+dense road silhouette while staying 1.17 s below the required ceiling; mobile
+visible geometry rises by 9,578 triangles and remains below the previous 70k
+probe limit. Draw calls land exactly on the requested ceiling without changing
+chunk count or traffic density.

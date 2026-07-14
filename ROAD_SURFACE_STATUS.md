@@ -168,3 +168,52 @@ Verification at this checkpoint:
 - Chase + noclip screenshots: `.devtests/shots/M-*-before.png`,
   `.devtests/shots/M-*-after.png` and `.devtests/shots/M-*-chase-after.png`
   for C1, Wangan, the R6 S-bend, ramp_17 and the Rainbow ascent.
+
+## Seamless road-silhouette follow-up (2026-07-14)
+
+The 24 m / 3 degree / 0.30 m render level still exposed individual chords in
+an elevated Route 11 Daiba view. The broad bridge curve read as roughly eight
+straight pieces even though the previous numeric probe passed.
+
+Road rendering now has two refinement levels, both sampled exclusively by the
+same authoritative `_frameAt(route, s)`:
+
+- `renderFrames` retains the measured coarse level (48,969 frames) for tunnel
+  shells, wall metadata and other non-silhouette work;
+- `surfaceFrames` is a dense superset (81,679 frames) used by asphalt, fascia
+  sides, markings, parapet caps/outer faces and handrails. Every coarse frame
+  object is reused by the dense level; no second road evaluator or surface was
+  introduced.
+
+Each coarse span is tested again at 25%, 50% and 75%, including centre and both
+deck edges. Refinable spans are bounded to 8 m, 0.75 degrees tangent change,
+0.06 m plan chord error and 0.03 m vertical chord error. The existing ~1.5 m
+minimum-span safeguard remains for literal source-data kinks. Measured maxima
+for spans longer than 3 m are 7.9971 m, 0.74973 degrees, 0.059998 m lateral and
+0.027740 m vertical. The `k5_uturn_4` 156 degree source kink is unchanged but
+occupies only 1.97 m.
+
+The dense silhouette does not multiply unrelated detail. Barrier-suppression
+projections remain cached at roughly 9 m, wall metadata and tunnel shells use
+`renderFrames`, and the non-silhouette underside uses the coarse level. The
+DoubleSide parapet/rail materials keep only the cap/outer silhouette sheets
+needed from chase and exterior views, avoiding redundant dense inner sheets.
+
+Repeatable visual probe:
+
+`node .devtests/road-silhouette-shots.mjs before|after`
+
+It captures the elevated Route 11 Daiba curve plus C1 and R6 elevated/chase
+views with traffic and UI removed. The Route 11 before image exposes the old
+7-8 chords; the after image reads as a continuous arc, with fascia, edge paint,
+parapet and rail remaining coincident. C1 and R6 chase/elevated shots show the
+same continuity through the tight curve and S-bend.
+
+Final validation:
+
+- `node .devtests/road-surface-probe.mjs`: PASS;
+- `node .devtests/performance.mjs`: PASS;
+- `node .devtests/e2e.mjs`: 25/25;
+- `node .devtests/osm-validate.mjs`: unchanged known failures -- rail 2 /
+  overlap 21 / ramp-drive 47 / smoothness 50; geometry hygiene 0. No unrelated
+  OSM/data fix was made.

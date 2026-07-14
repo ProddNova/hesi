@@ -41,7 +41,18 @@ for (let run = 0; run < 3; run += 1) {
       const positions = object.geometry.getAttribute('position');
       triangles += index ? index.count / 3 : (positions?.count || 0) / 3;
     });
-    scene = { triangles: Math.round(triangles), meshes, geometries: geometries.size };
+    let storedTriangles = 0;
+    for (const geometry of geometries) {
+      const index = geometry.getIndex();
+      const positions = geometry.getAttribute('position');
+      storedTriangles += index ? index.count / 3 : (positions?.count || 0) / 3;
+    }
+    scene = {
+      triangles: Math.round(triangles),
+      storedTriangles: Math.round(storedTriangles),
+      meshes,
+      geometries: geometries.size,
+    };
   }
   map.dispose();
 }
@@ -156,8 +167,9 @@ const result = {
 console.log(JSON.stringify(result, null, 2));
 const regressions = [];
 if (errors.length) regressions.push(`${errors.length} browser error(s)`);
-if (result.renderer.drawCalls > 175) regressions.push(`${result.renderer.drawCalls} draw calls (limit 175)`);
+if (result.renderer.drawCalls > 170) regressions.push(`${result.renderer.drawCalls} draw calls (limit 170)`);
 if (result.renderer.triangles > 70000) regressions.push(`${result.renderer.triangles} visible triangles (limit 70000)`);
+if (result.scene.storedTriangles > 2000000) regressions.push(`${result.scene.storedTriangles} stored triangles (limit 2000000)`);
 if (result.nodeMapBuildMs.median > 4000) regressions.push(`${result.nodeMapBuildMs.median} ms map build (limit 4000)`);
 if (result.frameTimingMs.p95 > 150) regressions.push(`${result.frameTimingMs.p95} ms frame p95 (limit 150)`);
 if (regressions.length) {

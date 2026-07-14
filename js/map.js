@@ -771,6 +771,7 @@ export class HighwayMap {
       taperEnd: null,
       samples: [],
       renderFrames: [],
+      surfaceFrames: [],
     };
     this.routes.set(route.id, route);
     this.routeOrder.push(route.id);
@@ -2584,20 +2585,11 @@ export class HighwayMap {
   }
 
   /**
-   * Render stations for a route: seeded at the coarse per-kind step, then
-   * refined until the drawn chord agrees with the analytic surface physics
-   * samples. The error is measured at the centre AND both deck edges (so
-   * bank twist counts) against the linear interpolation the deck triangles
-   * will actually draw. This bounds the render-vs-physics gap everywhere
-   * instead of hiding it under a blind subdivision count.
+   * Refine one frame span with quarter/midpoint analytic samples. `limits`
+   * describes one consumer level; every accepted station still comes from
+   * the single authoritative `_frameAt` sampler.
    */
-  _prepareRenderFrames(route) {
-    const step = route.kind === 'service' ? 14 : (route.kind === 'ramp' ? 16 : (route.kind === 'loop' ? 24 : 30));
-    const MAX_VERTICAL = 0.035;
-    const MAX_LATERAL = 0.3;
-    const MAX_TANGENT_ANGLE = THREE.MathUtils.degToRad(3);
-    const MAX_SEGMENT = 24;
-    const MIN_SEGMENT = 1.5;
+  _refineFrameSpan(route, a, b, limits, frames, depth, knownMid = null) {
     const spanError = (a, b, samples) => {
       let vertical = 0;
       let lateral = 0;
@@ -2615,32 +2607,59 @@ export class HighwayMap {
       return { vertical, lateral };
     };
     const tangentAngle = (a, b) => Math.acos(clamp(a.tangent.dot(b.tangent), -1, 1));
+    const span = b.distance - a.distance;
+    if (depth <= 0 || span <= limits.minSegment * 2) return;
+    const samples = [0.25, 0.5, 0.75].map((t) => {
+      const distance = a.distance + span * t;
+      const frame = t === 0.5 && knownMid ? knownMid : this._frameAt(route, distance);
+      frame.distance = distance; // keep monotonic across a closed-route wrap
+      return { t, frame };
+    });
+    const error = spanError(a, b, samples);
+    const tangentSamples = [a, ...samples.map((sample) => sample.frame), b];
+    let angle = tangentAngle(a, b);
+    for (let i = 1; i < tangentSamples.length; i += 1) {
+      angle = Math.max(angle, tangentAngle(tangentSamples[i - 1], tangentSamples[i]));
+    }
+    if (span <= limits.maxSegment
+      && error.vertical <= limits.maxVertical
+      && error.lateral <= limits.maxLateral
+      && angle <= limits.maxTangentAngle) return;
+    const mid = samples[1].frame;
+    this._refineFrameSpan(route, a, mid, limits, frames, depth - 1, samples[0].frame);
+    frames.push(mid);
+    this._refineFrameSpan(route, mid, b, limits, frames, depth - 1, samples[2].frame);
+  }
+
+  /**
+   * Build two render-station levels from the same `_frameAt` surface:
+   *
+   * - `renderFrames` preserves the measured coarse level for tunnel shells,
+   *   collision metadata and other non-silhouette work;
+   * - `surfaceFrames` is a dense superset for asphalt, fascia, paint and the
+   *   complete visible road-edge/barrier silhouette.
+   *
+   * The dense level starts from the accepted coarse spans, reuses their
+   * frame objects, and adds only the quarter/midpoint samples it needs.
+   */
+  _prepareRenderFrames(route) {
+    const step = route.kind === 'service' ? 14 : (route.kind === 'ramp' ? 16 : (route.kind === 'loop' ? 24 : 30));
+    const coarseLimits = {
+      maxVertical: 0.035,
+      maxLateral: 0.3,
+      maxTangentAngle: THREE.MathUtils.degToRad(3),
+      maxSegment: 24,
+      minSegment: 1.5,
+    };
+    const surfaceLimits = {
+      maxVertical: 0.03,
+      maxLateral: 0.06,
+      maxTangentAngle: THREE.MathUtils.degToRad(0.75),
+      maxSegment: 8,
+      minSegment: 1.5,
+    };
     const frames = route.renderFrames;
     frames.length = 0;
-    const refine = (a, b, depth, knownMid = null) => {
-      const span = b.distance - a.distance;
-      if (depth <= 0 || span <= MIN_SEGMENT * 2) return;
-      const samples = [0.25, 0.5, 0.75].map((t) => {
-        const distance = a.distance + span * t;
-        const frame = t === 0.5 && knownMid ? knownMid : this._frameAt(route, distance);
-        frame.distance = distance; // keep monotonic across a closed-route wrap
-        return { t, frame };
-      });
-      const error = spanError(a, b, samples);
-      const tangentSamples = [a, ...samples.map((sample) => sample.frame), b];
-      let angle = tangentAngle(a, b);
-      for (let i = 1; i < tangentSamples.length; i += 1) {
-        angle = Math.max(angle, tangentAngle(tangentSamples[i - 1], tangentSamples[i]));
-      }
-      if (span <= MAX_SEGMENT
-        && error.vertical <= MAX_VERTICAL
-        && error.lateral <= MAX_LATERAL
-        && angle <= MAX_TANGENT_ANGLE) return;
-      const mid = samples[1].frame;
-      refine(a, mid, depth - 1, samples[0].frame);
-      frames.push(mid);
-      refine(mid, b, depth - 1, samples[2].frame);
-    };
     const segmentCount = Math.max(3, Math.ceil(route.length / step));
     let previous = null;
     for (let i = 0; i <= segmentCount; i += 1) {
@@ -2648,16 +2667,34 @@ export class HighwayMap {
       const isWrap = route.closed && i === segmentCount;
       const frame = this._frameAt(route, isWrap ? 0 : distance);
       if (isWrap) frame.distance = route.length;
-      if (previous) refine(previous, frame, 7);
+      if (previous) this._refineFrameSpan(route, previous, frame, coarseLimits, frames, 7);
       if (!isWrap && i < segmentCount + (route.closed ? 0 : 1)) frames.push(frame);
       previous = frame;
     }
+
+    const surfaceFrames = route.surfaceFrames;
+    surfaceFrames.length = 0;
+    const count = route.closed ? frames.length : frames.length - 1;
+    for (let i = 0; i < count; i += 1) {
+      const a = frames[i];
+      let b = frames[(i + 1) % frames.length];
+      if (route.closed && i === frames.length - 1) {
+        b = this._frameAt(route, 0);
+        b.distance = route.length;
+      }
+      surfaceFrames.push(a);
+      this._refineFrameSpan(route, a, b, surfaceLimits, surfaceFrames, 7);
+    }
+    if (!route.closed && frames.length) surfaceFrames.push(frames[frames.length - 1]);
   }
 
-  _forEachFrameSegment(route, callback) {
-    const frames = route.renderFrames;
+  _forEachFrameSegment(route, callback, frames = route.renderFrames) {
     const count = route.closed ? frames.length : frames.length - 1;
     for (let i = 0; i < count; i += 1) callback(frames[i], frames[(i + 1) % frames.length], i);
+  }
+
+  _forEachSurfaceFrameSegment(route, callback) {
+    this._forEachFrameSegment(route, callback, route.surfaceFrames);
   }
 
   /** Deck edge point with banking applied. lateral along the base normal. */
@@ -2669,7 +2706,7 @@ export class HighwayMap {
 
   /**
    * Paint a longitudinal stripe [sStart, sEnd] onto the deck as merged quads.
-   * The stripe walks the route's render frames and interpolates the SAME
+   * The stripe walks the route's surface frames and interpolates the SAME
    * corner points the deck triangles interpolate, so paint sits in the drawn
    * surface's own planes — it bends with curves, pitches with grades and
    * rolls with banking, and can never float off the asphalt.
@@ -2678,7 +2715,7 @@ export class HighwayMap {
    * no room for the stripe (taper throats) are skipped.
    */
   _paintStrip(route, materialName, sStart, sEnd, lateralAt, width, lift = 0.055) {
-    const frames = route.renderFrames;
+    const frames = route.surfaceFrames;
     const count = route.closed ? frames.length : frames.length - 1;
     const halfWidth = width * 0.5;
     for (let i = 0; i < count; i += 1) {
@@ -2764,7 +2801,7 @@ export class HighwayMap {
     const barrierHeight = route.kind === 'service' ? 0.9 : 1.15;
     const medianHeight = 1.0;
 
-    // Refined frames can sit ~3 m apart; suppression zones (gore mouths, PA
+    // Surface frames can sit ~1.5 m apart; suppression zones (gore mouths, PA
     // gates) span tens of metres, so re-probe _barrierSuppressed only every
     // ~9 m per side — finer than the old 16-30 m step, at a fraction of the
     // projections.
@@ -2777,7 +2814,7 @@ export class HighwayMap {
       return result;
     };
 
-    this._forEachFrameSegment(route, (a, b) => {
+    this._forEachSurfaceFrameSegment(route, (a, b) => {
       // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
       const mid = a.position.clone().lerp(b.position, 0.5);
       const bucketRoad = this._bucket(mid, roadMaterialName);
@@ -2801,10 +2838,9 @@ export class HighwayMap {
       const dropRB = rightB.clone(); dropRB.y -= fasciaDepth;
       this._pushQuad(bucketFascia, dropLA, dropLB, leftB, leftA);
       this._pushQuad(bucketFascia, rightA, rightB, dropRB, dropRA);
-      if (elevated) this._pushQuad(bucketFascia, dropRA, dropRB, dropLB, dropLA); // underside, faces down
 
-      // Outer barriers — concrete parapet with a leaned inner face, capped
-      // top and a steel handrail, PS2-highway style. Every metre of the
+      // Outer barriers — capped concrete parapet + steel handrail,
+      // PS2-highway style. Every metre of the
       // network keeps its wallSegments record (collision metadata identical);
       // only the VISUAL is omitted where a segment would criss-cross another
       // carriageway at a gore mouth or PA gate.
@@ -2813,11 +2849,6 @@ export class HighwayMap {
       for (const side of [1, -1]) {
         const baseA = this._deckPoint(a, side * (a.half - 0.42), 0.02);
         const baseB = this._deckPoint(b, side * (b.half - 0.42), 0.02);
-        this.wallSegments.push({
-          routeId: route.id, type: 'outer', side,
-          start: baseA.clone(), end: baseB.clone(), height: barrierHeight,
-          distanceStart: a.distance, distanceEnd: b.distance,
-        });
         const probe = TMP_B.copy(baseA).lerp(baseB, 0.5);
         if (barrierSuppressedNear(probe, side)) continue;
         const lean = 0.85;
@@ -2827,12 +2858,13 @@ export class HighwayMap {
         const capB = this._deckPoint(b, side * (b.half - 0.06), lean + 0.06);
         const outA = this._deckPoint(a, side * a.half, 0.0);
         const outB = this._deckPoint(b, side * b.half, 0.0);
+        // `barrier` is DoubleSide: cap + outer wall preserve the same deck-edge
+        // silhouette from chase and exterior views without storing a third,
+        // hidden inner-profile sheet at every dense surface station.
         if (side > 0) {
-          this._pushQuad(bucketBarrier, baseA, baseB, innerTopB, innerTopA);
           this._pushQuad(bucketBarrier, innerTopA, innerTopB, capB, capA);
           this._pushQuad(bucketBarrier, capB, outB, outA, capA);
         } else {
-          this._pushQuad(bucketBarrier, baseB, baseA, innerTopA, innerTopB);
           this._pushQuad(bucketBarrier, innerTopB, innerTopA, capA, capB);
           this._pushQuad(bucketBarrier, capA, outA, outB, capB);
         }
@@ -2844,9 +2876,6 @@ export class HighwayMap {
           const railTopB = railB.clone(); railTopB.y += 0.09;
           if (side > 0) this._pushQuad(bucketRail, railA, railB, railTopB, railTopA);
           else this._pushQuad(bucketRail, railB, railA, railTopA, railTopB);
-          const railInA = this._deckPoint(a, side * (a.half - 0.26), 1.21);
-          const railInB = this._deckPoint(b, side * (b.half - 0.26), 1.21);
-          this._pushQuad(bucketRail, railTopA, railTopB, railInB, railInA);
         }
       }
 
@@ -2873,14 +2902,39 @@ export class HighwayMap {
         const capRA = this._deckPoint(a, -wTop, hTop + 0.04);
         const capRB = this._deckPoint(b, -wTop, hTop + 0.04);
         this._pushQuad(bucketMedian, capLA, capLB, capRB, capRA);
+      }
+    });
+
+    // Collision metadata and the enclosed tunnel shell do not define the
+    // open-road silhouette, so they retain the coarser render level. The
+    // collision corridor itself remains analytic and is not changed here.
+    this._forEachFrameSegment(route, (a, b) => {
+      const mid = a.position.clone().lerp(b.position, 0.5);
+      const elevated = a.position.y > 2.5 && !a.tunnel;
+      if (elevated) {
+        const fasciaDepth = 1.35;
+        const dropLA = this._deckPoint(a, a.half); dropLA.y -= fasciaDepth;
+        const dropLB = this._deckPoint(b, b.half); dropLB.y -= fasciaDepth;
+        const dropRA = this._deckPoint(a, -a.half); dropRA.y -= fasciaDepth;
+        const dropRB = this._deckPoint(b, -b.half); dropRB.y -= fasciaDepth;
+        this._pushQuad(this._bucket(mid, 'concreteDark'), dropRA, dropRB, dropLB, dropLA);
+      }
+      for (const side of [1, -1]) {
+        this.wallSegments.push({
+          routeId: route.id, type: 'outer', side,
+          start: this._deckPoint(a, side * (a.half - 0.42), 0.02),
+          end: this._deckPoint(b, side * (b.half - 0.42), 0.02),
+          height: barrierHeight,
+          distanceStart: a.distance, distanceEnd: b.distance,
+        });
+      }
+      if (route.bidirectional) {
         this.wallSegments.push({
           routeId: route.id, type: 'median', side: 0,
           start: this._deckPoint(a, 0.36, 0.02), end: this._deckPoint(b, 0.36, 0.02), height: medianHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
         });
       }
-
-      // tunnel shell
       if (a.tunnel && b.tunnel) {
         const bucketTunnel = this._bucket(mid, 'tunnelWall');
         const height = 6.1;
@@ -2896,7 +2950,6 @@ export class HighwayMap {
         this._pushQuad(bucketTunnel, roofRA, roofRB, wallRB, wallRA);
         this._pushQuad(bucketTunnel, roofLA, roofLB, roofRB, roofRA);
       }
-
     });
 
     // dead-end cap + crash cushions
@@ -2907,7 +2960,7 @@ export class HighwayMap {
 
   _buildDeadEnd(route) {
     {
-      const endFrame = route.renderFrames[route.renderFrames.length - 1];
+      const endFrame = route.surfaceFrames[route.surfaceFrames.length - 1];
       const bucket = this._bucket(endFrame.position, 'barrier');
       const left = this._deckPoint(endFrame, endFrame.half);
       const right = this._deckPoint(endFrame, -endFrame.half);

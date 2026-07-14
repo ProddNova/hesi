@@ -37,8 +37,10 @@ HighwayMap.prototype._paintStrip = originalStrip;
 
 const clampDot = (value) => Math.max(-1, Math.min(1, value));
 const angleDeg = (a, b) => Math.acos(clampDot(a.tangent.dot(b.tangent))) * 180 / Math.PI;
-let frameCount = 0;
+let renderFrameCount = 0;
+let surfaceFrameCount = 0;
 let segmentCount = 0;
+let sharedRenderFrames = 0;
 let worstLength = { value: 0 };
 let worstAngle = { value: 0 };
 let worstRefinableAngle = { value: 0 };
@@ -46,15 +48,26 @@ let worstVertical = { value: 0 };
 let worstLateral = { value: 0 };
 
 for (const route of map.routes.values()) {
-  const frames = route.renderFrames;
-  frameCount += frames.length;
+  const frames = route.surfaceFrames;
+  renderFrameCount += route.renderFrames.length;
+  surfaceFrameCount += frames.length;
+  const surfaceSet = new Set(frames);
+  sharedRenderFrames += route.renderFrames.filter((frame) => surfaceSet.has(frame)).length;
   const count = route.closed ? frames.length : frames.length - 1;
   for (let i = 0; i < count; i += 1) {
     const a = frames[i];
     const b = frames[(i + 1) % frames.length];
     const end = route.closed && i === frames.length - 1 ? route.length : b.distance;
     const span = end - a.distance;
-    const angle = angleDeg(a, b);
+    const analyticFrames = [a];
+    for (const t of [0.25, 0.5, 0.75]) {
+      analyticFrames.push(map._frameAt(route, a.distance + span * t));
+    }
+    analyticFrames.push(b);
+    let angle = angleDeg(a, b);
+    for (let sampleIndex = 1; sampleIndex < analyticFrames.length; sampleIndex += 1) {
+      angle = Math.max(angle, angleDeg(analyticFrames[sampleIndex - 1], analyticFrames[sampleIndex]));
+    }
     const location = { routeId: route.id, distance: a.distance, span };
     if (span > worstLength.value) worstLength = { value: span, ...location };
     if (angle > worstAngle.value) worstAngle = { value: angle, ...location };
@@ -106,7 +119,7 @@ for (const call of dashCalls) {
 // endpoint-all-or-nothing check emitted no quad; clipping must emit z=7..10.
 const syntheticRoute = {
   closed: false,
-  renderFrames: [
+  surfaceFrames: [
     { distance: 0, position: new THREE.Vector3(0, 0, 0), normal: new THREE.Vector3(1, 0, 0), bank: 0, half: 1 },
     { distance: 10, position: new THREE.Vector3(0, 0, 10), normal: new THREE.Vector3(1, 0, 0), bank: 0, half: 3 },
   ],
@@ -123,7 +136,9 @@ const taperStart = taperQuads.length ? Math.min(...taperQuads[0].map((point) => 
 
 const result = {
   buildMs,
-  frameCount,
+  renderFrameCount,
+  surfaceFrameCount,
+  sharedRenderFrames,
   segmentCount,
   worstLength,
   worstAngle,
@@ -139,10 +154,11 @@ const result = {
 console.log(JSON.stringify(result, null, 2));
 
 const failures = [];
-if (worstLength.value > 24.001) failures.push(`segment length ${worstLength.value.toFixed(3)} m`);
-if (worstRefinableAngle.value > 3.01) failures.push(`tangent change ${worstRefinableAngle.value.toFixed(3)} deg`);
-if (worstVertical.value > 0.0351) failures.push(`vertical chord error ${worstVertical.value.toFixed(4)} m`);
-if (worstLateral.value > 0.3001) failures.push(`lateral chord error ${worstLateral.value.toFixed(4)} m`);
+if (worstLength.value > 8.001) failures.push(`segment length ${worstLength.value.toFixed(3)} m`);
+if (worstRefinableAngle.value > 0.751) failures.push(`tangent change ${worstRefinableAngle.value.toFixed(3)} deg`);
+if (worstVertical.value > 0.0301) failures.push(`vertical chord error ${worstVertical.value.toFixed(4)} m`);
+if (worstLateral.value > 0.0601) failures.push(`lateral chord error ${worstLateral.value.toFixed(4)} m`);
+if (sharedRenderFrames !== renderFrameCount) failures.push(`${renderFrameCount - sharedRenderFrames} coarse frames not reused by surfaceFrames`);
 if (phaseErrors) failures.push(`${phaseErrors} dash phase errors`);
 if (taperQuads.length !== 1 || Math.abs(taperStart - 7) > 1e-6) failures.push('taper clipping failed');
 if (failures.length) {
