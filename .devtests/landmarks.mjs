@@ -46,9 +46,9 @@ const spots = [
   { name: 'rainbow-bridge', route: 'r11', frac: 0.45 },
   { name: 'wangan-straight', route: 'wangan', frac: 0.2 },
   { name: 'port-tunnel', route: 'wangan', frac: 0.44 },
-  { name: 'daikoku-approach', route: 'dj', frac: 0.15 },
+  { name: 'daikoku-approach', route: 'k5', frac: 0.55 },
   { name: 'daikoku-pa', pa: 'daikoku_pa' },
-  { name: 'yaesu-tunnel', route: 'c1', frac: 0.86 },
+  { name: 'c1-tunnel', route: 'c1', frac: 0.38 },
   { name: 'k1-industrial', route: 'k1', frac: 0.5 },
 ];
 for (const spot of spots) {

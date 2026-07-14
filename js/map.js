@@ -1,31 +1,33 @@
 import * as THREE from 'three';
+import ROUTE_DATA from '../data/routes.js';
 
 /**
- * Shutoko Nights world module — a scaled, topologically faithful low-poly
- * recreation of Tokyo's Shuto Expressway at night.
+ * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
+ * OpenStreetMap ground truth (data/routes.js, generated offline by
+ * tools/extract-osm.js — the game never calls any API at runtime).
  *
- * Coordinates: metres. +X east, +Z north, +Y up. Heading 0 faces +Z and the
- * world is left-hand traffic: for travel direction d (+1 = along the authored
- * curve) the carriageway occupies the NEGATIVE side of the directed curve
- * normal (the directed normal is the driver's right, so lanes sit to the
- * left of the centreline and lane 0 hugs the median, Japan style).
+ * Coordinates: metres. +X east, +Z north, +Y up, true 1:1 scale projected
+ * around 35.68 N 139.77 E. Every route is a ONE-WAY carriageway travelled
+ * from distance 0 to route.length (direction +1); opposing carriageways are
+ * independent corridors, exactly as OSM maps them.
  *
- * Network (blueprint):
- *   c1      C1 Inner Circular loop (~14.5 km, 2 lanes/dir, level E, one T tunnel)
- *   r11     Route 11 Daiba line + Rainbow Bridge (H deck over open water)
- *   wangan  Bayshore line (~31 km, 3 lanes/dir, Tokyo Port Tunnel at T)
- *   r9      Route 9 Fukagawa connector (E with an H river flyover)
- *   k1      K1 Yokohane line (E over industrial suburbs)
- *   dj      Daikoku JCT loop (H) + spiral (G), U-turn ramp (S), Daikoku PA
- * plus one-way junction ramps, a signed-closed stub at C1-W, and four PAs
- * (Shibaura + garage, Tatsumi, Heiwajima, Daikoku).
+ * Network: C1 loops, Route 11 Daiba + Rainbow Bridge, Bayshore B between
+ * Tatsumi and Daikoku (Tokyo Port Tunnel), Route 9 Fukagawa, Route 1 Haneda
+ * (Hamazakibashi-Haneda, Heiwajima PA), the Route 6 Mukojima stitch, K1
+ * Yokohane and the K5 Daikoku line into the Daikoku JCT stack — plus every
+ * interconnecting motorway_link ramp OSM has, and the four PAs (Shibaura +
+ * garage, Tatsumi, Heiwajima, Daikoku) at their real locations.
  *
- * Junction rule: carriageways NEVER cross at grade. Connectivity is a list of
- * directed edges (diverge / merge / continuation) between routes, and every
- * crossing is grade-separated by authored elevations (T -15, G 0, E +12,
- * H +24, S +36). Collision is the union of route corridors: a point is
- * drivable iff it is inside at least one corridor (or a PA lot) at a matching
- * elevation, so barriers are continuous and can never be disabled.
+ * Construction rules the generator enforces STRUCTURALLY:
+ *  - Connections exist only where the OSM topology graph has them.
+ *  - Diverges/merges are re-anchored to the OUTER side of the carriageway
+ *    they leave/join: a parallel taper runs alongside the mainline (deck
+ *    heights glued), then peels away — a ramp can never split a carriageway
+ *    down the middle, and staying in lane never captures you onto a ramp.
+ *  - Collision is the union of route corridors: a point is drivable iff it
+ *    is inside at least one corridor (or a PA lot) at a matching elevation,
+ *    so barriers are continuous, gores seal themselves, and walls can never
+ *    be disabled.
  */
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -136,22 +138,29 @@ export class HighwayMap {
     this._buildWorld();
     this._buildMinimapData();
 
-    this.routeAliases.set('c1_outer', { id: 'c1', direction: 1 });
-    this.routeAliases.set('c1_inner', { id: 'c1', direction: -1 });
-    this.routeAliases.set('c1o', { id: 'c1', direction: 1 });
-    this.routeAliases.set('c1i', { id: 'c1', direction: -1 });
-    this.routeAliases.set('yokohane', { id: 'k1', direction: 1 });
-    this.routeAliases.set('bayshore', { id: 'wangan', direction: 1 });
-    this.routeAliases.set('b', { id: 'wangan', direction: 1 });
-    this.routeAliases.set('rainbow', { id: 'r11', direction: 1 });
-    this.routeAliases.set('11', { id: 'r11', direction: 1 });
-    this.routeAliases.set('bay_link', { id: 'dj', direction: 1 });
-    this.routeAliases.set('shinjuku', { id: 'c1', direction: 1 });
+    // Group aliases resolve to that group's longest carriageway.
+    for (const groupId of this.groups.keys()) {
+      const chains = this._groupChains(groupId);
+      if (chains.length) this.routeAliases.set(groupId, { id: chains[0].id, direction: 1 });
+    }
+    const aliasTo = (name, groupId) => {
+      const chains = this._groupChains(groupId);
+      if (chains.length) this.routeAliases.set(name, { id: chains[0].id, direction: 1 });
+    };
+    aliasTo('c1_outer', 'c1');
+    aliasTo('c1_inner', 'c1');
+    aliasTo('yokohane', 'k1');
+    aliasTo('bayshore', 'wangan');
+    aliasTo('b', 'wangan');
+    aliasTo('rainbow', 'r11');
+    aliasTo('11', 'r11');
     this.trafficLanes = this.getTrafficLanes();
 
     const garageArea = this.serviceAreas.find((area) => area.hasGarage);
     const mainRoute = this.routes.get(garageArea.routeId);
-    const spawnDistance = wrap(garageArea.mainDistance + garageArea.direction * 620, mainRoute.length);
+    const spawnDistance = mainRoute.closed
+      ? wrap(garageArea.mainDistance + garageArea.direction * 620, mainRoute.length)
+      : clamp(garageArea.mainDistance + garageArea.direction * 620, 60, mainRoute.length - 140);
     this.initialSpawn = this.sampleLane(garageArea.routeId, spawnDistance, 0, garageArea.direction);
     this.initialSpawn.position.y += 0.65;
     this.initialSpawn.serviceAreaId = garageArea.id;
@@ -436,260 +445,264 @@ export class HighwayMap {
   // ------------------------------------------------------------------
 
   _defineNetwork() {
-    // C1 inner loop, counterclockwise N -> W -> S -> E, irregular radius
-    // 1.9-2.5 km, level E rolling +8..+16 with the Yaesu tunnel on the NE arc.
-    this._registerRoute({
-      id: 'c1', code: 'C1', name: 'C1 Inner Loop', kind: 'loop', closed: true,
-      lanes: 2, speedLimit: 80,
-      destinations: [['都心環状', 'C1 LOOP'], ['銀座', 'GINZA'], ['芝浦', 'SHIBAURA'], ['神田橋', 'KANDABASHI']],
-      points: [
-        vec(0, 14, 2300),      // N JCT
-        vec(-1000, 12, 2050),
-        vec(-1850, 10, 1350),
-        vec(-2150, 12, 700),
-        vec(-2300, 12, 0),     // W JCT (closed stub)
-        vec(-2200, 14, -800),
-        vec(-1400, 12, -1350),
-        vec(-700, 10, -1800),
-        vec(0, 10, -2300),     // S JCT — Shibaura, R11 departs
-        vec(950, 11, -2250),
-        vec(1800, 13, -1700),
-        vec(2200, 12, -800),
-        vec(2300, 12, 0),      // E JCT — R9 arrives (multi-level)
-        vec(2400, 8, 750),
-        vec(2250, -15, 1400),  // Yaesu tunnel (T) with a curve inside
-        vec(1500, -15, 2000),
-        vec(700, 6, 2350),
-      ],
-      tunnelZones: [{ nearA: vec(2340, 0, 1080), nearB: vec(1080, 0, 2210), name: 'Yaesu tunnel', style: 'white' }],
+    const data = ROUTE_DATA;
+    this.networkMeta = data.meta;
+    this.groups = new Map((data.groups || []).map((group) => [group.id, group]));
+    this._terrainSlabs = data.terrain || [];
+    this._dataServiceAreas = data.serviceAreas || [];
+    this._dataEdges = data.edges || [];
+
+    const groupKind = (groupId) => this.groups.get(groupId)?.kind || 'arterial';
+    const isEndRef = (ref, routeData, which) => (which === 'start'
+      ? ref.distance < 50
+      : ref.distance > routeData.length - 50);
+
+    // Index edges per data route so anchoring can find each route's own
+    // endpoint connections.
+    const startEdgeOf = new Map(); // routeId -> edge arriving at its start
+    const endEdgeOf = new Map();   // routeId -> edge leaving from its end
+    for (const edge of this._dataEdges) {
+      const toRoute = data.routes.find((entry) => entry.id === edge.to.route);
+      const fromRoute = data.routes.find((entry) => entry.id === edge.from.route);
+      if (toRoute && !toRoute.closed && isEndRef(edge.to, toRoute, 'start') && !startEdgeOf.has(toRoute.id)) {
+        startEdgeOf.set(toRoute.id, edge);
+      }
+      if (fromRoute && !fromRoute.closed && isEndRef(edge.from, fromRoute, 'end') && !endEdgeOf.has(fromRoute.id)) {
+        endEdgeOf.set(fromRoute.id, edge);
+      }
+    }
+
+    // Register in dependency order: a route whose endpoints diverge from /
+    // merge into another route needs that route's curve first so the
+    // endpoint can be re-anchored onto its outer edge.
+    const pending = [...data.routes];
+    let guard = pending.length + 4;
+    while (pending.length && guard > 0) {
+      guard -= 1;
+      let progressed = false;
+      for (let i = 0; i < pending.length; i += 1) {
+        const routeData = pending[i];
+        const startEdge = startEdgeOf.get(routeData.id);
+        const endEdge = endEdgeOf.get(routeData.id);
+        const needs = [];
+        if (startEdge && startEdge.kind === 'diverge') needs.push(startEdge.from.route);
+        if (endEdge && endEdge.kind === 'merge') needs.push(endEdge.to.route);
+        if (needs.some((id) => id !== routeData.id && !this.routes.has(id))) continue;
+        this._registerDataRoute(routeData, groupKind(routeData.group), startEdge, endEdge);
+        pending.splice(i, 1);
+        i -= 1;
+        progressed = true;
+      }
+      if (!progressed) {
+        // dependency cycle (braided ramps) — register the rest un-anchored
+        for (const routeData of pending) {
+          console.warn('Shutoko map: registering', routeData.id, 'without endpoint anchoring (cycle)');
+          this._registerDataRoute(routeData, groupKind(routeData.group), null, null);
+        }
+        pending.length = 0;
+      }
+    }
+
+    // Connectivity edges. Endpoint diverge/merge edges were added during
+    // anchoring; add everything else (continuations, mid-route merges).
+    for (const edge of this._dataEdges) {
+      if (edge._handled) continue;
+      const from = this.routes.get(edge.from.route);
+      const to = this.routes.get(edge.to.route);
+      if (!from || !to) continue;
+      const fromRef = edge.from.distance > (this._routeDataLength(from) - 50)
+        ? { routeId: from.id, distance: 'end', direction: 1 }
+        : { routeId: from.id, at: vec(edge.point[0], 0, edge.point[1]), direction: 1 };
+      const toRef = edge.to.distance < 50 && !to.closed
+        ? { routeId: to.id, distance: 0, direction: 1 }
+        : { routeId: to.id, at: vec(edge.point[0], 0, edge.point[1]), direction: 1 };
+      this._addEdge({ from: fromRef, to: toRef, kind: edge.kind, name: edge.kind, probability: edge.kind === 'diverge' ? 0.3 : 1 });
+    }
+
+    for (const junction of data.junctions || []) {
+      const routes = (junction.groups || []).flatMap((groupId) => this._groupChains(groupId).map((route) => route.id));
+      const point = vec(junction.x, this._groundYAt(junction.x, junction.z), junction.z);
+      this._registerJunction(junction.id, junction.name || junction.nameJa || 'JCT', point, routes);
+    }
+  }
+
+  /** All mainline chains of a route group, longest first. */
+  _groupChains(groupId) {
+    return [...this.routes.values()]
+      .filter((route) => route.group === groupId && route.kind !== 'ramp' && route.kind !== 'service')
+      .sort((a, b) => b.length - a.length);
+  }
+
+  _routeDataLength(route) {
+    return route.dataLength ?? route.length;
+  }
+
+  /** Deck height of the nearest carriageway (junction markers etc.). */
+  _groundYAt(x, z) {
+    const nearest = this.getNearestRoute(vec(x, 0, z), { maxDistance: 400, includeService: false });
+    return nearest ? nearest.point.y : 10;
+  }
+
+  /**
+   * Register one data carriageway. Endpoints participating in a diverge or
+   * merge are re-anchored onto the OUTER edge of the carriageway they
+   * leave/join: a parallel taper alongside the mainline (deck heights glued)
+   * before/after peeling — the structural guarantee that ramps never split a
+   * carriageway down the middle.
+   */
+  _registerDataRoute(routeData, kind, startEdge, endEdge) {
+    let points = routeData.points.map((entry) => vec(entry[0], entry[1], entry[2]));
+    const routeKind = routeData.kind === 'ramp' ? 'ramp' : kind;
+    let divergeInfo = null;
+    let mergeInfo = null;
+
+    if (!routeData.closed) {
+      const anchorSpan = Math.min(95, Math.max(30, routeData.length * 0.22));
+      if (startEdge && startEdge.kind === 'diverge' && this.routes.has(startEdge.from.route)) {
+        divergeInfo = this._anchorEndpoint(points, routeData, startEdge, 'start', anchorSpan);
+        points = divergeInfo.points;
+      }
+      if (endEdge && endEdge.kind === 'merge' && this.routes.has(endEdge.to.route)) {
+        mergeInfo = this._anchorEndpoint(points, routeData, endEdge, 'end', anchorSpan);
+        points = mergeInfo.points;
+      }
+    }
+
+    const route = this._registerRoute({
+      id: routeData.id,
+      code: routeData.code || 'R',
+      name: routeData.name || routeData.id,
+      kind: routeKind,
+      group: routeData.group,
+      synthetic: !!routeData.synthetic,
+      closed: !!routeData.closed,
+      oneWay: true,
+      bidirectional: false,
+      oneWayDirection: 1,
+      lanes: routeData.lanes || (routeData.kind === 'ramp' ? 1 : 2),
+      laneWidth: LANE_W,
+      speedLimit: routeData.speedLimit || 60,
+      points,
+      destinations: routeData.destinations || [],
+      tunnelRanges: routeData.tunnels || [],
+      bridgeRanges: routeData.bridges || [],
+      dataLength: routeData.length,
+      paId: routeData.paId || null,
     });
 
-    // Route 11 — Daiba line with the Rainbow Bridge (H deck over open water).
-    this._registerRoute({
-      id: 'r11', code: '11', name: 'Route 11 Daiba', kind: 'connector',
-      lanes: 2, speedLimit: 80,
-      destinations: [['台場', 'DAIBA'], ['湾岸線', 'WANGAN'], ['レインボーブリッジ', 'RAINBOW BRIDGE']],
-      points: [
-        vec(750, 11, -2600),   // start SE of C1-S (ramps hook up here)
-        vec(830, 13, -2980),
-        vec(700, 18, -3320),
-        vec(520, 24, -3650),   // north approach climbs to H
-        vec(420, 25, -4100),   // ...over the north tower
-        vec(390, 25, -4600),   // main span
-        vec(380, 24, -5150),   // south tower
-        vec(420, 20, -5580),
-        vec(340, 14, -5980),
-        vec(180, 11, -6240),
-        vec(40, 10, -6420),    // lands beside the Wangan (Daiba JCT)
-      ],
-      bridgeZone: { nearA: vec(500, 0, -3600), nearB: vec(420, 0, -5620) },
-    });
+    if (divergeInfo) {
+      const edge = this._addEdge({
+        from: { routeId: divergeInfo.hostId, distance: divergeInfo.hostDistance, direction: 1 },
+        to: { routeId: route.id, distance: 0, direction: 1 },
+        kind: 'diverge',
+        name: routeData.name || route.id,
+        probability: route.kind === 'ramp' ? 0.3 : 0.45,
+      });
+      edge.side = divergeInfo.side;
+      startEdgeOfMark(startEdge);
+    }
+    if (mergeInfo) {
+      const edge = this._addEdge({
+        from: { routeId: route.id, distance: 'end', direction: 1 },
+        to: { routeId: mergeInfo.hostId, distance: mergeInfo.hostDistance, direction: 1 },
+        kind: 'merge',
+        name: routeData.name || route.id,
+      });
+      edge.side = mergeInfo.side;
+      // vehicles arriving from a side merge land in the lane on that side
+      edge.mergeLane = mergeInfo.side < 0 ? null : 0;
+      startEdgeOfMark(endEdge);
+    }
+    return route;
 
-    // Wangan / Bayshore — the backbone. Tatsumi (east end) to Daikoku (west
-    // end) with the Tokyo Port Tunnel dipping to T under the bay.
-    this._registerRoute({
-      id: 'wangan', code: 'B', name: 'Wangan Bayshore', kind: 'arterial',
-      lanes: 3, speedLimit: 100,
-      destinations: [['湾岸線', 'WANGAN LINE'], ['大黒', 'DAIKOKU'], ['羽田', 'HANEDA'], ['空港中央', 'AIRPORT']],
-      points: [
-        vec(11000, 12, -5500), // Tatsumi JCT (continues as R9)
-        vec(10800, 11, -6050),
-        vec(10100, 10, -6400),
-        vec(8900, 10, -6550),
-        vec(7400, 9, -6450),
-        vec(5800, 9, -6350),
-        vec(4200, 10, -6300),
-        vec(2600, 10, -6350),
-        vec(1200, 10, -6450),
-        vec(0, 10, -6500),     // Daiba JCT — R11 lands here
-        vec(-1000, 8, -6700),
-        vec(-1800, 2, -6950),
-        vec(-2600, -13, -7150), // Tokyo Port Tunnel (T)
-        vec(-3500, -16, -7300),
-        vec(-4400, -15, -7400),
-        vec(-5200, -6, -7500),
-        vec(-6100, 4, -7700),
-        vec(-7000, 10, -8000), // Oi JCT — K1 ramps
-        vec(-8000, 11, -8900),
-        vec(-9200, 10, -9800),
-        vec(-10600, 10, -10800),
-        vec(-12200, 11, -11700),
-        vec(-13800, 10, -12500),
-        vec(-15300, 11, -13200),
-        vec(-16600, 12, -13750),
-        vec(-17500, 12, -14050),
-        vec(-18100, 12, -14250), // Daikoku JCT (continues as dj loop)
-      ],
-      tunnelZones: [{ nearA: vec(-2280, 0, -7080), nearB: vec(-5450, 0, -7550), name: 'Tokyo Port Tunnel', style: 'orange' }],
-    });
+    function startEdgeOfMark(edge) {
+      if (edge) edge._handled = true;
+    }
+  }
 
-    // Route 9 — Fukagawa connector, Tatsumi to C1-E, E with an H flyover.
-    this._registerRoute({
-      id: 'r9', code: '9', name: 'Route 9 Fukagawa', kind: 'connector',
-      lanes: 2, speedLimit: 80,
-      destinations: [['深川', 'FUKAGAWA'], ['都心環状', 'C1 LOOP'], ['箱崎', 'HAKOZAKI']],
-      points: [
-        vec(11000, 12, -5500), // == wangan east end (continuation)
-        vec(10600, 13, -4900),
-        vec(10100, 14, -4100),
-        vec(9400, 16, -3200),
-        vec(8500, 22, -2400),
-        vec(7400, 24, -1700),  // H flyover over the river
-        vec(6200, 24, -1150),
-        vec(5100, 18, -700),
-        vec(4000, 13, -350),
-        vec(3050, 12, -100),   // Hakozaki-style approach to C1-E
-      ],
-    });
+  /**
+   * Re-anchor one endpoint of a route onto the outer edge of its host
+   * carriageway. Returns the new point list plus the host edge reference
+   * (shifted 30 m along travel so transfers land where the vehicle already
+   * is).
+   */
+  _anchorEndpoint(points, routeData, edge, which, anchorSpan) {
+    const host = this.routes.get(which === 'start' ? edge.from.route : edge.to.route);
+    const connection = vec(edge.point[0], 0, edge.point[1]);
+    const projection = this._projectToRoute(host, connection);
+    const hostDistanceAtMouth = projection.distance;
 
-    // K1 Yokohane — Oi to Daikoku over the industrial suburbs (inland of B).
-    this._registerRoute({
-      id: 'k1', code: 'K1', name: 'K1 Yokohane', kind: 'arterial',
-      lanes: 2, speedLimit: 90,
-      destinations: [['横羽線', 'K1 YOKOHANE'], ['平和島', 'HEIWAJIMA'], ['大黒', 'DAIKOKU'], ['羽田', 'HANEDA']],
-      points: [
-        vec(-7250, 12, -8350), // Oi end (ramps to/from Wangan)
-        vec(-7800, 12, -9000),
-        vec(-8600, 13, -9700),
-        vec(-9700, 12, -10400),
-        vec(-11000, 12, -11000), // Heiwajima PA
-        vec(-12400, 13, -11500),
-        vec(-13800, 12, -11900),
-        vec(-15200, 12, -12300),
-        vec(-16400, 13, -12800),
-        vec(-17000, 12, -13300),
-        vec(-17336, 12, -14143), // Daikoku end (continuation from dj loop)
-      ],
-    });
+    // Which side does the branch leave/arrive on? Probe its own geometry
+    // ~45 m from the shared node, measured against the host's base normal.
+    const probe = this._pointAlongPolyline(points, which === 'start' ? 45 : -45);
+    const probeProjection = this._projectToRoute(host, probe);
+    const side = (probeProjection.signedLateral >= 0 ? 1 : -1);
+    const hostHalf = this._halfWidthAt(host, hostDistanceAtMouth);
+    const lateral = side * Math.max(0.6, hostHalf - 2.0);
 
-    // Daikoku JCT loop — H-level 205-degree turn joining Wangan west end to
-    // K1 south end, threading the multi-level stack above the PA.
-    this._registerRoute({
-      id: 'dj', code: 'B', name: 'Daikoku JCT', kind: 'connector',
-      lanes: 2, speedLimit: 60,
-      destinations: [['大黒PA', 'DAIKOKU PA'], ['横羽線', 'K1'], ['湾岸線', 'WANGAN']],
-      points: [
-        vec(-18100, 12, -14250), // == wangan west end
-        vec(-18307, 15, -14427),
-        vec(-18374, 19, -14689),
-        vec(-18280, 23, -14942),
-        vec(-18057, 24, -15095), // apex (H) over the PA approaches
-        vec(-17786, 24, -15093),
-        vec(-17591, 21, -14964),
-        vec(-17560, 18, -14400), // NE run rising out of the loop
-        vec(-17336, 12, -14143), // == k1 south end
-      ],
-    });
+    const edgePoint = (distance) => {
+      const sample = this._sampleCenter(host, distance, 1);
+      return sample.position.clone().addScaledVector(sample.normal, lateral);
+    };
 
-    // ---------------- junction ramps (one-way) ----------------
-    // Shibaura JCT: C1(+1, outer/south carriageway) <-> R11 north end.
-    this._addRamp({
-      id: 'shibaura_off', name: 'Shibaura off-ramp',
-      from: { routeId: 'c1', at: vec(-700, 0, -1800), offset: -420, direction: 1, kind: 'diverge', probability: 0.3 },
-      to: { routeId: 'r11', distance: 0, direction: 1 },
-      via: [vec(340, 10, -2520)],
-    });
-    this._addRamp({
-      id: 'shibaura_on', name: 'Shibaura on-ramp',
-      from: { routeId: 'r11', distance: 0, direction: -1 },
-      to: { routeId: 'c1', at: vec(950, 0, -2250), offset: 420, direction: 1, kind: 'merge' },
-      via: [vec(1080, 10.5, -2410)],
-    });
+    // Drop the raw points that hug the host inside the taper zone.
+    const kept = this._dropPolylineNear(points, which, anchorSpan + 25);
 
-    // Daiba JCT: R11 south end <-> Wangan.
-    this._addRamp({
-      id: 'daiba_on', name: 'Daiba on-ramp',
-      from: { routeId: 'r11', distance: 'end', direction: 1 },
-      to: { routeId: 'wangan', at: vec(-1000, 0, -6700), offset: 260, direction: 1, kind: 'merge' },
-      via: [vec(-320, 9.4, -6560)],
-    });
-    this._addRamp({
-      id: 'daiba_off', name: 'Daiba off-ramp',
-      from: { routeId: 'wangan', at: vec(1200, 0, -6450), offset: -380, direction: -1, kind: 'diverge', probability: 0.25 },
-      to: { routeId: 'r11', distance: 'end', direction: -1 },
-      via: [vec(360, 10.4, -6420)],
-    });
+    if (which === 'start') {
+      const prefix = [
+        edgePoint(this._normalizeDistance(host, hostDistanceAtMouth - 30)),
+        edgePoint(this._normalizeDistance(host, hostDistanceAtMouth + anchorSpan * 0.5)),
+        edgePoint(this._normalizeDistance(host, hostDistanceAtMouth + anchorSpan)),
+      ];
+      return {
+        points: prefix.concat(kept),
+        hostId: host.id,
+        hostDistance: this._normalizeDistance(host, hostDistanceAtMouth - 30),
+        side,
+      };
+    }
+    const suffix = [
+      edgePoint(this._normalizeDistance(host, hostDistanceAtMouth - anchorSpan)),
+      edgePoint(this._normalizeDistance(host, hostDistanceAtMouth - anchorSpan * 0.5)),
+      edgePoint(this._normalizeDistance(host, hostDistanceAtMouth + 30)),
+    ];
+    return {
+      points: kept.concat(suffix),
+      hostId: host.id,
+      hostDistance: this._normalizeDistance(host, hostDistanceAtMouth + 30),
+      side,
+    };
+  }
 
-    // Oi JCT: Wangan <-> K1 north end.
-    this._addRamp({
-      id: 'oi_off', name: 'Oi off-ramp',
-      from: { routeId: 'wangan', at: vec(-6100, 0, -7700), offset: -300, direction: 1, kind: 'diverge', probability: 0.3 },
-      to: { routeId: 'k1', distance: 0, direction: 1 },
-      via: [vec(-7000, 11.5, -8080)],
-    });
-    this._addRamp({
-      id: 'oi_on', name: 'Oi on-ramp',
-      from: { routeId: 'k1', distance: 0, direction: -1 },
-      to: { routeId: 'wangan', at: vec(-8000, 0, -8900), offset: -380, direction: -1, kind: 'merge' },
-      via: [vec(-7480, 11.5, -8340)],
-    });
+  /** Point at arc distance along a raw point list (negative = from the end). */
+  _pointAlongPolyline(points, distance) {
+    const fromEnd = distance < 0;
+    const target = Math.abs(distance);
+    let travelled = 0;
+    const ordered = fromEnd ? [...points].reverse() : points;
+    for (let i = 1; i < ordered.length; i += 1) {
+      const step = ordered[i].distanceTo(ordered[i - 1]);
+      if (travelled + step >= target && step > 0) {
+        const t = (target - travelled) / step;
+        return ordered[i - 1].clone().lerp(ordered[i], t);
+      }
+      travelled += step;
+    }
+    return ordered[ordered.length - 1].clone();
+  }
 
-    // Hakozaki-style C1-E: R9 north end <-> C1(+1, outer/east carriageway).
-    this._addRamp({
-      id: 'hakozaki_on', name: 'Hakozaki on-ramp',
-      from: { routeId: 'r9', distance: 'end', direction: 1 },
-      to: { routeId: 'c1', at: vec(2400, 0, 750), offset: -180, direction: 1, kind: 'merge' },
-      via: [vec(2660, 11, 260)],
-    });
-    this._addRamp({
-      id: 'hakozaki_off', name: 'Hakozaki off-ramp',
-      from: { routeId: 'c1', at: vec(2200, 0, -800), offset: -280, direction: 1, kind: 'diverge', probability: 0.3 },
-      to: { routeId: 'r9', distance: 'end', direction: -1 },
-      via: [vec(2780, 12, -620)],
-      lift: 6,
-    });
-
-    // C1-W reserved stub ramp, signed closed — dead end with crash cushions.
-    this._addRamp({
-      id: 'w_stub', name: 'C1-W reserved ramp',
-      from: { routeId: 'c1', at: vec(-2300, 0, 0), offset: -260, direction: 1, kind: 'diverge', probability: 0 },
-      to: null,
-      via: [vec(-2560, 11, -420), vec(-2650, 10, -560)],
-    });
-
-    // Daikoku spiral (H -> G), PA exit ramp (G -> E) and S-level U-turn.
-    this._addRamp({
-      id: 'daikoku_spiral', name: 'Daikoku spiral',
-      kind: 'service',
-      from: { routeId: 'dj', at: vec(-18374, 0, -14689), offset: -40, direction: 1, kind: 'diverge', probability: 0 },
-      to: { lot: 'daikoku_pa', edge: 'in' },
-      spiral: { center: vec(-18210, 0, -15290), radius: 88, turns: 1.1, fromY: 19, toY: 0.35 },
-    });
-    this._addRamp({
-      id: 'daikoku_out', name: 'Daikoku PA exit',
-      kind: 'service',
-      from: { lot: 'daikoku_pa', edge: 'out' },
-      to: { routeId: 'dj', at: vec(-17591 + 140, 0, -14964 + 155), offset: 220, direction: 1, kind: 'merge' },
-      via: [vec(-17690, 6, -14690)],
-    });
-    this._addRamp({
-      id: 'daikoku_uturn', name: 'Daikoku U-turn (S deck)',
-      from: { routeId: 'dj', at: vec(-18307, 0, -14427), offset: -60, direction: 1, kind: 'diverge', probability: 0.15 },
-      to: { routeId: 'dj', at: vec(-18057, 0, -15095), offset: 140, direction: -1, kind: 'merge' },
-      via: [
-        vec(-18720, 26, -14760),
-        vec(-18860, 33, -15180),
-        vec(-18640, 36, -15560),
-        vec(-18260, 36, -15680),
-        vec(-17900, 33, -15540),
-        vec(-17740, 28, -15260),
-      ],
-    });
-
-    this._registerJunction('shibaura_jct', 'Shibaura JCT', vec(150, 10, -2350), ['c1', 'r11']);
-    this._registerJunction('daiba_jct', 'Daiba JCT', vec(0, 10, -6500), ['wangan', 'r11']);
-    this._registerJunction('tatsumi_jct', 'Tatsumi JCT', vec(11000, 12, -5500), ['wangan', 'r9']);
-    this._registerJunction('oi_jct', 'Oi JCT', vec(-7000, 10, -8000), ['wangan', 'k1']);
-    this._registerJunction('hakozaki_jct', 'Hakozaki JCT', vec(2400, 12, 400), ['c1', 'r9']);
-    this._registerJunction('daikoku_jct', 'Daikoku JCT', vec(-18100, 12, -14700), ['wangan', 'k1', 'dj']);
-
-    // End-to-end continuations (same roadway, new name).
-    this._addEdge({ from: { routeId: 'wangan', distance: 0, direction: -1 }, to: { routeId: 'r9', distance: 0, direction: 1 }, kind: 'continuation', name: 'Tatsumi JCT' });
-    this._addEdge({ from: { routeId: 'r9', distance: 0, direction: -1 }, to: { routeId: 'wangan', distance: 0, direction: 1 }, kind: 'continuation', name: 'Tatsumi JCT' });
-    this._addEdge({ from: { routeId: 'wangan', distance: 'end', direction: 1 }, to: { routeId: 'dj', distance: 0, direction: 1 }, kind: 'continuation', name: 'Daikoku JCT' });
-    this._addEdge({ from: { routeId: 'dj', distance: 0, direction: -1 }, to: { routeId: 'wangan', distance: 'end', direction: -1 }, kind: 'continuation', name: 'Daikoku JCT' });
-    this._addEdge({ from: { routeId: 'dj', distance: 'end', direction: 1 }, to: { routeId: 'k1', distance: 'end', direction: -1 }, kind: 'continuation', name: 'Daikoku JCT' });
-    this._addEdge({ from: { routeId: 'k1', distance: 'end', direction: 1 }, to: { routeId: 'dj', distance: 'end', direction: -1 }, kind: 'continuation', name: 'Daikoku JCT' });
+  /** Remove points within `span` metres of the start/end of a point list. */
+  _dropPolylineNear(points, which, span) {
+    const ordered = which === 'start' ? points : [...points].reverse();
+    const kept = [];
+    let travelled = 0;
+    for (let i = 0; i < ordered.length; i += 1) {
+      if (i > 0) travelled += ordered[i].distanceTo(ordered[i - 1]);
+      if (travelled >= span) kept.push(ordered[i]);
+    }
+    // never hollow the route out completely
+    if (kept.length < 2) kept.push(...ordered.slice(-2));
+    return which === 'start' ? kept : kept.reverse();
   }
 
   _registerRoute(config) {
@@ -796,238 +809,76 @@ export class HighwayMap {
     return edge;
   }
 
-  /**
-   * Author a one-way ramp between carriageways. Anchors are computed on the
-   * outer (left) edge of the referenced carriageway so ramp corridors overlap
-   * the mainline at the gore — the corridor union keeps barriers sealed.
-   */
-  _addRamp(def) {
-    const lead = 110;
-    const points = [];
-    let fromEdge = null;
-    let toEdge = null;
-    const anchorAt = (ref) => {
-      const route = this.routes.get(ref.routeId);
-      let param;
-      if (ref.distance === 'end') param = route.length - 6;
-      else if (ref.distance === 0) param = 6;
-      else if (Number.isFinite(ref.distance)) param = ref.distance;
-      else param = wrap(this._projectToRoute(route, ref.at).distance + (ref.offset || 0), route.length);
-      const sample = this._sampleCenter(route.id, param, ref.direction);
-      const lateral = route.bidirectional
-        ? route.medianWidth * 0.5 + route.lanes * route.laneWidth - 1.4
-        : route.halfWidth - 2.2;
-      const anchor = sample.position.clone().addScaledVector(sample.normal, -lateral);
-      return { route, param, sample, anchor, tangent: sample.tangent.clone() };
-    };
-
-    if (def.from.lot) {
-      const lot = this._pendingLotAnchor(def.from.lot, def.from.edge);
-      points.push(lot.point, lot.point.clone().addScaledVector(lot.tangent, 60));
-    } else {
-      const a = anchorAt(def.from);
-      if (def.from.kind === 'diverge') {
-        // Ramp begins 30 m upstream of the anchor; the edge fires there so a
-        // transferring vehicle lands exactly where it already is.
-        points.push(
-          a.anchor.clone().addScaledVector(a.tangent, -30),
-          a.anchor.clone().addScaledVector(a.tangent, lead),
-        );
-        fromEdge = {
-          from: {
-            routeId: def.from.routeId,
-            distance: this._normalizeDistance(a.route, a.param - 30 * def.from.direction),
-            direction: def.from.direction,
-          },
-          kind: 'diverge',
-          probability: def.from.probability ?? 0.3,
-        };
-      } else {
-        // Departure from a route endpoint: ramp starts right at the endpoint
-        // anchor so the endpoint transfer is seamless.
-        points.push(a.anchor.clone(), a.anchor.clone().addScaledVector(a.tangent, lead));
-        fromEdge = {
-          from: { routeId: def.from.routeId, distance: def.from.distance === 'end' ? a.route.length : 0, direction: def.from.direction },
-          kind: 'continuation',
-          probability: 1,
-        };
-      }
-    }
-
-    if (def.spiral) {
-      const s = def.spiral;
-      const steps = Math.max(8, Math.round(s.turns * 10));
-      const startAngle = Math.atan2(points[points.length - 1].x - s.center.x, points[points.length - 1].z - s.center.z);
-      for (let i = 1; i <= steps; i += 1) {
-        const t = i / steps;
-        const angle = startAngle + t * s.turns * Math.PI * 2;
-        const y = s.fromY + (s.toY - s.fromY) * t;
-        points.push(vec(s.center.x + Math.sin(angle) * s.radius, y, s.center.z + Math.cos(angle) * s.radius));
-      }
-    }
-    for (const viaPoint of def.via || []) points.push(viaPoint.clone());
-    if (def.lift) {
-      // raise the middle of the ramp so it clears whatever it crosses
-      const mid = points[Math.floor(points.length / 2)];
-      mid.y += def.lift;
-    }
-
-    if (def.to && def.to.lot) {
-      const lot = this._pendingLotAnchor(def.to.lot, def.to.edge);
-      points.push(lot.point.clone().addScaledVector(lot.tangent, -60), lot.point);
-    } else if (def.to) {
-      const b = anchorAt(def.to);
-      if (def.to.kind === 'merge') {
-        // Ramp overshoots the anchor by 30 m; the edge lands the vehicle at
-        // that same spot on the mainline.
-        points.push(
-          b.anchor.clone().addScaledVector(b.tangent, -lead),
-          b.anchor.clone().addScaledVector(b.tangent, 30),
-        );
-        toEdge = {
-          to: {
-            routeId: def.to.routeId,
-            distance: this._normalizeDistance(b.route, b.param + 30 * def.to.direction),
-            direction: def.to.direction,
-          },
-          kind: 'merge',
-        };
-      } else {
-        // Arrival at a route endpoint: land at the anchor param, travelling on.
-        points.push(b.anchor.clone().addScaledVector(b.tangent, -lead), b.anchor.clone());
-        toEdge = { to: { routeId: def.to.routeId, distance: b.param, direction: def.to.direction }, kind: 'continuation' };
-      }
-    }
-
-    const route = this._registerRoute({
-      id: def.id, code: def.code || 'R', name: def.name, kind: def.kind === 'service' ? 'service' : 'ramp',
-      oneWay: true, bidirectional: false, lanes: def.lanes || 1, laneWidth: 4.3,
-      speedLimit: def.speedLimit || 50, points, traffic: def.kind !== 'service' && def.to !== null,
-      destinations: def.destinations || [],
-    });
-
-    if (fromEdge) {
-      this._addEdge({
-        from: fromEdge.from,
-        to: { routeId: route.id, distance: 0, direction: 1 },
-        kind: fromEdge.kind === 'diverge' ? 'diverge' : 'continuation',
-        name: def.name, probability: fromEdge.probability,
-      });
-    }
-    if (toEdge) {
-      this._addEdge({
-        from: { routeId: route.id, distance: 'end', direction: 1 },
-        to: toEdge.to,
-        kind: toEdge.kind, name: def.name,
-      });
-    }
-    if (def.to === null) route.deadEnd = true;
-    return route;
-  }
-
-  /** Lot anchors used before service areas exist — Daikoku PA is authored here. */
-  _pendingLotAnchor(lotId, edge) {
-    if (!this._lotAnchors) {
-      const center = vec(-18010, 0.3, -15080);
-      const tangent = vec(0.94, 0, 0.34).normalize(); // lot long axis, roughly W->E
-      const normal = horizontalNormal(tangent);
-      this._lotAnchors = {
-        daikoku_pa: {
-          center, tangent, normal, width: 96, length: 190,
-          in: { point: center.clone().addScaledVector(tangent, -95).addScaledVector(normal, -18), tangent: tangent.clone() },
-          out: { point: center.clone().addScaledVector(tangent, 95).addScaledVector(normal, -18), tangent: tangent.clone() },
-        },
-      };
-    }
-    return this._lotAnchors[lotId][edge];
-  }
-
   // ------------------------------------------------------------------
   // Service areas (PAs)
   // ------------------------------------------------------------------
 
   _defineServiceAreas() {
-    const roadside = [
-      {
-        id: 'shibaura_pa', name: 'Shibaura PA', routeId: 'c1',
-        at: vec(520, 0, -2320), direction: 1, width: 118, length: 250,
-        hasGarage: true, density: 'medium',
-      },
-      {
-        id: 'tatsumi_pa', name: 'Tatsumi PA', routeId: 'wangan',
-        at: vec(9500, 0, -6480), direction: -1, width: 100, length: 215,
-        density: 'light',
-      },
-      {
-        id: 'heiwajima_pa', name: 'Heiwajima PA', routeId: 'k1',
-        at: vec(-11000, 0, -11000), direction: 1, width: 104, length: 225,
-        density: 'light',
-      },
-    ];
-
-    for (const def of roadside) {
+    // PAs from OSM: real centroid, anchored to the real carriageway, on the
+    // real side. The deceleration/acceleration access lane is synthesized
+    // (diverge -> lot -> merge, probability 0 so AI never takes it), and lots
+    // that sit far off the viaduct (Daikoku, under the JCT stack) descend to
+    // ground level along the access legs.
+    for (const def of this._dataServiceAreas) {
       const route = this.routes.get(def.routeId);
-      const distance = this._projectToRoute(route, def.at).distance;
-      const sample = this._sampleCenter(route.id, distance, def.direction);
-      const outward = sample.normal.clone().multiplyScalar(-1); // driver's left
-      const offset = route.halfWidth + def.width * 0.5 + 16;
+      if (!route) {
+        console.warn('Shutoko map: PA anchor route missing:', def.routeId);
+        continue;
+      }
+      const projection = this._projectToRoute(route, vec(def.x, 0, def.z));
+      const distance = projection.distance;
+      const sample = this._sampleCenter(route, distance, 1);
+      const sideSign = def.side === 'right' ? 1 : -1; // along the base normal (driver's right)
+      const outward = sample.normal.clone().multiplyScalar(sideSign);
+      const offset = Math.max(route.halfWidth + def.width * 0.5 + 12, Math.abs(projection.signedLateral));
+      const grounded = offset > 45; // big standoff => the real lot is at ground level
       const center = sample.position.clone().addScaledVector(outward, offset);
-      const elevation = sample.position.y + 0.15;
+      const elevation = grounded ? 1.35 : sample.position.y + 0.15;
       center.y = elevation;
       const tangent = sample.tangent.clone();
 
       const legLength = def.length * 0.5 + 330;
-      const inSample = this._sampleCenter(route.id, distance - def.direction * legLength, def.direction);
-      const outSample = this._sampleCenter(route.id, distance + def.direction * legLength, def.direction);
-      const laneEdge = route.medianWidth * 0.5 + route.lanes * route.laneWidth - 1.4;
+      const inSample = this._sampleCenter(route, this._normalizeDistance(route, distance - legLength), 1);
+      const outSample = this._sampleCenter(route, this._normalizeDistance(route, distance + legLength), 1);
+      const laneEdge = Math.max(0.8, route.halfWidth - 1.6);
       const accessPoints = [
-        inSample.position.clone().addScaledVector(inSample.normal, -laneEdge),
-        this._sampleCenter(route.id, distance - def.direction * (def.length * 0.5 + 170), def.direction).position.clone()
+        inSample.position.clone().addScaledVector(inSample.normal, sideSign * laneEdge),
+        this._sampleCenter(route, this._normalizeDistance(route, distance - (def.length * 0.5 + 170)), 1).position.clone()
           .addScaledVector(outward, route.halfWidth + 7),
         center.clone().addScaledVector(tangent, -def.length * 0.42).addScaledVector(outward, -def.width * 0.18),
         center.clone().addScaledVector(outward, -def.width * 0.16),
         center.clone().addScaledVector(tangent, def.length * 0.42).addScaledVector(outward, -def.width * 0.18),
-        this._sampleCenter(route.id, distance + def.direction * (def.length * 0.5 + 170), def.direction).position.clone()
+        this._sampleCenter(route, this._normalizeDistance(route, distance + (def.length * 0.5 + 170)), 1).position.clone()
           .addScaledVector(outward, route.halfWidth + 7),
-        outSample.position.clone().addScaledVector(outSample.normal, -laneEdge),
+        outSample.position.clone().addScaledVector(outSample.normal, sideSign * laneEdge),
       ];
-      for (let i = 1; i < accessPoints.length - 1; i += 1) accessPoints[i].y = elevation;
+      for (let i = 2; i <= 4; i += 1) accessPoints[i].y = elevation;
       accessPoints[0].y = inSample.position.y;
+      accessPoints[1].y = (inSample.position.y + elevation) * 0.5;
+      accessPoints[5].y = (outSample.position.y + elevation) * 0.5;
       accessPoints[accessPoints.length - 1].y = outSample.position.y;
 
       const accessRoute = this._registerRoute({
         id: `${def.id}_access`, code: 'PA', name: `${def.name} lane`, kind: 'service',
+        group: def.id,
         points: accessPoints, lanes: 1, laneWidth: 4.6, oneWay: true, bidirectional: false,
         speedLimit: 30, traffic: false, shoulder: 1.0,
         destinations: [[def.name.toUpperCase(), 'パーキング']],
       });
       this._addEdge({
-        from: { routeId: def.routeId, distance: distance - def.direction * legLength, direction: def.direction },
+        from: { routeId: def.routeId, distance: this._normalizeDistance(route, distance - legLength), direction: 1 },
         to: { routeId: accessRoute.id, distance: 0, direction: 1 },
         kind: 'diverge', name: `${def.name} entry`, probability: 0,
       });
       this._addEdge({
         from: { routeId: accessRoute.id, distance: 'end', direction: 1 },
-        to: { routeId: def.routeId, distance: distance + def.direction * legLength, direction: def.direction },
+        to: { routeId: def.routeId, distance: this._normalizeDistance(route, distance + legLength), direction: 1 },
         kind: 'merge', name: `${def.name} exit`,
       });
 
-      this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, accessRoute.id);
+      const area = this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, accessRoute.id);
+      area.sideSign = sideSign;
     }
-
-    // Daikoku PA — ground-level meet under the stack, fed by the spiral.
-    const lot = this._pendingLotAnchor('daikoku_pa', 'in');
-    const anchors = this._lotAnchors.daikoku_pa;
-    const daikokuDef = {
-      id: 'daikoku_pa', name: 'Daikoku PA', routeId: 'daikoku_spiral',
-      width: anchors.width, length: anchors.length, density: 'packed', direction: 1,
-    };
-    this._pushServiceArea(
-      daikokuDef, this.routes.get('daikoku_spiral'), this.routes.get('daikoku_spiral').length,
-      anchors.center.clone(), anchors.tangent.clone(), anchors.normal.clone().multiplyScalar(-1), anchors.center.y,
-      'daikoku_spiral',
-    );
-    void lot;
   }
 
   _pushServiceArea(def, route, distance, center, tangent, outward, elevation, accessRouteId) {
@@ -1065,18 +916,24 @@ export class HighwayMap {
 
   _finalizeNetwork() {
     for (const route of this.routes.values()) {
-      for (const zone of route.tunnelZones) {
-        const a = this._projectToRoute(route, zone.nearA).distance;
-        const b = this._projectToRoute(route, zone.nearB).distance;
+      // Tunnel/bridge zones come from OSM as arc-distance ranges over the
+      // raw polyline; rescale onto the fitted curve's length.
+      const scale = route.dataLength ? route.length / route.dataLength : 1;
+      for (const zone of route.tunnelRanges || []) {
+        const long = zone.end - zone.start > 1400;
         route.tunnels.push({
-          name: zone.name, style: zone.style || 'white',
-          startDistance: Math.min(a, b), endDistance: Math.max(a, b),
+          name: zone.name || (route.group === 'wangan' && long ? 'Tokyo Port Tunnel' : `${route.name} tunnel`),
+          style: route.group === 'wangan' ? 'orange' : 'white',
+          startDistance: zone.start * scale,
+          endDistance: zone.end * scale,
         });
       }
-      if (route.bridgeZone) {
-        const a = this._projectToRoute(route, route.bridgeZone.nearA).distance;
-        const b = this._projectToRoute(route, route.bridgeZone.nearB).distance;
-        route.bridge = { startDistance: Math.min(a, b), endDistance: Math.max(a, b) };
+      // Only long spans count as "bridge" (pillar suppression + dressing):
+      // OSM tags most viaducts bridge=yes, which is what the pillars ARE for.
+      const spans = (route.bridgeRanges || []).filter((zone) => zone.end - zone.start > 400);
+      if (spans.length) {
+        const main = spans.reduce((a, b) => (b.end - b.start > a.end - a.start ? b : a));
+        route.bridge = { startDistance: main.start * scale, endDistance: main.end * scale };
       }
     }
     // Taper wide routes into narrower continuations so the corridor union has
@@ -1542,7 +1399,7 @@ export class HighwayMap {
   _districtLabel(route, distance, position) {
     const tunnel = this._isTunnel(route, distance);
     if (tunnel) return tunnel.name.toUpperCase();
-    if (this._isBridge(route, distance)) return 'RAINBOW BRIDGE';
+    if (this._isBridge(route, distance) && route.group === 'r11') return 'RAINBOW BRIDGE';
     const junction = this._nearbyJunction(position);
     if (junction) return junction.name.toUpperCase();
     return 'SHUTO EXPRESSWAY';
@@ -1873,7 +1730,7 @@ export class HighwayMap {
       }
       const edge = options[Math.abs(branchIndex) % options.length];
       const nextRoute = this.routes.get(edge.to.routeId);
-      if (edge.kind === 'merge') laneIndex = nextRoute.lanes - 1;
+      if (edge.kind === 'merge') laneIndex = edge.mergeLane ?? nextRoute.lanes - 1;
       laneIndex = clamp(laneIndex, 0, nextRoute.lanes - 1);
       route = nextRoute;
       distance = edge.to.distance;
@@ -2049,7 +1906,9 @@ export class HighwayMap {
     const rng = typeof randomSource === 'function' ? randomSource : Math.random;
     const edge = options[Math.floor(rng() * options.length)];
     const nextRoute = this.routes.get(edge.to.routeId);
-    const laneIndex = edge.kind === 'merge' ? nextRoute.lanes - 1 : clamp(laneRef.laneIndex ?? 0, 0, nextRoute.lanes - 1);
+    const laneIndex = edge.kind === 'merge'
+      ? (edge.mergeLane ?? nextRoute.lanes - 1)
+      : clamp(laneRef.laneIndex ?? 0, 0, nextRoute.lanes - 1);
     return this._laneRefFor(nextRoute, laneIndex, edge.to.direction);
   }
 
@@ -2409,26 +2268,35 @@ export class HighwayMap {
   }
 
   _buildEnvironment() {
-    // Water everywhere below sea level; land slabs raise the city floor.
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(58000, 46000, 1, 1), this.materials.water);
+    // Water everywhere below sea level; land slabs (projected from real
+    // Tokyo Bay geography by the extractor) raise the city floor.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const route of this.routes.values()) {
+      for (const sample of route.samples) {
+        minX = Math.min(minX, sample.point.x);
+        maxX = Math.max(maxX, sample.point.x);
+        minZ = Math.min(minZ, sample.point.z);
+        maxZ = Math.max(maxZ, sample.point.z);
+      }
+    }
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(maxX - minX + 24000, maxZ - minZ + 24000, 1, 1),
+      this.materials.water,
+    );
     water.name = 'Tokyo Bay';
     water.rotation.x = -Math.PI * 0.5;
-    water.position.set(-3000, -0.9, -6000);
+    water.position.set((minX + maxX) * 0.5, -0.9, (minZ + maxZ) * 0.5);
     this.group.add(water);
 
-    const slab = (x, z, w, d, name) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), this.materials.ground);
-      mesh.position.set(x, -0.62, z);
-      mesh.name = name;
+    for (const def of this._terrainSlabs) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(def.w, 1.0, def.d), this.materials.ground);
+      mesh.position.set(def.x, -0.62, def.z);
+      mesh.name = def.name;
       this.group.add(mesh);
-      return mesh;
-    };
-    slab(0, 1200, 26000, 12000, 'central Tokyo');          // C1 basin + north bank
-    slab(6500, -4600, 22000, 5600, 'Koto / Tatsumi land'); // east port strip
-    slab(-4200, -8200, 9000, 4800, 'Shinagawa waterfront');
-    slab(-11500, -10600, 9000, 5200, 'Keihin industrial belt');
-    slab(-17800, -14900, 5800, 4600, 'Daikoku island');
-    slab(500, -6900, 4200, 2600, 'Daiba island');
+    }
 
     if (this.options.addLighting !== false) {
       const hemisphere = new THREE.HemisphereLight(0x314167, 0x05050a, 0.72);
@@ -3171,7 +3039,7 @@ export class HighwayMap {
     for (const route of this.routes.values()) {
       if (route.kind === 'service') continue;
       const isRamp = route.kind === 'ramp';
-      const interval = isRamp ? 900 : (route.id === 'c1' ? 950 : 1050);
+      const interval = isRamp ? 900 : (route.group === 'c1' ? 950 : 1050);
       let signIndex = 0;
       for (let distance = Math.min(400, route.length * 0.3); distance < route.length - 120; distance += interval) {
         const destination = route.destinations[signIndex % Math.max(1, route.destinations.length)] || [route.name.toUpperCase(), ''];
@@ -3251,12 +3119,12 @@ export class HighwayMap {
       if (!area.routeId || !this.routes.has(area.routeId)) continue;
       const route = this.routes.get(area.routeId);
       for (const ahead of [500, 300, 100]) {
-        const distance = wrap(area.mainDistance - area.direction * (ahead + area.length * 0.5 + 330), route.length);
+        const distance = wrap(area.mainDistance - (ahead + area.length * 0.5 + 330), route.length);
         if (this._isTunnel(route, distance)) continue;
-        const center = this._sampleCenter(route, distance, area.direction);
+        const center = this._sampleCenter(route, distance, 1);
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
         const half = this._halfWidthAt(route, distance);
-        const lateral = -area.direction * (half + 0.6);
+        const lateral = (area.sideSign || -1) * (half + 0.6);
         const position = this._deckPoint(frame, lateral, 3.2);
         if (this._barrierSuppressed(position, route)) continue;
         const sign = this._makeSignMesh(`P ${area.name}|${ahead}m`, '#175ba5', 2.7, 1.75);
@@ -3274,21 +3142,42 @@ export class HighwayMap {
   // ------------------------------------------------------------------
 
   _buildBridge() {
-    const route = this.routes.get('r11');
+    // Rainbow Bridge dressing spans BOTH carriageways: the longest r11 chain
+    // is the spine; the sibling's lateral offset widens towers and cables so
+    // one suspension structure carries the pair, like the real deck.
+    const chains = this._groupChains('r11');
+    const route = chains.find((chain) => chain.bridge);
     if (!route?.bridge) return;
+    const sibling = chains.find((chain) => chain !== route && chain.bridge) || null;
     const { startDistance, endDistance } = route.bridge;
     const span = endDistance - startDistance;
     const towerDistances = [startDistance + span * 0.22, startDistance + span * 0.78];
     const towerTops = [];
 
-    for (const distance of towerDistances) {
+    // Lateral band the pair occupies, measured along the spine's normal.
+    const pairBand = (distance) => {
       const center = this._sampleCenter(route, distance, 1);
+      let inner = -route.halfWidth;
+      let outer = route.halfWidth;
+      if (sibling) {
+        const projection = this._projectToRoute(sibling, center.position);
+        const toSibling = TMP_A.copy(projection.point).sub(center.position);
+        const lateral = toSibling.dot(horizontalNormal(center.baseTangent));
+        inner = Math.min(inner, lateral - sibling.halfWidth);
+        outer = Math.max(outer, lateral + sibling.halfWidth);
+      }
+      return { center, inner, outer, mid: (inner + outer) * 0.5, half: (outer - inner) * 0.5 };
+    };
+
+    for (const distance of towerDistances) {
+      const band = pairBand(distance);
+      const center = band.center;
       const quaternion = yawQuaternion(center.baseTangent);
       const normal = horizontalNormal(center.baseTangent);
       const deckY = center.position.y;
       const towerHeight = 62;
       for (const side of [-1, 1]) {
-        const legBase = center.position.clone().addScaledVector(normal, side * (route.halfWidth + 2.4));
+        const legBase = center.position.clone().addScaledVector(normal, band.mid + side * (band.half + 2.4));
         // leg from water to above deck
         const leg = legBase.clone();
         leg.y = (deckY + towerHeight) * 0.5 - 10;
@@ -3296,9 +3185,9 @@ export class HighwayMap {
       }
       // cross beams
       for (const beamY of [deckY + 14, deckY + towerHeight - 6]) {
-        const beam = center.position.clone();
+        const beam = center.position.clone().addScaledVector(normal, band.mid);
         beam.y = beamY;
-        this._instance(beam, vec(route.halfWidth * 2 + 9, 3.0, 2.6), quaternion, null, 'box:towerWhite');
+        this._instance(beam, vec(band.half * 2 + 9, 3.0, 2.6), quaternion, null, 'box:towerWhite');
       }
       // aircraft blinker
       const blinkerPos = center.position.clone();
@@ -3327,7 +3216,8 @@ export class HighwayMap {
         for (let i = 0; i <= steps; i += 1) {
           const t = i / steps;
           const distance = spanDef.a + (spanDef.b - spanDef.a) * t;
-          const center = this._sampleCenter(route, distance, 1);
+          const band = pairBand(this._normalizeDistance(route, distance));
+          const center = band.center;
           const normal = horizontalNormal(center.baseTangent);
           const deckY = center.position.y;
           const yA = topFor(spanDef.a) ?? deckY + 6;
@@ -3335,7 +3225,7 @@ export class HighwayMap {
           // parabola between the span end heights
           const sagDepth = spanDef.sag * 42;
           const cableY = yA + (yB - yA) * t - 4 * sagDepth * t * (1 - t);
-          const point = center.position.clone().addScaledVector(normal, side * (route.halfWidth + 2.4));
+          const point = center.position.clone().addScaledVector(normal, band.mid + side * (band.half + 2.4));
           point.y = cableY;
           if (previous) {
             const mid = previous.clone().lerp(point, 0.5);
@@ -3357,14 +3247,17 @@ export class HighwayMap {
       }
     }
 
-    // Rainbow Bridge signature: light chain along both deck edges.
-    for (let distance = startDistance - 40; distance <= endDistance + 40; distance += 16) {
-      const center = this._sampleCenter(route, distance, 1);
-      const normal = horizontalNormal(center.baseTangent);
-      for (const side of [-1, 1]) {
-        const bulb = center.position.clone().addScaledVector(normal, side * (route.halfWidth + 0.35));
-        bulb.y += 1.42;
-        this._instance(bulb, vec(0.24, 0.24, 0.24), null, null, 'box:cableLight');
+    // Rainbow Bridge signature: light chain along both carriageways' edges.
+    for (const chain of chains) {
+      if (!chain.bridge) continue;
+      for (let distance = chain.bridge.startDistance - 40; distance <= chain.bridge.endDistance + 40; distance += 16) {
+        const center = this._sampleCenter(chain, this._normalizeDistance(chain, distance), 1);
+        const normal = horizontalNormal(center.baseTangent);
+        for (const side of [-1, 1]) {
+          const bulb = center.position.clone().addScaledVector(normal, side * (chain.halfWidth + 0.35));
+          bulb.y += 1.42;
+          this._instance(bulb, vec(0.24, 0.24, 0.24), null, null, 'box:cableLight');
+        }
       }
     }
   }
@@ -3800,13 +3693,28 @@ export class HighwayMap {
     }
   }
 
+  /** Project lat/lon to local metres with the extractor's origin. */
+  _ll(lat, lon) {
+    const origin = this.networkMeta?.origin || { lat: 35.68, lon: 139.77 };
+    const rad = Math.PI / 180;
+    const earth = 6371008.8;
+    return vec(
+      (lon - origin.lon) * rad * Math.cos(origin.lat * rad) * earth,
+      0,
+      (lat - origin.lat) * rad * earth,
+    );
+  }
+
   _buildCity() {
     const random = mulberry32(this.seed ^ 0xa73b91);
     this._footprints = new Map();
 
     // --- C1 canyon: two rows of towers hard against both sides of the loop
-    // so the C1 reads as a lit canyon with no bare gaps.
-    const c1 = this.routes.get('c1');
+    // so the C1 reads as a lit canyon with no bare gaps. The spine is the
+    // longest C1 carriageway; _canPlaceBuilding keeps towers off the sibling
+    // carriageway and every ramp.
+    const c1 = this._groupChains('c1')[0];
+    if (!c1) return;
     for (let distance = 0; distance < c1.length; distance += 44) {
       const center = this._sampleCenter(c1, distance, 1);
       if (this._isTunnel(c1, distance)) continue;
@@ -3835,8 +3743,10 @@ export class HighwayMap {
       }
     }
 
-    // --- Route 9 Fukagawa: a lighter mixed row so the connector is not bare.
-    const r9 = this.routes.get('r9');
+    // --- Route 9 Fukagawa + Route 1 Haneda: lighter mixed rows so the
+    // connectors are not bare.
+    const mixedSpines = [this._groupChains('r9')[0], this._groupChains('r1')[0]].filter(Boolean);
+    for (const r9 of mixedSpines) {
     for (let distance = 200; distance < r9.length - 200; distance += 70) {
       const center = this._sampleCenter(r9, distance, 1);
       const normal = horizontalNormal(center.baseTangent);
@@ -3857,9 +3767,11 @@ export class HighwayMap {
         this._recordFootprint(position.x, position.z, radius);
       }
     }
+    }
 
     // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers.
-    const k1 = this.routes.get('k1');
+    const k1 = this._groupChains('k1')[0];
+    if (!k1) return;
     for (let distance = 0; distance < k1.length; distance += 56) {
       const center = this._sampleCenter(k1, distance, 1);
       const normal = horizontalNormal(center.baseTangent);
@@ -3887,14 +3799,30 @@ export class HighwayMap {
       }
     }
 
-    // Wangan port: cranes, container stacks, warehouses on the LAND side
-    // (north/west of travel direction +1 => positive base-normal side).
-    const wangan = this.routes.get('wangan');
+    // Wangan port: cranes, container stacks, warehouses on the LAND side.
+    // Which side is land varies along the real Bayshore, so aim at the
+    // nearest terrain slab centre.
+    const wangan = this._groupChains('wangan')[0];
+    if (!wangan) return;
     for (let distance = 300; distance < wangan.length; distance += 110) {
       if (this._isTunnel(wangan, distance)) continue;
       const center = this._sampleCenter(wangan, distance, 1);
       const normal = horizontalNormal(center.baseTangent);
-      const landSide = 1; // +normal = inland (the bay is on the -normal side)
+      let landSide = 1;
+      {
+        let nearest = null;
+        let nearestSq = Infinity;
+        for (const slab of this._terrainSlabs) {
+          const dx = slab.x - center.position.x;
+          const dz = slab.z - center.position.z;
+          const dSq = dx * dx + dz * dz;
+          if (dSq < nearestSq) { nearestSq = dSq; nearest = slab; }
+        }
+        if (nearest) {
+          const toLand = TMP_A.set(nearest.x - center.position.x, 0, nearest.z - center.position.z);
+          landSide = toLand.dot(normal) >= 0 ? 1 : -1;
+        }
+      }
       if (random() < 0.35) {
         // container stack rows
         const setback = 40 + random() * 120;
@@ -3957,11 +3885,12 @@ export class HighwayMap {
     // through the PSX fog. Placed on the far side of the bay from the
     // Rainbow Bridge and behind Daikoku.
     const random = mulberry32(this.seed ^ 0x517cc1);
+    const at = (lat, lon) => this._ll(lat, lon);
     const clusters = [
-      { x: -1400, z: -4600, spread: 1500, count: 26, tall: 130, streak: [1, -0.2] },   // west bank, faces the bridge
-      { x: 2400, z: -4400, spread: 1200, count: 18, tall: 90, streak: [-1, -0.2] },    // east bank
-      { x: -15200, z: -14900, spread: 1400, count: 16, tall: 70, streak: [-1, -0.1] }, // Daikoku shore
-      { x: 8600, z: -4300, spread: 1500, count: 16, tall: 80, streak: [0.2, -1] },     // Tatsumi postcard
+      { ...at(35.6440, 139.7480), spread: 1500, count: 26, tall: 130, streak: [1, -0.2] },  // Shibaura bank, faces the bridge
+      { ...at(35.6300, 139.7950), spread: 1200, count: 18, tall: 90, streak: [-1, -0.2] },  // Daiba east bank
+      { ...at(35.4750, 139.6600), spread: 1400, count: 16, tall: 70, streak: [1, -0.1] },   // Yokohama shore behind Daikoku
+      { ...at(35.6560, 139.8300), spread: 1500, count: 16, tall: 80, streak: [-0.2, -1] },  // Tatsumi postcard
     ];
     for (const cluster of clusters) {
       for (let i = 0; i < cluster.count; i += 1) {
@@ -3994,8 +3923,8 @@ export class HighwayMap {
       }
     }
 
-    // Broadcast tower near the C1 west arc.
-    const towerPos = vec(-1450, 0, -2950);
+    // Broadcast tower at the real Tokyo Tower spot, inside the C1 west arc.
+    const towerPos = this._ll(35.6586, 139.7454);
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(4, 22, 240, 6), this.materials.towerWhite);
     tower.position.copy(towerPos);
     tower.position.y = 120;
@@ -4006,8 +3935,9 @@ export class HighwayMap {
     this._addChunkMesh(towerBlinker, towerBlinker.position);
     this.blinkers.push(towerBlinker);
 
-    // Ferris wheel near the Daikoku end of the bay.
-    const wheelCenter = vec(-16350, 66, -15600);
+    // Ferris wheel on Daiba (Palette Town, PS2-era Tokyo Bay signature).
+    const wheelCenter = this._ll(35.6249, 139.7815);
+    wheelCenter.y = 66;
     const wheelGroup = new THREE.Group();
     wheelGroup.name = 'Bay ferris wheel';
     const rim = new THREE.Mesh(new THREE.TorusGeometry(52, 1.6, 5, 22), this.materials.crane);
@@ -4045,9 +3975,11 @@ export class HighwayMap {
       c1: '#ffb454',
       wangan: '#4fc9ff',
       k1: '#e87bff',
+      k5: '#7fc4ff',
       r11: '#ffe667',
       r9: '#79e690',
-      dj: '#f07777',
+      r1: '#ff9f7a',
+      r6: '#a0e0d0',
       ramp: '#8b98ab',
       service: '#aeb8c8',
     };
@@ -4075,7 +4007,7 @@ export class HighwayMap {
         kind: route.kind,
         closed: !!route.closed,
         points,
-        color: colors[route.id] || colors[route.kind] || '#d6d6d6',
+        color: colors[route.group] || colors[route.kind] || '#d6d6d6',
         width: route.kind === 'service' || route.kind === 'ramp' ? 1 : (route.lanes >= 3 ? 3 : 2),
         length: route.length,
       });
