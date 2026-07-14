@@ -20,6 +20,12 @@ PASS  geometry-hygiene    283511 checks,  0 failures
 Full failure list: `.devtests/osm-validate-failures.txt` (regenerated on
 each failing run). All classes below.
 
+Verified AT this checkpoint commit: the counts above reproduce exactly,
+and the browser e2e passes **25/25** (iPhone-like touch viewport,
+`CHROMIUM_PATH=/opt/pw-browsers/chromium node .devtests/e2e.mjs`) — the
+game boots, drives, scores, banks, refuels, tows, garages and saves on
+the checkpointed map.
+
 ### rail-continuity (2)
 - `escape correction left road shibaura_pa_access d=726 side=1`
 - `escape correction left road daikoku_pa_access d=924 side=1`
