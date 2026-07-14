@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260713a';
+import * as MapModule from './map.js?v=20260714c';
 import * as PhysicsModule from './physics.js?v=20260713a';
 import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
@@ -28,8 +28,10 @@ class ShutokoNights {
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
+    this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
     this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
+    this.setupDebugMenu();
     this.resize();window.addEventListener('resize',()=>this.resize());
     // iOS Safari: orientation changes and browser-chrome show/hide don't always
     // fire a plain resize, so listen to everything and settle late.
@@ -80,7 +82,9 @@ class ShutokoNights {
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
   buildWorld(){
+    const mapBuildStarted=performance.now();
     try{this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
     // union for continuous collision so barriers are solid at any speed.
@@ -110,6 +114,8 @@ class ShutokoNights {
   setupInput(){
     const block=new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
     window.addEventListener('keydown',e=>{
+      const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'');
+      if((e.code==='Digit0'||e.code==='Numpad0')&&!typing&&!e.repeat){e.preventDefault();this.toggleDebugMenu();return;}
       if(block.has(e.code))e.preventDefault();if(!this.keys[e.code])this.pressed.add(e.code);this.keys[e.code]=true;
       this.audio?.unlock?.();this.audio?.resume?.();
       if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
@@ -118,6 +124,9 @@ class ShutokoNights {
       if(e.code==='F1'){e.preventDefault();this.ui.showHelp();}
     });
     window.addEventListener('keyup',e=>{this.keys[e.code]=false;});window.addEventListener('blur',()=>{this.keys={};this.pressed.clear();this.releaseTouchInput?.();});
+    document.addEventListener('mousemove',e=>{if(this.debug?.noclip&&document.pointerLockElement===this.canvas&&!this.debug.menuOpen){this.debug.yaw-=e.movementX*.0022;this.debug.pitch=clamp(this.debug.pitch-e.movementY*.0022,-Math.PI*.49,Math.PI*.49);}});
+    document.addEventListener('wheel',e=>{if(!this.debug?.noclip||this.debug.menuOpen)return;e.preventDefault();const factor=e.deltaY<0?1.18:1/1.18;this.debug.moveSpeed=clamp(this.debug.moveSpeed*factor,5,400);this.updateDroneSpeedHUD();},{passive:false});
+    this.canvas.addEventListener('click',()=>{if(this.debug?.noclip&&!this.debug.menuOpen&&document.pointerLockElement!==this.canvas)this.requestDronePointerLock();});
     // iOS Safari: block pinch zoom, long-press callout/selection and double-tap zoom on the game surface.
     for(const type of ['gesturestart','gesturechange','gestureend'])document.addEventListener(type,e=>e.preventDefault());
     document.addEventListener('contextmenu',e=>{if(this.isTouchDevice)e.preventDefault();});
@@ -192,7 +201,8 @@ class ShutokoNights {
     // stays stable); anything slower degrades to slow motion rather than
     // exploding.
     let dt=Math.min(.05,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
-    if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
+    if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
+    this.updateDebugHitboxes(dt);
     this.render();this.pressed.clear();
   }
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
@@ -202,6 +212,7 @@ class ShutokoNights {
   }
 
   updateDriving(dt){
+    if(this.debug.menuOpen){this.updateAudio({...this.getTelemetry(),throttle:0,slip:0},dt);return;}
     // On touch devices you cannot browse the phone and steer at the same
     // time, so the world freezes while an overlay is up. Desktop keeps
     // driving as before.
@@ -215,9 +226,76 @@ class ShutokoNights {
     // pull the events out for scoring so scrapes/hits still cost combo/lives.
     for(const ev of this.physics.consumeEvents?.()||[]){if(ev.type==='collision'&&(ev.kind==='wall'||ev.kind==='impact'))this.registerContact('wall',{severity:ev.severity,normal:ev.normal});}
     if(this.admin.infiniteFuel)this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);
-    this.syncFuelFromPhysics();this.resolveMapCollision();this.traffic?.update?.(dt,this.getVehicleState());this.handleTrafficEvents();this.updatePlayerMesh();this.map?.update?.(pos,performance.now()/1000);
+    this.syncFuelFromPhysics();this.resolveMapCollision();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState());this.handleTrafficEvents();this.updatePlayerMesh();this.map?.update?.(pos,performance.now()/1000);
     const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
+  }
+
+  setupDebugMenu(){
+    this.debug.root=document.getElementById('debug-menu');this.debug.droneHUD=document.getElementById('debug-drone-hud');this.debug.speedHUD=document.getElementById('debug-drone-speed');this.updateDroneSpeedHUD();
+    this.debug.overlay=new THREE.Group();this.debug.overlay.name='Debug hitboxes';this.debug.overlay.renderOrder=999;this.roadScene.add(this.debug.overlay);this.debug.layers={};
+    const bind=(id,fn)=>document.getElementById(id)?.addEventListener('change',e=>fn(e.target.checked));
+    bind('debug-noclip',v=>this.setNoclip(v));bind('debug-traffic',v=>this.setTrafficDisabled(v));
+    document.getElementById('debug-close')?.addEventListener('click',()=>this.toggleDebugMenu(false));
+    document.querySelectorAll('[data-debug-hitbox]').forEach(input=>input.addEventListener('change',()=>this.setDebugHitbox(input.dataset.debugHitbox,input.checked)));
+    document.getElementById('debug-hitboxes-all')?.addEventListener('click',()=>{const inputs=[...document.querySelectorAll('[data-debug-hitbox]')],enable=inputs.some(input=>!input.checked);for(const input of inputs){input.checked=enable;this.setDebugHitbox(input.dataset.debugHitbox,enable);}});
+  }
+  toggleDebugMenu(force){
+    const open=typeof force==='boolean'?force:!this.debug.menuOpen;this.debug.menuOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));
+    this.keys={};this.pressed.clear();if(open)document.exitPointerLock?.();else if(this.debug.noclip)this.requestDronePointerLock();
+  }
+  requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
+  updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}
+  setTrafficDisabled(disabled){
+    this.debug.trafficDisabled=!!disabled;if(disabled)this.traffic?.clear?.();
+    const input=document.getElementById('debug-traffic');if(input)input.checked=!!disabled;
+    this.ui?.toast?.(disabled?'DEBUG // TRAFFIC OFF':'DEBUG // TRAFFIC ON','amber');
+  }
+  setNoclip(enabled){
+    enabled=!!enabled;const input=document.getElementById('debug-noclip');if(input)input.checked=enabled;
+    if(enabled){
+      if(!this.started||this.mode!=='driving'){if(input)input.checked=false;this.ui?.toast?.('NOCLIP AVAILABLE ON THE HIGHWAY','red');return;}
+      const direction=new THREE.Vector3();this.camera.getWorldDirection(direction);this.debug.position.copy(this.camera.position);this.debug.yaw=Math.atan2(direction.x,direction.z);this.debug.pitch=Math.asin(clamp(direction.y,-1,1));this.debug.noclip=true;this.playerMesh.visible=false;this.debug.droneHUD?.classList.remove('hidden');this.ui?.toast?.('NOCLIP // DRONE ACTIVE','amber');
+    }else if(this.debug.noclip){
+      this.debug.noclip=false;document.exitPointerLock?.();const p=this.debug.position.clone(),info=this.map?.getRoadInfo?.(p)||null;
+      if(info&&Number.isFinite(info.height)&&(info.worldDistance??0)<80)p.y=info.height+.65;
+      const heading=this.debug.yaw;if(this.physics.setPosition)this.physics.setPosition(p.x,p.y,p.z,heading);else this.physics.reset?.(p,heading);
+      this.mode='driving';this.playerMesh.visible=true;this.updatePlayerMesh();this.contactCooldown=1.2;this.snapDrivingCamera();this.debug.droneHUD?.classList.add('hidden');this.ui?.toast?.('NOCLIP OFF // CAR RESPAWNED HERE','amber');
+    }
+  }
+  updateNoclip(dt){
+    if(!this.debug.menuOpen){
+      const turn=1.35*dt;if(this.keys.ArrowLeft)this.debug.yaw+=turn;if(this.keys.ArrowRight)this.debug.yaw-=turn;if(this.keys.ArrowUp)this.debug.pitch=clamp(this.debug.pitch+turn,-Math.PI*.49,Math.PI*.49);if(this.keys.ArrowDown)this.debug.pitch=clamp(this.debug.pitch-turn,-Math.PI*.49,Math.PI*.49);
+      const forward=new THREE.Vector3(Math.sin(this.debug.yaw),0,Math.cos(this.debug.yaw)),right=new THREE.Vector3(-Math.cos(this.debug.yaw),0,Math.sin(this.debug.yaw));const speed=this.debug.moveSpeed*((this.keys.ShiftLeft||this.keys.ShiftRight)?3.5:1);
+      const move=new THREE.Vector3();if(this.keys.KeyW)move.add(forward);if(this.keys.KeyS)move.sub(forward);if(this.keys.KeyD)move.add(right);if(this.keys.KeyA)move.sub(right);if(this.keys.Space||this.keys.KeyE)move.y+=1;if(this.keys.ControlLeft||this.keys.ControlRight||this.keys.KeyQ)move.y-=1;if(move.lengthSq())this.debug.position.addScaledVector(move.normalize(),speed*dt);
+    }
+    const cp=Math.cos(this.debug.pitch),look=new THREE.Vector3(Math.sin(this.debug.yaw)*cp,Math.sin(this.debug.pitch),Math.cos(this.debug.yaw)*cp);this.camera.position.copy(this.debug.position);this.camera.up.set(0,1,0);this.camera.lookAt(this.debug.position.clone().add(look));this.camera.fov=64;this.camera.updateProjectionMatrix();
+    this.map?.update?.(this.debug.position,performance.now()/1000);if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,{position:this.debug.position,previousPosition:this.debug.position,velocity:new THREE.Vector3(),heading:this.debug.yaw,width:1,length:1});
+  }
+
+  _debugMaterial(color,opacity=1){return new THREE.LineBasicMaterial({color,transparent:opacity<1,opacity,depthTest:false,depthWrite:false,toneMapped:false});}
+  _buildRoadHitboxes(){
+    const group=new THREE.Group(),positions=[];for(const route of this.map?.routes?.values?.()||[]){const frames=route.renderFrames||[],count=route.closed?frames.length:frames.length-1;for(let i=0;i<count;i++){const a=frames[i],b=frames[(i+1)%frames.length];if(!a||!b)continue;const point=(f,side)=>f.position.clone().addScaledVector(f.normal,side*f.half).add(new THREE.Vector3(0,.14+Math.tan(f.bank||0)*side*f.half,0)),al=point(a,-1),ar=point(a,1),bl=point(b,-1),br=point(b,1);for(const v of[al,ar,br,al,br,bl])positions.push(v.x,v.y,v.z);}}
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));const mesh=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({color:0x39e6ff,wireframe:true,transparent:true,opacity:.52,depthTest:false,depthWrite:false,toneMapped:false}));mesh.renderOrder=998;group.add(mesh);return group;
+  }
+  _buildWallHitboxes(){
+    const positions=[];for(const wall of this.map?.wallSegments||[]){const a=wall.start,b=wall.end,h=wall.height||1.2;if(!a||!b)continue;positions.push(a.x,a.y,a.z,b.x,b.y,b.z,a.x,a.y+h,a.z,b.x,b.y+h,b.z,a.x,a.y,a.z,a.x,a.y+h,a.z,b.x,b.y,b.z,b.x,b.y+h,b.z);}
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));const lines=new THREE.LineSegments(geometry,this._debugMaterial(0xff365b,.9));lines.renderOrder=999;const group=new THREE.Group();group.add(lines);return group;
+  }
+  _buildServiceHitboxes(){
+    const group=new THREE.Group(),material=this._debugMaterial(0xffd34f,.9);for(const area of this.map?.serviceAreas||[]){const edges=new THREE.EdgesGeometry(new THREE.BoxGeometry(area.width||20,6,area.length||30)),lines=new THREE.LineSegments(edges,material);lines.position.copy(area.center);lines.position.y=(area.elevation??area.center.y)+3;lines.rotation.y=Math.atan2(area.tangent?.x||0,area.tangent?.z||1);lines.renderOrder=999;group.add(lines);}return group;
+  }
+  _buildVehicleHitboxes(){const group=new THREE.Group();this.debug.playerHelper=new THREE.BoxHelper(this.playerMesh,0x7dff62);group.add(this.debug.playerHelper);this.debug.trafficHelpers=(this.traffic?.pool||[]).map(vehicle=>{const helper=new THREE.BoxHelper(vehicle.mesh,0xff9a2e);helper.visible=false;group.add(helper);return{vehicle,helper};});return group;}
+  _disposeDebugGroup(group){if(!group)return;group.traverse(o=>{o.geometry?.dispose?.();if(o.material&&!Array.isArray(o.material))o.material.dispose?.();});group.removeFromParent();}
+  setDebugHitbox(kind,enabled){
+    if(!(kind in this.debug.hitboxes))return;this.debug.hitboxes[kind]=!!enabled;let layer=this.debug.layers[kind];if(enabled&&!layer){if(kind==='roads')layer=this._buildRoadHitboxes();else if(kind==='walls')layer=this._buildWallHitboxes();else if(kind==='services')layer=this._buildServiceHitboxes();else if(kind==='vehicles')layer=this._buildVehicleHitboxes();else layer=new THREE.Group();layer.name=`Debug ${kind}`;this.debug.layers[kind]=layer;this.debug.overlay.add(layer);}if(layer)layer.visible=!!enabled;if(kind==='world'&&enabled)this.debug.worldRefresh=Infinity;
+  }
+  _refreshWorldHitboxes(){
+    const layer=this.debug.layers.world;if(!layer)return;for(const child of[...layer.children])this._disposeDebugGroup(child);const candidates=[];this.map?.group?.traverse?.(o=>{if(o.isMesh&&o.visible&&o.parent?.visible!==false)candidates.push(o);});const origin=this.debug.noclip?this.debug.position:this.camera.position;let count=0;for(const mesh of candidates){if(count>=120)break;mesh.geometry?.computeBoundingSphere?.();const center=mesh.geometry?.boundingSphere?.center?.clone?.();if(!center)continue;mesh.localToWorld(center);if(center.distanceToSquared(origin)>650*650)continue;const helper=new THREE.BoxHelper(mesh,0xb06cff);helper.material.depthTest=false;helper.material.transparent=true;helper.material.opacity=.48;helper.renderOrder=997;layer.add(helper);count++;}
+  }
+  updateDebugHitboxes(dt){
+    if(this.debug.hitboxes.vehicles){this.debug.playerHelper?.update?.();if(this.debug.playerHelper)this.debug.playerHelper.visible=this.playerMesh.visible;for(const {vehicle,helper}of this.debug.trafficHelpers||[]){helper.visible=!!vehicle.active;if(vehicle.active)helper.update();}}
+    if(this.debug.hitboxes.world){this.debug.worldRefresh+=dt;if(this.debug.worldRefresh>.45){this.debug.worldRefresh=0;this._refreshWorldHitboxes();}}
   }
 
   getVehicleState(){return this.physics.getState?.()||this.physics.state||this.physics;}

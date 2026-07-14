@@ -118,6 +118,25 @@
       </div>
     </section>
 
+    <aside id="debug-menu" class="debug-menu hidden" aria-label="Debug tools" aria-hidden="true">
+      <header><div><small>WORLD INSPECTOR</small><h2>DEBUG // 0</h2></div><button id="debug-close" aria-label="Close debug menu">×</button></header>
+      <div class="debug-menu-body">
+        <label class="debug-toggle"><span><b>NOCLIP / DRONE</b><small>Fly freely, then respawn the car here</small></span><input id="debug-noclip" type="checkbox"><i></i></label>
+        <label class="debug-toggle"><span><b>DISABLE TRAFFIC</b><small>Despawns every AI vehicle</small></span><input id="debug-traffic" type="checkbox"><i></i></label>
+        <details class="debug-hitboxes">
+          <summary><span><b>HITBOXES</b><small>Choose collision and bounds overlays</small></span><em>EDIT</em></summary>
+          <label><input type="checkbox" data-debug-hitbox="roads"><span>Road collision surfaces</span></label>
+          <label><input type="checkbox" data-debug-hitbox="walls"><span>Barriers and walls</span></label>
+          <label><input type="checkbox" data-debug-hitbox="vehicles"><span>Player and traffic vehicles</span></label>
+          <label><input type="checkbox" data-debug-hitbox="services"><span>Service areas / triggers</span></label>
+          <label><input type="checkbox" data-debug-hitbox="world"><span>Visible world bounds</span></label>
+          <button id="debug-hitboxes-all">TOGGLE ALL</button>
+        </details>
+        <div class="debug-controls"><b>DRONE CONTROLS</b><span>WASD move · mouse / arrows look</span><span>WHEEL speed · SPACE/CTRL height · SHIFT boost</span></div>
+      </div>
+    </aside>
+    <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span id="debug-drone-speed">55 M/S</span><span>WHEEL SPEED · SHIFT BOOST</span><small>0 MENU</small></div>
+
     <div id="install-progress" class="install hidden"><span id="install-label">INSTALLING</span><div><i></i></div></div>
 
     <section id="touch-controls" class="touch-controls hidden" aria-label="Touch controls">
@@ -155,7 +174,7 @@
     <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260713a"></script>
+  <script type="module" src="js/game.js?v=20260714f"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
