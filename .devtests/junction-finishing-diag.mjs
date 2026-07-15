@@ -128,16 +128,16 @@ for (const spec of CASES) {
   const zoneForPaint = (branch._zonesAsBranch || []).find((z) => z.host === host && z.which === spec.which);
   let solidAcross = 0;
   let candidates = 0;
-  for (const r of rows) {
-    const unionOuter = Math.max(r.hostHalf, side * r.outer);
-    if (side * r.outer > r.hostHalf + 0.25 && Math.abs(r.dy) < 0.5
-      && (side * r.outer) - branch.halfWidth * 2 < r.hostHalf - 0.3) {
-      candidates += 1;
-      const suppressed = zoneForPaint && zoneForPaint.hostContains(zoneForPaint.hostEdgeSuppress, r.hostS);
-      if (!suppressed) solidAcross += 1;
-    }
+  for (const row of zoneForPaint ? zoneForPaint.samples : []) {
+    // The zone's own authoritative openings: crossable stations whose
+    // one-surface union extends past the host edge. A solid host edge
+    // line through one of those is a marking-ownership defect.
+    if (!row.crossable || row.crossOuter <= row.hostHalf + 0.25) continue;
+    candidates += 1;
+    const suppressed = zoneForPaint.hostContains(zoneForPaint.hostEdgeSuppress, row.hS);
+    if (!suppressed) solidAcross += 1;
   }
-  console.log(`  MARKINGS: host solid edge line crossing the mergeable union at ${solidAcross}/${candidates} crossable stations (0 = zone ownership works)`);
+  console.log(`  MARKINGS: host solid edge line crossing the mergeable union at ${solidAcross}/${candidates} crossable-open stations (0 = zone ownership works)`);
 
   // --- 4. rail suppression intervals + terminal steps ------------------
   const railIntervals = (route, sideSign, from, to) => {
