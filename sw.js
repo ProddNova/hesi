@@ -1,4 +1,4 @@
-const CACHE = 'shutoko-nights-v11';
+const CACHE = 'shutoko-nights-v12';
 const CORE = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
   './js/game.js', './js/map.js', './js/physics.js', './js/traffic.js', './js/data.js',

@@ -49,6 +49,20 @@ const CHUNK = 600;
 const CHUNK_VISIBLE = 1500;
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 
+// TEMPORARY (lateral-junction rebuild): the synthesized PA access lanes —
+// the decel/accel legs and descent spirals _defineServiceAreas builds around
+// each parking area — are broken and will be rebuilt in their own pass.
+// This flag removes them from the RUNTIME map only: no route is registered,
+// so their asphalt, collision corridor, guardrails/wall segments, markings
+// and traffic connections all disappear together. The raw (data/routes.js)
+// and smoothed (data/routes-smoothed.js) network data are untouched; set the
+// flag to false (or pass options.paAccessLanes = true) to restore every lane.
+// EXCEPTION — garage connector: the lane of the PA that hosts the player
+// garage (Shibaura, hasGarage in data) is kept, because the garage flow
+// drives through that lot (spawn/tow/exit land beside it on R11 and the
+// player must be able to drive in and out of the lot).
+const PA_ACCESS_LANES_DISABLED = true;
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -901,6 +915,19 @@ export class HighwayMap {
       const elevation = grounded ? 1.35 : sample.position.y + 0.15;
       center.y = elevation;
       const tangent = sample.tangent.clone();
+
+      // PA access lanes are temporarily disabled (see PA_ACCESS_LANES_DISABLED)
+      // except the garage connector: the lot itself stays (dressing, refuel,
+      // proximity, its own wall collision), but no access route, corridor,
+      // rails or edges are created for it.
+      const laneDisabled = (this.options.paAccessLanes === true ? false : PA_ACCESS_LANES_DISABLED)
+        && !def.hasGarage;
+      if (laneDisabled) {
+        const area = this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, null);
+        area.sideSign = sideSign;
+        area.accessDisabled = true;
+        continue;
+      }
 
       // Entry and exit hosts are chosen independently: a roadside PA uses
       // its own carriageway for both, but a JCT-island PA (Daikoku) enters
@@ -3568,6 +3595,7 @@ export class HighwayMap {
     }
     // PA advance boards (blue P), on poles, facing their carriageway.
     for (const area of this.serviceAreas) {
+      if (area.accessDisabled) continue; // no access lane — don't advertise the exit
       if (!area.routeId || !this.routes.has(area.routeId)) continue;
       const route = this.routes.get(area.routeId);
       for (const ahead of [500, 300, 100]) {
