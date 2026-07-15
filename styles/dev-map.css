@@ -1,0 +1,120 @@
+/* Developer network map overlay (styles/dev-map.css)
+ * A full-screen debug tool opened with the M key. Deliberately isolated from
+ * the main styles.css so it can be added/rebased without touching game styling.
+ * Sits above the HUD, phone, debug menu and scene-fade curtain. */
+
+.dev-map {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #05080f;
+  color: #eef5ff;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+.dev-map[hidden] { display: none; }
+
+.dev-map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.dev-map-toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: linear-gradient(180deg, rgba(4, 8, 15, 0.92), rgba(4, 8, 15, 0));
+  pointer-events: none;
+}
+
+.dev-map-toolbar > * { pointer-events: auto; }
+
+.dev-map-brand {
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  font-size: 12px;
+  color: #ffd34f;
+  margin-right: 6px;
+}
+
+.dev-map-toolbar button {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #dbe6f5;
+  background: rgba(12, 20, 34, 0.9);
+  border: 1px solid #33465f;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.dev-map-toolbar button:hover { background: rgba(28, 44, 70, 0.95); border-color: #5a7597; }
+.dev-map-toolbar button:active { background: rgba(40, 60, 92, 0.95); }
+.dev-map-toolbar button[aria-pressed="true"] { border-color: #5ad1ff; color: #bfeeff; }
+
+.dev-map-close {
+  margin-left: auto;
+  border-color: #7a3040 !important;
+  color: #ff9db0 !important;
+}
+.dev-map-close:hover { background: rgba(80, 24, 34, 0.9) !important; }
+
+.dev-map-info {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 10px 12px;
+  background: rgba(6, 10, 18, 0.86);
+  border: 1px solid #2b3b52;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.dev-map-info dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0 0 6px;
+}
+
+.dev-map-info dt { color: #7f93ac; letter-spacing: 0.05em; }
+.dev-map-info dd { margin: 0; color: #eef5ff; word-break: break-word; }
+.dev-map-info dd.is-on { color: #5ad1ff; font-weight: 600; }
+
+.dev-map-help {
+  margin: 0;
+  color: #8fa2bb;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Freeze scrolling of the page underneath while the map is open. */
+body.dev-map-open { overflow: hidden; }
+
+@media (max-width: 600px) {
+  .dev-map-toolbar button { padding: 8px 10px; }
+  .dev-map-info { font-size: 11px; }
+}
