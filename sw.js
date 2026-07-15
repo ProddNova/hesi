@@ -1,8 +1,8 @@
 const CACHE = 'shutoko-nights-v18';
 const CORE = [
-  './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
+  './', './index.html', './styles.css', './styles/dev-map.css', './manifest.webmanifest', './icon.svg',
   './js/game.js', './js/map.js', './js/physics.js', './js/traffic.js', './js/data.js',
-  './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js', './data/routes-smoothed.js'
+  './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js', './js/dev-map.js', './data/routes-smoothed.js'
 ];
 
 self.addEventListener('install', event => {

@@ -7,6 +7,7 @@ import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260713a';
 import { GameUI } from './ui.js?v=20260713a';
+import { DeveloperMap } from './dev-map.js?v=20260715f';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
@@ -32,6 +33,7 @@ class ShutokoNights {
     this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
     this.setupDebugMenu();
+    this.setupDevMap();
     this.resize();window.addEventListener('resize',()=>this.resize());
     // iOS Safari: orientation changes and browser-chrome show/hide don't always
     // fire a plain resize, so listen to everything and settle late.
@@ -118,6 +120,10 @@ class ShutokoNights {
     window.addEventListener('keydown',e=>{
       const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'');
       if((e.code==='Digit0'||e.code==='Numpad0')&&!typing&&!e.repeat){e.preventDefault();this.toggleDebugMenu();return;}
+      if(e.code==='KeyM'&&!typing&&!e.repeat){e.preventDefault();this.toggleDevMap();return;}
+      // While the developer map is open it owns input (it handles Escape via a
+      // capture-phase listener); swallow the rest so no gameplay key leaks through.
+      if(this.devMap?.isOpen())return;
       if(block.has(e.code))e.preventDefault();if(!this.keys[e.code])this.pressed.add(e.code);this.keys[e.code]=true;
       this.audio?.unlock?.();this.audio?.resume?.();
       if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
@@ -215,6 +221,9 @@ class ShutokoNights {
     // stays stable); anything slower degrades to slow motion rather than
     // exploding.
     let dt=Math.min(.05,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
+    // Developer map freezes gameplay (vehicle + drone stay put) while it is open.
+    // Freezing is preferable to letting the car/camera drift on stuck input.
+    if(this.devMap?.isOpen()){this.render();this.pressed.clear();return;}
     if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
     this.updateDebugHitboxes(dt);
     this.render();this.pressed.clear();
@@ -260,6 +269,72 @@ class ShutokoNights {
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
   updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}
+  setupDevMap(){
+    // Full-screen developer network map (M). A debug/inspection tool separate
+    // from the phone minimap. It never touches game internals directly — every
+    // interaction goes through these callbacks (see js/dev-map.js / DEV_MAP.md).
+    try{
+      this.devMap=new DeveloperMap({
+        getNetwork:()=>this.getDevNetwork(),
+        getCurrentPosition:()=>{const p=this.debug.noclip?this.debug.position:vec(this.getVehicleState().position||this.getVehicleState());return{x:p.x,y:p.y,z:p.z};},
+        getCurrentHeading:()=>{if(this.debug.noclip)return this.debug.yaw;const s=this.getVehicleState();return s.heading??s.yaw??0;},
+        getCurrentRoute:()=>{try{const p=this.debug.noclip?this.debug.position:vec(this.getVehicleState().position||this.getVehicleState());const info=this.map?.getRoadInfo?.(p);return info?.routeName||info?.route?.name||info?.routeId||null;}catch(e){return null;}},
+        isNoclipActive:()=>!!this.debug.noclip,
+        teleportToRoutePoint:(payload)=>this.teleportToRoutePoint(payload),
+        onOpen:()=>{this.keys={};this.pressed.clear();this.releaseTouchInput?.();document.exitPointerLock?.();},
+        // Deliberately do NOT reacquire pointer lock on close; just leave input clean.
+        onClose:()=>{this.keys={};this.pressed.clear();this.releaseTouchInput?.();},
+      });
+    }catch(e){console.error('Dev map init',e);this.devMap=null;}
+  }
+  toggleDevMap(){this.devMap?.toggle();}
+  getDevNetwork(){
+    const mm=this.map?.getMinimapData?.();if(!mm)return null;
+    // Start from the authoritative runtime minimap network (real names, ids,
+    // kinds, colours, geometry) and enrich each route with the metadata the
+    // tooltip needs (group, lane count, travel direction).
+    const routes=mm.routes.map((route)=>{
+      let meta=null;try{meta=this.map.getRoute?.(route.id);}catch(e){meta=null;}
+      const groupName=meta?.group?(this.map.groups?.get?.(meta.group)?.name||null):null;
+      return {...route,
+        group:meta?.group??null,groupName,
+        lanes:meta?.lanes??null,
+        oneWay:meta?.oneWay,bidirectional:meta?.bidirectional,
+        direction:meta?.oneWayDirection??1};
+    });
+    return {routes,bounds:mm.bounds,junctions:mm.junctions,serviceAreas:mm.serviceAreas,garage:mm.garage};
+  }
+  _snapNoclipCamera(){
+    const cp=Math.cos(this.debug.pitch),look=new THREE.Vector3(Math.sin(this.debug.yaw)*cp,Math.sin(this.debug.pitch),Math.cos(this.debug.yaw)*cp);
+    this.camera.position.copy(this.debug.position);this.camera.up.set(0,1,0);this.camera.lookAt(this.debug.position.clone().add(look));this.camera.fov=64;this.camera.updateProjectionMatrix();
+  }
+  teleportToRoutePoint({routeId,distance,lane=0,direction=1}){
+    // Use the authoritative route sampler for the exact centre, road height and
+    // travel tangent at the clicked chainage.
+    let sample=null;try{sample=this.map?.sampleLane?.(routeId,distance,lane,direction);}catch(e){console.error('teleport sample',e);return null;}
+    if(!sample)return null;
+    const centre=vec(sample.position||sample.point||sample.center);
+    const heading=Number.isFinite(sample.heading)?sample.heading:Math.atan2(sample.tangent?.x||0,sample.tangent?.z||1);
+    if(this.debug.noclip){
+      // Noclip drone teleport: move the debug/drone position + yaw, then refresh
+      // the camera and streamed chunks/world visibility immediately.
+      this.debug.position.set(centre.x,centre.y+2.2,centre.z);this.debug.yaw=heading;
+      this._snapNoclipCamera();
+      this.map?.update?.(this.debug.position,performance.now()/1000);
+      return {x:this.debug.position.x,y:this.debug.position.y,z:this.debug.position.z,heading,routeName:sample.routeName};
+    }
+    // Driving teleport: reset the physics pose (setPosition clears linear and
+    // angular velocity), place the car just above the surface, refresh mesh,
+    // camera, current road info and streamed chunks, and arm a contact cooldown
+    // so it does not immediately register a crash.
+    const target=vec({x:centre.x,y:centre.y+0.6,z:centre.z});
+    if(this.physics.setPosition)this.physics.setPosition(target.x,target.y,target.z,heading);else this.physics.reset?.(target,heading);
+    this.contactCooldown=1.2;this.fuelWarned=false;
+    this.currentRoadInfo=this.map?.getRoadInfo?.(target)||this.currentRoadInfo;
+    this.updatePlayerMesh();this.snapDrivingCamera();
+    this.map?.update?.(target,performance.now()/1000);
+    return {x:target.x,y:target.y,z:target.z,heading,routeName:sample.routeName};
+  }
   setTrafficDisabled(disabled){
     this.debug.trafficDisabled=!!disabled;if(disabled)this.traffic?.clear?.();
     const input=document.getElementById('debug-traffic');if(input)input.checked=!!disabled;
