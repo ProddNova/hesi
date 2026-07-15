@@ -1529,13 +1529,23 @@ export class HighwayMap {
           return hLo <= hHi ? { host: [hLo, hHi], branch: [bLo, bHi] } : null;
         };
 
-        // Openings are gated on crossOuter, not unionOuter: a wing that
-        // has already peeled above (or dived below) the host edge keeps
-        // the host's solid line and rail — only a one-surface union past
-        // the edge hands the boundary to the zone.
+        // Marking width uses unionOuter, not crossOuter, INSIDE the
+        // crossable run: every row in [c0,c1] already cleared shelfFree
+        // (<=0.35 m, the same test `merged`/`continuous` used to admit it
+        // here), so crossOuter's extra 0.18 m lip veto can no longer be
+        // distinguishing a genuine wing (that would already have failed
+        // shelfFree and never reached this range) — on a shallow, truly
+        // level merge taper it just re-tests noise in the dy interpolation
+        // and flickers crossOuter back to hostHalf for stretches of rows
+        // even while the paved union stays smoothly wide. That flicker
+        // fragmented the open/dash interval down to a short window near
+        // one end of the true taper, leaving the rest of the merge lane
+        // marked by neither the host's suppressed edge nor a dash — the
+        // gap the branch's own (still-drawn) edge line then filled,
+        // duplicating/pre-empting the boundary tens of metres early.
         const crossable = rangeIn(() => true);
-        const open = rangeIn((r) => r.crossOuter > r.hostHalf + 0.25);
-        const dash = rangeIn((r) => r.crossOuter - laneEdge >= 2.0);
+        const open = rangeIn((r) => r.unionOuter > r.hostHalf + 0.25);
+        const dash = rangeIn((r) => r.unionOuter - laneEdge >= 2.0);
         // Outer rail hand-off: rows are ordered from the mouth end outward,
         // so the FIRST row with a real wing marks the single tip boundary —
         // tailward of it the host rail owns the edge (branch rail off),
@@ -4280,13 +4290,30 @@ export class HighwayMap {
     // gore opens, the branch's host-side edge line reappears naturally and
     // becomes the ramp-side gore line. Dash phase is untouched — clipping
     // skips stations, never re-bases route distance.
-    const mouthPaintLat = (latFn, width) => {
+    // edgeSide identifies a call as painting the route's OWN edge line on
+    // that side (1 or -1), so it can be handed to the zone: once this
+    // route is inside a junction zone's crossable span, the host-ward
+    // edge is the zone's dash/suppress boundary to draw, not the branch's
+    // own line. The per-frame coplanar clip below (_mouthClipAt) only
+    // hides paint once the branch cross-section is fully coplanar-covered,
+    // which on a shallow merge taper lags the zone's own "one drivable
+    // union" verdict by tens of metres — the branch keeps drawing a
+    // "ghost" edge line deep into (and past) the merge, duplicating or
+    // pre-empting the host's authoritative boundary. One owner per
+    // boundary: inside crossable, the zone always wins on that side.
+    const mouthPaintLat = (latFn, width, edgeSide = null) => {
       if (this.options.junctionMouthSurfaces === false) return latFn;
       if (!route.junctionMouths) return latFn;
       const margin = width * 0.5 + 0.3;
       return (frame) => {
         const lat = latFn(frame);
         if (lat === null) return null;
+        if (edgeSide !== null && route._zonesAsBranch) {
+          for (const zone of route._zonesAsBranch) {
+            if (!zone.crossable || edgeSide !== zone.hostwardSign) continue;
+            if (frame.distance >= zone.crossable.branch[0] - 1 && frame.distance <= zone.crossable.branch[1] + 1) return null;
+          }
+        }
         const jx = this._mouthClipAt(route, frame);
         if (!jx) return lat;
         if (jx.skip) return null;
@@ -4337,7 +4364,7 @@ export class HighwayMap {
       this._markingTag = 'edgeLine';
       for (const [from, to] of kept) {
         this._paintStrip(route, 'marking', from, to,
-          mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
+          mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16, side), 0.16);
       }
       if (route.bidirectional) {
         this._paintStrip(route, 'amber', 0, route.length,
