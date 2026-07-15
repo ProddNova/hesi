@@ -41,19 +41,20 @@ const fail = (label, detail) => {
 const strips = map._markingLog.filter((p) => p.kind === 'strip');
 const summary = { zonesChecked: 0, earlyEdge: 0, dashOutsideOverlap: 0, hostDup: 0, oneLaneReversal: 0 };
 
-const zones = (map.junctionZones || []).filter((z) => z.crossable);
+const zones = (map.junctionZones || []).filter((z) => z.markingOpening || z.crossable);
 
 // 1. no branch edge line on the host-ward side inside crossable.branch
 for (const zone of zones) {
   summary.zonesChecked += 1;
+  const opening = zone.markingOpening?.branch || zone.crossable.branch;
   const branchPieces = strips.filter((p) => p.tag === 'edgeLine' && p.routeId === zone.branch.id);
   for (const piece of branchPieces) {
     const mid = (piece.sFrom + piece.sTo) * 0.5;
-    if (mid < zone.crossable.branch[0] - 1 || mid > zone.crossable.branch[1] + 1) continue;
+    if (mid < opening[0] || mid > opening[1]) continue;
     const side = Math.sign(piece.latFrom);
     if (side !== zone.hostwardSign) continue;
     summary.earlyEdge += 1;
-    fail('early-incoming-edge', `${zone.kind} ${zone.branch.id} on ${zone.host.id}: branch host-ward edge painted at s=${piece.sFrom.toFixed(0)}..${piece.sTo.toFixed(0)} (inside crossable ${zone.crossable.branch[0].toFixed(0)}..${zone.crossable.branch[1].toFixed(0)})`);
+    fail('early-incoming-edge', `${zone.kind} ${zone.branch.id} on ${zone.host.id}: branch host-ward edge painted at s=${piece.sFrom.toFixed(0)}..${piece.sTo.toFixed(0)} (inside A-B ${opening[0].toFixed(2)}..${opening[1].toFixed(2)})`);
   }
 }
 
@@ -72,13 +73,15 @@ for (const zone of zones) {
     }
   }
   if (zone.dash) {
+    const opening = zone.markingOpening?.host || zone.crossable.host;
     const dashPieces = strips.filter((p) => p.tag === 'zoneDash' && p.routeId === zone.host.id
-      && (p.sFrom + p.sTo) * 0.5 >= zone.dash.from - 1 && (p.sFrom + p.sTo) * 0.5 <= zone.dash.to + 1);
+      && (p.owner === `junction:${zone.id}`
+        || ((p.sFrom + p.sTo) * 0.5 >= zone.dash.from - 1 && (p.sFrom + p.sTo) * 0.5 <= zone.dash.to + 1)));
     for (const piece of dashPieces) {
       const mid = (piece.sFrom + piece.sTo) * 0.5;
-      if (zone.hostContains(zone.crossable.host, mid)) continue;
+      if (zone.hostContains(opening, mid)) continue;
       summary.dashOutsideOverlap += 1;
-      fail('dash-outside-overlap', `${zone.kind} ${zone.branch.id} on ${zone.host.id}: zoneDash at s=${piece.sFrom.toFixed(0)} outside crossable ${zone.crossable.host[0].toFixed(0)}..${zone.crossable.host[1].toFixed(0)}`);
+      fail('dash-outside-overlap', `${zone.kind} ${zone.branch.id} on ${zone.host.id}: zoneDash at s=${piece.sFrom.toFixed(0)} outside A-B ${opening[0].toFixed(2)}..${opening[1].toFixed(2)}`);
     }
   }
 }

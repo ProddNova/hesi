@@ -14,7 +14,10 @@
 const VERBOSE = process.argv.includes('--verbose');
 const originalWarn = console.warn;
 console.warn = () => {};
-const { HighwayMap } = await import('../js/map.js');
+// AB_MAP_MODULE lets the same probe executable audit a detached parent
+// worktree, proving the regression really fails before this branch.
+const mapModule = process.env.AB_MAP_MODULE || '../js/map.js';
+const { HighwayMap } = await import(mapModule);
 const map = new HighwayMap(null, { addLighting: false, markingDebug: true });
 console.warn = originalWarn;
 
