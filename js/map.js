@@ -593,12 +593,15 @@ export class HighwayMap {
       const endDrop = Math.abs(routeData.points[0][1] - routeData.points[routeData.points.length - 1][1]);
       const steep = endDrop > routeData.length * 0.05;
       const anchorSpan = steep ? 30 : Math.min(95, Math.max(30, routeData.length * 0.22));
-      if (startEdge && startEdge.kind === 'diverge' && this.routes.has(startEdge.from.route)) {
-        divergeInfo = this._anchorEndpoint(points, routeData, startEdge, 'start', anchorSpan);
+      const anchorsStart = !!(startEdge && startEdge.kind === 'diverge' && this.routes.has(startEdge.from.route));
+      const anchorsEnd = !!(endEdge && endEdge.kind === 'merge' && this.routes.has(endEdge.to.route));
+      const doubleAnchored = anchorsStart && anchorsEnd;
+      if (anchorsStart) {
+        divergeInfo = this._anchorEndpoint(points, routeData, startEdge, 'start', anchorSpan, doubleAnchored);
         if (divergeInfo) points = divergeInfo.points;
       }
-      if (endEdge && endEdge.kind === 'merge' && this.routes.has(endEdge.to.route)) {
-        mergeInfo = this._anchorEndpoint(points, routeData, endEdge, 'end', anchorSpan);
+      if (anchorsEnd) {
+        mergeInfo = this._anchorEndpoint(points, routeData, endEdge, 'end', anchorSpan, doubleAnchored);
         if (mergeInfo) points = mergeInfo.points;
       }
     }
@@ -637,6 +640,7 @@ export class HighwayMap {
       if (startEdge) startEdge._handled = true;
     }
     if (mergeInfo) {
+      const host = this.routes.get(mergeInfo.hostId);
       const edge = this._addEdge({
         from: { routeId: route.id, distance: 'end', direction: 1 },
         to: { routeId: mergeInfo.hostId, distance: mergeInfo.hostDistance, direction: 1 },
@@ -644,8 +648,11 @@ export class HighwayMap {
         name: routeData.name || route.id,
       });
       edge.side = mergeInfo.side;
-      // vehicles arriving from a side merge land in the lane on that side
-      edge.mergeLane = mergeInfo.side < 0 ? null : 0;
+      // The branch's lanes are glued onto the host's outermost lanes on
+      // that side (see _anchorEndpoint), so branch lane L lands exactly on
+      // host lane mergeLaneBase + L — a zero-jump hand-off.
+      edge.mergeLaneBase = mergeInfo.side > 0 ? 0 : Math.max(0, host.lanes - route.lanes);
+      edge.mergeLane = edge.mergeLaneBase;
       if (endEdge) endEdge._handled = true;
     }
     return route;
@@ -657,7 +664,7 @@ export class HighwayMap {
    * (shifted 30 m along travel so transfers land where the vehicle already
    * is).
    */
-  _anchorEndpoint(points, routeData, edge, which, anchorSpan) {
+  _anchorEndpoint(points, routeData, edge, which, anchorSpan, doubleAnchored = false) {
     const host = this.routes.get(which === 'start' ? edge.from.route : edge.to.route);
     const connection = vec(edge.point[0], 0, edge.point[1]);
     const projection = this._projectToRoute(host, connection);
@@ -676,20 +683,48 @@ export class HighwayMap {
     const probe = this._pointAlongPolyline(points, which === 'start' ? 45 : -45);
     const probeProjection = this._projectToRoute(host, probe);
     const side = (probeProjection.signedLateral >= 0 ? 1 : -1);
-    const hostHalf = this._halfWidthAt(host, hostDistanceAtMouth);
-    const lateral = side * Math.max(0.6, hostHalf - 2.0);
+    // LANE-ALIGNED glue line: the branch's lanes overlap the host's
+    // outermost `branchLanes` lanes on that side, so the transition ends ON
+    // the host's lane grid. This is width-continuous by construction (a
+    // ramp's narrower shoulder ends 0.35 m inside the host's paved edge, an
+    // equal-width merge overlaps exactly) and traffic transfers land where
+    // the vehicle already is — the old edge-anchored line (hostHalf − 2 m)
+    // left every branch ~1.1 m outside the outer lane centre, so vehicles
+    // rode the shoulder and snapped laterally at the hand-off.
+    const branchLanes = Math.max(1, routeData.lanes || (routeData.kind === 'ramp' ? 1 : 2));
+    const lateral = side * Math.max(0, host.lanes - branchLanes) * (host.laneWidth || LANE_W) * 0.5;
 
     const edgePoint = (distance) => {
       const sample = this._sampleCenter(host, this._normalizeDistance(host, distance), 1);
       return sample.position.clone().addScaledVector(sample.normal, lateral);
     };
 
-    // BLENDED TAPER: over the first 2*anchorSpan of the branch, each point
-    // is a smoothstep mix of the host's outer edge (at the matching
-    // station) and the raw geometry — a true transition curve with no
-    // corner anywhere. Beyond the blend, raw geometry continues untouched.
-    const blendLength = anchorSpan * 2;
+    // BLENDED TAPER: over the first `blendLength` of the branch, each point
+    // mixes the host's lane-aligned glue line (at the matching station)
+    // with the raw geometry using a SQUARED smoothstep — tangent-continuous
+    // at both ends (weight slope 0 at t=0 and t=1), and heavily skewed so
+    // the branch is fully glued near the mouth and does its lateral glide
+    // far out where the pavements are still separate: no last-moment
+    // diagonal at the merge point. The length comes from route metadata:
+    // at least the anchoring span, stretched to what the branch's speed
+    // limit needs for a comfortable glide, capped by available geometry
+    // (steep diving ramps keep the short span — their heights are pinned
+    // to the host only briefly; double-anchored connectors keep their two
+    // blends disjoint).
+    const speedNeed = ((routeData.speedLimit || 60) / 3.6) * 9;
+    const lengthCap = routeData.length * (doubleAnchored ? 0.45 : 0.7);
     const ordered = which === 'start' ? points : [...points].reverse();
+    // The blend must never reach the branch's FAR endpoint: that point can
+    // be another route's continuation anchor (ramp_39 hands off onto
+    // ramp_46's start), and pulling it toward the glue line tears the
+    // hand-off open. Cap by the polyline's own arc so the far end always
+    // keeps raw geometry.
+    let polylineArc = 0;
+    for (let i = 1; i < ordered.length; i += 1) polylineArc += ordered[i].distanceTo(ordered[i - 1]);
+    const blendLength = Math.min(
+      Math.max(anchorSpan * 2, Math.min(anchorSpan > 31 ? speedNeed : 0, lengthCap, 240)),
+      polylineArc * 0.8,
+    );
     const alongSign = which === 'start' ? 1 : -1;
     const blended = [];
     let travelled = 0;
@@ -698,7 +733,8 @@ export class HighwayMap {
       if (i > 0) travelled += ordered[i].distanceTo(ordered[i - 1]);
       if (travelled > blendLength) { restFrom = i; break; }
       const t = travelled / blendLength;
-      const smooth = t * t * (3 - 2 * t);
+      const step = t * t * (3 - 2 * t);
+      const smooth = step * step;
       const station = hostDistanceAtMouth + alongSign * travelled;
       const hostEdge = edgePoint(station);
       const rawY = ordered[i].y;
@@ -710,8 +746,13 @@ export class HighwayMap {
       blended.push(mixed);
     }
     const rest = ordered.slice(restFrom);
+    // TWO lead points on the glue line pin the curve's endpoint tangent to
+    // the host direction (an open Catmull-Rom's end tangent leans toward
+    // the next interior point — one lead alone let the mouth start/end
+    // 5-8 deg off-axis with a ~0.6 m bulge).
     const lead = edgePoint(hostDistanceAtMouth - alongSign * 30);
-    const merged = [lead, ...blended, ...rest];
+    const lead2 = edgePoint(hostDistanceAtMouth - alongSign * 15);
+    const merged = [lead, lead2, ...blended, ...rest];
     const result = which === 'start' ? merged : merged.reverse();
 
     if (which === 'start') {
@@ -1273,6 +1314,334 @@ export class HighwayMap {
         end.span -= overflow * 0.5;
       }
     }
+    this._prepareJunctionZones();
+  }
+
+  /**
+   * ONE data-driven local representation per same-level merge/diverge —
+   * the single source every consumer reads (asphalt already reads the
+   * mouth clip, which is this envelope in per-frame detail; markings,
+   * guardrails, traffic and the probes read the records built here), so
+   * no subsystem guesses on its own where a junction begins or ends.
+   *
+   * Everything is measured from the actual route curves and widths:
+   *   e          side-signed lateral of the branch centre in the host frame
+   *   unionOuter side-signed outer edge of the paved union at that station
+   *   innerEdge  side-signed hostward edge of the branch pavement
+   *   dy         branch deck height above the host's banked deck
+   *
+   * Derived intervals (host or branch chainage; on a closed host they are
+   * stored unwrapped around `hostRef` — use zone.hostContains):
+   *   crossable         branch pavement continuous with the host (the
+   *                     boundary a driver may cross)
+   *   hostEdgeSuppress  host solid edge line suppressed (union wider than
+   *                     the host, pavement continuous)
+   *   dash              dashed lane-separation boundary (crossable AND the
+   *                     merge/exit lane is usable), at host lateral dashLat
+   *   hostRailOpen      host-side rail suppressed
+   *   branchOuterRailOn branch outer rail forced on (it is the union's
+   *                     outer edge through the zone)
+   *   branchOuterRailOff branch outer rail forced off (thin-wing tail
+   *                     where the host rail has resumed)
+   *   branchInnerRailOff branch hostward rail forced off (crossable zone
+   *                     and gore nose — no rail between joined lanes)
+   */
+  _prepareJunctionZones() {
+    this.junctionZones = [];
+    for (const route of this.routes.values()) {
+      if (!route.junctionMouths) continue;
+      for (const mouth of route.junctionMouths) {
+        const host = mouth.host;
+        const side = mouth.side;
+        const which = mouth.which;
+        const laneEdge = host.lanes * host.laneWidth * 0.5;
+        const step = 4;
+        const rows = [];
+        for (let s = 0; s <= mouth.span + step; s += step) {
+          const bS = which === 'start'
+            ? Math.min(s, route.length)
+            : Math.max(0, route.length - s);
+          const frame = this._frameAt(route, bS);
+          const projection = this._projectToRoute(host, frame.position);
+          if (projection.endOvershoot > 4) continue;
+          const hostHalf = this._halfWidthAt(host, projection.distance);
+          const bank = this._bankAt(host, projection.distance);
+          const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+          const e = side * projection.signedLateral;
+          const dy = frame.position.y - deckY;
+          // Continuity is the RENDERER'S OWN mouth-clip decision at this
+          // cross-section, not a looser re-derivation: merged means the
+          // clip removed a covered coplanar strip (the drawn union is one
+          // surface there). The clip's overlap gauge (covered band + dy
+          // line) additionally tells physics which deck owns the surface
+          // and where the one-surface union laterally ends. |dy| >= 1.6
+          // cannot overlap-band-match anything — skip the projections.
+          let removed = null;
+          let covered = null;
+          let dyEnds = null;
+          let Lends = null;
+          if (Math.abs(dy) < 1.6) {
+            frame._jxSeed = projection.distance;
+            const clip = this._mouthClipAt(route, frame);
+            if (clip && clip.mouth === mouth && clip.removed) removed = clip.removed;
+            const gauge = frame._jxGauge;
+            if (gauge && gauge.mouth === mouth) {
+              covered = gauge.covered;
+              dyEnds = gauge.dyEnds;
+              Lends = gauge.Lends;
+            }
+          }
+          const unionOuter = Math.max(hostHalf, e + frame.half);
+          // Outer side-lateral extent of the ONE-SURFACE union: where the
+          // wing leaves the host's paved edge at more than the coplanar
+          // offset (a shelf peeling above or a sheet diving below), the
+          // crossable surface ends at the host edge — the wing beyond is
+          // separate geometry, not a boundary a driver may cross.
+          // Crossability also demands the TOP surface across the CROSSED
+          // band — covered laterals on the zone's side of the host
+          // centreline — be step-free: a sheet may dive below the host
+          // (the host deck rides on top, flat), but a shelf rising above
+          // it in the crossing path is a lip a driver would have to
+          // mount. A tilted section's far end hanging over the OPPOSITE
+          // half of the host is not in anyone's crossing path.
+          let crossOuter = unionOuter;
+          let shelfFree = true;
+          if (covered) {
+            const dyAtT = (t) => dyEnds[0] + (dyEnds[1] - dyEnds[0]) * t;
+            const sLatT = (t) => side * (Lends[0] + (Lends[1] - Lends[0]) * t);
+            const tOf = (lat) => (lat + frame.half) / (2 * frame.half);
+            let t0 = tOf(covered[0]);
+            let t1 = tOf(covered[1]);
+            const s0 = sLatT(t0);
+            const s1 = sLatT(t1);
+            if (s0 < 0 && s1 < 0) {
+              // covered band entirely on the far half — nothing crossed
+            } else {
+              if (s0 < 0) t0 += (0 - s0) / (s1 - s0) * (t1 - t0);
+              else if (s1 < 0) t1 = t0 + (0 - s0) / (s1 - s0) * (t1 - t0);
+              // 0.35 = the renderer's one-level band (APRON_DY), shared
+              // EXACTLY with _surfaceDefersToHost's strip-row rule: any
+              // sliver the crossing band may hover under is one physics
+              // defers to the host beneath (flat walk), and anything
+              // higher is a real lip that also keeps its own corridor —
+              // both sides of the threshold stay self-consistent.
+              shelfFree = Math.max(dyAtT(t0), dyAtT(t1)) < 0.35;
+            }
+            const edgeLat = covered[1] < frame.half - 0.05
+              ? covered[1]
+              : (covered[0] > -frame.half + 0.05 ? covered[0] : null);
+            if (edgeLat !== null && Math.abs(dyAtT(tOf(edgeLat))) > 0.18) {
+              crossOuter = Math.min(crossOuter, hostHalf);
+            }
+          }
+          rows.push({
+            bS,
+            hS: projection.distance,
+            e,
+            hostHalf,
+            half: frame.half,
+            unionOuter,
+            crossOuter,
+            innerEdge: e - frame.half,
+            dy,
+            merged: removed !== null && shelfFree,
+            removed,
+            covered,
+            dyEnds,
+          });
+        }
+        if (rows.length < 2) continue;
+        // Unwrap host chainage around the zone middle so intervals on a
+        // closed loop crossing station 0 stay contiguous.
+        const hostRef = rows[Math.floor(rows.length / 2)].hS;
+        const unwrap = (h) => {
+          if (!host.closed) return h;
+          let delta = h - hostRef;
+          delta -= Math.round(delta / host.length) * host.length;
+          return hostRef + delta;
+        };
+        for (const row of rows) row.hU = unwrap(row.hS);
+
+        // A row is continuous when the drawn union is one surface there
+        // (the clip removed a coplanar strip) AND the branch pavement
+        // actually overlaps the host. The old |dy| < 1.5 re-derivation
+        // called rows crossable where the renderer draws two separate
+        // decks — markings, rails and the collision walk all disagreed
+        // with the visible asphalt over those rows.
+        const continuous = (r) => r.merged && r.innerEdge < r.hostHalf - 0.3;
+        const range = (pred) => {
+          let hLo = Infinity;
+          let hHi = -Infinity;
+          let bLo = Infinity;
+          let bHi = -Infinity;
+          for (const r of rows) {
+            if (!pred(r)) continue;
+            hLo = Math.min(hLo, r.hU);
+            hHi = Math.max(hHi, r.hU);
+            bLo = Math.min(bLo, r.bS);
+            bHi = Math.max(bHi, r.bS);
+          }
+          return hLo <= hHi ? { host: [hLo, hHi], branch: [bLo, bHi] } : null;
+        };
+        // MOUTH-CONNECTED component: rows are ordered from the transfer
+        // end outward, so the opening a driver can actually use is the
+        // first contiguous continuous run. A later disjoint qualifying
+        // stretch (decks re-converging further out) is not part of this
+        // opening — one min/max over all rows used to smear intervals
+        // across the non-crossable span between them.
+        let c0 = -1;
+        let c1 = -1;
+        for (let i = 0; i < rows.length; i += 1) {
+          if (continuous(rows[i])) { if (c0 < 0) c0 = i; c1 = i; } else if (c0 >= 0) break;
+        }
+        for (let i = 0; i < rows.length; i += 1) rows[i].crossable = c0 >= 0 && i >= c0 && i <= c1;
+        const rangeIn = (pred) => {
+          let hLo = Infinity;
+          let hHi = -Infinity;
+          let bLo = Infinity;
+          let bHi = -Infinity;
+          for (let i = c0; c0 >= 0 && i <= c1; i += 1) {
+            const r = rows[i];
+            if (!pred(r)) continue;
+            hLo = Math.min(hLo, r.hU);
+            hHi = Math.max(hHi, r.hU);
+            bLo = Math.min(bLo, r.bS);
+            bHi = Math.max(bHi, r.bS);
+          }
+          return hLo <= hHi ? { host: [hLo, hHi], branch: [bLo, bHi] } : null;
+        };
+
+        // Openings are gated on crossOuter, not unionOuter: a wing that
+        // has already peeled above (or dived below) the host edge keeps
+        // the host's solid line and rail — only a one-surface union past
+        // the edge hands the boundary to the zone.
+        const crossable = rangeIn(() => true);
+        const open = rangeIn((r) => r.crossOuter > r.hostHalf + 0.25);
+        // Host rail hand-off matches the branch outer rail's 0.6 m wing
+        // threshold: the host rail resumes where the branch rail ends
+        // (slight overlap over the last sliver of wing, never a gap).
+        const railOpen = rangeIn((r) => r.crossOuter > r.hostHalf + 0.55);
+        const dash = rangeIn((r) => r.crossOuter - laneEdge >= 2.0);
+        // Outer rail hand-off: rows are ordered from the mouth end outward,
+        // so the FIRST row with a real wing marks the single tip boundary —
+        // tailward of it the host rail owns the edge (branch rail off),
+        // outward of it the branch's outer edge is the union's edge and its
+        // rail is forced on through the whole engaged region (the old point
+        // probe made it flicker with every small width change).
+        let tipIndex = -1;
+        for (let i = 0; i < rows.length; i += 1) {
+          if (rows[i].unionOuter >= rows[i].hostHalf + 0.6) { tipIndex = i; break; }
+        }
+        const lastEngaged = rows.length - 1;
+        const branchInterval = (a, b) => [Math.min(rows[a].bS, rows[b].bS), Math.max(rows[a].bS, rows[b].bS)];
+        const outerOn = tipIndex >= 0 ? { branch: branchInterval(tipIndex, lastEngaged) } : null;
+        const outerOff = tipIndex > 0 ? { branch: branchInterval(0, tipIndex - 1) } : (tipIndex < 0 ? { branch: branchInterval(0, lastEngaged) } : null);
+        const innerOff = range((r) => r.innerEdge < r.hostHalf + 0.9 && Math.abs(r.dy) < 2.5);
+        // Host rail intervals are BOUND TO THE SAME TIP ROW as the branch
+        // outer rail, so the hand-off happens at one envelope station by
+        // construction (on a slowly-forking equal-width branch, separate
+        // width thresholds landed nearly 100 m apart, leaving the edge
+        // unguarded between them). Mouth-side of the tip the host owns the
+        // edge (forced on through the glued tail — the yield probe would
+        // otherwise keep it dead); outward of the tip the opening is the
+        // branch rail's.
+        let hostRailOpen = null;
+        let hostRailOn = null;
+        if (crossable && railOpen) {
+          const tipH = tipIndex >= 0 ? rows[tipIndex].hU : (which === 'end' ? railOpen.host[0] : railOpen.host[1]);
+          hostRailOpen = which === 'end'
+            ? [railOpen.host[0] - 2, tipH + 2]
+            : [tipH - 2, railOpen.host[1] + 2];
+          if (hostRailOpen[1] <= hostRailOpen[0]) hostRailOpen = null;
+          const tail = which === 'end'
+            ? [tipH, crossable.host[1] + 15]
+            : [crossable.host[0] - 15, tipH];
+          if (tail[1] > tail[0]) hostRailOn = tail;
+        } else if (crossable) {
+          hostRailOn = [crossable.host[0] - 15, crossable.host[1] + 15];
+        }
+
+        // Branch-frame lateral sign pointing at the host, measured (the
+        // edge whose projection sits deeper inside the host) — a branch
+        // can wander across the host centreline, so -side is not reliable.
+        const midRow = rows[Math.floor(rows.length / 2)];
+        const midFrame = this._frameAt(route, midRow.bS);
+        const plusDepth = Math.abs(this._projectToRoute(host, this._deckPoint(midFrame, midFrame.half)).signedLateral);
+        const minusDepth = Math.abs(this._projectToRoute(host, this._deckPoint(midFrame, -midFrame.half)).signedLateral);
+        const branchHostward = plusDepth < minusDepth ? 1 : -1;
+
+        const zone = {
+          kind: mouth.kind,
+          which,
+          side,
+          hostwardSign: branchHostward,
+          host,
+          branch: route,
+          hostRef,
+          laneEdge,
+          dashLat: side * laneEdge,
+          samples: rows,
+          branchSpan: [Math.min(rows[0].bS, rows[rows.length - 1].bS), Math.max(rows[0].bS, rows[rows.length - 1].bS)],
+          hostSpan: crossable ? crossable.host : null,
+          crossable,
+          hostEdgeSuppress: open ? open.host : null,
+          dash: dash ? { from: dash.host[0], to: dash.host[1] } : null,
+          hostRailOpen,
+          hostRailOn,
+          branchOuterRailOn: outerOn ? outerOn.branch : null,
+          branchOuterRailOff: outerOff ? outerOff.branch : null,
+          branchInnerRailOff: innerOff ? innerOff.branch : null,
+          hostContains(interval, h) {
+            if (!interval) return false;
+            let value = h;
+            if (host.closed) {
+              let delta = value - hostRef;
+              delta -= Math.round(delta / host.length) * host.length;
+              value = hostRef + delta;
+            }
+            return value >= interval[0] && value <= interval[1];
+          },
+        };
+        this.junctionZones.push(zone);
+        mouth.zone = zone;
+        if (!host._zonesAsHost) host._zonesAsHost = [];
+        host._zonesAsHost.push(zone);
+        if (!route._zonesAsBranch) route._zonesAsBranch = [];
+        route._zonesAsBranch.push(zone);
+
+        // Rail ownership intervals for the barrier builder. Modes: 'off'
+        // (opening — never draw), 'on' (the union's outer edge — always
+        // draw, overriding the yield probe that used to kill a ramp's
+        // outer rail 1.6 m before the pavements even met). 'off' wins.
+        this._addRailZone(host, side, zone.hostRailOpen, 'off');
+        this._addRailZone(host, side, zone.hostRailOn, 'on');
+        this._addRailZone(route, branchHostward, zone.branchInnerRailOff, 'off');
+        this._addRailZone(route, -branchHostward, zone.branchOuterRailOn, 'on');
+        this._addRailZone(route, -branchHostward, zone.branchOuterRailOff, 'off');
+      }
+    }
+  }
+
+  /** Register a rail ownership interval (chainage pieces) on a route side. */
+  _addRailZone(route, sideSign, interval, mode) {
+    if (!interval) return;
+    if (!route._railZones) route._railZones = { 1: [], [-1]: [] };
+    for (const [from, to] of this._zoneIntervalPieces(route, interval)) {
+      route._railZones[sideSign].push({ from, to, mode });
+    }
+  }
+
+  /** Zone-forced rail mode at a chainage ('off' | 'on' | null = probe). */
+  _railZoneMode(route, sideSign, distance) {
+    const zones = route._railZones?.[sideSign];
+    if (!zones) return null;
+    let mode = null;
+    for (const zone of zones) {
+      if (distance < zone.from || distance > zone.to) continue;
+      if (zone.mode === 'off') return 'off';
+      mode = zone.mode;
+    }
+    return mode;
   }
 
   /**
@@ -1302,8 +1671,12 @@ export class HighwayMap {
     const half = frame.half;
 
     // Signed distance of a cross-section point OUTSIDE the host's paved
-    // edge on the branch's side (g < 0 = inside the host surface), plus the
-    // vertical gap to the host's banked deck there.
+    // edge (g < 0 = inside the host surface), plus the vertical gap to the
+    // host's banked deck there. Side-agnostic on purpose: a lane-aligned
+    // branch can drift across the host centreline (or a lifting 2-lane
+    // ramp can lean over the "wrong" side for a stretch), and the old
+    // side-signed distance then reported points far PAST the opposite
+    // paved edge as deeply inside — clipping real wing surface into holes.
     const measure = (lateral) => {
       const point = this._deckPoint(frame, lateral);
       const projection = this._projectToRoute(host, point, this._hostSeedIndex(host, frame._jxSeed));
@@ -1312,7 +1685,9 @@ export class HighwayMap {
       const bank = this._bankAt(host, projection.distance);
       const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
       return {
-        g: mouth.side * projection.signedLateral - hostHalf,
+        L: projection.signedLateral,
+        H: hostHalf,
+        g: Math.abs(projection.signedLateral) - hostHalf,
         dy: point.y - deckY,
         overshoot: projection.endOvershoot,
       };
@@ -1322,18 +1697,20 @@ export class HighwayMap {
     if (lo.overshoot > 2 || hi.overshoot > 2) return null;
     const hostward = hi.g < lo.g ? 1 : -1;
     const inner = hostward > 0 ? hi : lo;   // cross-section end nearer the host centre
-    // g and dy are locally linear across the short cross-section
-    const valueAt = (lat) => {
-      const t = (lat + half) / (2 * half);
-      return { g: lo.g + (hi.g - lo.g) * t, dy: lo.dy + (hi.dy - lo.dy) * t };
-    };
-    const latForG = (g) => {
-      if (Math.abs(hi.g - lo.g) < 1e-6) return null;
-      return -half + ((g - lo.g) / (hi.g - lo.g)) * (2 * half);
-    };
+    // dy is locally linear across the short cross-section
     const latForDy = (dy) => {
       if (Math.abs(hi.dy - lo.dy) < 1e-6) return null;
       return -half + ((dy - lo.dy) / (hi.dy - lo.dy)) * (2 * half);
+    };
+    // Signed-linear "outside the pavement" distance on the section's own
+    // side of the host — only used by the apron path, where the section is
+    // fully outside and therefore cannot straddle the host centreline.
+    const sideSign = (hostward > 0 ? hi.L : lo.L) >= 0 ? 1 : -1;
+    const gSide0 = sideSign * lo.L - lo.H;
+    const gSide1 = sideSign * hi.L - hi.H;
+    const latForG = (g) => {
+      if (Math.abs(gSide1 - gSide0) < 1e-6) return null;
+      return -half + ((g - gSide0) / (gSide1 - gSide0)) * (2 * half);
     };
     // Flap vertex: at `lat`, hug the host surface from just below.
     const flapVertex = (rawLat) => {
@@ -1345,16 +1722,25 @@ export class HighwayMap {
       return { lat, point };
     };
 
-    const COPLANAR = 0.12;  // |dy| below which host/branch decks are one surface
+    // |dy| below which host/branch decks are one surface. Wide enough that
+    // the linear endpoint interpolation of dy across the section (true dy
+    // curves with bank/projection differences) cannot leave drawn strips
+    // grazing the host within the z-fight band.
+    const COPLANAR = 0.18;
     const TUCK = 0.35;      // how far a cut edge slides under the host surface
     const GORE_FILL = 1.2;  // widest sliver the gore apron closes
     const APRON_DY = 0.35;  // largest level offset the apron may bridge
 
-    if (inner.g >= 0) {
-      // Fully outside the host pavement: close the gore sliver while the
-      // gap is narrow and the decks are still at one level. The apron
-      // fades back to the branch's own edge as the gap or level offset
-      // grows, so the fill closes smoothly instead of ending in a face.
+    if (inner.g >= 0 && lo.L * hi.L >= 0) {
+      // Fully outside the host pavement ON ONE SIDE: close the gore
+      // sliver while the gap is narrow and the decks are still at one
+      // level. The apron fades back to the branch's own edge as the gap
+      // or level offset grows, so the fill closes smoothly instead of
+      // ending in a face. (A section whose two ends sit outside OPPOSITE
+      // host edges — a branch wider than its host — is a straddle, not a
+      // gore: it falls through to the exact covered-strip clip below,
+      // which otherwise never ran and left a full-width coplanar ribbon
+      // z-fighting over the host.)
       const separation = inner.g;
       if (separation >= GORE_FILL || Math.abs(inner.dy) >= APRON_DY) return null;
       let width = clamp((GORE_FILL - separation) / 0.35, 0, 1);
@@ -1369,16 +1755,39 @@ export class HighwayMap {
       return frame._jx;
     }
 
-    // Removed strip R = {g < 0} ∩ {|dy| < COPLANAR} ∩ section.
-    let coveredLo = -half;
-    let coveredHi = half;
-    const gRoot = latForG(0);
-    if (gRoot !== null) {
-      if (hostward > 0) coveredLo = Math.max(coveredLo, gRoot);
-      else coveredHi = Math.min(coveredHi, gRoot);
-    } else if (lo.g >= 0) {
-      coveredLo = half; // nothing covered
-    }
+    // Removed strip R = {covered by host pavement} ∩ {|dy| < COPLANAR}.
+    // Covered = {|L(t)| ≤ H(t)} solved exactly as two linear constraints
+    // (L−H ≤ 0 and L+H ≥ 0): a lane-aligned branch can lie fully inside
+    // the host or straddle its centreline, where any single-root cut
+    // misclassifies half the section (drawn coplanar sheets or holes).
+    let tMin = 0;
+    let tMax = 1;
+    const clipConstraint = (f0, f1, keepNegative) => {
+      const s0 = keepNegative ? f0 : -f0;
+      const s1 = keepNegative ? f1 : -f1; // want s ≤ 0
+      if (s0 > 0 && s1 > 0) { tMin = 1; tMax = 0; return; }
+      if (s0 <= 0 && s1 <= 0) return;
+      const root = s0 / (s0 - s1);
+      if (s0 > 0) tMin = Math.max(tMin, root);
+      else tMax = Math.min(tMax, root);
+    };
+    clipConstraint(lo.L - lo.H, hi.L - hi.H, true);
+    clipConstraint(lo.L + lo.H, hi.L + hi.H, false);
+    if (tMin >= tMax) return null; // host covers none of the section
+    const coveredLo = -half + tMin * 2 * half;
+    const coveredHi = -half + tMax * 2 * half;
+    // Deck-overlap gauge for physics/zone consumers: the host-covered
+    // lateral band and the (locally linear) branch-above-host offsets at
+    // the section ends. Recorded even when nothing ends up coplanar —
+    // a buried or shelving sheet still overlaps the host, and surface
+    // ownership must know about it.
+    frame._jxGauge = {
+      mouth,
+      covered: [coveredLo, coveredHi],
+      dyEnds: [lo.dy, hi.dy],
+      Lends: [lo.L, hi.L],
+      half,
+    };
     let planarLo = -half;
     let planarHi = half;
     if (Math.abs(hi.dy - lo.dy) < 1e-6) {
@@ -1412,7 +1821,17 @@ export class HighwayMap {
         flapHi: null,
       });
     }
-    frame._jx = { mouth, hostward, skip: intervals.length === 0, intervals };
+    frame._jx = {
+      mouth,
+      hostward,
+      skip: intervals.length === 0,
+      intervals,
+      // Coplanar strip handed to the host deck (frame laterals) — the
+      // authoritative "these decks are one surface here" record that
+      // junction zones and physics consume, so crossability, collision
+      // and the drawn union can never disagree.
+      removed: [removedLo, removedHi],
+    };
     return frame._jx;
   }
 
@@ -1758,6 +2177,12 @@ export class HighwayMap {
       // correction still applies, so keep the corridor.
       if (projection.endOvershoot > 4
         && this._endIsOpen(route, projection.u > 0.5 ? 1 : -1)) continue;
+      // Junction mouth: where the drawn cross-section strip was handed to
+      // the host deck (coplanar duplicate removed), the branch has no
+      // surface of its own — the host corridor owns physics there, same
+      // as it owns the visible asphalt.
+      if (route._zonesAsBranch
+        && this._surfaceDefersToHost(route, projection.distance, projection.signedLateral)) continue;
       const bank = this._bankAt(route, projection.distance);
       const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
       const vertical = position.y - deckY;
@@ -1768,6 +2193,39 @@ export class HighwayMap {
       });
     }
     return corridors;
+  }
+
+  /**
+   * TRUE when the drawn asphalt at this branch station/lateral is the
+   * HOST's deck: the junction-zone row nearest the station shows the
+   * lateral inside the host-covered band with the branch deck at or
+   * below the host's top surface (a removed coplanar strip or a buried
+   * sheet — neither carries the car; the host's surface is the road).
+   * A shelf rising above the host keeps its own corridor. Uses the
+   * precomputed zone rows — no projections at query time.
+   */
+  _surfaceDefersToHost(route, distance, lateral) {
+    for (const zone of route._zonesAsBranch) {
+      const [b0, b1] = zone.branchSpan;
+      if (distance < b0 - 2 || distance > b1 + 2) continue;
+      let best = null;
+      let bestDelta = Infinity;
+      for (const row of zone.samples) {
+        const delta = Math.abs(row.bS - distance);
+        if (delta < bestDelta) { bestDelta = delta; best = row; }
+      }
+      if (!best?.covered || lateral <= best.covered[0] || lateral >= best.covered[1]) continue;
+      const t = (lateral + best.half) / (2 * best.half);
+      const dy = best.dyEnds[0] + (best.dyEnds[1] - best.dyEnds[0]) * t;
+      // On a section that IS partially merged (a strip was removed), the
+      // whole covered band within the renderer's one-level tolerance
+      // (APRON_DY) rides the host: the leftover slivers hovering under
+      // 0.35 m are cosmetic ghosts, not decks. A section with NO strip
+      // keeps its corridor unless it is buried — a full-width ribbon
+      // above the host is a real second deck and carries the car.
+      if (dy < (best.removed ? 0.35 : 0.18)) return true;
+    }
+    return false;
   }
 
   /**
@@ -2254,7 +2712,12 @@ export class HighwayMap {
       }
       const edge = options[Math.abs(branchIndex) % options.length];
       const nextRoute = this.routes.get(edge.to.routeId);
-      if (edge.kind === 'merge') laneIndex = edge.mergeLane ?? nextRoute.lanes - 1;
+      if (edge.kind === 'merge') {
+        // lane-aligned hand-off: branch lane L sits ON host lane base + L
+        laneIndex = edge.mergeLaneBase !== undefined
+          ? edge.mergeLaneBase + laneIndex
+          : (edge.mergeLane ?? nextRoute.lanes - 1);
+      }
       laneIndex = clamp(laneIndex, 0, nextRoute.lanes - 1);
       route = nextRoute;
       distance = edge.to.distance;
@@ -2431,7 +2894,9 @@ export class HighwayMap {
     const edge = options[Math.floor(rng() * options.length)];
     const nextRoute = this.routes.get(edge.to.routeId);
     const laneIndex = edge.kind === 'merge'
-      ? (edge.mergeLane ?? nextRoute.lanes - 1)
+      ? (edge.mergeLaneBase !== undefined
+        ? edge.mergeLaneBase + (laneRef.laneIndex ?? 0)
+        : (edge.mergeLane ?? nextRoute.lanes - 1))
       : clamp(laneRef.laneIndex ?? 0, 0, nextRoute.lanes - 1);
     return this._laneRefFor(nextRoute, laneIndex, edge.to.direction);
   }
@@ -2465,12 +2930,17 @@ export class HighwayMap {
     const vehicle = request.vehicle || null;
     const beforePosition = this.sampleLane(route.id, s0, laneIndex, direction).position;
 
-    // Mid-route diverge: outermost lane only, seeded per vehicle+edge.
-    if (route.traffic && laneIndex === route.lanes - 1 && travel > 0) {
+    // Mid-route diverge: only from the outermost lane ON THE EXIT'S SIDE
+    // (a left exit takes left-lane vehicles — the old outermost-right gate
+    // sent cars snapping across the full carriageway at left diverges),
+    // seeded per vehicle+edge. They land in the branch's matching lane.
+    if (route.traffic && travel > 0) {
       const s1 = s0 + travel * direction;
       for (const edge of this.edges) {
         if (edge.kind !== 'diverge' || edge.probability <= 0) continue;
         if (edge.from.routeId !== route.id || edge.from.direction !== direction) continue;
+        const exitLane = (edge.side ?? -1) > 0 ? 0 : route.lanes - 1;
+        if (laneIndex !== exitLane) continue;
         const d = edge.from.distance;
         const crossed = direction > 0 ? (s0 < d && s1 >= d) : (s0 > d && s1 <= d);
         if (!crossed) continue;
@@ -2479,7 +2949,8 @@ export class HighwayMap {
         const hash = ((vehicle?.poolIndex ?? 0) * 2654435761 + Math.floor(d)) >>> 0;
         if ((hash % 1000) / 1000 >= edge.probability) continue;
         const overrun = Math.abs(s1 - d);
-        const sample = this.sampleLane(targetRoute.id, edge.to.distance + overrun, 0, edge.to.direction);
+        const landingLane = (edge.side ?? -1) > 0 ? 0 : targetRoute.lanes - 1;
+        const sample = this.sampleLane(targetRoute.id, edge.to.distance + overrun, landingLane, edge.to.direction);
         return this._trafficResult(sample, beforePosition, true);
       }
     }
@@ -3055,17 +3526,39 @@ export class HighwayMap {
     }
   }
 
-  /** Paint dashes from one route-absolute phase; frames/chunks never reset it. */
-  _paintDashedStrip(route, materialName, lateralAt, width, period, dashLength, phase = 0) {
-    const first = Math.ceil((-dashLength * 0.5 - phase) / period);
-    const last = Math.floor((route.length + dashLength * 0.5 - phase) / period);
+  /**
+   * Paint dashes from one route-absolute phase; frames/chunks never reset
+   * it, and a clipped range (junction-zone dashed boundaries) never
+   * re-bases it — dashes inside [sFrom, sTo] land exactly where the
+   * full-route pattern would put them.
+   */
+  _paintDashedStrip(route, materialName, lateralAt, width, period, dashLength, phase = 0, sFrom = 0, sTo = null) {
+    const end = sTo === null ? route.length : Math.min(sTo, route.length);
+    const from = Math.max(0, sFrom);
+    const first = Math.ceil((from - dashLength * 0.5 - phase) / period);
+    const last = Math.floor((end + dashLength * 0.5 - phase) / period);
     for (let index = first; index <= last; index += 1) {
       const center = phase + index * period;
-      this._paintStrip(route, materialName,
-        Math.max(0, center - dashLength * 0.5),
-        Math.min(route.length, center + dashLength * 0.5),
-        lateralAt, width);
+      const lo = Math.max(from, center - dashLength * 0.5);
+      const hi = Math.min(end, center + dashLength * 0.5);
+      if (hi - lo < 0.05) continue;
+      this._paintStrip(route, materialName, lo, hi, lateralAt, width);
     }
+  }
+
+  /**
+   * Chainage pieces of an unwrapped zone interval on this route (closed
+   * routes: an interval crossing station 0 splits into two pieces).
+   */
+  _zoneIntervalPieces(route, interval) {
+    if (!interval) return [];
+    let [a, b] = interval;
+    if (b <= a) return [];
+    if (!route.closed) return [[clamp(a, 0, route.length), clamp(b, 0, route.length)]];
+    const start = wrap(a, route.length);
+    const span = Math.min(b - a, route.length);
+    if (start + span <= route.length) return [[start, start + span]];
+    return [[start, route.length], [0, start + span - route.length]];
   }
 
   /**
@@ -3242,12 +3735,27 @@ export class HighwayMap {
    * a hollow open cross-section. The material is DoubleSide, so one face
    * serves both run ends.
    */
-  _emitBarrierEndCap(bucket, frame, side) {
-    const base = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
-    const top = this._deckPoint(frame, side * (frame.half - 0.3), 0.85);
-    const cap = this._deckPoint(frame, side * (frame.half - 0.06), 0.91);
-    const out = this._deckPoint(frame, side * frame.half, 0.0);
-    this._pushQuad(bucket, base, top, cap, out);
+  _emitBarrierEndCap(bucket, frame, side, factor = 1) {
+    const p = this._parapetProfile(frame, side, factor);
+    this._pushQuad(bucket, p.base, p.top, p.cap, p.out);
+  }
+
+  /**
+   * Parapet cross-section at one frame, scaled by a terminal factor:
+   * factor 1 is the full profile; toward 0 the profile sinks to deck level
+   * and squeezes toward the outer edge — the ramped end terminal every
+   * junction-mouth rail run now finishes with, instead of a full-height
+   * profile chopped mid-air.
+   */
+  _parapetProfile(frame, side, factor = 1) {
+    const squeeze = 0.36 * (1 - factor);
+    const lean = 0.02 + 0.83 * factor;
+    return {
+      base: this._deckPoint(frame, side * (frame.half - 0.42 + squeeze), 0.02),
+      top: this._deckPoint(frame, side * (frame.half - 0.3 + squeeze * 0.66), lean),
+      cap: this._deckPoint(frame, side * (frame.half - 0.06), lean + 0.06 * factor),
+      out: this._deckPoint(frame, side * frame.half, 0.0),
+    };
   }
 
   _buildRouteGeometry(route) {
@@ -3255,23 +3763,61 @@ export class HighwayMap {
     const barrierHeight = route.kind === 'service' ? 0.9 : 1.15;
     const medianHeight = 1.0;
 
-    // Surface frames can sit ~1.5 m apart; suppression zones (gore mouths, PA
-    // gates) span tens of metres, so re-probe _barrierSuppressed only every
-    // ~9 m per side — finer than the old 16-30 m step, at a fraction of the
-    // projections.
-    const suppressionCache = { 1: null, [-1]: null };
-    const barrierSuppressedNear = (probe, side) => {
-      const cached = suppressionCache[side];
-      if (cached && xzDistanceSq(cached.point, probe) < 9 * 9) return cached.result;
-      const result = this._barrierSuppressed(probe, route);
-      suppressionCache[side] = { point: probe.clone(), result };
-      return result;
+    // Rail visibility per surface frame per side. Inside a junction zone
+    // the zone's ownership intervals decide (exact chainage boundaries —
+    // 'off' across the drivable opening, 'on' along the union's outer
+    // edge); everywhere else the ~9 m-cached point probe decides (PA
+    // gates, braided complexes).
+    const frames = route.surfaceFrames;
+    const barrierVisible = { 1: new Array(frames.length), [-1]: new Array(frames.length) };
+    {
+      const cache = { 1: null, [-1]: null };
+      for (let i = 0; i < frames.length; i += 1) {
+        const frame = frames[i];
+        for (const side of [1, -1]) {
+          const mode = this._railZoneMode(route, side, frame.distance);
+          let visible;
+          if (mode === 'off') visible = false;
+          else if (mode === 'on') visible = true;
+          else {
+            const probe = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+            const cached = cache[side];
+            if (cached && xzDistanceSq(cached.point, probe) < 9 * 9) visible = cached.result;
+            else {
+              visible = !this._barrierSuppressed(probe, route);
+              cache[side] = { point: probe, result: visible };
+            }
+          }
+          barrierVisible[side][i] = visible;
+        }
+      }
+    }
+    // Terminal taper: within RAIL_TAPER metres of a visibility boundary the
+    // parapet profile ramps down to deck level (see _parapetProfile), so
+    // every run finishes as an intentional end terminal.
+    const RAIL_TAPER = 7;
+    const railFactor = (side, i) => {
+      const list = barrierVisible[side];
+      if (!list[i]) return 0;
+      const s = frames[i].distance;
+      let factor = 1;
+      for (let j = i + 1; j < list.length; j += 1) {
+        const d = frames[j].distance - s;
+        if (d > RAIL_TAPER) break;
+        if (!list[j]) { factor = Math.min(factor, Math.max(d, 0.8) / RAIL_TAPER); break; }
+      }
+      for (let j = i - 1; j >= 0; j -= 1) {
+        const d = s - frames[j].distance;
+        if (d > RAIL_TAPER) break;
+        if (!list[j]) { factor = Math.min(factor, Math.max(d, 0.8) / RAIL_TAPER); break; }
+      }
+      return factor;
     };
     // Parapet runs end/restart at junction-mouth openings; track the runs so
     // each terminal gets a closing face instead of an open hollow profile.
     const barrierRun = { 1: false, [-1]: false };
 
-    this._forEachSurfaceFrameSegment(route, (a, b) => {
+    this._forEachSurfaceFrameSegment(route, (a, b, segmentIndex) => {
       // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
       const mid = a.position.clone().lerp(b.position, 0.5);
       // Junction mouths draw a clipped deck that unions with the host
@@ -3307,42 +3853,39 @@ export class HighwayMap {
       // carriageway at a gore mouth or PA gate.
       const bucketBarrier = this._bucket(mid, 'barrier');
       const bucketRail = this._bucket(mid, 'railMetal');
+      const nextIndex = (segmentIndex + 1) % frames.length;
       for (const side of [1, -1]) {
-        const baseA = this._deckPoint(a, side * (a.half - 0.42), 0.02);
-        const baseB = this._deckPoint(b, side * (b.half - 0.42), 0.02);
-        const probe = TMP_B.copy(baseA).lerp(baseB, 0.5);
-        if (barrierSuppressedNear(probe, side)) {
-          // Run ends at a junction-mouth opening: close the profile cleanly
-          // instead of leaving a hollow open end across the mouth.
+        const drawn = barrierVisible[side][segmentIndex] && barrierVisible[side][nextIndex];
+        if (!drawn) {
+          // Run ends at a junction-mouth opening: close the (tapered)
+          // profile cleanly instead of leaving a hollow open end.
           if (barrierRun[side]) {
-            this._emitBarrierEndCap(bucketBarrier, a, side);
+            this._emitBarrierEndCap(bucketBarrier, a, side, railFactor(side, segmentIndex));
             barrierRun[side] = false;
           }
           continue;
         }
+        const fA = railFactor(side, segmentIndex);
+        const fB = railFactor(side, nextIndex);
         if (!barrierRun[side]) {
-          this._emitBarrierEndCap(bucketBarrier, a, side);
+          this._emitBarrierEndCap(bucketBarrier, a, side, fA);
           barrierRun[side] = true;
         }
-        const lean = 0.85;
-        const innerTopA = this._deckPoint(a, side * (a.half - 0.3), lean);
-        const innerTopB = this._deckPoint(b, side * (b.half - 0.3), lean);
-        const capA = this._deckPoint(a, side * (a.half - 0.06), lean + 0.06);
-        const capB = this._deckPoint(b, side * (b.half - 0.06), lean + 0.06);
-        const outA = this._deckPoint(a, side * a.half, 0.0);
-        const outB = this._deckPoint(b, side * b.half, 0.0);
+        const pA = this._parapetProfile(a, side, fA);
+        const pB = this._parapetProfile(b, side, fB);
         // `barrier` is DoubleSide: cap + outer wall preserve the same deck-edge
         // silhouette from chase and exterior views without storing a third,
         // hidden inner-profile sheet at every dense surface station.
         if (side > 0) {
-          this._pushQuad(bucketBarrier, innerTopA, innerTopB, capB, capA);
-          this._pushQuad(bucketBarrier, capB, outB, outA, capA);
+          this._pushQuad(bucketBarrier, pA.top, pB.top, pB.cap, pA.cap);
+          this._pushQuad(bucketBarrier, pB.cap, pB.out, pA.out, pA.cap);
         } else {
-          this._pushQuad(bucketBarrier, innerTopB, innerTopA, capA, capB);
-          this._pushQuad(bucketBarrier, capA, outA, outB, capB);
+          this._pushQuad(bucketBarrier, pB.top, pA.top, pA.cap, pB.cap);
+          this._pushQuad(bucketBarrier, pA.cap, pA.out, pB.out, pB.cap);
         }
-        // steel handrail on top of the parapet (skipped inside tunnels)
-        if (!a.tunnel) {
+        // steel handrail on top of the parapet (skipped inside tunnels and
+        // over end terminals — it must not float above a sunk profile)
+        if (!a.tunnel && fA > 0.96 && fB > 0.96) {
           const railA = this._deckPoint(a, side * (a.half - 0.18), 1.12);
           const railB = this._deckPoint(b, side * (b.half - 0.18), 1.12);
           const railTopA = railA.clone(); railTopA.y += 0.09;
@@ -3608,12 +4151,45 @@ export class HighwayMap {
     for (const offset of dividerOffsets) {
       this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14), 0.14, dashStep, dashLength, 6);
     }
+    // Edge lines with junction-zone marking ownership. Where this route
+    // HOSTS a merge/diverge, the zone owns the boundary: the solid edge
+    // line is suppressed over the zone's crossable opening (painted only
+    // on the complement intervals — exact chainage clipping, no per-frame
+    // dropouts) and a dashed lane-separation line marks the mergeable
+    // boundary at the host's outer lane edge. The branch's own edge lines
+    // are already clipped to its drawn deck (mouthPaintLat), so exactly
+    // one route paints each visible boundary.
     for (const side of [1, -1]) {
-      this._paintStrip(route, 'marking', 0, route.length,
-        mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
+      const suppress = [];
+      for (const zone of route._zonesAsHost || []) {
+        if (zone.side !== side || !zone.hostEdgeSuppress) continue;
+        suppress.push(...this._zoneIntervalPieces(route, zone.hostEdgeSuppress));
+      }
+      suppress.sort((a, b) => a[0] - b[0]);
+      const kept = [];
+      let cursor = 0;
+      for (const [from, to] of suppress) {
+        if (from > cursor + 0.5) kept.push([cursor, from]);
+        cursor = Math.max(cursor, to);
+      }
+      if (route.length > cursor + 0.5) kept.push([cursor, route.length]);
+      for (const [from, to] of kept) {
+        this._paintStrip(route, 'marking', from, to,
+          mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
+      }
       if (route.bidirectional) {
         this._paintStrip(route, 'amber', 0, route.length,
           () => side * (route.medianWidth * 0.5 + 0.28), 0.13);
+      }
+    }
+    // Dashed merge/diverge boundary: a slightly wider, denser broken line
+    // along the host's outer lane edge through each zone's crossable
+    // interval, ending where the merge lane stops being usable. Phase is
+    // route-absolute like every other dash.
+    for (const zone of route._zonesAsHost || []) {
+      if (!zone.dash) continue;
+      for (const [from, to] of this._zoneIntervalPieces(route, [zone.dash.from, zone.dash.to])) {
+        this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
       }
     }
 

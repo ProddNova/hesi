@@ -65,6 +65,11 @@ const cases = [
   { name: 'left-merge-k1_0-ramp_42', branch: 'ramp_42', which: 'end', host: 'k1_0', branchS: 100 },
   { name: 'left-diverge-k1_0-ramp_42', branch: 'ramp_42', which: 'start', host: 'k1_0', branchS: 116 },
   { name: 'wide-diverge-wangan_0-ramp_2', branch: 'ramp_2', which: 'start', host: 'wangan_0', branchS: 240 },
+  // The two junctions from the user's visual bug report (2026-07-15):
+  // the equal-width C1 loop-closing merge on the Shibaura viaduct, and
+  // the R6 -> C1 outer merge among the downtown towers.
+  { name: 'right-merge-c1_0-c1_3', branch: 'c1_3', which: 'end', host: 'c1_0', branchS: 166 },
+  { name: 'right-merge-c1_0-r6_3', branch: 'r6_3', which: 'end', host: 'c1_0', branchS: 170 },
 ];
 
 for (const junction of cases) {
@@ -75,15 +80,34 @@ for (const junction of cases) {
     let host;
     try { branch = map.getRoute(c.branch); host = map.getRoute(c.host); } catch { return { missing: true }; }
     const stationAt = (s) => (c.which === 'start' ? s : branch.length - s);
-    // mouth throat middle (where surfaces are joined) + the gore/split area
-    const throatSample = map._sampleCenter(branch, stationAt(c.branchS * 0.45), 1);
-    const goreSample = map._sampleCenter(branch, stationAt(c.branchS), 1);
-    const hostProjection = map._projectToRoute(host, goreSample.position);
-    const throatProjection = map._projectToRoute(host, throatSample.position);
-    const gore = goreSample.position.clone().lerp(hostProjection.point, 0.5);
-    const throat = throatSample.position.clone().lerp(throatProjection.point, 0.5);
-    const tangent = throatProjection.tangent.clone();
-    if (c.which === 'end') tangent.multiplyScalar(1); // travel direction of the host
+    // Prefer the shared junction-zone record: centre the cameras on the
+    // CROSSABLE interval (the actual mergeable boundary) so every shot
+    // frames the union/taper area instead of the separate approach.
+    const zone = (map.junctionZones || []).find((z) => z.branch === branch && z.host === host && z.which === c.which);
+    let throat;
+    let gore;
+    let tangent;
+    if (zone && zone.crossable) {
+      // Frame the action: for a merge the interesting run is the gore ->
+      // dash zone -> taper tip, so anchor the cameras at the zone START
+      // (where the branch pavement first joins) looking downstream; the
+      // top view hovers over the crossable middle.
+      const start = zone.crossable.host[0];
+      const mid = (zone.crossable.host[0] + zone.crossable.host[1]) * 0.5;
+      const startSample = map._sampleCenter(host, map._normalizeDistance(host, start), 1);
+      const midSample = map._sampleCenter(host, map._normalizeDistance(host, mid), 1);
+      throat = startSample.position.clone();
+      gore = midSample.position.clone();
+      tangent = startSample.tangent.clone();
+    } else {
+      const throatSample = map._sampleCenter(branch, stationAt(c.branchS * 0.45), 1);
+      const goreSample = map._sampleCenter(branch, stationAt(c.branchS), 1);
+      const hostProjection = map._projectToRoute(host, goreSample.position);
+      const throatProjection = map._projectToRoute(host, throatSample.position);
+      gore = goreSample.position.clone().lerp(hostProjection.point, 0.5);
+      throat = throatSample.position.clone().lerp(throatProjection.point, 0.5);
+      tangent = throatProjection.tangent.clone();
+    }
     return {
       gore: { x: gore.x, y: gore.y, z: gore.z },
       throat: { x: throat.x, y: throat.y, z: throat.z },
