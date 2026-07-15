@@ -85,9 +85,10 @@ class ShutokoNights {
   }
   buildWorld(){
     const mapBuildStarted=performance.now();
-    // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?paAccessLanes=1
+    // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?legacyProgressiveMerges=1
+    // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
-    try{const legacyMouths=typeof location!=='undefined'&&/[?&]legacyMouths=1/.test(location.search);const paAccessLanes=typeof location!=='undefined'&&/[?&]paAccessLanes=1/.test(location.search);this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    try{const legacyMouths=typeof location!=='undefined'&&/[?&]legacyMouths=1/.test(location.search);const legacyProgressiveMerges=typeof location!=='undefined'&&/[?&]legacyProgressiveMerges=1/.test(location.search);const paAccessLanes=typeof location!=='undefined'&&/[?&]paAccessLanes=1/.test(location.search);this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor

@@ -130,6 +130,44 @@ The set deliberately spans left/right, merge/diverge, one-/two-lane branches,
 two-/three-lane hosts, a constrained opening, a broad opening, and curved
 geometry. No fifth connection is enabled.
 
-The shared transition architecture, implementation/probe results,
-legacy/progressive image matrix, performance comparison, limitations, and
-developer-map pin instructions will be appended as the remaining phases land.
+## Phase 3 — one authoritative transition model
+
+`js/progressive-merge.js` builds one record for each allow-listed zone after
+the existing A–B zone has measured source geometry and before any route mesh is
+built. The four records are exposed as `map.progressiveTransitions`, keyed by
+`map.progressiveTransitionById`, and linked from the host, branch, and source
+zone. `?legacyProgressiveMerges=1` (or `progressiveMerges: false` headlessly)
+builds zero active records without changing any other junction.
+
+Each record owns:
+
+- ordered `approachStart`, `openingStart`, `parallelStart`,
+  `absorptionStart`, and `transitionEnd` chainages;
+- host/branch/temporary/final lane counts and explicit per-lane mappings;
+- sampled lane-centre paths, surviving/absorbed/separated lanes, and boundary
+  paths;
+- a one-sided paved envelope using zero-slope quintic width easing, plus the
+  legal crossable envelope;
+- exactly one marking owner for every surviving, temporary, outer, or
+  superseded boundary;
+- the progressive guardrail envelope;
+- automation status/manual-review reason and reversible prototype identity.
+
+All four use one auxiliary lane because measured width supports that topology
+cleanly without forcing every two-lane branch into a four-/five-lane permanent
+carriageway:
+
+- `J8`: 2 + 1 → temporary 3 → final 2;
+- `J0`: 2 + 2 → temporary 3 → final 2;
+- `J10`: 3 + 2 → temporary 4 → final 3;
+- `J2`: inverse 2-lane diverge through temporary 3 → finalized 2-lane host.
+
+`.devtests/progressive-merge-model-probe.mjs` passes: exactly four active and
+zero legacy records; strict phase order; 136.6–203.4 m transition lengths;
+continuous sampled lane paths; valid temporary/final counts; complete mapping
+and ownership records; usable auxiliary width; and base width restored at both
+ends.
+
+The geometry/physics/marking/rail consumers, legacy/progressive image matrix,
+performance comparison, limitations, and developer-map pin instructions will
+be appended as the remaining phases land.

@@ -4,6 +4,8 @@ import * as THREE from 'three';
 // XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
 // any extractor run).
 import ROUTE_DATA from '../data/routes-smoothed.js';
+import { buildProgressiveTransitions } from './progressive-merge.js';
+import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -139,6 +141,8 @@ export class HighwayMap {
     this.junctions = [];
     this.serviceAreas = [];
     this.wallSegments = [];
+    this.progressiveTransitions = [];
+    this.progressiveTransitionById = new Map();
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
     // options.markingDebug: per-piece paint/suppression records (see
@@ -1338,6 +1342,10 @@ export class HighwayMap {
       }
     }
     this._prepareJunctionZones();
+    this.progressiveTransitions = buildProgressiveTransitions(this, PROGRESSIVE_MERGE_PROTOTYPES);
+    this.progressiveTransitionById = new Map(
+      this.progressiveTransitions.map((transition) => [transition.id, transition]),
+    );
   }
 
   /**
