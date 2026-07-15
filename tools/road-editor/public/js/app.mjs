@@ -40,6 +40,7 @@ const app = {
   needsDraw: true,
 };
 window.__app = app; // console debugging aid
+window.__ui = ui;
 
 const LAYER_DEFS = [
   ['body', 'Corpo strada', '#8ea3c4'],
@@ -86,6 +87,8 @@ async function boot() {
   }).catch(() => {});
 
   if ($('btnApply')) $('btnApply').disabled = !app.meta.allowApply;
+  // race-free boot handshake: late-loading modules check the flag first
+  window.__appBooted = true;
   window.dispatchEvent(new CustomEvent('editor:booted'));
 }
 
