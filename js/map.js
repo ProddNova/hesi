@@ -49,6 +49,12 @@ const CHUNK = 600;
 const CHUNK_VISIBLE = 1500;
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 
+// Measured by .devtests/elevation-offset-probe.mjs. Apply this once, at the
+// authoritative data-control-point boundary, so curves and every system
+// derived from them inherit exactly the same lift without changing X/Z or
+// any route-to-route height difference.
+export const ROAD_NETWORK_Y_OFFSET = 4.5;
+
 // TEMPORARY (lateral-junction rebuild): the synthesized PA access lanes —
 // the decel/accel legs and descent spirals _defineServiceAreas builds around
 // each parking area — are broken and will be rebuilt in their own pass.
@@ -570,7 +576,9 @@ export class HighwayMap {
    * carriageway down the middle.
    */
   _registerDataRoute(routeData, kind, startEdge, endEdge) {
-    let points = routeData.points.map((entry) => vec(entry[0], entry[1], entry[2]));
+    let points = routeData.points.map((entry) => vec(
+      entry[0], entry[1] + ROAD_NETWORK_Y_OFFSET, entry[2],
+    ));
     const routeKind = routeData.kind === 'ramp' ? 'ramp' : kind;
     let divergeInfo = null;
     let mergeInfo = null;
