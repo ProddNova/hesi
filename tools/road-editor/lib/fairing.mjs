@@ -735,7 +735,11 @@ export function finishRoute(state) {
 export function fairRoute(routeData, ctx, lambda) {
   const state = prepareRoute(routeData, ctx);
   solveState(state, lambda ?? ctx.params?.LAMBDA ?? DEFAULT_PARAMS.LAMBDA);
-  return finishRoute(state);
+  const r = finishRoute(state);
+  r.overrideWarnings = state.overrideResult ? state.overrideResult.warnings : [];
+  r.overrideApplied = state.overrideResult ? state.overrideResult.applied : 0;
+  r.overrideSkipped = state.overrideResult ? state.overrideResult.skipped : 0;
+  return r;
 }
 
 // ------------------------------------------------------------ full build
