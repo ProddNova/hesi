@@ -141,6 +141,10 @@ export class HighwayMap {
     this.wallSegments = [];
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
+    // options.markingDebug: per-piece paint records (see _paintStrip /
+    // _dressGores) consumed by .devtests/marking-orientation-probe.mjs.
+    this._markingLog = [];
+    this._markingTag = null;
     this.blinkers = [];
     // Quality-scalable effect layers (light pools / wet-asphalt streaks):
     // instanced meshes whose geometry name is in _effectTypes get collected so
@@ -3537,6 +3541,31 @@ export class HighwayMap {
       const outer1 = outerA.lerp(outerB, t1);
       const bucket = this._bucket(TMP_A.copy(inner0).lerp(outer1, 0.5), materialName);
       this._pushQuad(bucket, outer0, outer1, inner1, inner0); // up-facing, like the deck
+      // Marking-orientation instrumentation (options.markingDebug): one
+      // record per painted piece — the piece's own world direction vs the
+      // intended marking-path tangent at that station — so a probe can
+      // detect diagonal/zig-zag paint instead of trusting interval maths.
+      if (this.options.markingDebug && materialName !== 'amber') {
+        const start = inner0.clone().lerp(outer0, 0.5);
+        const end = inner1.clone().lerp(outer1, 0.5);
+        // Mean end tangent ~ the mid tangent: on an arc, the chord of a
+        // constant-lateral stripe is parallel to it regardless of how
+        // sharp the curve is, so only REAL lateral drift reads diagonal.
+        const meanTangent = a.tangent.clone().add(b.tangent).normalize();
+        this._markingLog.push({
+          kind: 'strip',
+          tag: this._markingTag || 'untagged',
+          routeId: route.id,
+          material: materialName,
+          sFrom: lo,
+          sTo: hi,
+          latFrom: la + (lb - la) * t0,
+          latTo: la + (lb - la) * t1,
+          start: { x: start.x, y: start.y, z: start.z },
+          end: { x: end.x, y: end.y, z: end.z },
+          tangent: { x: meanTangent.x, y: meanTangent.y, z: meanTangent.z },
+        });
+      }
     }
   }
 
@@ -4042,8 +4071,17 @@ export class HighwayMap {
   /**
    * Junction gore dressing. For every diverge/merge between a mainline and a
    * ramp: find the physical split point (where the two paved edges separate),
-   * paint the chevron wedge between the mouth and the split, and terminate
+   * paint the hatched wedge over the GENUINE gore nose only, and terminate
    * the barrier V with a yellow/black crash cushion.
+   *
+   * The wedge derives from the shared junction-zone record (the same one
+   * markings/rails/physics read): stations inside the zone's CROSSABLE
+   * interval are the merge/exit lane itself — the longitudinal dashed
+   * boundary owns them, and hatching there was the user-reported
+   * slash/backslash zig-zag. Stripes also require both paved edges at one
+   * level (a wedge between decks 0.3+ m apart is two separate surfaces,
+   * not a paintable gore) and are capped to a short nose band. All stripes
+   * of one gore lean the SAME way (real 導流帯 hatching), never alternating.
    */
   _dressGores() {
     for (const edge of this.edges) {
@@ -4055,6 +4093,9 @@ export class HighwayMap {
       if (!ramp || !main || ramp === main) continue;
       if (ramp.kind !== 'ramp' && ramp.kind !== 'service') continue;
       const fromStart = edge.kind === 'diverge';
+      const mouth = (ramp.junctionMouths || []).find((candidate) => (
+        candidate.host === main && candidate.which === (fromStart ? 'start' : 'end')));
+      const zone = mouth?.zone;
 
       // walk the ramp away from the shared mouth until the paved edges split;
       // wedge points sit on the BANKED deck surfaces (_frameAt), so the
@@ -4062,6 +4103,7 @@ export class HighwayMap {
       // floating at bare curve height.
       let tip = null;
       const stripes = [];
+      const NOSE_STRIPES_MAX = 6; // ~54 m of hatching, a readable nose band
       for (let s = 24; s <= Math.min(320, ramp.length - 6); s += 9) {
         const rampDist = fromStart ? s : ramp.length - s;
         if (rampDist < 2 || rampDist > ramp.length - 2) break;
@@ -4084,18 +4126,39 @@ export class HighwayMap {
           tip = { wedge, tangent: rampFrame.tangent.clone() };
           break;
         }
-        if (wedgeWidth > 1.1) stripes.push({ wedge, tangent: rampFrame.tangent.clone(), width: wedgeWidth });
+        // Crossable stations belong to the dashed merge/exit boundary, and
+        // split-level "wedges" are separate decks — no hatching on either.
+        const crossableHere = !!zone?.crossable
+          && (zone.hostContains(zone.crossable.host, projection.distance)
+            || (rampDist >= zone.crossable.branch[0] - 2 && rampDist <= zone.crossable.branch[1] + 2));
+        const oneLevel = Math.abs(mainEdge.y - rampEdge.y) < 0.25;
+        if (wedgeWidth > 1.1 && !crossableHere && oneLevel && stripes.length < NOSE_STRIPES_MAX) {
+          stripes.push({ wedge, tangent: rampFrame.tangent.clone(), width: wedgeWidth, sideSign });
+        }
       }
 
-      // chevron paint across the wedge
-      let flip = 1;
+      // parallel hatching across the wedge (mirrored by connection side)
       for (const stripe of stripes) {
         const position = stripe.wedge.clone();
         position.y += 0.06;
-        const skew = new THREE.Quaternion().setFromAxisAngle(UP, flip * 0.62);
-        flip *= -1;
+        const skewAngle = stripe.sideSign * 0.62;
+        const skew = new THREE.Quaternion().setFromAxisAngle(UP, skewAngle);
         const quaternion = yawQuaternion(stripe.tangent).multiply(skew);
         this._instance(position, vec(0.3, 0.025, Math.min(4.2, stripe.width * 1.15)), quaternion, null, 'box:marking');
+        if (this.options.markingDebug) {
+          this._markingLog.push({
+            kind: 'chevron',
+            tag: 'goreChevron',
+            routeId: ramp.id,
+            hostId: main.id,
+            edgeKind: edge.kind,
+            skewDeg: (skewAngle * 180) / Math.PI,
+            length: Math.min(4.2, stripe.width * 1.15),
+            wedgeWidth: stripe.width,
+            position: { x: position.x, y: position.y, z: position.z },
+            tangent: { x: stripe.tangent.x, y: stripe.tangent.y, z: stripe.tangent.z },
+          });
+        }
       }
 
       // crash cushion at the barrier split
@@ -4162,6 +4225,7 @@ export class HighwayMap {
     } else {
       for (let lane = 1; lane < route.lanes; lane += 1) dividerOffsets.push((lane - route.lanes * 0.5) * route.laneWidth);
     }
+    this._markingTag = 'laneDivider';
     for (const offset of dividerOffsets) {
       this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14), 0.14, dashStep, dashLength, 6);
     }
@@ -4187,6 +4251,7 @@ export class HighwayMap {
         cursor = Math.max(cursor, to);
       }
       if (route.length > cursor + 0.5) kept.push([cursor, route.length]);
+      this._markingTag = 'edgeLine';
       for (const [from, to] of kept) {
         this._paintStrip(route, 'marking', from, to,
           mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
@@ -4200,12 +4265,14 @@ export class HighwayMap {
     // along the host's outer lane edge through each zone's crossable
     // interval, ending where the merge lane stops being usable. Phase is
     // route-absolute like every other dash.
+    this._markingTag = 'zoneDash';
     for (const zone of route._zonesAsHost || []) {
       if (!zone.dash) continue;
       for (const [from, to] of this._zoneIntervalPieces(route, [zone.dash.from, zone.dash.to])) {
         this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
       }
     }
+    this._markingTag = null;
 
     // Support pillars for elevated decks (every ~30 m per blueprint).
     if (!isService) {
