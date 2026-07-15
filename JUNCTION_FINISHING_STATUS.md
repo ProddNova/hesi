@@ -1,5 +1,178 @@
 # Junction Visual Finishing Status
 
+## Exact A-B merge-marking clipping pass (2026-07-15c)
+
+- Branch: `codex/merge-marking-ab-clipping`
+- Base: `origin/main` at `edd31f9918af49d86d9e4aa1657d2f342e77fe4e`
+- Scope: marking diagnostics, the authoritative same-level opening,
+  route-local marking clipping and explicit boundary ownership only. Road
+  centrelines, paved geometry, collision, vehicle physics, traffic topology,
+  elevation and guardrail architecture are unchanged.
+
+### A-B model and demonstrated root cause
+
+For a host carriageway and a joining branch, A-B is the mouth-connected
+component where the renderer's own `_mouthClipAt` removes a host-covered,
+coplanar branch strip and the crossed top surface is shelf-free. It is the
+same `continuous = merged && physical overlap` decision already consumed by
+the rendered paved union and collision hand-off. A is the first exact
+transition into that component and B is the exact transition out.
+
+The old marking system did not clip a continuous marking path at A/B:
+
+1. `_prepareJunctionZones` sampled the shared geometry every 4 m and stored
+   coarse min/max chainages.
+2. The branch host-facing solid edge used the coarse zone hand-off, while
+   other branch markings still made independent per-render-frame mouth-clip
+   decisions.
+3. `_paintStrip` rejected a complete surface-frame span when either endpoint
+   was suppressed. With frames up to 8 m apart, a true intersection could be
+   moved by almost one whole frame; no split vertex was emitted at A or B.
+4. Branch internal dividers had no junction ownership rule, so 24 route-local
+   divider/edge pieces survived inside legal openings in the instrumented,
+   behavior-unchanged baseline. The host, branch and junction systems could
+   consequently paint the same physical region without an explainable owner.
+
+This was an ownership/clipping defect, not a road-shape defect. Expanding the
+old intervals or adding route-specific offsets would only move the error.
+
+### Authoritative opening and exact cutter
+
+`HighwayMap._junctionMouthRow` now evaluates a branch section using the
+renderer-authoritative mouth clip and records the removed/covered band,
+host/branch chainage, deck edges, union width and shelf decision. The 4 m rows
+locate topology only. `_refineJunctionTransition` bisects each boolean
+transition by fresh geometry evaluations to a bracket below 5 mm. Only the
+mouth-connected component is refined; disconnected overlaps cannot own this
+mouth.
+
+Each zone stores `markingOpening` with:
+
+- exact branch and unwrapped-host A/B chainages;
+- the geometry source (`rendered-mouth-clip-connected-component`);
+- sampled removed/covered envelope rows;
+- a world-space opening polygon.
+
+Before tessellation, `_paintStrip` detects any span containing A or B and
+hands it to `_paintMouthStripSegment`. That helper inserts exact A/B cut
+stations, classifies each independent interior piece, discards only forbidden
+pieces, and emits separate quads. A quad can therefore never bridge the
+removed interval. Normal spans retain the established surface-frame/deck-plane
+path, and dash phase remains route-absolute.
+
+The host solid edge is suppressed over the complete authoritative opening.
+The branch edge facing the host and absorbed branch dividers are absent
+inside A-B; the far branch edge remains the physical outside edge. Host lane
+dividers remain route-owned and are not suppressed. An optional dashed merge
+boundary is junction-owned only where the same opening geometry says the
+extra lane is usable.
+
+Every zone exposes `markingBoundaries`: physical meaning, route/lateral,
+interval, outside owner, opening owner (`host`, `branch`, `junction`, or
+`none`) and the reason for that decision. Painted and suppressed debug pieces
+also expose owner, type, positions, chainage, tangents, route/junction class,
+zone memberships, true-opening intersection and suppression reason.
+
+### Six recorded representative cases
+
+The current line range is the surviving branch host-facing solid edge nearest
+the opening. No host lane divider was wrongfully suppressed in any case.
+
+| Topology | Connection | Side / lanes | Exact branch A-B (m) | Current branch line near A (m) | Active owners near opening |
+| --- | --- | --- | ---: | ---: | --- |
+| one-lane into two-lane merge | `ramp_1 -> r11_0` | left, 1 -> 2 | 315.02-335.57 | 195.7-315.0 | `route:r11_0`; branch boundary becomes `none` |
+| two-lane into two-lane merge | `c1_3 -> c1_0` | right, 2 -> 2 | 328.04-447.31 | 282.5-328.0 | `route:c1_0`, `route:c1_3`, `junction:J0` |
+| two-lane into three-lane merge | `ramp_3 -> wangan_1` | left, 2 -> 3 | 919.36-1087.59 | 879.7-919.4 | `route:wangan_1`, `route:ramp_3`, `junction:J10` |
+| left-side merge | `c1_6 -> c1_2` | left, 2 -> 2 | 254.20-351.70 | 202.2-254.2 | `route:c1_2`, `route:c1_6`, `junction:J1` |
+| right-side merge | `r6_3 -> c1_0` | right, 2 -> 2 | 1778.77-1940.43 | 1755.7-1778.8 | `route:c1_0`, `route:r6_3`, `junction:J5` |
+| diverge | `c1_0 -> r1_0` | right, 2 -> 2 | 0.00-153.93 | 153.9-164.5 | `route:c1_0`, `route:r1_0`, `junction:J2` |
+
+### Parent-fail / branch-pass proof
+
+The same `.devtests/ab-marking-clipping-probe.mjs` executable was run against
+the detached parent worktree and this branch.
+
+- Parent `edd31f9`: **FAIL (57)**, exact openings 0/56; all 56 zones lack an
+  authoritative geometry-refined A-B record and 113,699 pieces lack the new
+  ownership diagnostics.
+- Behavior-unchanged diagnostic commit `d14bda1`: **FAIL (135)** with 0/56
+  exact openings, maximum cut error 7.992 m, 24 route-local pieces inside
+  openings, shortest accidental fragment 0.100 m, longest illegal penetration
+  5.016 m and one duplicate boundary.
+- Final branch: **PASS**, 56/56 exact openings, 112,605 painted pieces, maximum
+  observed A/B error 0.000 m, and zero route-local opening pieces, solid-edge
+  penetrations, bridging quads, accidental fragments, illegal penetration,
+  duplicate boundaries, wrongful host-divider suppressions and invented
+  one-lane dividers.
+
+### Identical-camera visual evidence
+
+`.devtests/ab-marking-shots.mjs` serves either checkout and derives each camera
+from the unchanged route/zone geometry. Fade completion, chunk visibility and
+two rendered frames are awaited before capture. Every case was inspected in
+plan, chase and close views. The after images show the host-facing branch line
+ending at the real opening, host dividers continuing longitudinally, and no
+crossing solid, slash fragment, duplicate boundary, asphalt change or rail
+regression.
+
+| Case | View | Parent | Branch |
+| --- | --- | --- | --- |
+| 1 -> 2 merge | plan | [before](docs/junctions/ab-clipping/AB-one-to-two-merge-plan-before.png) | [after](docs/junctions/ab-clipping/AB-one-to-two-merge-plan-after.png) |
+| 1 -> 2 merge | chase | [before](docs/junctions/ab-clipping/AB-one-to-two-merge-chase-before.png) | [after](docs/junctions/ab-clipping/AB-one-to-two-merge-chase-after.png) |
+| 1 -> 2 merge | close | [before](docs/junctions/ab-clipping/AB-one-to-two-merge-close-before.png) | [after](docs/junctions/ab-clipping/AB-one-to-two-merge-close-after.png) |
+| 2 -> 2 merge | plan | [before](docs/junctions/ab-clipping/AB-two-to-two-merge-plan-before.png) | [after](docs/junctions/ab-clipping/AB-two-to-two-merge-plan-after.png) |
+| 2 -> 2 merge | chase | [before](docs/junctions/ab-clipping/AB-two-to-two-merge-chase-before.png) | [after](docs/junctions/ab-clipping/AB-two-to-two-merge-chase-after.png) |
+| 2 -> 2 merge | close | [before](docs/junctions/ab-clipping/AB-two-to-two-merge-close-before.png) | [after](docs/junctions/ab-clipping/AB-two-to-two-merge-close-after.png) |
+| 2 -> 3 merge | plan | [before](docs/junctions/ab-clipping/AB-two-to-three-merge-plan-before.png) | [after](docs/junctions/ab-clipping/AB-two-to-three-merge-plan-after.png) |
+| 2 -> 3 merge | chase | [before](docs/junctions/ab-clipping/AB-two-to-three-merge-chase-before.png) | [after](docs/junctions/ab-clipping/AB-two-to-three-merge-chase-after.png) |
+| 2 -> 3 merge | close | [before](docs/junctions/ab-clipping/AB-two-to-three-merge-close-before.png) | [after](docs/junctions/ab-clipping/AB-two-to-three-merge-close-after.png) |
+| left merge | plan | [before](docs/junctions/ab-clipping/AB-left-merge-plan-before.png) | [after](docs/junctions/ab-clipping/AB-left-merge-plan-after.png) |
+| left merge | chase | [before](docs/junctions/ab-clipping/AB-left-merge-chase-before.png) | [after](docs/junctions/ab-clipping/AB-left-merge-chase-after.png) |
+| left merge | close | [before](docs/junctions/ab-clipping/AB-left-merge-close-before.png) | [after](docs/junctions/ab-clipping/AB-left-merge-close-after.png) |
+| right merge | plan | [before](docs/junctions/ab-clipping/AB-right-merge-plan-before.png) | [after](docs/junctions/ab-clipping/AB-right-merge-plan-after.png) |
+| right merge | chase | [before](docs/junctions/ab-clipping/AB-right-merge-chase-before.png) | [after](docs/junctions/ab-clipping/AB-right-merge-chase-after.png) |
+| right merge | close | [before](docs/junctions/ab-clipping/AB-right-merge-close-before.png) | [after](docs/junctions/ab-clipping/AB-right-merge-close-after.png) |
+| diverge | plan | [before](docs/junctions/ab-clipping/AB-right-diverge-plan-before.png) | [after](docs/junctions/ab-clipping/AB-right-diverge-plan-after.png) |
+| diverge | chase | [before](docs/junctions/ab-clipping/AB-right-diverge-chase-before.png) | [after](docs/junctions/ab-clipping/AB-right-diverge-chase-after.png) |
+| diverge | close | [before](docs/junctions/ab-clipping/AB-right-diverge-close-before.png) | [after](docs/junctions/ab-clipping/AB-right-diverge-close-after.png) |
+
+### Full regression comparison
+
+| Check | Parent | Branch | Assessment |
+| --- | --- | --- | --- |
+| A-B clipping | FAIL 57; 0/56 exact openings | PASS; 56/56, all violation counters 0 | intended fix |
+| merge-marking | PASS, 113,699 strips | PASS, 112,605 strips | fewer forbidden pieces; all four counters 0 |
+| marking orientation | PASS, 0 diagonal / 0 lateral jump / 44 clean chevrons | same, 112,605 strips | unchanged geometry quality |
+| junction finishing | FAIL 6 | FAIL same 6 and identical maxima | pre-existing, out of scope |
+| lateral junction | PASS, 56 mouths / 20,185 points / 22 doubles | identical | unchanged |
+| road surface | PASS | PASS; identical frame/length/angle/vertical/lateral metrics | one extra exact dash call only |
+| merge guardrail | PASS, worst 2.00 m | identical | unchanged |
+| guardrail | PASS, 211 runs / 88 gaps | identical | unchanged |
+| traffic smoke | PASS, 23 active / finite positions | identical deterministic result | unchanged |
+| performance | absolute 4 s limit fails in this container; node median 7,244.1 ms | same environmental fail; node median 7,458.0 ms (+3.0%) | expected bounded cost of exact 56-zone refinement; 168 vs 169 draw calls and 2,188 fewer stored triangles |
+| osm-validate | 329 known failures (22 overlap, 247 ramp-drive, 60 smoothness) | identical counts and first failures | unchanged |
+| complete mobile e2e / iPhone viewport | PASS 34/34, no console errors | PASS 34/34, no console errors | unchanged |
+
+The performance probe's browser run is single-sample and noisy (branch booted
+faster, 8.06 s vs 9.83 s, while its isolated browser map-build sample was
+slower). The three-run Node median is the comparison used above. Build-time
+bisection rows are cached only within one zone and released immediately, so
+the exact model does not retain thousands of scratch frames at runtime.
+
+Cache versions: `map.js?v=20260715h`, service worker
+`shutoko-nights-v19`.
+
+### Remaining limitations
+
+This pass does not claim every junction subsystem is perfect. The unchanged
+six finishing failures remain: five steering-rate route-data kink families
+and the `ramp_0`/`r1_3` 0.332 m collision-height step. OSM validation likewise
+retains the same 329 data/topology issues, and PA access lanes remain disabled
+pending their dedicated rebuild. None is caused by marking clipping, and none
+was modified here.
+
+---
+
 ## Merge-local markings + guardrails finishing pass (2026-07-15b)
 
 - Branch: `claude/merge-markings-guardrails-final-id16mj`

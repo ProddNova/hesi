@@ -141,10 +141,15 @@ export class HighwayMap {
     this.wallSegments = [];
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
-    // options.markingDebug: per-piece paint records (see _paintStrip /
-    // _dressGores) consumed by .devtests/marking-orientation-probe.mjs.
+    // options.markingDebug: per-piece paint/suppression records (see
+    // _paintStrip / _dressGores). Besides orientation, the A-B junction
+    // probe needs to explain which system attempted every boundary and why
+    // a candidate span was retained or rejected.
     this._markingLog = [];
     this._markingTag = null;
+    this._markingOwner = null;
+    this._markingClassification = null;
+    this._markingBoundary = null;
     this.blinkers = [];
     // Quality-scalable effect layers (light pools / wet-asphalt streaks):
     // instanced meshes whose geometry name is in _effectTypes get collected so
@@ -1336,6 +1341,155 @@ export class HighwayMap {
   }
 
   /**
+   * Evaluate one branch cross-section against the renderer's authoritative
+   * mouth clip. Junction consumers must use this record instead of repeating
+   * overlap/height guesses with their own tolerances.
+   */
+  _junctionMouthRow(route, mouth, bS, hostSeed = null) {
+    // The three exact ownership predicates share their topology brackets.
+    // Reuse an evaluated section instead of re-projecting its centre and
+    // both deck edges for each predicate's bisection.
+    const cache = mouth._markingRowCache || (mouth._markingRowCache = new Map());
+    const cacheKey = bS.toFixed(6);
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    const host = mouth.host;
+    const side = mouth.side;
+    const frame = this._frameAt(route, bS);
+    const projection = this._projectToRoute(
+      host,
+      frame.position,
+      hostSeed === null ? null : this._hostSeedIndex(host, hostSeed),
+    );
+    if (projection.endOvershoot > 4) {
+      cache.set(cacheKey, null);
+      return null;
+    }
+    const hostHalf = this._halfWidthAt(host, projection.distance);
+    const bank = this._bankAt(host, projection.distance);
+    const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+    const e = side * projection.signedLateral;
+    const dy = frame.position.y - deckY;
+    let clip = null;
+    let removed = null;
+    let covered = null;
+    let dyEnds = null;
+    let Lends = null;
+    if (Math.abs(dy) < 1.6) {
+      frame._jxSeed = projection.distance;
+      clip = this._mouthClipAt(route, frame);
+      if (clip && clip.mouth === mouth && clip.removed) removed = clip.removed;
+      const gauge = frame._jxGauge;
+      if (gauge && gauge.mouth === mouth) {
+        covered = gauge.covered;
+        dyEnds = gauge.dyEnds;
+        Lends = gauge.Lends;
+      }
+    }
+    const unionOuter = Math.max(hostHalf, e + frame.half);
+    let crossOuter = unionOuter;
+    let shelfFree = true;
+    if (covered) {
+      const dyAtT = (t) => dyEnds[0] + (dyEnds[1] - dyEnds[0]) * t;
+      const sLatT = (t) => side * (Lends[0] + (Lends[1] - Lends[0]) * t);
+      const tOf = (lat) => (lat + frame.half) / (2 * frame.half);
+      let t0 = tOf(covered[0]);
+      let t1 = tOf(covered[1]);
+      const s0 = sLatT(t0);
+      const s1 = sLatT(t1);
+      if (!(s0 < 0 && s1 < 0)) {
+        if (s0 < 0) t0 += (0 - s0) / (s1 - s0) * (t1 - t0);
+        else if (s1 < 0) t1 = t0 + (0 - s0) / (s1 - s0) * (t1 - t0);
+        // This is the same top-surface threshold consumed by the visible
+        // paved-union/collision hand-off. A higher shelf is a second deck.
+        shelfFree = Math.max(dyAtT(t0), dyAtT(t1)) < 0.35;
+      }
+      const edgeLat = covered[1] < frame.half - 0.05
+        ? covered[1]
+        : (covered[0] > -frame.half + 0.05 ? covered[0] : null);
+      if (edgeLat !== null && Math.abs(dyAtT(tOf(edgeLat))) > 0.18) {
+        crossOuter = Math.min(crossOuter, hostHalf);
+      }
+    }
+    const row = {
+      bS,
+      hS: projection.distance,
+      e,
+      hostHalf,
+      half: frame.half,
+      unionOuter,
+      crossOuter,
+      innerEdge: e - frame.half,
+      dy,
+      merged: removed !== null && shelfFree,
+      apron: !!clip?.apron,
+      removed,
+      covered,
+      dyEnds,
+      Lends,
+      frame,
+    };
+    cache.set(cacheKey, row);
+    return row;
+  }
+
+  /** Refine one geometry-predicate transition to centimetre chainage. */
+  _refineJunctionTransition(route, mouth, a, b, predicate, unwrap) {
+    let lo = a;
+    let hi = b;
+    const stateLo = predicate(lo);
+    for (let iteration = 0; iteration < 18 && Math.abs(hi.bS - lo.bS) > 0.005; iteration += 1) {
+      const mid = this._junctionMouthRow(
+        route,
+        mouth,
+        (lo.bS + hi.bS) * 0.5,
+        (lo.hS + hi.hS) * 0.5,
+      );
+      if (!mid) break;
+      mid.hU = unwrap(mid.hS);
+      if (predicate(mid) === stateLo) lo = mid;
+      else hi = mid;
+    }
+    const boundary = this._junctionMouthRow(
+      route,
+      mouth,
+      (lo.bS + hi.bS) * 0.5,
+      (lo.hS + hi.hS) * 0.5,
+    ) || hi;
+    boundary.hU = unwrap(boundary.hS);
+    return boundary;
+  }
+
+  /**
+   * Exact predicate bands bracketed by the audit rows. Sampling locates a
+   * component; final boundaries are analytic mouth-geometry evaluations,
+   * never render-frame stations or hand-tuned metre offsets.
+   */
+  _exactJunctionBands(route, mouth, rows, predicate, unwrap) {
+    const bands = [];
+    let start = null;
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const active = predicate(row);
+      if (active && !start) {
+        start = index === 0 || predicate(rows[index - 1])
+          ? row
+          : this._refineJunctionTransition(route, mouth, rows[index - 1], row, predicate, unwrap);
+      }
+      if (!active && start) {
+        const end = this._refineJunctionTransition(route, mouth, rows[index - 1], row, predicate, unwrap);
+        bands.push({ start, end });
+        start = null;
+      }
+    }
+    if (start) bands.push({ start, end: rows[rows.length - 1] });
+    return bands.map((band) => ({
+      ...band,
+      branch: [Math.min(band.start.bS, band.end.bS), Math.max(band.start.bS, band.end.bS)],
+      host: [Math.min(band.start.hU, band.end.hU), Math.max(band.start.hU, band.end.hU)],
+    }));
+  }
+
+  /**
    * ONE data-driven local representation per same-level merge/diverge —
    * the single source every consumer reads (asphalt already reads the
    * mouth clip, which is this envelope in per-frame detail; markings,
@@ -1375,100 +1529,20 @@ export class HighwayMap {
         const laneEdge = host.lanes * host.laneWidth * 0.5;
         const step = 4;
         const rows = [];
+        let hostSeed = null;
         for (let s = 0; s <= mouth.span + step; s += step) {
           const bS = which === 'start'
             ? Math.min(s, route.length)
             : Math.max(0, route.length - s);
-          const frame = this._frameAt(route, bS);
-          const projection = this._projectToRoute(host, frame.position);
-          if (projection.endOvershoot > 4) continue;
-          const hostHalf = this._halfWidthAt(host, projection.distance);
-          const bank = this._bankAt(host, projection.distance);
-          const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
-          const e = side * projection.signedLateral;
-          const dy = frame.position.y - deckY;
-          // Continuity is the RENDERER'S OWN mouth-clip decision at this
-          // cross-section, not a looser re-derivation: merged means the
-          // clip removed a covered coplanar strip (the drawn union is one
-          // surface there). The clip's overlap gauge (covered band + dy
-          // line) additionally tells physics which deck owns the surface
-          // and where the one-surface union laterally ends. |dy| >= 1.6
-          // cannot overlap-band-match anything — skip the projections.
-          let removed = null;
-          let covered = null;
-          let dyEnds = null;
-          let Lends = null;
-          if (Math.abs(dy) < 1.6) {
-            frame._jxSeed = projection.distance;
-            const clip = this._mouthClipAt(route, frame);
-            if (clip && clip.mouth === mouth && clip.removed) removed = clip.removed;
-            const gauge = frame._jxGauge;
-            if (gauge && gauge.mouth === mouth) {
-              covered = gauge.covered;
-              dyEnds = gauge.dyEnds;
-              Lends = gauge.Lends;
-            }
-          }
-          const unionOuter = Math.max(hostHalf, e + frame.half);
-          // Outer side-lateral extent of the ONE-SURFACE union: where the
-          // wing leaves the host's paved edge at more than the coplanar
-          // offset (a shelf peeling above or a sheet diving below), the
-          // crossable surface ends at the host edge — the wing beyond is
-          // separate geometry, not a boundary a driver may cross.
-          // Crossability also demands the TOP surface across the CROSSED
-          // band — covered laterals on the zone's side of the host
-          // centreline — be step-free: a sheet may dive below the host
-          // (the host deck rides on top, flat), but a shelf rising above
-          // it in the crossing path is a lip a driver would have to
-          // mount. A tilted section's far end hanging over the OPPOSITE
-          // half of the host is not in anyone's crossing path.
-          let crossOuter = unionOuter;
-          let shelfFree = true;
-          if (covered) {
-            const dyAtT = (t) => dyEnds[0] + (dyEnds[1] - dyEnds[0]) * t;
-            const sLatT = (t) => side * (Lends[0] + (Lends[1] - Lends[0]) * t);
-            const tOf = (lat) => (lat + frame.half) / (2 * frame.half);
-            let t0 = tOf(covered[0]);
-            let t1 = tOf(covered[1]);
-            const s0 = sLatT(t0);
-            const s1 = sLatT(t1);
-            if (s0 < 0 && s1 < 0) {
-              // covered band entirely on the far half — nothing crossed
-            } else {
-              if (s0 < 0) t0 += (0 - s0) / (s1 - s0) * (t1 - t0);
-              else if (s1 < 0) t1 = t0 + (0 - s0) / (s1 - s0) * (t1 - t0);
-              // 0.35 = the renderer's one-level band (APRON_DY), shared
-              // EXACTLY with _surfaceDefersToHost's strip-row rule: any
-              // sliver the crossing band may hover under is one physics
-              // defers to the host beneath (flat walk), and anything
-              // higher is a real lip that also keeps its own corridor —
-              // both sides of the threshold stay self-consistent.
-              shelfFree = Math.max(dyAtT(t0), dyAtT(t1)) < 0.35;
-            }
-            const edgeLat = covered[1] < frame.half - 0.05
-              ? covered[1]
-              : (covered[0] > -frame.half + 0.05 ? covered[0] : null);
-            if (edgeLat !== null && Math.abs(dyAtT(tOf(edgeLat))) > 0.18) {
-              crossOuter = Math.min(crossOuter, hostHalf);
-            }
-          }
-          rows.push({
-            bS,
-            hS: projection.distance,
-            e,
-            hostHalf,
-            half: frame.half,
-            unionOuter,
-            crossOuter,
-            innerEdge: e - frame.half,
-            dy,
-            merged: removed !== null && shelfFree,
-            removed,
-            covered,
-            dyEnds,
-          });
+          const authoritativeRow = this._junctionMouthRow(route, mouth, bS, hostSeed);
+          if (!authoritativeRow) continue;
+          hostSeed = authoritativeRow.hS;
+          rows.push(authoritativeRow);
         }
-        if (rows.length < 2) continue;
+        if (rows.length < 2) {
+          delete mouth._markingRowCache;
+          continue;
+        }
         // Unwrap host chainage around the zone middle so intervals on a
         // closed loop crossing station 0 stay contiguous.
         const hostRef = rows[Math.floor(rows.length / 2)].hS;
@@ -1546,6 +1620,90 @@ export class HighwayMap {
         const crossable = rangeIn(() => true);
         const open = rangeIn((r) => r.unionOuter > r.hostHalf + 0.25);
         const dash = rangeIn((r) => r.unionOuter - laneEdge >= 2.0);
+
+        // A-B marking opening: the exact mouth-connected component of the
+        // SAME `continuous` predicate used by the rendered paved union. The
+        // 4 m rows only bracket topology; bisection evaluates fresh analytic
+        // mouth clips for the final cut points.
+        // Refine only the mouth-connected component already located by
+        // c0/c1. Solving every later, disconnected overlap component wasted
+        // thousands of curve projections and could never affect this mouth.
+        let openingBand = null;
+        if (c0 >= 0) {
+          const start = c0 === 0
+            ? rows[c0]
+            : this._refineJunctionTransition(route, mouth, rows[c0 - 1], rows[c0], continuous, unwrap);
+          const end = c1 === rows.length - 1
+            ? rows[c1]
+            : this._refineJunctionTransition(route, mouth, rows[c1], rows[c1 + 1], continuous, unwrap);
+          openingBand = {
+            start,
+            end,
+            branch: [Math.min(start.bS, end.bS), Math.max(start.bS, end.bS)],
+            host: [Math.min(start.hU, end.hU), Math.max(start.hU, end.hU)],
+          };
+        }
+        let markingOpening = null;
+        let openingRows = [];
+        if (openingBand) {
+          const envelopeRows = [
+            openingBand.start,
+            ...rows.filter((row) => row.bS > openingBand.branch[0] + 0.001
+              && row.bS < openingBand.branch[1] - 0.001 && continuous(row)),
+            openingBand.end,
+          ];
+          openingRows = envelopeRows;
+          const hostValues = envelopeRows.map((row) => row.hU);
+          openingBand.host = [Math.min(...hostValues), Math.max(...hostValues)];
+          const lower = [];
+          const upper = [];
+          const envelope = [];
+          for (const row of envelopeRows) {
+            if (!row.removed) continue;
+            const loPoint = this._deckPoint(row.frame, row.removed[0], 0.06);
+            const hiPoint = this._deckPoint(row.frame, row.removed[1], 0.06);
+            const pointOf = (point) => ({ x: point.x, y: point.y, z: point.z });
+            lower.push(pointOf(loPoint));
+            upper.push(pointOf(hiPoint));
+            envelope.push({
+              branchS: row.bS,
+              hostS: row.hU,
+              removed: [...row.removed],
+              covered: row.covered ? [...row.covered] : null,
+              lower: pointOf(loPoint),
+              upper: pointOf(hiPoint),
+            });
+          }
+          markingOpening = {
+            exact: true,
+            source: 'rendered-mouth-clip-connected-component',
+            branch: [...openingBand.branch],
+            host: [...openingBand.host],
+            envelope,
+            polygon: [...lower, ...upper.reverse()],
+          };
+        }
+
+        const sameOpening = (band) => markingOpening
+          && band.branch[1] >= markingOpening.branch[0] - 0.01
+          && band.branch[0] <= markingOpening.branch[1] + 0.01;
+        // The host's default solid edge is not an opening boundary. Suppress
+        // it over the complete authoritative A-B component, including the
+        // narrow nose/tail where the junction owner intentionally paints no
+        // substitute. This also makes A/B themselves the only hand-off cuts.
+        const hostEdgeSuppressPieces = markingOpening ? [[...markingOpening.host]] : [];
+        const exactDashBands = this._exactJunctionBands(
+          route, mouth, openingRows,
+          (row) => continuous(row) && row.unionOuter - laneEdge >= 2.0,
+          unwrap,
+        ).filter(sameOpening);
+        const dashPieces = exactDashBands.map((band) => ({ from: band.host[0], to: band.host[1] }));
+        const hostEdgeSuppress = hostEdgeSuppressPieces.length
+          ? [Math.min(...hostEdgeSuppressPieces.map((piece) => piece[0])), Math.max(...hostEdgeSuppressPieces.map((piece) => piece[1]))]
+          : (markingOpening ? null : open?.host || null);
+        const exactDash = dashPieces.length
+          ? { from: Math.min(...dashPieces.map((piece) => piece.from)), to: Math.max(...dashPieces.map((piece) => piece.to)) }
+          : (markingOpening ? null : (dash ? { from: dash.host[0], to: dash.host[1] } : null));
         // THE RAIL-BLOCKED BAND — one physical rule for every opening:
         // the host rail (footprint laterals [hostHalf - 0.42, hostHalf])
         // must not stand where the branch pavement reaches under it
@@ -1662,6 +1820,7 @@ export class HighwayMap {
         const branchHostward = plusDepth < minusDepth ? 1 : -1;
 
         const zone = {
+          id: `J${this.junctionZones.length}:${mouth.kind}:${host.id}:${route.id}:${which}`,
           kind: mouth.kind,
           which,
           side,
@@ -1675,8 +1834,11 @@ export class HighwayMap {
           branchSpan: [Math.min(rows[0].bS, rows[rows.length - 1].bS), Math.max(rows[0].bS, rows[rows.length - 1].bS)],
           hostSpan: crossable ? crossable.host : null,
           crossable,
-          hostEdgeSuppress: open ? open.host : null,
-          dash: dash ? { from: dash.host[0], to: dash.host[1] } : null,
+          markingOpening,
+          hostEdgeSuppress,
+          hostEdgeSuppressPieces,
+          dash: exactDash,
+          dashPieces,
           hostRailOpen,
           hostRailOn,
           branchOuterRailOn: outerOn ? outerOn.branch : null,
@@ -1694,12 +1856,74 @@ export class HighwayMap {
             return value >= interval[0] && value <= interval[1];
           },
         };
+        const branchDividers = this._laneDividerOffsets(route);
+        const hostDividers = this._laneDividerOffsets(host);
+        zone.markingBoundaries = [
+          {
+            id: `${zone.id}:branch-host-edge`,
+            physicalBoundary: 'branch edge facing host',
+            route: route.id,
+            lateral: branchHostward,
+            interval: markingOpening?.branch || null,
+            outsideOwner: `route:${route.id}`,
+            openingOwner: 'none',
+            reason: 'edge disappears into one crossable paved union',
+          },
+          {
+            id: `${zone.id}:branch-outer-edge`,
+            physicalBoundary: 'outer edge of paved union',
+            route: route.id,
+            lateral: -branchHostward,
+            interval: markingOpening?.branch || null,
+            outsideOwner: `route:${route.id}`,
+            openingOwner: `route:${route.id}`,
+            reason: 'separated physical road edge remains visible',
+          },
+          ...branchDividers.map((lateral, index) => ({
+            id: `${zone.id}:branch-divider:${index}`,
+            physicalBoundary: `branch lane divider ${index}`,
+            route: route.id,
+            lateral,
+            interval: markingOpening?.branch || null,
+            outsideOwner: `route:${route.id}`,
+            openingOwner: 'none',
+            reason: 'route-local lane topology is absorbed by the junction union',
+          })),
+          ...hostDividers.map((lateral, index) => ({
+            id: `${zone.id}:host-divider:${index}`,
+            physicalBoundary: `host lane divider ${index}`,
+            route: host.id,
+            lateral,
+            interval: markingOpening?.host || null,
+            outsideOwner: `route:${host.id}`,
+            openingOwner: `route:${host.id}`,
+            reason: 'unrelated host lane boundary continues through the opening',
+          })),
+          {
+            id: `${zone.id}:host-edge`,
+            physicalBoundary: 'host outer edge facing branch',
+            route: host.id,
+            lateral: side,
+            interval: hostEdgeSuppress,
+            pieces: hostEdgeSuppressPieces.map((piece) => [...piece]),
+            outsideOwner: `route:${host.id}`,
+            openingOwner: dashPieces.length ? `junction:${zone.id}` : 'none',
+            reason: dashPieces.length
+              ? 'junction owns the broken merge boundary'
+              : 'legal opening has no solid edge marking',
+          },
+        ];
         this.junctionZones.push(zone);
         mouth.zone = zone;
         if (!host._zonesAsHost) host._zonesAsHost = [];
         host._zonesAsHost.push(zone);
         if (!route._zonesAsBranch) route._zonesAsBranch = [];
         route._zonesAsBranch.push(zone);
+        if (markingOpening) {
+          if (!route._markingOpeningCuts) route._markingOpeningCuts = [];
+          route._markingOpeningCuts.push(...markingOpening.branch);
+          route._markingOpeningCuts.sort((left, right) => left - right);
+        }
 
         // Rail ownership intervals for the barrier builder. Modes: 'off'
         // (opening — never draw), 'on' (the union's outer edge — always
@@ -1714,6 +1938,10 @@ export class HighwayMap {
           this._addRailZone(route, -branchHostward, zone.branchOuterRailOn, 'on');
         }
         this._addRailZone(route, -branchHostward, zone.branchOuterRailOff, 'off');
+        // Bisection rows are build-time scratch. The zone retains only plain
+        // intervals/envelope points, so do not pin thousands of frame/vector
+        // objects for the lifetime of the map.
+        delete mouth._markingRowCache;
       }
     }
   }
@@ -1901,7 +2129,7 @@ export class HighwayMap {
       const interval = hostward > 0
         ? { lo: -half, hi: half, flapLo: null, flapHi: flap }
         : { lo: -half, hi: half, flapLo: flap, flapHi: null };
-      frame._jx = { mouth, hostward, skip: false, intervals: [interval] };
+      frame._jx = { mouth, hostward, skip: false, apron: true, intervals: [interval] };
       return frame._jx;
     }
 
@@ -3624,6 +3852,190 @@ export class HighwayMap {
   }
 
   /**
+   * Diagnostic membership of a route-local span in the shared junction-zone
+   * model. Kept behind `markingDebug`: production rendering pays no cost.
+   */
+  _markingDebugContext(route, sFrom, sTo) {
+    const memberships = [];
+    for (const zone of route._zonesAsBranch || []) {
+      const interval = zone.crossable?.branch;
+      if (!interval || sTo < interval[0] || sFrom > interval[1]) continue;
+      memberships.push({ zoneId: zone.id, role: 'branch', opening: 'crossable' });
+    }
+    for (const zone of route._zonesAsHost || []) {
+      if (!zone.crossable?.host) continue;
+      const intersects = this._zoneIntervalPieces(route, zone.crossable.host)
+        .some(([from, to]) => sTo >= from && sFrom <= to);
+      if (intersects) memberships.push({ zoneId: zone.id, role: 'host', opening: 'crossable' });
+    }
+    return {
+      junctionZoneIds: memberships.map((entry) => entry.zoneId),
+      junctionMemberships: memberships,
+      intersectsTrueOpening: memberships.length > 0,
+    };
+  }
+
+  /**
+   * Exact clipping for marking paths on a branch mouth. The intended path is
+   * split at the geometry-refined A/B stations before any quad is emitted;
+   * surviving/suppressed pieces are independent.
+   */
+  _paintMouthStripSegment(route, materialName, a, b, segStart, segEnd, lo, hi, lateralAt, width, lift) {
+    const halfWidth = width * 0.5;
+    const sampleOf = (value) => {
+      if (typeof value === 'number') {
+        return { lateral: value, intendedLateral: value, suppressionReason: null, zoneId: null };
+      }
+      if (value && typeof value === 'object') {
+        return {
+          ...value,
+          intendedLateral: value.intendedLateral ?? value.lateral,
+        };
+      }
+      return {
+        lateral: null,
+        intendedLateral: null,
+        suppressionReason: 'marking-path-undefined',
+        zoneId: null,
+      };
+    };
+    const stateAt = (distance, knownFrame = null) => {
+      const frame = knownFrame || this._frameAt(route, distance);
+      if (!knownFrame) frame.distance = distance;
+      const sample = sampleOf(lateralAt(frame));
+      let allowed = sample.lateral !== null;
+      let reason = sample.suppressionReason;
+      const intended = sample.intendedLateral;
+      if (intended === null) {
+        allowed = false;
+        reason ||= 'marking-path-undefined';
+      } else if (frame.half - 0.3 - halfWidth - Math.abs(intended) < 0) {
+        allowed = false;
+        reason = 'outside-route-paved-width';
+      }
+      return {
+        distance,
+        frame,
+        intended,
+        allowed,
+        reason: reason || null,
+        zoneId: sample.zoneId || null,
+      };
+    };
+
+    // A/B have already been solved from the authoritative mouth geometry.
+    // Split the surface-frame span at those exact stations first, then
+    // classify each independent piece at its interior. This avoids both the
+    // old whole-frame dropout and an expensive second geometric bisection
+    // during paint generation.
+    const cuts = [lo, hi];
+    for (const zone of route._zonesAsBranch || []) {
+      const opening = zone.markingOpening?.branch;
+      if (!opening) continue;
+      for (const boundary of opening) {
+        if (boundary > lo + 0.001 && boundary < hi - 0.001) cuts.push(boundary);
+      }
+    }
+    cuts.sort((left, right) => left - right);
+    const rawPieces = [];
+    for (let index = 1; index < cuts.length; index += 1) {
+      const from = cuts[index - 1];
+      const to = cuts[index];
+      const midState = stateAt((from + to) * 0.5);
+      rawPieces.push({
+        from,
+        to,
+        allowed: midState.allowed,
+        reason: midState.reason,
+        zoneId: midState.zoneId,
+      });
+    }
+    const pieces = [];
+    for (const piece of rawPieces) {
+      const previous = pieces[pieces.length - 1];
+      if (previous && previous.allowed === piece.allowed
+        && previous.reason === piece.reason && previous.zoneId === piece.zoneId
+        && Math.abs(previous.to - piece.from) < 0.006) {
+        previous.to = piece.to;
+      } else pieces.push({ ...piece });
+    }
+
+    const baseA = sampleOf(lateralAt(a)).intendedLateral;
+    const baseB = sampleOf(lateralAt(b)).intendedLateral;
+    if (baseA === null || baseB === null) return;
+    const span = Math.max(segEnd - segStart, EPSILON);
+    for (const piece of pieces) {
+      if (piece.to - piece.from < 0.004) continue;
+      const t0 = (piece.from - segStart) / span;
+      const t1 = (piece.to - segStart) / span;
+      const lat0 = baseA + (baseB - baseA) * t0;
+      const lat1 = baseA + (baseB - baseA) * t1;
+      if (!piece.allowed) {
+        if (this.options.markingDebug && materialName !== 'amber') {
+          const context = this._markingDebugContext(route, piece.from, piece.to);
+          this._markingLog.push({
+            kind: 'suppressedStrip',
+            tag: this._markingTag || 'untagged',
+            markingType: this._markingTag || 'untagged',
+            routeId: route.id,
+            owner: this._markingOwner || `route:${route.id}`,
+            classification: this._markingClassification || 'route-local',
+            boundary: this._markingBoundary,
+            material: materialName,
+            sFrom: piece.from,
+            sTo: piece.to,
+            latFrom: lat0,
+            latTo: lat1,
+            suppressionReason: piece.reason || 'marking-path-undefined',
+            suppressionZoneId: piece.zoneId,
+            ...context,
+          });
+        }
+        continue;
+      }
+      const innerA = this._deckPoint(a, baseA - halfWidth, lift);
+      const outerA = this._deckPoint(a, baseA + halfWidth, lift);
+      const innerB = this._deckPoint(b, baseB - halfWidth, lift);
+      const outerB = this._deckPoint(b, baseB + halfWidth, lift);
+      const inner0 = innerA.clone().lerp(innerB, t0);
+      const outer0 = outerA.clone().lerp(outerB, t0);
+      const inner1 = innerA.lerp(innerB, t1);
+      const outer1 = outerA.lerp(outerB, t1);
+      const bucket = this._bucket(TMP_A.copy(inner0).lerp(outer1, 0.5), materialName);
+      this._pushQuad(bucket, outer0, outer1, inner1, inner0);
+      if (this.options.markingDebug && materialName !== 'amber') {
+        const start = inner0.clone().lerp(outer0, 0.5);
+        const end = inner1.clone().lerp(outer1, 0.5);
+        const fromFrame = this._frameAt(route, piece.from);
+        const toFrame = this._frameAt(route, piece.to);
+        const meanTangent = fromFrame.tangent.clone().add(toFrame.tangent).normalize();
+        const context = this._markingDebugContext(route, piece.from, piece.to);
+        this._markingLog.push({
+          kind: 'strip',
+          tag: this._markingTag || 'untagged',
+          markingType: this._markingTag || 'untagged',
+          routeId: route.id,
+          owner: this._markingOwner || `route:${route.id}`,
+          classification: this._markingClassification || 'route-local',
+          boundary: this._markingBoundary,
+          material: materialName,
+          sFrom: piece.from,
+          sTo: piece.to,
+          latFrom: lat0,
+          latTo: lat1,
+          start: { x: start.x, y: start.y, z: start.z },
+          end: { x: end.x, y: end.y, z: end.z },
+          tangent: { x: meanTangent.x, y: meanTangent.y, z: meanTangent.z },
+          tangentFrom: { x: fromFrame.tangent.x, y: fromFrame.tangent.y, z: fromFrame.tangent.z },
+          tangentTo: { x: toFrame.tangent.x, y: toFrame.tangent.y, z: toFrame.tangent.z },
+          suppressionReason: null,
+          ...context,
+        });
+      }
+    }
+  }
+
+  /**
    * Paint a longitudinal stripe [sStart, sEnd] onto the deck as merged quads.
    * The stripe walks the route's surface frames and interpolates the SAME
    * corner points the deck triangles interpolate, so paint sits in the drawn
@@ -3637,6 +4049,7 @@ export class HighwayMap {
     const frames = route.surfaceFrames;
     const count = route.closed ? frames.length : frames.length - 1;
     const halfWidth = width * 0.5;
+    const openingCuts = route._markingOpeningCuts;
     for (let i = 0; i < count; i += 1) {
       const a = frames[i];
       const b = frames[(i + 1) % frames.length];
@@ -3645,9 +4058,57 @@ export class HighwayMap {
       const lo = Math.max(sStart, segStart);
       const hi = Math.min(sEnd, segEnd);
       if (hi - lo < 0.05) continue;
-      const la = lateralAt(a);
-      const lb = lateralAt(b);
-      if (la === null || lb === null) continue;
+      // Ordinary spans retain the established surface-frame paint path.
+      // Only a span that actually contains an exact A or B cut needs the
+      // independent-piece cutter; spans wholly inside are already rejected
+      // by mouthPaintLat at both endpoints.
+      let crossesOpeningCut = false;
+      if (this.options.junctionMouthSurfaces !== false && openingCuts) {
+        for (const boundary of openingCuts) {
+          if (boundary >= hi - 0.001) break;
+          if (boundary > lo + 0.001) { crossesOpeningCut = true; break; }
+        }
+      }
+      if (crossesOpeningCut) {
+        this._paintMouthStripSegment(
+          route, materialName, a, b, segStart, segEnd, lo, hi, lateralAt, width, lift,
+        );
+        continue;
+      }
+      const rawA = lateralAt(a);
+      const rawB = lateralAt(b);
+      const sampleOf = (value) => {
+        if (typeof value === 'number') return { lateral: value, suppressionReason: null, zoneId: null };
+        if (value && typeof value === 'object') return value;
+        return { lateral: null, suppressionReason: 'marking-path-undefined', zoneId: null };
+      };
+      const sampleA = sampleOf(rawA);
+      const sampleB = sampleOf(rawB);
+      const la = sampleA.lateral;
+      const lb = sampleB.lateral;
+      if (la === null || lb === null) {
+        if (this.options.markingDebug && materialName !== 'amber') {
+          const context = this._markingDebugContext(route, lo, hi);
+          this._markingLog.push({
+            kind: 'suppressedStrip',
+            tag: this._markingTag || 'untagged',
+            markingType: this._markingTag || 'untagged',
+            routeId: route.id,
+            owner: this._markingOwner || `route:${route.id}`,
+            classification: this._markingClassification || 'route-local',
+            boundary: this._markingBoundary,
+            material: materialName,
+            sFrom: lo,
+            sTo: hi,
+            latFrom: la,
+            latTo: lb,
+            suppressionReason: sampleA.suppressionReason || sampleB.suppressionReason || 'marking-path-undefined',
+            suppressionZoneId: sampleA.zoneId || sampleB.zoneId || null,
+            ...context,
+          });
+        }
+        continue;
+      }
       const span = Math.max(segEnd - segStart, EPSILON);
       let t0 = (lo - segStart) / span;
       let t1 = (hi - segStart) / span;
@@ -3656,7 +4117,29 @@ export class HighwayMap {
       // span merely because one endpoint is too narrow.
       const clearanceA = a.half - 0.3 - halfWidth - Math.abs(la);
       const clearanceB = b.half - 0.3 - halfWidth - Math.abs(lb);
-      if (clearanceA < 0 && clearanceB < 0) continue;
+      if (clearanceA < 0 && clearanceB < 0) {
+        if (this.options.markingDebug && materialName !== 'amber') {
+          const context = this._markingDebugContext(route, lo, hi);
+          this._markingLog.push({
+            kind: 'suppressedStrip',
+            tag: this._markingTag || 'untagged',
+            markingType: this._markingTag || 'untagged',
+            routeId: route.id,
+            owner: this._markingOwner || `route:${route.id}`,
+            classification: this._markingClassification || 'route-local',
+            boundary: this._markingBoundary,
+            material: materialName,
+            sFrom: lo,
+            sTo: hi,
+            latFrom: la,
+            latTo: lb,
+            suppressionReason: 'outside-route-paved-width',
+            suppressionZoneId: null,
+            ...context,
+          });
+        }
+        continue;
+      }
       if ((clearanceA < 0) !== (clearanceB < 0)) {
         const crossing = clamp(clearanceA / (clearanceA - clearanceB), 0, 1);
         if (clearanceA < 0) t0 = Math.max(t0, crossing);
@@ -3684,10 +4167,15 @@ export class HighwayMap {
         // constant-lateral stripe is parallel to it regardless of how
         // sharp the curve is, so only REAL lateral drift reads diagonal.
         const meanTangent = a.tangent.clone().add(b.tangent).normalize();
+        const context = this._markingDebugContext(route, lo, hi);
         this._markingLog.push({
           kind: 'strip',
           tag: this._markingTag || 'untagged',
+          markingType: this._markingTag || 'untagged',
           routeId: route.id,
+          owner: this._markingOwner || `route:${route.id}`,
+          classification: this._markingClassification || 'route-local',
+          boundary: this._markingBoundary,
           material: materialName,
           sFrom: lo,
           sTo: hi,
@@ -3696,6 +4184,10 @@ export class HighwayMap {
           start: { x: start.x, y: start.y, z: start.z },
           end: { x: end.x, y: end.y, z: end.z },
           tangent: { x: meanTangent.x, y: meanTangent.y, z: meanTangent.z },
+          tangentFrom: { x: a.tangent.x, y: a.tangent.y, z: a.tangent.z },
+          tangentTo: { x: b.tangent.x, y: b.tangent.y, z: b.tangent.z },
+          suppressionReason: null,
+          ...context,
         });
       }
     }
@@ -4311,6 +4803,22 @@ export class HighwayMap {
   // Route dressing (instanced details)
   // ------------------------------------------------------------------
 
+  /** Intended route-local lane boundaries in the route's lateral frame. */
+  _laneDividerOffsets(route) {
+    const offsets = [];
+    if (route.bidirectional) {
+      for (let lane = 1; lane < route.lanes; lane += 1) {
+        const boundary = route.medianWidth * 0.5 + lane * route.laneWidth;
+        offsets.push(boundary, -boundary);
+      }
+    } else {
+      for (let lane = 1; lane < route.lanes; lane += 1) {
+        offsets.push((lane - route.lanes * 0.5) * route.laneWidth);
+      }
+    }
+    return offsets;
+  }
+
   _queueRouteDetails(route) {
     const isService = route.kind === 'service';
     const isRamp = route.kind === 'ramp';
@@ -4338,43 +4846,79 @@ export class HighwayMap {
     // "ghost" edge line deep into (and past) the merge, duplicating or
     // pre-empting the host's authoritative boundary. One owner per
     // boundary: inside crossable, the zone always wins on that side.
-    const mouthPaintLat = (latFn, width, edgeSide = null) => {
+    const mouthPaintLat = (latFn, width, edgeSide = null, boundaryRole = null) => {
       if (this.options.junctionMouthSurfaces === false) return latFn;
       if (!route.junctionMouths) return latFn;
       const margin = width * 0.5 + 0.3;
       return (frame) => {
         const lat = latFn(frame);
-        if (lat === null) return null;
-        if (edgeSide !== null && route._zonesAsBranch) {
+        if (lat === null) return {
+          lateral: null, intendedLateral: null, suppressionReason: 'marking-path-undefined', zoneId: null,
+        };
+        if (route._zonesAsBranch) {
           for (const zone of route._zonesAsBranch) {
-            if (!zone.crossable || edgeSide !== zone.hostwardSign) continue;
-            if (frame.distance >= zone.crossable.branch[0] - 1 && frame.distance <= zone.crossable.branch[1] + 1) return null;
+            const removesBoundary = boundaryRole === 'laneDivider' || edgeSide === zone.hostwardSign;
+            if (!removesBoundary) continue;
+            const opening = zone.markingOpening?.branch;
+            const afterA = opening && (opening[0] <= 0.001
+              ? frame.distance >= opening[0] - 0.001
+              : frame.distance > opening[0] + 0.001);
+            const beforeB = opening && (opening[1] >= route.length - 0.001
+              ? frame.distance <= opening[1] + 0.001
+              : frame.distance < opening[1] - 0.001);
+            if (afterA && beforeB) {
+              return {
+                lateral: null,
+                intendedLateral: lat,
+                suppressionReason: 'junction-opening-no-marking',
+                zoneId: zone.id,
+              };
+            }
+            // Backward-compatible fallback for the A/B-disabled surface mode.
+            if (!opening && zone.crossable && edgeSide === zone.hostwardSign
+              && frame.distance >= zone.crossable.branch[0] - 1
+              && frame.distance <= zone.crossable.branch[1] + 1) {
+              return {
+                lateral: null,
+                intendedLateral: lat,
+                suppressionReason: 'junction-zone-owner-handoff',
+                zoneId: zone.id,
+              };
+            }
           }
         }
         const jx = this._mouthClipAt(route, frame);
-        if (!jx) return lat;
-        if (jx.skip) return null;
+        if (!jx) return { lateral: lat, intendedLateral: lat, suppressionReason: null, zoneId: null };
+        if (jx.skip) return {
+          lateral: null,
+          intendedLateral: lat,
+          suppressionReason: 'host-covers-branch-section',
+          zoneId: jx.mouth.zone?.id || null,
+        };
         // paint must sit on a drawn interval, clear of any cut edge
         for (const interval of jx.intervals) {
           const loBound = interval.lo <= -frame.half + 0.01 ? interval.lo : interval.lo + margin;
           const hiBound = interval.hi >= frame.half - 0.01 ? interval.hi : interval.hi - margin;
-          if (lat >= loBound && lat <= hiBound) return lat;
+          if (lat >= loBound && lat <= hiBound) {
+            return { lateral: lat, intendedLateral: lat, suppressionReason: null, zoneId: jx.mouth.zone?.id || null };
+          }
         }
-        return null;
+        return {
+          lateral: null,
+          intendedLateral: lat,
+          suppressionReason: 'outside-visible-branch-deck',
+          zoneId: jx.mouth.zone?.id || null,
+        };
       };
     };
-    const dividerOffsets = [];
-    if (route.bidirectional) {
-      for (let lane = 1; lane < route.lanes; lane += 1) {
-        const boundary = route.medianWidth * 0.5 + lane * route.laneWidth;
-        dividerOffsets.push(boundary, -boundary);
-      }
-    } else {
-      for (let lane = 1; lane < route.lanes; lane += 1) dividerOffsets.push((lane - route.lanes * 0.5) * route.laneWidth);
-    }
+    const dividerOffsets = this._laneDividerOffsets(route);
     this._markingTag = 'laneDivider';
-    for (const offset of dividerOffsets) {
-      this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14), 0.14, dashStep, dashLength, 6);
+    this._markingOwner = `route:${route.id}`;
+    this._markingClassification = 'route-local';
+    for (let dividerIndex = 0; dividerIndex < dividerOffsets.length; dividerIndex += 1) {
+      const offset = dividerOffsets[dividerIndex];
+      this._markingBoundary = `lane-divider:${dividerIndex}:${offset.toFixed(3)}`;
+      this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14, null, 'laneDivider'), 0.14, dashStep, dashLength, 6);
     }
     // Edge lines with junction-zone marking ownership. Where this route
     // HOSTS a merge/diverge, the zone owns the boundary: the solid edge
@@ -4388,17 +4932,23 @@ export class HighwayMap {
       const suppress = [];
       for (const zone of route._zonesAsHost || []) {
         if (zone.side !== side || !zone.hostEdgeSuppress) continue;
-        suppress.push(...this._zoneIntervalPieces(route, zone.hostEdgeSuppress));
+        const pieces = zone.hostEdgeSuppressPieces?.length
+          ? zone.hostEdgeSuppressPieces
+          : [zone.hostEdgeSuppress];
+        for (const piece of pieces) suppress.push(...this._zoneIntervalPieces(route, piece));
       }
       suppress.sort((a, b) => a[0] - b[0]);
       const kept = [];
       let cursor = 0;
       for (const [from, to] of suppress) {
-        if (from > cursor + 0.5) kept.push([cursor, from]);
+        if (from > cursor + 0.01) kept.push([cursor, from]);
         cursor = Math.max(cursor, to);
       }
-      if (route.length > cursor + 0.5) kept.push([cursor, route.length]);
+      if (route.length > cursor + 0.01) kept.push([cursor, route.length]);
       this._markingTag = 'edgeLine';
+      this._markingOwner = `route:${route.id}`;
+      this._markingClassification = 'route-local';
+      this._markingBoundary = `edge:${side}`;
       for (const [from, to] of kept) {
         this._paintStrip(route, 'marking', from, to,
           mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16, side), 0.16);
@@ -4415,11 +4965,20 @@ export class HighwayMap {
     this._markingTag = 'zoneDash';
     for (const zone of route._zonesAsHost || []) {
       if (!zone.dash) continue;
-      for (const [from, to] of this._zoneIntervalPieces(route, [zone.dash.from, zone.dash.to])) {
-        this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
+      this._markingOwner = `junction:${zone.id}`;
+      this._markingClassification = 'junction-local';
+      this._markingBoundary = `merge-boundary:${zone.id}`;
+      const pieces = zone.dashPieces?.length ? zone.dashPieces : [zone.dash];
+      for (const piece of pieces) {
+        for (const [from, to] of this._zoneIntervalPieces(route, [piece.from, piece.to])) {
+          this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
+        }
       }
     }
     this._markingTag = null;
+    this._markingOwner = null;
+    this._markingClassification = null;
+    this._markingBoundary = null;
 
     // Support pillars for elevated decks (every ~30 m per blueprint).
     if (!isService) {
