@@ -44,6 +44,7 @@ async function initEdit() {
   }
   state.onChange = onDocChange;
   wireEditEvents();
+  window.__stateReady = true;
   window.dispatchEvent(new CustomEvent('editor:stateReady'));
   onDocChange();
   syncPreviews();
@@ -303,7 +304,7 @@ function wireEditEvents() {
     if (ctrl && (key === 'z' || key === 'Z') && !shift) { ev.preventDefault(); doUndo(); }
     else if (ctrl && (key === 'y' || key === 'Y' || ((key === 'z' || key === 'Z') && shift))) { ev.preventDefault(); doRedo(); }
     else if (key === 'Delete' || key === 'Backspace') deleteSelectedHandles();
-    else if (key === 's' || key === 'S') toggleSnap();
+    else if ((key === 's' || key === 'S') && !ctrl) toggleSnap();
     else if (key === 'n') warnNav(1);
     else if (key === 'N') warnNav(-1);
   });
