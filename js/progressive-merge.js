@@ -72,6 +72,7 @@ function laneMappings(zone) {
 
 function buildRecord(map, zone, prototype) {
   const rows = [...zone.samples].sort((left, right) => left.hU - right.hU);
+  const branchRows = [...zone.samples].sort((left, right) => left.bS - right.bS);
   const approachStart = rows[0].hU;
   const transitionEnd = rows[rows.length - 1].hU;
   const length = transitionEnd - approachStart;
@@ -82,8 +83,8 @@ function buildRecord(map, zone, prototype) {
     ? clamp(Math.max(approachStart + length * 0.12, compatibleStart), approachStart + 12, transitionEnd - 72)
     : clamp(approachStart + length * 0.12, approachStart + 12, compatibleEnd - 64);
   const parallelStart = clamp(
-    Math.max(openingStart + 24, approachStart + length * 0.32),
-    openingStart + 20,
+    Math.max(openingStart + 30, approachStart + length * 0.32),
+    openingStart + 28,
     transitionEnd - 48,
   );
   const absorptionStart = clamp(
@@ -141,6 +142,53 @@ function buildRecord(map, zone, prototype) {
       const value = unwrappedHostDistance(zone, distance);
       return value >= approachStart - padding && value <= transitionEnd + padding;
     },
+    hostAtBranch(distance) {
+      if (distance < branchRows[0].bS - 0.01 || distance > branchRows[branchRows.length - 1].bS + 0.01) return null;
+      let upper = 1;
+      while (upper < branchRows.length && branchRows[upper].bS < distance) upper += 1;
+      if (upper >= branchRows.length) return branchRows[branchRows.length - 1].hU;
+      const left = branchRows[upper - 1];
+      const right = branchRows[upper];
+      const span = Math.max(1e-6, right.bS - left.bS);
+      return left.hU + (right.hU - left.hU) * ((distance - left.bS) / span);
+    },
+    branchDeckHostBlendAt(distance) {
+      const hostS = this.hostAtBranch(distance);
+      if (hostS === null) return 0;
+      if (zone.kind === 'merge') {
+        if (hostS <= openingStart) return 0;
+        if (hostS >= parallelStart) return 1;
+        return quintic((hostS - openingStart) / (parallelStart - openingStart));
+      }
+      if (hostS <= parallelStart) return 1;
+      if (hostS >= absorptionStart) return 0;
+      return 1 - quintic((hostS - parallelStart) / (absorptionStart - parallelStart));
+    },
+    branchDeckOffsetAt(distance, lateral = 0) {
+      const blend = this.branchDeckHostBlendAt(distance);
+      if (blend <= 0) return 0;
+      if (distance < branchRows[0].bS - 0.01 || distance > branchRows[branchRows.length - 1].bS + 0.01) return 0;
+      let upper = 1;
+      while (upper < branchRows.length && branchRows[upper].bS < distance) upper += 1;
+      const right = branchRows[Math.min(upper, branchRows.length - 1)];
+      const left = branchRows[Math.max(0, upper - 1)];
+      const rowDy = (row) => {
+        const ends = row.dyEnds || [row.dy, row.dy];
+        const half = Math.max(0.01, row.half || zone.branch.halfWidth);
+        const t = clamp((lateral + half) / (half * 2), 0, 1);
+        return ends[0] + (ends[1] - ends[0]) * t;
+      };
+      const span = Math.max(1e-6, right.bS - left.bS);
+      const t = clamp((distance - left.bS) / span, 0, 1);
+      const dy = rowDy(left) + (rowDy(right) - rowDy(left)) * t;
+      // dy is branch minus host. Moving by -dy lands the source deck on the
+      // same banked plane as the widened host surface without a vertical lip.
+      return -dy * blend;
+    },
+    phaseAtBranch(distance) {
+      const hostS = this.hostAtBranch(distance);
+      return hostS === null ? null : this.phaseAt(hostS);
+    },
     phaseAt(distance) {
       const value = unwrappedHostDistance(zone, distance);
       if (value < openingStart) return 'approach';
@@ -155,6 +203,24 @@ function buildRecord(map, zone, prototype) {
       if (value < parallelStart) return quintic((value - openingStart) / (parallelStart - openingStart));
       if (value <= absorptionStart) return 1;
       return 1 - quintic((value - absorptionStart) / (transitionEnd - absorptionStart));
+    },
+    boundaryLateralAt(distance) {
+      const value = unwrappedHostDistance(zone, distance);
+      const baseHalf = map._halfWidthAt(zone.host, map._normalizeDistance(zone.host, value));
+      const baseEdgeLine = zone.side * (baseHalf - 0.75);
+      const laneBoundary = zone.side * hostLaneEdge;
+      if (value <= openingStart || value >= transitionEnd) return baseEdgeLine;
+      if (value < parallelStart) {
+        const factor = quintic((value - openingStart) / (parallelStart - openingStart));
+        return baseEdgeLine + (laneBoundary - baseEdgeLine) * factor;
+      }
+      if (value <= absorptionStart) return laneBoundary;
+      const factor = quintic((value - absorptionStart) / (transitionEnd - absorptionStart));
+      return laneBoundary + (baseEdgeLine - laneBoundary) * factor;
+    },
+    outerMarkingLateralAt(distance) {
+      const envelope = this.envelopeAt(distance);
+      return envelope.outerLateral - zone.side * 0.75;
     },
     envelopeAt(distance) {
       const value = unwrappedHostDistance(zone, distance);
@@ -261,6 +327,12 @@ function buildRecord(map, zone, prototype) {
   }
   record.laneCentres = lanePaths;
   record.laneBoundaries = boundaryPaths;
+  record.worldBounds = record.pavedEnvelope.reduce((bounds, row) => ({
+    minX: Math.min(bounds.minX, row.lower.x, row.upper.x),
+    maxX: Math.max(bounds.maxX, row.lower.x, row.upper.x),
+    minZ: Math.min(bounds.minZ, row.lower.z, row.upper.z),
+    maxZ: Math.max(bounds.maxZ, row.lower.z, row.upper.z),
+  }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity });
   return record;
 }
 
@@ -286,4 +358,3 @@ export function buildProgressiveTransitions(map, prototypes) {
   }
   return records;
 }
-

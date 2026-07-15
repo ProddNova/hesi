@@ -1243,6 +1243,26 @@ export class HighwayMap {
     return half;
   }
 
+  /** Active one-sided progressive envelope for a host route station. */
+  _progressiveEnvelopeAt(route, distance) {
+    for (const transition of route._progressiveTransitionsAsHost || []) {
+      if (!transition.containsHost(distance, 0.01)) continue;
+      return { transition, envelope: transition.envelopeAt(distance) };
+    }
+    return null;
+  }
+
+  /** True rendered/collision edge lateral, including a progressive envelope. */
+  _surfaceEdgeLateral(frame, side, inset = 0) {
+    const progressive = frame.route
+      ? this._progressiveEnvelopeAt(frame.route, frame.distance)
+      : null;
+    if (progressive && progressive.transition.sideSign === side) {
+      return progressive.envelope.outerLateral - side * inset;
+    }
+    return side * (frame.half - inset);
+  }
+
   _endIsOpen(route, whichEnd) {
     if (route.closed) return true;
     const endDistance = whichEnd > 0 ? route.length : 0;
@@ -1987,7 +2007,7 @@ export class HighwayMap {
         if (mode === 'off') { visible = false; cause = 'zone-off'; }
         else if (mode === 'on') { visible = true; cause = 'zone-on'; }
         else {
-          const probe = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+          const probe = this._deckPoint(frame, this._surfaceEdgeLateral(frame, side, 0.42), 0.02);
           visible = !this._barrierSuppressed(probe, route);
           cause = visible ? 'probe-on' : 'probe-off';
         }
@@ -2000,10 +2020,14 @@ export class HighwayMap {
       let run = null;
       for (let i = 0; i < frames.length; i += 1) {
         if (barrierVisible[side][i]) {
-          if (!run) run = { from: frames[i].distance, fromIndex: i, fromHalf: frames[i].half };
+          if (!run) run = {
+            from: frames[i].distance,
+            fromIndex: i,
+            fromHalf: Math.abs(this._surfaceEdgeLateral(frames[i], side)),
+          };
           run.to = frames[i].distance;
           run.toIndex = i;
-          run.toHalf = frames[i].half;
+          run.toHalf = Math.abs(this._surfaceEdgeLateral(frames[i], side));
         } else if (run) {
           run.cutCause = causes[side][i];
           route._railRuns[side].push(run);
@@ -2019,6 +2043,15 @@ export class HighwayMap {
 
   /** Zone-forced rail mode at a chainage ('off' | 'on' | null = probe). */
   _railZoneMode(route, sideSign, distance) {
+    for (const transition of route._progressiveTransitionsAsHost || []) {
+      if (transition.sideSign === sideSign && transition.containsHost(distance, 0.01)) return 'on';
+    }
+    for (const transition of route._progressiveTransitionsAsBranch || []) {
+      const phase = transition.phaseAtBranch(distance);
+      if (!phase) continue;
+      if (transition.type === 'merge' && phase !== 'approach') return 'off';
+      if (transition.type === 'diverge' && (phase === 'approach' || phase === 'opening' || phase === 'parallel')) return 'off';
+    }
     const zones = route._railZones?.[sideSign];
     if (!zones) return null;
     let mode = null;
@@ -2068,12 +2101,22 @@ export class HighwayMap {
       const projection = this._projectToRoute(host, point, this._hostSeedIndex(host, frame._jxSeed));
       frame._jxSeed = projection.distance;
       const hostHalf = this._halfWidthAt(host, projection.distance);
+      const progressive = this._progressiveEnvelopeAt(host, projection.distance);
+      const lower = progressive?.envelope.lateralMin ?? -hostHalf;
+      const upper = progressive?.envelope.lateralMax ?? hostHalf;
       const bank = this._bankAt(host, projection.distance);
       const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+      let outside;
+      if (projection.signedLateral < lower) outside = lower - projection.signedLateral;
+      else if (projection.signedLateral > upper) outside = projection.signedLateral - upper;
+      else outside = -Math.min(projection.signedLateral - lower, upper - projection.signedLateral);
       return {
         L: projection.signedLateral,
         H: hostHalf,
-        g: Math.abs(projection.signedLateral) - hostHalf,
+        lower,
+        upper,
+        progressive: progressive?.transition || null,
+        g: outside,
         dy: point.y - deckY,
         overshoot: projection.endOvershoot,
       };
@@ -2092,8 +2135,8 @@ export class HighwayMap {
     // side of the host — only used by the apron path, where the section is
     // fully outside and therefore cannot straddle the host centreline.
     const sideSign = (hostward > 0 ? hi.L : lo.L) >= 0 ? 1 : -1;
-    const gSide0 = sideSign * lo.L - lo.H;
-    const gSide1 = sideSign * hi.L - hi.H;
+    const gSide0 = sideSign * lo.L - (sideSign > 0 ? lo.upper : -lo.lower);
+    const gSide1 = sideSign * hi.L - (sideSign > 0 ? hi.upper : -hi.lower);
     const latForG = (g) => {
       if (Math.abs(gSide1 - gSide0) < 1e-6) return null;
       return -half + ((g - gSide0) / (gSide1 - gSide0)) * (2 * half);
@@ -2112,7 +2155,12 @@ export class HighwayMap {
     // the linear endpoint interpolation of dy across the section (true dy
     // curves with bank/projection differences) cannot leave drawn strips
     // grazing the host within the z-fight band.
-    const COPLANAR = 0.18;
+    // A progressive transition owns one shared host plane. It may absorb a
+    // source branch whose centre plane is still easing by up to 0.75 m; its
+    // cut flap lands on the host plane, and physics defers to the same host
+    // envelope. Legacy mouths retain the exact 0.18 m coplanar tolerance.
+    const progressiveOwner = lo.progressive || hi.progressive;
+    const COPLANAR = progressiveOwner ? 0.75 : 0.18;
     const TUCK = 0.35;      // how far a cut edge slides under the host surface
     const GORE_FILL = 1.2;  // widest sliver the gore apron closes
     const APRON_DY = 0.35;  // largest level offset the apron may bridge
@@ -2157,8 +2205,8 @@ export class HighwayMap {
       if (s0 > 0) tMin = Math.max(tMin, root);
       else tMax = Math.min(tMax, root);
     };
-    clipConstraint(lo.L - lo.H, hi.L - hi.H, true);
-    clipConstraint(lo.L + lo.H, hi.L + hi.H, false);
+    clipConstraint(lo.L - lo.upper, hi.L - hi.upper, true);
+    clipConstraint(lo.lower - lo.L, hi.lower - hi.L, true);
     if (tMin >= tMax) return null; // host covers none of the section
     const coveredLo = -half + tMin * 2 * half;
     const coveredHi = -half + tMax * 2 * half;
@@ -2212,6 +2260,7 @@ export class HighwayMap {
       hostward,
       skip: intervals.length === 0,
       intervals,
+      progressive: progressiveOwner?.id || null,
       // Coplanar strip handed to the host deck (frame laterals) — the
       // authoritative "these decks are one surface here" record that
       // junction zones and physics consume, so crossability, collision
@@ -2556,8 +2605,13 @@ export class HighwayMap {
       if (Math.abs(position.y - projection.point.y) > 8) {
         projection = this._projectToRoute(route, position);
       }
-      const half = this._halfWidthAt(route, projection.distance);
-      if (Math.abs(projection.signedLateral) > half + lateralMargin + 14) continue;
+      const baseHalf = this._halfWidthAt(route, projection.distance);
+      const progressive = this._progressiveEnvelopeAt(route, projection.distance);
+      const lateralMin = progressive?.envelope.lateralMin ?? -baseHalf;
+      const lateralMax = progressive?.envelope.lateralMax ?? baseHalf;
+      const half = Math.max(Math.abs(lateralMin), Math.abs(lateralMax));
+      if (projection.signedLateral < lateralMin - lateralMargin - 14
+        || projection.signedLateral > lateralMax + lateralMargin + 14) continue;
       // Past an OPEN end the corridor no longer exists (the continuation
       // route's corridor takes over); past a CLOSED end the end wall
       // correction still applies, so keep the corridor.
@@ -2574,7 +2628,9 @@ export class HighwayMap {
       const vertical = position.y - deckY;
       if (vertical < -verticalWindow || vertical > verticalWindow + 2.5) continue;
       corridors.push({
-        route, projection, half, bank, deckY, vertical,
+        route, projection, half, baseHalf, lateralMin, lateralMax,
+        transition: progressive?.transition || null,
+        bank, deckY, vertical,
         absLateral: Math.abs(projection.signedLateral),
       });
     }
@@ -2594,6 +2650,21 @@ export class HighwayMap {
     for (const zone of route._zonesAsBranch) {
       const [b0, b1] = zone.branchSpan;
       if (distance < b0 - 2 || distance > b1 + 2) continue;
+      if (zone.progressive) {
+        const hostS = zone.progressive.hostAtBranch(distance);
+        const phase = hostS === null ? null : zone.progressive.phaseAt(hostS);
+        if (hostS !== null && phase !== 'approach') {
+          const frame = this._frameAt(route, distance);
+          const point = this._deckPoint(frame, lateral);
+          const projection = this._projectToRoute(zone.host, point, this._hostSeedIndex(zone.host, hostS));
+          const envelope = zone.progressive.envelopeAt(projection.distance);
+          const bank = this._bankAt(zone.host, projection.distance);
+          const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+          if (projection.signedLateral > envelope.lateralMin + 0.02
+            && projection.signedLateral < envelope.lateralMax - 0.02
+            && point.y - deckY < 0.8) return true;
+        }
+      }
       let best = null;
       let bestDelta = Infinity;
       for (const row of zone.samples) {
@@ -2620,7 +2691,15 @@ export class HighwayMap {
    */
   _lateralCorrection(corridor, lateral, radius) {
     const route = corridor.route;
-    const outer = Math.max(0.4, corridor.half - Math.max(0.35, radius));
+    const inset = Math.max(0.35, radius);
+    if (corridor.transition) {
+      const minimum = corridor.lateralMin + inset;
+      const maximum = corridor.lateralMax - inset;
+      if (lateral < minimum) return minimum - lateral;
+      if (lateral > maximum) return maximum - lateral;
+      return 0;
+    }
+    const outer = Math.max(0.4, corridor.half - inset);
     if (route.bidirectional) {
       const inner = route.medianWidth * 0.5 + Math.max(0.35, radius) * 0.72;
       const side = lateral >= 0 ? 1 : -1;
@@ -2694,7 +2773,9 @@ export class HighwayMap {
     const route = best.route;
     const projection = best.projection;
     const absLateral = best.absLateral;
-    const onSurface = absLateral <= best.half + 0.3 && Math.abs(best.vertical) < 5.5;
+    const onSurface = projection.signedLateral >= (best.lateralMin ?? -best.half) - 0.3
+      && projection.signedLateral <= (best.lateralMax ?? best.half) + 0.3
+      && Math.abs(best.vertical) < 5.5;
     let direction = 1;
     let lane = 0;
     let medianDistance = Infinity;
@@ -2748,7 +2829,13 @@ export class HighwayMap {
       roadHalfWidth: best.half,
       halfWidth: best.half,
       roadWidth: best.half * 2,
-      edgeDistance: best.half - absLateral,
+      lateralMin: best.lateralMin ?? -best.half,
+      lateralMax: best.lateralMax ?? best.half,
+      transitionId: best.transition?.id || null,
+      edgeDistance: Math.min(
+        projection.signedLateral - (best.lateralMin ?? -best.half),
+        (best.lateralMax ?? best.half) - projection.signedLateral,
+      ),
       medianDistance,
       onRoadSurface: onSurface,
       onRoad: drivable,
@@ -2918,8 +3005,8 @@ export class HighwayMap {
       side,
       innerLimit,
       outerLimit,
-      minLateral: route.bidirectional ? side * innerLimit : -outerLimit,
-      maxLateral: side * outerLimit,
+      minLateral: route.bidirectional ? side * innerLimit : (info.lateralMin ?? -outerLimit) + vehicleRadius,
+      maxLateral: route.bidirectional ? side * outerLimit : (info.lateralMax ?? outerLimit) - vehicleRadius,
       junction: info.junction,
       disabled: false,
       tunnel: info.tunnel,
@@ -3722,6 +3809,7 @@ export class HighwayMap {
     if (up.y < 0) up.multiplyScalar(-1);
     up.normalize();
     return {
+      route,
       u,
       distance: normalized,
       position,
@@ -3748,12 +3836,15 @@ export class HighwayMap {
     const spanError = (a, b, samples) => {
       let vertical = 0;
       let lateral = 0;
-      const startPoints = [-1, 0, 1].map((side) => this._deckPoint(a, side * a.half));
-      const endPoints = [-1, 0, 1].map((side) => this._deckPoint(b, side * b.half));
+      const startPoints = [-1, 0, 1].map((side) => this._deckPoint(a,
+        side === 0 ? 0 : this._surfaceEdgeLateral(a, side)));
+      const endPoints = [-1, 0, 1].map((side) => this._deckPoint(b,
+        side === 0 ? 0 : this._surfaceEdgeLateral(b, side)));
       for (const sample of samples) {
         for (let track = 0; track < 3; track += 1) {
           const side = track - 1;
-          const analytic = this._deckPoint(sample.frame, side * sample.frame.half);
+          const analytic = this._deckPoint(sample.frame,
+            side === 0 ? 0 : this._surfaceEdgeLateral(sample.frame, side));
           const chord = startPoints[track].clone().lerp(endPoints[track], sample.t);
           vertical = Math.max(vertical, Math.abs(analytic.y - chord.y));
           lateral = Math.max(lateral, Math.hypot(analytic.x - chord.x, analytic.z - chord.z));
@@ -3855,8 +3946,29 @@ export class HighwayMap {
   /** Deck edge point with banking applied. lateral along the base normal. */
   _deckPoint(frame, lateral, lift = 0) {
     const point = frame.position.clone().addScaledVector(frame.normal, lateral);
-    point.y += Math.tan(frame.bank) * lateral + lift;
+    point.y += Math.tan(frame.bank) * lateral;
+    // The source route eases onto/off the authoritative host plane over the
+    // shared transition phases. This removes the sub-metre shelf that would
+    // otherwise remain when two audited centrelines meet at slightly
+    // different bank/elevation samples.
+    for (const transition of frame.route?._progressiveTransitionsAsBranch || []) {
+      point.y += transition.branchDeckOffsetAt(frame.distance, lateral);
+    }
+    point.y += lift;
     return point;
+  }
+
+  /** Signed room from a marking path to the current one-sided paved edge. */
+  _markingClearance(frame, lateral, halfWidth) {
+    const progressive = frame.route
+      ? this._progressiveEnvelopeAt(frame.route, frame.distance)
+      : null;
+    const lower = progressive?.envelope.lateralMin ?? -frame.half;
+    const upper = progressive?.envelope.lateralMax ?? frame.half;
+    return Math.min(
+      lateral - lower - 0.3 - halfWidth,
+      upper - lateral - 0.3 - halfWidth,
+    );
   }
 
   /**
@@ -3917,7 +4029,7 @@ export class HighwayMap {
       if (intended === null) {
         allowed = false;
         reason ||= 'marking-path-undefined';
-      } else if (frame.half - 0.3 - halfWidth - Math.abs(intended) < 0) {
+      } else if (this._markingClearance(frame, intended, halfWidth) < 0) {
         allowed = false;
         reason = 'outside-route-paved-width';
       }
@@ -4123,8 +4235,8 @@ export class HighwayMap {
       // A lane boundary can enter/leave the paved deck during a width taper.
       // Clip at that exact crossing instead of discarding this entire render
       // span merely because one endpoint is too narrow.
-      const clearanceA = a.half - 0.3 - halfWidth - Math.abs(la);
-      const clearanceB = b.half - 0.3 - halfWidth - Math.abs(lb);
+      const clearanceA = this._markingClearance(a, la, halfWidth);
+      const clearanceB = this._markingClearance(b, lb, halfWidth);
       if (clearanceA < 0 && clearanceB < 0) {
         if (this.options.markingDebug && materialName !== 'amber') {
           const context = this._markingDebugContext(route, lo, hi);
@@ -4445,11 +4557,12 @@ export class HighwayMap {
   _parapetProfile(frame, side, factor = 1) {
     const squeeze = 0.36 * (1 - factor);
     const lean = 0.02 + 0.83 * factor;
+    const edge = this._surfaceEdgeLateral(frame, side);
     return {
-      base: this._deckPoint(frame, side * (frame.half - 0.42 + squeeze), 0.02),
-      top: this._deckPoint(frame, side * (frame.half - 0.3 + squeeze * 0.66), lean),
-      cap: this._deckPoint(frame, side * (frame.half - 0.06), lean + 0.06 * factor),
-      out: this._deckPoint(frame, side * frame.half, 0.0),
+      base: this._deckPoint(frame, edge - side * (0.42 - squeeze), 0.02),
+      top: this._deckPoint(frame, edge - side * (0.3 - squeeze * 0.66), lean),
+      cap: this._deckPoint(frame, edge - side * 0.06, lean + 0.06 * factor),
+      out: this._deckPoint(frame, edge, 0.0),
     };
   }
 
@@ -4497,10 +4610,10 @@ export class HighwayMap {
       // surface (see _emitMouthDeck); everywhere else the full deck.
       if (!this._emitMouthDeck(route, a, b, mid)) {
         const bucketRoad = this._bucket(mid, roadMaterialName);
-        const leftA = this._deckPoint(a, a.half);
-        const leftB = this._deckPoint(b, b.half);
-        const rightA = this._deckPoint(a, -a.half);
-        const rightB = this._deckPoint(b, -b.half);
+        const leftA = this._deckPoint(a, this._surfaceEdgeLateral(a, 1));
+        const leftB = this._deckPoint(b, this._surfaceEdgeLateral(b, 1));
+        const rightA = this._deckPoint(a, this._surfaceEdgeLateral(a, -1));
+        const rightB = this._deckPoint(b, this._surfaceEdgeLateral(b, -1));
         // Deck top, wound UP-facing. It was wound the other way for years:
         // the single-sided road material culled the real deck from above and
         // the game was actually showing the fascia UNDERSIDE 0.5-1.35 m below
@@ -4559,8 +4672,8 @@ export class HighwayMap {
         // steel handrail on top of the parapet (skipped inside tunnels and
         // over end terminals — it must not float above a sunk profile)
         if (!a.tunnel && fA > 0.96 && fB > 0.96) {
-          const railA = this._deckPoint(a, side * (a.half - 0.18), 1.12);
-          const railB = this._deckPoint(b, side * (b.half - 0.18), 1.12);
+          const railA = this._deckPoint(a, this._surfaceEdgeLateral(a, side, 0.18), 1.12);
+          const railB = this._deckPoint(b, this._surfaceEdgeLateral(b, side, 0.18), 1.12);
           const railTopA = railA.clone(); railTopA.y += 0.09;
           const railTopB = railB.clone(); railTopB.y += 0.09;
           if (side > 0) this._pushQuad(bucketRail, railA, railB, railTopB, railTopA);
@@ -4609,10 +4722,10 @@ export class HighwayMap {
         const jxB = mouthy ? this._mouthClipAt(route, b) : null;
         const fasciaDepth = 1.35;
         if (!jxA && !jxB) {
-          const dropLA = this._deckPoint(a, a.half); dropLA.y -= fasciaDepth;
-          const dropLB = this._deckPoint(b, b.half); dropLB.y -= fasciaDepth;
-          const dropRA = this._deckPoint(a, -a.half); dropRA.y -= fasciaDepth;
-          const dropRB = this._deckPoint(b, -b.half); dropRB.y -= fasciaDepth;
+          const dropLA = this._deckPoint(a, this._surfaceEdgeLateral(a, 1)); dropLA.y -= fasciaDepth;
+          const dropLB = this._deckPoint(b, this._surfaceEdgeLateral(b, 1)); dropLB.y -= fasciaDepth;
+          const dropRA = this._deckPoint(a, this._surfaceEdgeLateral(a, -1)); dropRA.y -= fasciaDepth;
+          const dropRB = this._deckPoint(b, this._surfaceEdgeLateral(b, -1)); dropRB.y -= fasciaDepth;
           this._pushQuad(this._bucket(mid, 'concreteDark'), dropRA, dropRB, dropLB, dropLA);
         } else if (!(jxA?.skip) && !(jxB?.skip)) {
           // Underside spans the full drawn footprint (intervals + flaps).
@@ -4635,8 +4748,8 @@ export class HighwayMap {
       for (const side of [1, -1]) {
         this.wallSegments.push({
           routeId: route.id, type: 'outer', side,
-          start: this._deckPoint(a, side * (a.half - 0.42), 0.02),
-          end: this._deckPoint(b, side * (b.half - 0.42), 0.02),
+          start: this._deckPoint(a, this._surfaceEdgeLateral(a, side, 0.42), 0.02),
+          end: this._deckPoint(b, this._surfaceEdgeLateral(b, side, 0.42), 0.02),
           height: barrierHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
         });
@@ -4726,6 +4839,10 @@ export class HighwayMap {
       const mouth = (ramp.junctionMouths || []).find((candidate) => (
         candidate.host === main && candidate.which === (fromStart ? 'start' : 'end')));
       const zone = mouth?.zone;
+      // The progressive transition owns its complete lane-drop/split zone.
+      // It intentionally uses longitudinal guidance only; the legacy gore
+      // hatching/cushion would sit inside the new drivable auxiliary lane.
+      if (zone?.progressive) continue;
 
       // walk the ramp away from the shared mouth until the paved edges split;
       // wedge points sit on the BANKED deck surfaces (_frameAt), so the
@@ -4865,6 +4982,20 @@ export class HighwayMap {
         };
         if (route._zonesAsBranch) {
           for (const zone of route._zonesAsBranch) {
+            if (zone.progressive) {
+              const phase = zone.progressive.phaseAtBranch(frame.distance);
+              const transitionOwns = zone.progressive.type === 'merge'
+                ? phase && phase !== 'approach'
+                : !!phase;
+              if (transitionOwns) {
+                return {
+                  lateral: null,
+                  intendedLateral: lat,
+                  suppressionReason: 'progressive-transition-owner-handoff',
+                  zoneId: zone.id,
+                };
+              }
+            }
             const removesBoundary = boundaryRole === 'laneDivider' || edgeSide === zone.hostwardSign;
             if (!removesBoundary) continue;
             const opening = zone.markingOpening?.branch;
@@ -4945,6 +5076,10 @@ export class HighwayMap {
           : [zone.hostEdgeSuppress];
         for (const piece of pieces) suppress.push(...this._zoneIntervalPieces(route, piece));
       }
+      for (const transition of route._progressiveTransitionsAsHost || []) {
+        if (transition.sideSign !== side) continue;
+        suppress.push(...this._zoneIntervalPieces(route, transition.hostInterval));
+      }
       suppress.sort((a, b) => a[0] - b[0]);
       const kept = [];
       let cursor = 0;
@@ -4972,6 +5107,7 @@ export class HighwayMap {
     // route-absolute like every other dash.
     this._markingTag = 'zoneDash';
     for (const zone of route._zonesAsHost || []) {
+      if (zone.progressive) continue;
       if (!zone.dash) continue;
       this._markingOwner = `junction:${zone.id}`;
       this._markingClassification = 'junction-local';
@@ -4981,6 +5117,40 @@ export class HighwayMap {
         for (const [from, to] of this._zoneIntervalPieces(route, [piece.from, piece.to])) {
           this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
         }
+      }
+    }
+    // Progressive transition-owned paint. The host and branch route painters
+    // are suppressed over the claimed paths above; this is the sole owner of
+    // the moving exterior edge and the temporary auxiliary-lane boundary.
+    for (const transition of route._progressiveTransitionsAsHost || []) {
+      this._markingClassification = 'progressive-transition';
+      this._markingOwner = `progressive:${transition.id}`;
+      this._markingTag = 'progressiveOuterEdge';
+      this._markingBoundary = `progressive-outer-edge:${transition.id}`;
+      for (const [from, to] of this._zoneIntervalPieces(route, transition.hostInterval)) {
+        this._paintStrip(
+          route,
+          'marking',
+          from,
+          to,
+          (frame) => transition.outerMarkingLateralAt(frame.distance),
+          0.16,
+        );
+      }
+      this._markingTag = 'progressiveAuxBoundary';
+      this._markingBoundary = `progressive-aux-boundary:${transition.id}`;
+      for (const [from, to] of this._zoneIntervalPieces(route, transition.crossableInterval)) {
+        this._paintDashedStrip(
+          route,
+          'marking',
+          (frame) => transition.boundaryLateralAt(frame.distance),
+          0.18,
+          10,
+          5,
+          6,
+          from,
+          to,
+        );
       }
     }
     this._markingTag = null;

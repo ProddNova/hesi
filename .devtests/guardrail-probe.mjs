@@ -43,7 +43,7 @@ const deg = (rad) => (rad * 180) / Math.PI;
 const summary = { runs: 0, gaps: 0, openings: 0, worstLateralStep: 0, worstTangent: 0, doubled: 0, insideAsphalt: 0, unexplained: 0 };
 
 const exactSuppressed = (route, frame, side) => {
-  const point = map._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+  const point = map._deckPoint(frame, map._surfaceEdgeLateral(frame, side, 0.42), 0.02);
   return map._barrierSuppressed(point, route);
 };
 
@@ -86,7 +86,7 @@ for (const route of map.routes.values()) {
       if (gapLen < 30) {
         const endFrame = frames[prev.toIndex];
         const startFrame = frames[next.fromIndex];
-        const lateralStep = Math.abs(endFrame.half - startFrame.half);
+        const lateralStep = Math.abs((prev.toHalf ?? endFrame.half) - (next.fromHalf ?? startFrame.half));
         summary.worstLateralStep = Math.max(summary.worstLateralStep, lateralStep);
         if (lateralStep > 1.2) {
           fail('lateral-step', `${route.id} side ${side} rail restarts ${lateralStep.toFixed(2)} m off its edge lateral across ${gapLen.toFixed(0)} m gap at s=${prev.to.toFixed(0)}`);
@@ -128,6 +128,16 @@ for (const zone of map.junctionZones) {
     for (const [from, to] of map._zoneIntervalPieces(zone.host, [lo + 2, hi - 2])) {
       const overlap = Math.min(run.to, to) - Math.max(run.from, from);
       if (overlap > 4) {
+        if (zone.progressive) {
+          const frames = zone.host.surfaceFrames.filter((frame) => frame.distance >= Math.max(run.from, from)
+            && frame.distance <= Math.min(run.to, to));
+          const followsExterior = frames.length > 0 && frames.every((frame) => {
+            const actual = map._surfaceEdgeLateral(frame, zone.side, 0.42);
+            const expected = zone.progressive.envelopeAt(frame.distance).outerLateral - zone.side * 0.42;
+            return Math.abs(actual - expected) < 0.03;
+          });
+          if (followsExterior) continue;
+        }
         fail('rail-across-opening', `${zone.kind} ${zone.branch.id} on ${zone.host.id} side ${zone.side}: run ${run.from.toFixed(0)}..${run.to.toFixed(0)} covers opening ${lo.toFixed(0)}..${hi.toFixed(0)} by ${overlap.toFixed(0)} m`);
       }
     }
@@ -155,7 +165,7 @@ for (const route of map.routes.values()) {
     for (const run of route._railRuns[side]) {
       for (let i = run.fromIndex; i <= run.toIndex; i += 2) {
         const frame = frames[i];
-        const point = map._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+        const point = map._deckPoint(frame, map._surfaceEdgeLateral(frame, side, 0.42), 0.02);
         const tangent = frame.tangent;
         const sample = { routeId: route.id, side, s: frame.distance, point, tangent, zoneForced: causes[i] === 'zone-on' };
         samples.push(sample);

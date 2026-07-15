@@ -42,6 +42,21 @@ const summary = { convergenceChecked: 0, worstConvergence: 0, openingCrossed: 0,
 
 // 1. outer-rail convergence continuity
 for (const zone of zones) {
+  if (zone.progressive) {
+    summary.convergenceChecked += 1;
+    const first = zone.progressive.guardrailEnvelope[0];
+    const last = zone.progressive.guardrailEnvelope.at(-1);
+    const firstFrame = map._frameAt(zone.host, first.hostS);
+    const lastFrame = map._frameAt(zone.host, last.hostS);
+    const firstBase = zone.side * map._halfWidthAt(zone.host, first.hostS);
+    const lastBase = zone.side * map._halfWidthAt(zone.host, last.hostS);
+    const difference = Math.max(Math.abs(first.lateral - firstBase), Math.abs(last.lateral - lastBase));
+    summary.worstConvergence = Math.max(summary.worstConvergence, difference);
+    if (difference > 0.05 || !firstFrame || !lastFrame) {
+      fail('outer-rail-convergence', `${zone.id}: progressive envelope does not return to the stable host edge (${difference.toFixed(2)} m)`);
+    }
+    continue;
+  }
   const pieces = zone.branchOuterRailOnPieces?.length ? zone.branchOuterRailOnPieces
     : (zone.branchOuterRailOn ? [zone.branchOuterRailOn] : null);
   if (!zone.hostRailOpen || !pieces) continue;
@@ -81,6 +96,16 @@ for (const zone of zones) {
     for (const [from, to] of map._zoneIntervalPieces(zone.host, [lo + 2, hi - 2])) {
       const overlap = Math.min(run.to, to) - Math.max(run.from, from);
       if (overlap > 4) {
+        if (zone.progressive) {
+          const frames = zone.host.surfaceFrames.filter((frame) => frame.distance >= Math.max(run.from, from)
+            && frame.distance <= Math.min(run.to, to));
+          const followsExterior = frames.length > 0 && frames.every((frame) => {
+            const actual = map._surfaceEdgeLateral(frame, zone.side, 0.42);
+            const expected = zone.progressive.envelopeAt(frame.distance).outerLateral - zone.side * 0.42;
+            return Math.abs(actual - expected) < 0.03;
+          });
+          if (followsExterior) continue;
+        }
         summary.openingCrossed += 1;
         fail('rail-across-merge-opening', `${zone.kind} ${zone.branch.id} on ${zone.host.id}: run ${run.from.toFixed(0)}..${run.to.toFixed(0)} crosses opening ${lo.toFixed(0)}..${hi.toFixed(0)} by ${overlap.toFixed(0)} m`);
       }
@@ -109,7 +134,7 @@ for (const zone of zones) {
     const step = Math.max(1, Math.floor(inside.length / 6));
     let suppressedAll = true;
     for (let k = 0; k < inside.length; k += step) {
-      const probe = map._deckPoint(frames[inside[k]], side * (frames[inside[k]].half - 0.42), 0.02);
+      const probe = map._deckPoint(frames[inside[k]], map._surfaceEdgeLateral(frames[inside[k]], side, 0.42), 0.02);
       if (!map._barrierSuppressed(probe, branch)) { suppressedAll = false; break; }
     }
     if (!suppressedAll) {
