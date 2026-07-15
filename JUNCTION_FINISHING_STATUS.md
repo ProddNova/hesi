@@ -1,5 +1,153 @@
 # Junction Visual Finishing Status
 
+## Merge-local markings + guardrails finishing pass (2026-07-15b)
+
+- Branch: `claude/merge-markings-guardrails-final-id16mj`
+- Base: `origin/main` at `0572fc4` (after PR #20, the pass documented
+  below this section)
+- Scope: **merge-local only** — lane-marking ownership through
+  same-level merge/diverge zones, and merge-local guardrail hand-off
+  continuity. No change to junction geometry, vertical crossings, PA
+  access lanes, or map generation; the paved envelope and crossability
+  rules from the prior passes are untouched.
+
+### User-observed defects (2026-07-15, second visual bug report)
+
+1. One-lane branches still occasionally showed diagonal `/ \` marks.
+2. A line belonging to the incoming road appeared 50-100 m before the
+   real merge and cut across the host road.
+3. In multi-lane merges (2-lane into 3-lane), the incoming outer solid
+   line appeared too early and overwrote/duplicated the host's dashed
+   lane line.
+4. Guardrails: visible step discontinuities, accidental 20-40 m gaps,
+   bad convergence on outer rails (2-lane → 3-lane called out as the
+   worst case), and openings slightly too long or poorly placed.
+
+### Phase 1 — classification
+
+Reproduced against four representative cases (right/left, 1→2/2→3
+lane merges): `k1_0 ← ramp_42` (1→2, right), `wangan_1 ← ramp_9` and
+`wangan_0 ← ramp_47` (2→3, right), `c1_0 ← r6_3` (left, equal-width).
+`.devtests/merge-marking-probe.mjs` (new) formalises the classification
+and fails 272 times on this base commit; `.devtests/merge-guardrail-probe.mjs`
+(new) fails 40/47 checked zones, up to 59 m of hand-off mismatch.
+
+Root cause of defects 2/3 (marking): `_prepareJunctionZones` derives the
+host's dashed merge boundary and edge-line suppression (`dash`,
+`hostEdgeSuppress`) from `crossOuter`, which carries an extra 0.18 m
+lip-veto on top of the union width — meaningful for genuinely stacked
+wings, but pure interpolation noise on a shallow, level merge taper,
+where it flickered the derived interval down to a short window near one
+end of the true taper. Separately, a branch's own edge line was only
+ever suppressed by its per-frame coplanar-overlap clip (`_mouthClipAt`),
+which on the same shallow taper lags the zone's "one drivable union"
+verdict by tens of metres. The two effects combined: the host's own
+edge line would vanish (correctly) while the branch kept independently
+painting a "ghost" edge line through the same stretch — the reported
+early/duplicate line.
+
+Root cause of defect 4 (guardrail): the branch's own outer-rail hand-off
+(`tipIndex`) was derived from a stricter, *different* threshold
+(union width past host by 0.6 m) than the host's own rail-opening band
+(`railBlocked`, 0.15 m) — despite a code comment already asserting they
+were "bound to the same tip row." They weren't, and disagreed by tens of
+metres on a shallow taper: the host's rail opens (correctly, a real
+paved conflict) well before the branch's own outer rail turns on,
+leaving the stretch between with no rail on either route.
+
+Defect 1 (diagonal one-lane marks) was not reproduced on this base commit
+— the prior pass's `_dressGores` fix (zone-aware parallel gore hatching)
+already holds network-wide (`marking-orientation-probe`: 0 diagonal
+pieces, 0 alternating chevron runs).
+
+### Phase 2 — marking ownership fix
+
+`js/map.js`, `_prepareJunctionZones` + `_queueRouteDetails`:
+
+- `hostEdgeSuppress`/`dash` now derive from `unionOuter` instead of
+  `crossOuter`, but only within rows already inside the zone's
+  `crossable` run — every such row already cleared the looser 0.35 m
+  `shelfFree` test to get there, so the extra 0.18 m veto could no
+  longer be distinguishing a genuine wing from taper noise.
+- A branch's own edge line is now suppressed on the host-ward side
+  throughout the zone's `crossable.branch` span — the zone is the
+  single authority on that boundary once a station is inside crossable,
+  not the branch's independent per-frame clip. The branch's *far*
+  (outer) edge line is untouched: it correctly becomes the widened
+  road's new outer boundary, exactly as before.
+
+`.devtests/merge-marking-probe.mjs` goes from 272 failures to 0.
+Confirmed visually at the two 2-lane→3-lane cases (`wangan_1 ← ramp_9`,
+`wangan_0 ← ramp_47`): a duplicate/converging solid line that used to
+run alongside the host's resumed edge line is gone, leaving one clean
+boundary (`docs/junctions/marking-2to3-merge-*-before/after.png`).
+
+### Phase 3 — guardrail continuity fix
+
+`js/map.js`, `_prepareJunctionZones`:
+
+- The branch's outer-rail tip (`tipIndex`) now derives from the SAME
+  `railBlocked` band used to build the host's own opening
+  (`hostRailOpen`), instead of a separate, stricter width threshold —
+  the hand-off happens at one shared physical row by construction.
+- The forced-on span is built as separate pieces bounded by
+  `railBlocked`, not one interval blindly spanning to the last sampled
+  row: a route whose data kinks back near the host well beyond the
+  merge (the pre-existing, documented steering-snap families —
+  `r6_0`/`ramp_18`, `ramp_21`, `ramp_46`) can carry a second, disjoint
+  engaged stretch with a genuinely clear gap in between; forcing "on"
+  straight through that gap put the branch's outer rail parallel to,
+  and within a metre of, the host's own independently-visible rail
+  there (a new doubled-rail regression caught by `guardrail-probe`
+  during this fix and corrected before landing).
+
+`.devtests/merge-guardrail-probe.mjs` (new) goes from 40/47 zones
+failing (up to 59 m apart) to 0/52, worst case 2.0 m — exactly the
+deliberate padding built into the opening bounds. `guardrail-probe`,
+`junction-finishing-probe` and `lateral-junction-probe` are unchanged
+(same pass/fail split as before this pass, including the same 6
+documented, out-of-scope failures).
+
+### Before/after images (docs/junctions/)
+
+| Case | Before | After |
+| --- | --- | --- |
+| `wangan_1 ← ramp_9` (2→3, right) merge paint | `marking-2to3-merge-wangan1-ramp9-before.png` | `marking-2to3-merge-wangan1-ramp9-after.png` |
+| `wangan_0 ← ramp_47` (2→3, right) merge paint | `marking-2to3-merge-wangan0-ramp47-before.png` | `marking-2to3-merge-wangan0-ramp47-after.png` |
+| `c1_0 ← r6_3` (left, equal-width) merge paint | `marking-left-merge-c1_0-r6_3-before.png` | `marking-left-merge-c1_0-r6_3-after.png` |
+
+### Probe results (this pass)
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Merge-marking probe (new) | PASS | 56 zones, 113,699 strips: 0 early-incoming-edge (was 272), 0 host-edge-inside-suppress, 0 dash-outside-overlap, 0 one-lane-zigzag |
+| Merge-guardrail probe (new) | PASS | 52 zones checked: worst outer-rail convergence 2.0 m (was up to 59 m, 40/47 zones failing), 0 opening-crossed, 0 unexplained branch gaps |
+| Marking-orientation probe | PASS | 113,699 strips, 0 diagonal, 44 chevrons all clean — unchanged |
+| Guardrail probe | PASS | 211 runs / 88 gaps / 52 zone openings, 0 unexplained gaps, 0 doubled, 0 inside asphalt — unchanged pass |
+| Junction-finishing probe | 6 failures (unchanged set) | same 5 steering-rate data kinks + 1 collision-step family as the base commit, none touched by this pass |
+| Lateral-junction probe | PASS | 56 mouths / 20,185 pts, 0 holes/steps/rails-across, duplicates 22 (ratchet 60) — unchanged |
+| Road-surface probe | PASS | refinement + dash phase, 0 errors |
+| osm-validate | unchanged | 22 overlap / 247 ramp-drive / 60 smoothness failures — identical counts to the base commit; pre-existing data families |
+| Traffic runtime smoke | PASS | 20 s, 23 active vehicles, finite positions |
+| Performance | no regression | map build 6.89 s vs base 6.94 s on this container (container fails the absolute limits identically at base, documented pre-existing) |
+| End-to-end | PASS | 34/34 checks, no console errors across the whole session |
+
+Cache versions bumped per convention: `map.js?v=20260715g`, service worker
+`shutoko-nights-v18`.
+
+### Remaining open issues (unchanged, out of scope for this pass)
+
+Same as documented below: the steering-rate route-data kinks
+(`r6_0`/`c1_2`, `ramp_18`, `ramp_21`, `ramp_27`, `ramp_46`), the
+`ramp_0`/`r1_3` collision-height overlap family, and PA access lanes
+(disabled, pending their own rebuild). None of these are merge-marking
+or merge-guardrail defects — they are route-data/vertical-crossing
+issues explicitly out of scope for this pass.
+
+---
+
+# Junction Visual Finishing Status (previous pass)
+
 - Date: 2026-07-15
 - Branch: `claude/junction-markings-rails-cleanup-33r2nb`
 - Base: `origin/main` at `8e4467a` (after the junction-merge-finishing PR #19)

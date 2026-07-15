@@ -1529,38 +1529,23 @@ export class HighwayMap {
           return hLo <= hHi ? { host: [hLo, hHi], branch: [bLo, bHi] } : null;
         };
 
-        // Openings are gated on crossOuter, not unionOuter: a wing that
-        // has already peeled above (or dived below) the host edge keeps
-        // the host's solid line and rail — only a one-surface union past
-        // the edge hands the boundary to the zone.
+        // Marking width uses unionOuter, not crossOuter, INSIDE the
+        // crossable run: every row in [c0,c1] already cleared shelfFree
+        // (<=0.35 m, the same test `merged`/`continuous` used to admit it
+        // here), so crossOuter's extra 0.18 m lip veto can no longer be
+        // distinguishing a genuine wing (that would already have failed
+        // shelfFree and never reached this range) — on a shallow, truly
+        // level merge taper it just re-tests noise in the dy interpolation
+        // and flickers crossOuter back to hostHalf for stretches of rows
+        // even while the paved union stays smoothly wide. That flicker
+        // fragmented the open/dash interval down to a short window near
+        // one end of the true taper, leaving the rest of the merge lane
+        // marked by neither the host's suppressed edge nor a dash — the
+        // gap the branch's own (still-drawn) edge line then filled,
+        // duplicating/pre-empting the boundary tens of metres early.
         const crossable = rangeIn(() => true);
-        const open = rangeIn((r) => r.crossOuter > r.hostHalf + 0.25);
-        const dash = rangeIn((r) => r.crossOuter - laneEdge >= 2.0);
-        // Outer rail hand-off: rows are ordered from the mouth end outward,
-        // so the FIRST row with a real wing marks the single tip boundary —
-        // tailward of it the host rail owns the edge (branch rail off),
-        // outward of it the branch's outer edge is the union's edge and its
-        // rail is forced on through the whole engaged region (the old point
-        // probe made it flicker with every small width change).
-        let tipIndex = -1;
-        for (let i = 0; i < rows.length; i += 1) {
-          if (rows[i].unionOuter >= rows[i].hostHalf + 0.6) { tipIndex = i; break; }
-        }
-        const lastEngaged = rows.length - 1;
-        const branchInterval = (a, b) => [Math.min(rows[a].bS, rows[b].bS), Math.max(rows[a].bS, rows[b].bS)];
-        const outerOn = tipIndex >= 0 ? { branch: branchInterval(tipIndex, lastEngaged) } : null;
-        const outerOff = tipIndex > 0 ? { branch: branchInterval(0, tipIndex - 1) } : (tipIndex < 0 ? { branch: branchInterval(0, lastEngaged) } : null);
-        const innerOff = range((r) => r.innerEdge < r.hostHalf + 0.9 && Math.abs(r.dy) < 2.5);
-        // Host rail intervals are BOUND TO THE SAME TIP ROW as the branch
-        // outer rail, so the hand-off happens at one envelope station by
-        // construction (on a slowly-forking equal-width branch, separate
-        // width thresholds landed nearly 100 m apart, leaving the edge
-        // unguarded between them). Mouth-side of the tip the host owns the
-        // edge (forced on through the glued tail — the yield probe would
-        // otherwise keep it dead); outward of the tip the opening is the
-        // branch rail's.
-        let hostRailOpen = null;
-        let hostRailOn = null;
+        const open = rangeIn((r) => r.unionOuter > r.hostHalf + 0.25);
+        const dash = rangeIn((r) => r.unionOuter - laneEdge >= 2.0);
         // THE RAIL-BLOCKED BAND — one physical rule for every opening:
         // the host rail (footprint laterals [hostHalf - 0.42, hostHalf])
         // must not stand where the branch pavement reaches under it
@@ -1588,6 +1573,63 @@ export class HighwayMap {
         const bandInterval = band
           ? [Math.min(rows[band.from].hU, rows[band.to].hU) - 2, Math.max(rows[band.from].hU, rows[band.to].hU) + 2]
           : null;
+        // Outer rail hand-off: the branch's own outer rail must switch ON
+        // no later than the mouth-ward edge of the SAME rail-blocked band
+        // that opens the host's rail (band.from) — both derive from one
+        // physical row, so the hand-off happens at one envelope station
+        // by construction. Deriving the branch tip from a separate,
+        // stricter threshold (unionOuter past hostHalf by a full 0.6 m,
+        // rather than railBlocked's 0.15 m) left a station range where the
+        // host's rail had already opened (a real conflict, correctly
+        // suppressed) but the branch's own outer rail had not yet turned
+        // on — an unguarded 20-40 m gap along the outer edge with no rail
+        // on either route. Where no band reaches the crossable interior
+        // (no genuine conflict anywhere near the mouth) the old
+        // union-width scan still marks the tip.
+        let tipIndex = -1;
+        if (band) {
+          tipIndex = band.from;
+        } else {
+          for (let i = 0; i < rows.length; i += 1) {
+            if (rows[i].unionOuter >= rows[i].hostHalf + 0.6) { tipIndex = i; break; }
+          }
+        }
+        const lastEngaged = rows.length - 1;
+        const branchInterval = (a, b) => [Math.min(rows[a].bS, rows[b].bS), Math.max(rows[a].bS, rows[b].bS)];
+        // Forced-on pieces, not one blind span to lastEngaged: on a route
+        // whose data kinks back near the host well beyond the merge (the
+        // documented steering-snap families), a second, disjoint engaged
+        // stretch can appear deep in the approach with a genuinely CLEAR
+        // gap in between (neither railBlocked nor a real wing) — forcing
+        // "on" straight through that gap put the branch's outer rail
+        // right where the host's own independently-visible rail already
+        // stands nearby, doubling up (measured: a genuinely clear 2-row
+        // gap is exactly where the host's own rail flickers back on for
+        // one sample, so even bridging a short gap re-created the
+        // doubling — every clear row splits the run and the per-frame
+        // probe decides in between). railBlocked alone (not OR'd with a
+        // bare width threshold) is the engagement test: its own dy gate
+        // already excludes a wing that has genuinely separated onto
+        // another deck, which a plain union-width check does not.
+        const engaged = railBlocked;
+        const onPieces = [];
+        if (tipIndex >= 0) {
+          let runFrom = null;
+          for (let i = tipIndex; i <= lastEngaged; i += 1) {
+            if (engaged(rows[i])) {
+              if (runFrom === null) runFrom = i;
+            } else if (runFrom !== null) {
+              onPieces.push(branchInterval(runFrom, i - 1));
+              runFrom = null;
+            }
+          }
+          if (runFrom !== null) onPieces.push(branchInterval(runFrom, lastEngaged));
+        }
+        const outerOn = tipIndex >= 0 ? { branch: branchInterval(tipIndex, lastEngaged), pieces: onPieces } : null;
+        const outerOff = tipIndex > 0 ? { branch: branchInterval(0, tipIndex - 1) } : (tipIndex < 0 ? { branch: branchInterval(0, lastEngaged) } : null);
+        const innerOff = range((r) => r.innerEdge < r.hostHalf + 0.9 && Math.abs(r.dy) < 2.5);
+        let hostRailOpen = null;
+        let hostRailOn = null;
         if (crossable && bandInterval) {
           hostRailOpen = bandInterval;
           // Force the rail ON through the covered interior (where the yield
@@ -1638,6 +1680,7 @@ export class HighwayMap {
           hostRailOpen,
           hostRailOn,
           branchOuterRailOn: outerOn ? outerOn.branch : null,
+          branchOuterRailOnPieces: outerOn ? outerOn.pieces : null,
           branchOuterRailOff: outerOff ? outerOff.branch : null,
           branchInnerRailOff: innerOff ? innerOff.branch : null,
           hostContains(interval, h) {
@@ -1665,7 +1708,11 @@ export class HighwayMap {
         this._addRailZone(host, side, zone.hostRailOpen, 'off');
         this._addRailZone(host, side, zone.hostRailOn, 'on');
         this._addRailZone(route, branchHostward, zone.branchInnerRailOff, 'off');
-        this._addRailZone(route, -branchHostward, zone.branchOuterRailOn, 'on');
+        if (zone.branchOuterRailOnPieces) {
+          for (const piece of zone.branchOuterRailOnPieces) this._addRailZone(route, -branchHostward, piece, 'on');
+        } else {
+          this._addRailZone(route, -branchHostward, zone.branchOuterRailOn, 'on');
+        }
         this._addRailZone(route, -branchHostward, zone.branchOuterRailOff, 'off');
       }
     }
@@ -4280,13 +4327,30 @@ export class HighwayMap {
     // gore opens, the branch's host-side edge line reappears naturally and
     // becomes the ramp-side gore line. Dash phase is untouched — clipping
     // skips stations, never re-bases route distance.
-    const mouthPaintLat = (latFn, width) => {
+    // edgeSide identifies a call as painting the route's OWN edge line on
+    // that side (1 or -1), so it can be handed to the zone: once this
+    // route is inside a junction zone's crossable span, the host-ward
+    // edge is the zone's dash/suppress boundary to draw, not the branch's
+    // own line. The per-frame coplanar clip below (_mouthClipAt) only
+    // hides paint once the branch cross-section is fully coplanar-covered,
+    // which on a shallow merge taper lags the zone's own "one drivable
+    // union" verdict by tens of metres — the branch keeps drawing a
+    // "ghost" edge line deep into (and past) the merge, duplicating or
+    // pre-empting the host's authoritative boundary. One owner per
+    // boundary: inside crossable, the zone always wins on that side.
+    const mouthPaintLat = (latFn, width, edgeSide = null) => {
       if (this.options.junctionMouthSurfaces === false) return latFn;
       if (!route.junctionMouths) return latFn;
       const margin = width * 0.5 + 0.3;
       return (frame) => {
         const lat = latFn(frame);
         if (lat === null) return null;
+        if (edgeSide !== null && route._zonesAsBranch) {
+          for (const zone of route._zonesAsBranch) {
+            if (!zone.crossable || edgeSide !== zone.hostwardSign) continue;
+            if (frame.distance >= zone.crossable.branch[0] - 1 && frame.distance <= zone.crossable.branch[1] + 1) return null;
+          }
+        }
         const jx = this._mouthClipAt(route, frame);
         if (!jx) return lat;
         if (jx.skip) return null;
@@ -4337,7 +4401,7 @@ export class HighwayMap {
       this._markingTag = 'edgeLine';
       for (const [from, to] of kept) {
         this._paintStrip(route, 'marking', from, to,
-          mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
+          mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16, side), 0.16);
       }
       if (route.bidirectional) {
         this._paintStrip(route, 'amber', 0, route.length,
