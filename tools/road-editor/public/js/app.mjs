@@ -41,6 +41,7 @@ const app = {
 };
 window.__app = app; // console debugging aid
 window.__ui = ui;
+import('./geometry.mjs').then((g) => { window.__geom = g; });
 
 const LAYER_DEFS = [
   ['body', 'Corpo strada', '#8ea3c4'],

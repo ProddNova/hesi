@@ -81,3 +81,17 @@ All routes are one-way carriageways travelled from `points[0]` to
 nodes — this graph is the ground truth for what connects to what.
 
 Data © OpenStreetMap contributors, ODbL 1.0.
+
+## road-editor/ — manual centreline editor
+
+Local, browser-based editor for hand-correcting individual road curves via
+`data/route-overrides.json` (stable v2 anchors; production data untouched).
+The fairing mathematics is shared with `build-smoothed-routes.mjs`
+(`road-editor/lib/fairing.mjs`), so its live preview IS the generator output.
+
+```
+node tools/road-editor/server.mjs          # → http://127.0.0.1:8123/
+node --test 'tools/road-editor/test/*.test.mjs'
+```
+
+Full guide: [ROAD_EDITOR.md](../ROAD_EDITOR.md).

@@ -19,6 +19,7 @@ export const state = new EditorState({
   storageKey: 'roadEditor:draft',
 });
 window.__state = state;
+window.__edit = { schedulePreview: (...a) => schedulePreview(...a), syncPreviews: () => syncPreviews() };
 
 const DEFAULT_INFLUENCE = 45;
 const DEFAULT_WEIGHT = 24;
