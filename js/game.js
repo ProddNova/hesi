@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260715a';
+import * as MapModule from './map.js?v=20260715b';
 import * as PhysicsModule from './physics.js?v=20260713a';
 import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
@@ -83,7 +83,8 @@ class ShutokoNights {
   }
   buildWorld(){
     const mapBuildStarted=performance.now();
-    try{this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium'});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons (debug/screenshot A/B only)
+    try{const legacyMouths=typeof location!=='undefined'&&/[?&]legacyMouths=1/.test(location.search);this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor

@@ -19,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(ROOT, '.devtests', 'shots');
 await mkdir(OUT, { recursive: true });
-const SUFFIX = process.argv[2] ? `-${process.argv[2]}` : '';
+const LEGACY = process.argv.includes('--legacy'); // pre-rebuild full ribbons (?legacyMouths=1)
+const suffixArg = process.argv.slice(2).find((arg) => !arg.startsWith('--'));
+const SUFFIX = suffixArg ? `-${suffixArg}` : '';
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 
 const server = createServer(async (req, res) => {
@@ -43,7 +45,7 @@ await context.route('https://cdn.jsdelivr.net/**', async (route) => {
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());
 page.on('pageerror', (error) => console.error('pageerror:', String(error)));
-await page.goto(`http://127.0.0.1:${port}/`);
+await page.goto(`http://127.0.0.1:${port}/${LEGACY ? '?legacyMouths=1' : ''}`);
 await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 60000 });
 await page.tap('#new-game-button');
 await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeout: 8000 });
@@ -73,34 +75,39 @@ for (const junction of cases) {
     let host;
     try { branch = map.getRoute(c.branch); host = map.getRoute(c.host); } catch { return { missing: true }; }
     const stationAt = (s) => (c.which === 'start' ? s : branch.length - s);
+    // mouth throat middle (where surfaces are joined) + the gore/split area
+    const throatSample = map._sampleCenter(branch, stationAt(c.branchS * 0.45), 1);
     const goreSample = map._sampleCenter(branch, stationAt(c.branchS), 1);
     const hostProjection = map._projectToRoute(host, goreSample.position);
+    const throatProjection = map._projectToRoute(host, throatSample.position);
     const gore = goreSample.position.clone().lerp(hostProjection.point, 0.5);
-    const tangent = hostProjection.tangent.clone();
+    const throat = throatSample.position.clone().lerp(throatProjection.point, 0.5);
+    const tangent = throatProjection.tangent.clone();
     if (c.which === 'end') tangent.multiplyScalar(1); // travel direction of the host
     return {
       gore: { x: gore.x, y: gore.y, z: gore.z },
+      throat: { x: throat.x, y: throat.y, z: throat.z },
       tangent: { x: tangent.x, y: tangent.y, z: tangent.z },
       heading: Math.atan2(tangent.x, tangent.z),
     };
   }, junction);
   if (setup.missing) { console.log(`SKIP ${junction.name}`); continue; }
 
-  // 1. elevated oblique — looking along the host through the mouth
+  // 1. elevated oblique — from behind the throat, looking through mouth + gore
   await page.evaluate(({ setup: s }) => {
     const g = window.shutoko;
     if (!g.debug.noclip) g.setNoclip(true);
-    g.debug.position.set(s.gore.x - s.tangent.x * 65, s.gore.y + 20, s.gore.z - s.tangent.z * 65);
+    g.debug.position.set(s.throat.x - s.tangent.x * 55, s.throat.y + 17, s.throat.z - s.tangent.z * 55);
     g.debug.yaw = s.heading;
-    g.debug.pitch = -0.34;
+    g.debug.pitch = -0.3;
   }, { setup });
   await page.waitForTimeout(900);
   await page.screenshot({ path: join(OUT, `J-${junction.name}-oblique${SUFFIX}.png`) });
 
-  // 2. top-down — straight above the gore
+  // 2. top-down — above the mouth throat (union zone), gore at frame edge
   await page.evaluate(({ setup: s }) => {
     const g = window.shutoko;
-    g.debug.position.set(s.gore.x, s.gore.y + 78, s.gore.z);
+    g.debug.position.set(s.throat.x + s.tangent.x * 12, s.throat.y + 52, s.throat.z + s.tangent.z * 12);
     g.debug.yaw = s.heading;
     g.debug.pitch = -1.45;
   }, { setup });
