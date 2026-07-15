@@ -65,14 +65,15 @@ export const CITY_BUILDING_HEIGHT_SCALE = 1.8;
 // the decel/accel legs and descent spirals _defineServiceAreas builds around
 // each parking area — are broken and will be rebuilt in their own pass.
 // This flag removes them from the RUNTIME map only: no route is registered,
-// so their asphalt, collision corridor, guardrails/wall segments, markings
-// and traffic connections all disappear together. The raw (data/routes.js)
-// and smoothed (data/routes-smoothed.js) network data are untouched; set the
-// flag to false (or pass options.paAccessLanes = true) to restore every lane.
-// EXCEPTION — garage connector: the lane of the PA that hosts the player
-// garage (Shibaura, hasGarage in data) is kept, because the garage flow
-// drives through that lot (spawn/tow/exit land beside it on R11 and the
-// player must be able to drive in and out of the lot).
+// so their asphalt, collision corridor, guardrails/wall segments, markings,
+// minimap polyline and traffic connections all disappear together. The raw
+// (data/routes.js) and smoothed (data/routes-smoothed.js) network data are
+// untouched; set the flag to false (or pass options.paAccessLanes = true) to
+// restore every lane. This now includes the garage connector (Shibaura,
+// hasGarage in data): the lot and its dressing stay, but the lane is gone,
+// so the garage flow never drives it — spawn/tow/exit already land on the
+// R11 mainline (initialSpawn) and the ENTER GARAGE trigger relocates to the
+// mainline shoulder beside the lot (see _defineServiceAreas).
 const PA_ACCESS_LANES_DISABLED = true;
 
 function clamp(value, min, max) {
@@ -972,16 +973,25 @@ export class HighwayMap {
       center.y = elevation;
       const tangent = sample.tangent.clone();
 
-      // PA access lanes are temporarily disabled (see PA_ACCESS_LANES_DISABLED)
-      // except the garage connector: the lot itself stays (dressing, refuel,
+      // PA access lanes are temporarily disabled (see PA_ACCESS_LANES_DISABLED),
+      // the garage connector included: the lot itself stays (dressing, refuel,
       // proximity, its own wall collision), but no access route, corridor,
-      // rails or edges are created for it.
-      const laneDisabled = (this.options.paAccessLanes === true ? false : PA_ACCESS_LANES_DISABLED)
-        && !def.hasGarage;
+      // rails or edges are created for it. The garage stays usable without
+      // its lane: the ENTER GARAGE trigger point (area.garageEntrance, read
+      // by getGarageTransition / getServiceAreaProximity / the minimap
+      // marker) moves onto the host carriageway's shoulder beside the lot,
+      // while the physical building keeps its lot anchor (garageLotAnchor).
+      const laneDisabled = this.options.paAccessLanes === true ? false : PA_ACCESS_LANES_DISABLED;
       if (laneDisabled) {
         const area = this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, null);
         area.sideSign = sideSign;
         area.accessDisabled = true;
+        if (area.hasGarage) {
+          const shoulder = sample.position.clone()
+            .addScaledVector(sample.normal, sideSign * Math.max(1.2, route.halfWidth - 1.8));
+          shoulder.y = sample.position.y + 0.15;
+          area.garageEntrance = shoulder;
+        }
         continue;
       }
 
@@ -1157,9 +1167,13 @@ export class HighwayMap {
       refuelPosition: center.clone().addScaledVector(outward, def.width * 0.18).addScaledVector(tangent, def.length * 0.22),
       bankRadius: Math.min(def.width, def.length) * 0.44,
     };
-    area.garageEntrance = def.hasGarage
+    // The lot-local anchor the garage BUILDING is dressed around; the
+    // functional entrance trigger (garageEntrance) defaults to it but moves
+    // to the mainline shoulder while the access lane is disabled.
+    area.garageLotAnchor = def.hasGarage
       ? center.clone().addScaledVector(outward, def.width * 0.46).addScaledVector(tangent, -14)
       : null;
+    area.garageEntrance = area.garageLotAnchor ? area.garageLotAnchor.clone() : null;
     this.serviceAreas.push(area);
     return area;
   }
@@ -4987,17 +5001,21 @@ export class HighwayMap {
   }
 
   _buildGarageExterior(area) {
+    // Building, shutter and fascia sign stay on the LOT anchor; the pulsing
+    // transition ring + beacon follow the functional entrance trigger, which
+    // sits on the mainline shoulder while the access lane is disabled.
+    const lotAnchor = area.garageLotAnchor || area.garageEntrance;
     const frontNormal = area.normal.clone();
     const orientation = yawQuaternion(frontNormal);
-    const buildingPos = area.garageEntrance.clone().addScaledVector(frontNormal, 18);
+    const buildingPos = lotAnchor.clone().addScaledVector(frontNormal, 18);
     buildingPos.y = area.elevation + 6.2;
     this._instance(buildingPos, vec(48, 12.4, 34), orientation, null, 'box:garage');
 
-    const shutterPos = area.garageEntrance.clone().addScaledVector(frontNormal, 0.8);
+    const shutterPos = lotAnchor.clone().addScaledVector(frontNormal, 0.8);
     shutterPos.y = area.elevation + 3.45;
     this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:vending');
     const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', 17, 3.25, true);
-    const signPos = area.garageEntrance.clone().addScaledVector(frontNormal, 0.45);
+    const signPos = lotAnchor.clone().addScaledVector(frontNormal, 0.45);
     signPos.y = area.elevation + 8.5;
     sign.position.copy(signPos);
     sign.quaternion.copy(yawQuaternion(frontNormal.clone().multiplyScalar(-1)));
