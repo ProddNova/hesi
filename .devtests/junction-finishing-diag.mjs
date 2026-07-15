@@ -125,15 +125,19 @@ for (const spec of CASES) {
   // union (branch overlapping) where that solid line lies between the
   // host's outer lane edge and the union's outer edge = a solid line
   // through the crossable zone.
+  const zoneForPaint = (branch._zonesAsBranch || []).find((z) => z.host === host && z.which === spec.which);
   let solidAcross = 0;
+  let candidates = 0;
   for (const r of rows) {
     const unionOuter = Math.max(r.hostHalf, side * r.outer);
-    if (side * r.outer > r.hostHalf - 0.2 && Math.abs(r.dy) < 0.5) {
-      const lineLat = r.hostHalf - 0.75;
-      if (lineLat < unionOuter - 0.4) solidAcross += 1;
+    if (side * r.outer > r.hostHalf + 0.25 && Math.abs(r.dy) < 0.5
+      && (side * r.outer) - branch.halfWidth * 2 < r.hostHalf - 0.3) {
+      candidates += 1;
+      const suppressed = zoneForPaint && zoneForPaint.hostContains(zoneForPaint.hostEdgeSuppress, r.hostS);
+      if (!suppressed) solidAcross += 1;
     }
   }
-  console.log(`  MARKINGS: host solid edge line inside the mergeable union at ${solidAcross}/${rows.length} sampled stations`);
+  console.log(`  MARKINGS: host solid edge line crossing the mergeable union at ${solidAcross}/${candidates} crossable stations (0 = zone ownership works)`);
 
   // --- 4. rail suppression intervals + terminal steps ------------------
   const railIntervals = (route, sideSign, from, to) => {

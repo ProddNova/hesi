@@ -3277,17 +3277,39 @@ export class HighwayMap {
     }
   }
 
-  /** Paint dashes from one route-absolute phase; frames/chunks never reset it. */
-  _paintDashedStrip(route, materialName, lateralAt, width, period, dashLength, phase = 0) {
-    const first = Math.ceil((-dashLength * 0.5 - phase) / period);
-    const last = Math.floor((route.length + dashLength * 0.5 - phase) / period);
+  /**
+   * Paint dashes from one route-absolute phase; frames/chunks never reset
+   * it, and a clipped range (junction-zone dashed boundaries) never
+   * re-bases it — dashes inside [sFrom, sTo] land exactly where the
+   * full-route pattern would put them.
+   */
+  _paintDashedStrip(route, materialName, lateralAt, width, period, dashLength, phase = 0, sFrom = 0, sTo = null) {
+    const end = sTo === null ? route.length : Math.min(sTo, route.length);
+    const from = Math.max(0, sFrom);
+    const first = Math.ceil((from - dashLength * 0.5 - phase) / period);
+    const last = Math.floor((end + dashLength * 0.5 - phase) / period);
     for (let index = first; index <= last; index += 1) {
       const center = phase + index * period;
-      this._paintStrip(route, materialName,
-        Math.max(0, center - dashLength * 0.5),
-        Math.min(route.length, center + dashLength * 0.5),
-        lateralAt, width);
+      const lo = Math.max(from, center - dashLength * 0.5);
+      const hi = Math.min(end, center + dashLength * 0.5);
+      if (hi - lo < 0.05) continue;
+      this._paintStrip(route, materialName, lo, hi, lateralAt, width);
     }
+  }
+
+  /**
+   * Chainage pieces of an unwrapped zone interval on this route (closed
+   * routes: an interval crossing station 0 splits into two pieces).
+   */
+  _zoneIntervalPieces(route, interval) {
+    if (!interval) return [];
+    let [a, b] = interval;
+    if (b <= a) return [];
+    if (!route.closed) return [[clamp(a, 0, route.length), clamp(b, 0, route.length)]];
+    const start = wrap(a, route.length);
+    const span = Math.min(b - a, route.length);
+    if (start + span <= route.length) return [[start, start + span]];
+    return [[start, route.length], [0, start + span - route.length]];
   }
 
   /**
@@ -3830,12 +3852,45 @@ export class HighwayMap {
     for (const offset of dividerOffsets) {
       this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14), 0.14, dashStep, dashLength, 6);
     }
+    // Edge lines with junction-zone marking ownership. Where this route
+    // HOSTS a merge/diverge, the zone owns the boundary: the solid edge
+    // line is suppressed over the zone's crossable opening (painted only
+    // on the complement intervals — exact chainage clipping, no per-frame
+    // dropouts) and a dashed lane-separation line marks the mergeable
+    // boundary at the host's outer lane edge. The branch's own edge lines
+    // are already clipped to its drawn deck (mouthPaintLat), so exactly
+    // one route paints each visible boundary.
     for (const side of [1, -1]) {
-      this._paintStrip(route, 'marking', 0, route.length,
-        mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
+      const suppress = [];
+      for (const zone of route._zonesAsHost || []) {
+        if (zone.side !== side || !zone.hostEdgeSuppress) continue;
+        suppress.push(...this._zoneIntervalPieces(route, zone.hostEdgeSuppress));
+      }
+      suppress.sort((a, b) => a[0] - b[0]);
+      const kept = [];
+      let cursor = 0;
+      for (const [from, to] of suppress) {
+        if (from > cursor + 0.5) kept.push([cursor, from]);
+        cursor = Math.max(cursor, to);
+      }
+      if (route.length > cursor + 0.5) kept.push([cursor, route.length]);
+      for (const [from, to] of kept) {
+        this._paintStrip(route, 'marking', from, to,
+          mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
+      }
       if (route.bidirectional) {
         this._paintStrip(route, 'amber', 0, route.length,
           () => side * (route.medianWidth * 0.5 + 0.28), 0.13);
+      }
+    }
+    // Dashed merge/diverge boundary: a slightly wider, denser broken line
+    // along the host's outer lane edge through each zone's crossable
+    // interval, ending where the merge lane stops being usable. Phase is
+    // route-absolute like every other dash.
+    for (const zone of route._zonesAsHost || []) {
+      if (!zone.dash) continue;
+      for (const [from, to] of this._zoneIntervalPieces(route, [zone.dash.from, zone.dash.to])) {
+        this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
       }
     }
 
