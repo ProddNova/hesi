@@ -4,7 +4,10 @@
  * of the surface-level lateral-junction-probe (holes / coplanar doubles /
  * height steps / rails across mouths — run both).
  *
- * Per junction zone (the shared representation in map.junctionZones):
+ * Per junction zone (the shared representation in map.junctionZones —
+ * row crossability is the zone's own classification, which in turn is the
+ * renderer's mouth-clip decision: every check below reads the same record
+ * the asphalt, markings, rails and physics consume):
  *
  *  1. TANGENT MISMATCH — branch lane path vs host direction at the
  *     transfer point must be near-parallel (< 3 deg), and along the
@@ -78,7 +81,7 @@ for (const zone of map.junctionZones) {
   if (transferDeg > transferLimit) fail(label, `tangent mismatch ${transferDeg.toFixed(1)} deg at transfer`);
   let zoneDeg = 0; // reported only — a curved exit legitimately bends away
   for (const row of zone.samples) {
-    if (!(Math.abs(row.dy) < 1.5 && row.innerEdge < row.hostHalf - 0.3)) continue;
+    if (!row.crossable) continue;
     const bTan = map._frameAt(branch, row.bS).tangent;
     const hTan = map._frameAt(host, map._normalizeDistance(host, row.hS)).tangent;
     zoneDeg = Math.max(zoneDeg, deg(Math.acos(Math.min(1, Math.abs(bTan.dot(hTan))))));
@@ -93,7 +96,7 @@ for (const zone of map.junctionZones) {
   if (branch.kind !== 'service') {
     const rel = [];
     for (const row of zone.samples) {
-      if (!(Math.abs(row.dy) < 1.5 && row.innerEdge < row.hostHalf - 0.3)) continue;
+      if (!row.crossable) continue;
       const bTan = map._frameAt(branch, row.bS).tangent;
       const hTan = map._frameAt(host, map._normalizeDistance(host, row.hS)).tangent;
       let dh = Math.atan2(bTan.x, bTan.z) - Math.atan2(hTan.x, hTan.z);
@@ -114,14 +117,13 @@ for (const zone of map.junctionZones) {
 
   // --- 3./4. marking ownership ---------------------------------------------
   for (const row of zone.samples) {
-    const crossableRow = Math.abs(row.dy) < 1.5 && row.innerEdge < row.hostHalf - 0.3;
-    if (!crossableRow) continue;
+    if (!row.crossable) continue;
     const suppressed = zone.hostContains(zone.hostEdgeSuppress, row.hS);
-    if (row.unionOuter > row.hostHalf + 0.3 && !suppressed) {
+    if (row.crossOuter > row.hostHalf + 0.3 && !suppressed) {
       summary.solidAcross += 1;
       if (VERBOSE) console.log(`  solid-line ${label} hS=${row.hS.toFixed(0)}`);
     }
-    if (row.unionOuter - row.hostHalf >= 1.2 && !suppressed) {
+    if (row.crossOuter - row.hostHalf >= 1.2 && !suppressed) {
       summary.duplicateBoundary += 1;
       if (VERBOSE) console.log(`  duplicate-boundary ${label} hS=${row.hS.toFixed(0)}`);
     }
@@ -139,12 +141,12 @@ for (const zone of map.junctionZones) {
   }
 
   // --- 6. collision continuity across the union ------------------------------
-  const rows = zone.samples.filter((r) => Math.abs(r.dy) < 1.5 && r.innerEdge < r.hostHalf - 0.3);
+  const rows = zone.samples.filter((r) => r.crossable);
   for (let k = 0; k < rows.length; k += Math.max(1, Math.floor(rows.length / 6))) {
     const row = rows[k];
     const hFrame = map._frameAt(host, map._normalizeDistance(host, row.hS));
     let prevY = null;
-    for (let lat = 0; lat <= row.unionOuter - 0.6; lat += 0.6) {
+    for (let lat = 0; lat <= row.crossOuter - 0.6; lat += 0.6) {
       const point = map._deckPoint(hFrame, side * lat);
       point.y += 0.5;
       const info = map.getRoadInfo(point);

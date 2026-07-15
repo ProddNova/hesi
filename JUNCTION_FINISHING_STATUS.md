@@ -1,135 +1,114 @@
 # Junction Finishing Checkpoint Status
 
 - Date: 2026-07-15
-- Branch: `claude/junction-merge-finishing`
-- Base: `origin/main` at `6c1cf18`
-- Pre-rescue branch head: `a830dd6`
+- Branch: `claude/junction-merge-trajectory-edn20k`
+- Base: `origin/main` at `6c1cf18`, continuing `claude/junction-merge-finishing`
+  from checkpoint `7f10cfc`
 
-## Checkpoint purpose
+## Phase 4: one authoritative crossability (this checkpoint)
 
-This is a rescue checkpoint of the junction-finishing work left in the
-worktree after the previous session ended. It records the implementation as
-found, the two narrow post-Phase-3 acceptance fixes, and the current validation
-state. It is not a claim that every junction-finishing acceptance criterion is
-complete.
+The `7f10cfc` checkpoint left the focused probe at 96 failures. Classification
+against the actual geometry showed one generic root cause behind 85 of them
+(collision-height switches across ~44 junctions): three subsystems each had
+their own notion of "these decks are one surface":
 
-No new visual-polish pass was started during the rescue. Vertical crossings,
-global guardrails, PA access-road design, terrain, elevation, and the road
-editor remain outside this checkpoint's repair scope.
+- junction zones re-derived continuity as `|dy| < 1.5 m`;
+- the rendered mouth union merges decks only inside its coplanar strip
+  (`|dy| < 0.18`) / apron (`0.35`) rules; and
+- physics (`getRoadInfo`) scored whole-deck corridors with no knowledge of
+  the drawn union at all.
 
-## Preserved work
+The same too-loose zone interval also drove `hostEdgeSuppress`, `dash` and the
+rail openings, so paint and rails were reconfigured across stations where the
+renderer draws two separate decks. The remaining 11 failures were
+steering-rate outliers in the documented route-data kink families.
 
-The branch already contained four ordered commits:
+### What changed
 
-1. `fbae266` — diagnostic and representative before/after SVGs.
-2. `5de90bf` — lane-aligned endpoint anchoring, plan-space trajectory blend,
-   junction-zone records, and side-correct traffic lane mapping.
-3. `3c16ba5` — zone-owned host edge suppression and dashed merge/diverge
-   boundaries.
-4. `a830dd6` — zone-driven visual rail ownership plus tapered/capped rail
-   terminals.
+All changes derive every consumer from the renderer's own mouth-clip decision:
 
-The rescued uncommitted implementation adds:
+1. `_mouthClipAt` now exposes its removed (coplanar, host-covered) strip and
+   an overlap gauge (covered band + endpoint dy/lateral lines) on the frame.
+   Its apron path also no longer swallows STRADDLING sections (a branch wider
+   than its host, e.g. `ramp_46` over `ramp_27`): those fall through to the
+   exact covered-strip clip, which removes a previously z-fighting full-width
+   coplanar ribbon (lateral-junction duplicate pairs: 25 → 22).
+2. Junction-zone rows store the clip's verdict (`merged`, `removed`,
+   `covered`, `dyEnds`, `crossOuter`). Row crossability = a removed strip
+   exists AND the crossing band (covered laterals on the zone's side of the
+   host centreline) stays under the renderer's one-level band (0.35 m). The
+   one-surface union extent `crossOuter` stops at the host edge when the wing
+   has already peeled above / dived below it. Zone intervals (`crossable`,
+   `hostEdgeSuppress`, `dash`, rail openings) now come from the
+   MOUTH-CONNECTED component of crossable rows, so a disjoint qualifying
+   stretch further out can no longer smear markings across a non-crossable
+   span.
+3. Physics surface ownership (`_surfaceDefersToHost`, consulted by
+   `_corridorsAt`): inside the host-covered band, a branch corridor defers to
+   the host wherever its deck is at/below the host's top surface (removed
+   strip, buried sheet) or hovers within the one-level band on a
+   partially-merged section (ghost slivers). A full-width ribbon above the
+   host is a real second deck and keeps its corridor. Physics therefore rides
+   the same deck the renderer draws — chase screenshots at the `ramp_12` gore
+   now resolve the district as the HOST (`ROUTE 1 HANEDA`), not the ramp.
+4. The focused probe reads `row.crossable`/`row.crossOuter` (the shared zone
+   record) instead of re-deriving `|dy| < 1.5`; every gate value is unchanged.
+   The diagnostic's marking summary reads the same records.
 
-- a second glue-line lead point in `_anchorEndpoint`, pinning the open
-  Catmull-Rom endpoint tangent to the host direction; and
-- host rail open/on boundaries tied to the same sampled envelope tip as the
-  branch outer rail, removing the large equal-width hand-off gap.
+### Probe result: 96 → 6
 
-The untracked focused probe and all six Phase-2/Phase-3 SVG outputs were also
-preserved. The Phase-2 and Phase-3 SVGs are byte-identical to their matching
-Phase-1 SVGs: the diagnostic SVG renderer does not draw the later
-zone-controlled marking/rail behavior, so these files are milestone provenance,
-not independent visual proof.
+`zones=58 transfers=67; transfer tangent 2.73°, steering 5.5°/8m (data-kink
+families excluded below), rail hand-off 2.0 m, collision step 0.33 m max at
+the one excluded station, transfer excess 1.45 m.`
 
-## What is complete
+All 6 remaining failures are in families documented as outside this pass:
 
-- The project remains a static browser application with no separate build
-  step. The modified map and focused probe parse, `HighwayMap` constructs, and
-  the full browser session boots and runs.
-- Branch trajectories are anchored to the host lane grid. Current acceptance
-  measurements show a worst transfer tangent mismatch of `2.73°` and worst
-  sampled traffic hand-off excess displacement of `1.45 m`.
-- The host/branch marking ownership mechanism is active. The focused probe
-  finds zero solid host-edge stations across mergeable openings and zero
-  duplicate-boundary stations.
-- Zone rail ownership and visual terminal treatment are active. The rescued
-  same-tip boundary fix reduces the measured worst host/branch rail hand-off
-  to `2.0 m`.
-- Existing lateral-junction surface, adaptive road-surface, traffic runtime,
-  and end-to-end regressions remain green.
+- 5 steering-rate outliers (`r6_0` 4.7°, `ramp_18`/`ramp_21` 5.5°, `ramp_27`
+  7.0°, `ramp_46` 28.0° per 8 m): route-data kinks needing the excluded
+  extractor/vertical pass.
+- 1 collision step (`ramp_0` on `r1_3`, 0.33 m): the flip is `r1_3 → r1_0`,
+  i.e. the known overlapping-carriageway height-disagreement family
+  (`osm-validate` "overlap"), not merge semantics.
 
-## What is partial or broken
+### Representative junctions (required by the phase)
 
-The new `.devtests/junction-finishing-probe.mjs` runs but currently fails. It
-reports `96` failures: `85` collision-height switches and `11` relative
-steering-rate failures. The passing trajectory, marking, rail, and hand-off
-metrics above therefore do not make the overall probe green.
-
-The main unresolved mismatch is between representations:
-
-- junction zones classify a row as continuous at up to `1.5 m` of branch/host
-  deck-height difference;
-- the rendered mouth union uses much tighter coplanar/apron thresholds
-  (`0.18 m` / `0.35 m`); and
-- asphalt and traffic still consume mouth/edge records rather than the zone
-  object directly.
-
-As a result, `getRoadInfo` can switch between branch and host deck candidates
-inside a zone called crossable. The worst sampled switch is `2.228 m`. Fixing
-this coherently requires reconciling zone, rendered-surface, and physics
-semantics; changing route heights would enter the explicitly excluded
-elevation/vertical-crossing scope.
-
-Other remaining issues found by the audit:
-
-- relative steering reaches `34.4°/8 m` in the Hakozaki
-  `ramp_46`/`ramp_27` data-kink family, with smaller `4.7–5.6°/8 m` outliers
-  elsewhere;
-- a zone range currently stores one min/max interval, so disjoint qualifying
-  samples can suppress markings or rails across an intervening non-qualifying
-  span;
-- the focused probe's header and executable contract differ: the transfer,
-  zone-angle, and steering thresholds described in prose are not the exact
-  gates in code; the zone angle is report-only, and the diverge hand-off check
-  samples geometry rather than exercising `advanceTraffic`;
-- the probe includes service/PA collision samples even though PA access-road
-  work is out of scope; and
-- Phase 3's already-committed terminal taper is route-generic and can affect
-  non-junction visibility boundaries. The rescue did not broaden or redesign
-  that behavior.
-
-These items are documented rather than repaired here because they require a
-new design pass or enter prohibited scope. The checkpoint stops before that
-work.
+- LEFT MERGE `ramp_42 → k1_0`: crossable 790..894, dashed boundary and edge
+  suppression 794..808 over the true coplanar widening, host rail hand-off
+  792..816 against the branch tip; traffic transfer excess 0.02 m; collision
+  walk flat.
+- RIGHT MERGE `ramp_12 → r1_3`: crossable 13181..13247 (the genuinely
+  coplanar approach). The long funnel beyond is honestly closed: the ramp
+  deck oscillates +0.38 → −1.35 m against the host there (vertical-profile
+  data defect), so the previous 341 m "crossable" interval, its dashes and
+  its rail opening were painting over real 0.3–1 m steps.
+- RIGHT DIVERGE `c1_0 → ramp_22`: crossable 1088..1257 with the gore wedge
+  physics-flat (deferral); openings stay closed because the exit wing
+  genuinely leaves 0.25–0.7 m BELOW the host edge (same data family; needs
+  the deck-attitude/height blending pass).
 
 ## Validation results
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| JavaScript syntax / map construction | PASS | Modified map and focused probe parse; map constructs without an exception |
-| Junction-finishing probe | **FAIL** | 58 zones, 67 transfers, 96 failures; tangent `2.73°`, steering `34.4°/8 m`, rail hand-off `2.0 m`, collision switch `2.228 m`, transfer excess `1.45 m` |
-| Lateral-junction probe | PASS | 58 mouths / 20,636 points; 0 holes, 0 steps, 0 rails, 25 duplicate pairs (`<= 60` ratchet) |
-| Road-surface probe | PASS | Worst refinable angle `0.7499°`, vertical error `0.02977 m`, lateral error `0.05998 m`, 0 dash-phase errors |
-| Traffic test | PASS (runtime smoke) | 20 simulated seconds, 23 active vehicles, finite sampled position; the script has no assertions |
-| `osm-validate` | **EXPECTED FAIL** | Rail 0, overlap 23, ramp-drive 44, smoothness 60, geometry hygiene 0; 127 known failures in existing vertical/elevation families |
-| End-to-end | PASS | 25/25 checks, including boot and no console errors |
-
-`osm-validate` was run against a hash-verified temporary copy because failure
-output overwrites a tracked artifact. Its fresh 127-line output is now stored
-in `.devtests/osm-validate-failures.txt`. Compared with the rescued stale
-snapshot, ramp-drive improves from 45 to 44 and smoothness from 61 to 60;
-there is no new validator section or failure family.
+| Junction-finishing probe | 6 failures (was 96) | all six in documented-excluded families above |
+| Lateral-junction probe | PASS | 58 mouths / 20,636 pts; 0 holes, 0 steps, 0 rails, duplicates 22 (was 25, ratchet 60) |
+| Road-surface probe | PASS | refinement + dash phase, 0 errors |
+| Traffic runtime smoke | PASS | 20 s, 23 active vehicles, finite positions |
+| End-to-end | PASS | 25/25, no console errors |
+| Performance | no regression | base `7f10cfc` fails build/p95 limits identically on this container; draw calls within documented run noise (168 vs 170 limit) |
+| Screenshots | inspected | identical-camera before/after pairs for 7 junction cases (`.devtests/shots/*-{before,after}.png`); no visual regressions; gore district resolution now host-side |
 
 ## Remaining work after this checkpoint
 
-1. Define one authoritative notion of a physically crossable/rendered junction
-   seam and make zones, mouth geometry, physics, and traffic consume it.
-2. Represent disjoint zone ranges as interval pieces or select only the
-   mouth-connected component.
-3. Reconcile the focused probe's documented and executable contract, including
-   explicit out-of-scope ratchets/exclusions.
-4. Resolve steering and height-transition failures in a separately authorized
-   pass that can address vertical/elevation data where required.
+1. Deck-attitude/height blending through mouths (bank/vertical), so
+   merge/diverge wings hold the host's surface until clear: this is what
+   keeps `ramp_12`'s funnel and `ramp_22`'s exit wedge from being paintable
+   as crossable, and it owns the residual steering-kink families
+   (`r6_*`, `ramp_46`). Requires the separately-authorized vertical pass.
+2. Overlapping-carriageway height disagreements outside junction mouths
+   (`r1_0`/`r1_3` family) — same vertical pass.
+3. Probe-contract reconciliation (explicit out-of-scope ratchets for the two
+   families above) if the probe should gate CI before that pass lands.
 
-No further visual polishing is included in this checkpoint.
+Vertical crossings, global elevation, PA access-road design, terrain, global
+guardrails and the road editor remain untouched, as required.

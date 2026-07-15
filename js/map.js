@@ -1368,14 +1368,86 @@ export class HighwayMap {
           const bank = this._bankAt(host, projection.distance);
           const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
           const e = side * projection.signedLateral;
+          const dy = frame.position.y - deckY;
+          // Continuity is the RENDERER'S OWN mouth-clip decision at this
+          // cross-section, not a looser re-derivation: merged means the
+          // clip removed a covered coplanar strip (the drawn union is one
+          // surface there). The clip's overlap gauge (covered band + dy
+          // line) additionally tells physics which deck owns the surface
+          // and where the one-surface union laterally ends. |dy| >= 1.6
+          // cannot overlap-band-match anything — skip the projections.
+          let removed = null;
+          let covered = null;
+          let dyEnds = null;
+          let Lends = null;
+          if (Math.abs(dy) < 1.6) {
+            frame._jxSeed = projection.distance;
+            const clip = this._mouthClipAt(route, frame);
+            if (clip && clip.mouth === mouth && clip.removed) removed = clip.removed;
+            const gauge = frame._jxGauge;
+            if (gauge && gauge.mouth === mouth) {
+              covered = gauge.covered;
+              dyEnds = gauge.dyEnds;
+              Lends = gauge.Lends;
+            }
+          }
+          const unionOuter = Math.max(hostHalf, e + frame.half);
+          // Outer side-lateral extent of the ONE-SURFACE union: where the
+          // wing leaves the host's paved edge at more than the coplanar
+          // offset (a shelf peeling above or a sheet diving below), the
+          // crossable surface ends at the host edge — the wing beyond is
+          // separate geometry, not a boundary a driver may cross.
+          // Crossability also demands the TOP surface across the CROSSED
+          // band — covered laterals on the zone's side of the host
+          // centreline — be step-free: a sheet may dive below the host
+          // (the host deck rides on top, flat), but a shelf rising above
+          // it in the crossing path is a lip a driver would have to
+          // mount. A tilted section's far end hanging over the OPPOSITE
+          // half of the host is not in anyone's crossing path.
+          let crossOuter = unionOuter;
+          let shelfFree = true;
+          if (covered) {
+            const dyAtT = (t) => dyEnds[0] + (dyEnds[1] - dyEnds[0]) * t;
+            const sLatT = (t) => side * (Lends[0] + (Lends[1] - Lends[0]) * t);
+            const tOf = (lat) => (lat + frame.half) / (2 * frame.half);
+            let t0 = tOf(covered[0]);
+            let t1 = tOf(covered[1]);
+            const s0 = sLatT(t0);
+            const s1 = sLatT(t1);
+            if (s0 < 0 && s1 < 0) {
+              // covered band entirely on the far half — nothing crossed
+            } else {
+              if (s0 < 0) t0 += (0 - s0) / (s1 - s0) * (t1 - t0);
+              else if (s1 < 0) t1 = t0 + (0 - s0) / (s1 - s0) * (t1 - t0);
+              // 0.35 = the renderer's one-level band (APRON_DY), shared
+              // EXACTLY with _surfaceDefersToHost's strip-row rule: any
+              // sliver the crossing band may hover under is one physics
+              // defers to the host beneath (flat walk), and anything
+              // higher is a real lip that also keeps its own corridor —
+              // both sides of the threshold stay self-consistent.
+              shelfFree = Math.max(dyAtT(t0), dyAtT(t1)) < 0.35;
+            }
+            const edgeLat = covered[1] < frame.half - 0.05
+              ? covered[1]
+              : (covered[0] > -frame.half + 0.05 ? covered[0] : null);
+            if (edgeLat !== null && Math.abs(dyAtT(tOf(edgeLat))) > 0.18) {
+              crossOuter = Math.min(crossOuter, hostHalf);
+            }
+          }
           rows.push({
             bS,
             hS: projection.distance,
             e,
             hostHalf,
-            unionOuter: Math.max(hostHalf, e + frame.half),
+            half: frame.half,
+            unionOuter,
+            crossOuter,
             innerEdge: e - frame.half,
-            dy: frame.position.y - deckY,
+            dy,
+            merged: removed !== null && shelfFree,
+            removed,
+            covered,
+            dyEnds,
           });
         }
         if (rows.length < 2) continue;
@@ -1390,7 +1462,13 @@ export class HighwayMap {
         };
         for (const row of rows) row.hU = unwrap(row.hS);
 
-        const continuous = (r) => Math.abs(r.dy) < 1.5 && r.innerEdge < r.hostHalf - 0.3;
+        // A row is continuous when the drawn union is one surface there
+        // (the clip removed a coplanar strip) AND the branch pavement
+        // actually overlaps the host. The old |dy| < 1.5 re-derivation
+        // called rows crossable where the renderer draws two separate
+        // decks — markings, rails and the collision walk all disagreed
+        // with the visible asphalt over those rows.
+        const continuous = (r) => r.merged && r.innerEdge < r.hostHalf - 0.3;
         const range = (pred) => {
           let hLo = Infinity;
           let hHi = -Infinity;
@@ -1405,14 +1483,45 @@ export class HighwayMap {
           }
           return hLo <= hHi ? { host: [hLo, hHi], branch: [bLo, bHi] } : null;
         };
+        // MOUTH-CONNECTED component: rows are ordered from the transfer
+        // end outward, so the opening a driver can actually use is the
+        // first contiguous continuous run. A later disjoint qualifying
+        // stretch (decks re-converging further out) is not part of this
+        // opening — one min/max over all rows used to smear intervals
+        // across the non-crossable span between them.
+        let c0 = -1;
+        let c1 = -1;
+        for (let i = 0; i < rows.length; i += 1) {
+          if (continuous(rows[i])) { if (c0 < 0) c0 = i; c1 = i; } else if (c0 >= 0) break;
+        }
+        for (let i = 0; i < rows.length; i += 1) rows[i].crossable = c0 >= 0 && i >= c0 && i <= c1;
+        const rangeIn = (pred) => {
+          let hLo = Infinity;
+          let hHi = -Infinity;
+          let bLo = Infinity;
+          let bHi = -Infinity;
+          for (let i = c0; c0 >= 0 && i <= c1; i += 1) {
+            const r = rows[i];
+            if (!pred(r)) continue;
+            hLo = Math.min(hLo, r.hU);
+            hHi = Math.max(hHi, r.hU);
+            bLo = Math.min(bLo, r.bS);
+            bHi = Math.max(bHi, r.bS);
+          }
+          return hLo <= hHi ? { host: [hLo, hHi], branch: [bLo, bHi] } : null;
+        };
 
-        const crossable = range(continuous);
-        const open = range((r) => continuous(r) && r.unionOuter > r.hostHalf + 0.25);
+        // Openings are gated on crossOuter, not unionOuter: a wing that
+        // has already peeled above (or dived below) the host edge keeps
+        // the host's solid line and rail — only a one-surface union past
+        // the edge hands the boundary to the zone.
+        const crossable = rangeIn(() => true);
+        const open = rangeIn((r) => r.crossOuter > r.hostHalf + 0.25);
         // Host rail hand-off matches the branch outer rail's 0.6 m wing
         // threshold: the host rail resumes where the branch rail ends
         // (slight overlap over the last sliver of wing, never a gap).
-        const railOpen = range((r) => continuous(r) && r.unionOuter > r.hostHalf + 0.55);
-        const dash = range((r) => continuous(r) && r.unionOuter - laneEdge >= 2.0);
+        const railOpen = rangeIn((r) => r.crossOuter > r.hostHalf + 0.55);
+        const dash = rangeIn((r) => r.crossOuter - laneEdge >= 2.0);
         // Outer rail hand-off: rows are ordered from the mouth end outward,
         // so the FIRST row with a real wing marks the single tip boundary —
         // tailward of it the host rail owns the edge (branch rail off),
@@ -1622,11 +1731,16 @@ export class HighwayMap {
     const GORE_FILL = 1.2;  // widest sliver the gore apron closes
     const APRON_DY = 0.35;  // largest level offset the apron may bridge
 
-    if (inner.g >= 0) {
-      // Fully outside the host pavement: close the gore sliver while the
-      // gap is narrow and the decks are still at one level. The apron
-      // fades back to the branch's own edge as the gap or level offset
-      // grows, so the fill closes smoothly instead of ending in a face.
+    if (inner.g >= 0 && lo.L * hi.L >= 0) {
+      // Fully outside the host pavement ON ONE SIDE: close the gore
+      // sliver while the gap is narrow and the decks are still at one
+      // level. The apron fades back to the branch's own edge as the gap
+      // or level offset grows, so the fill closes smoothly instead of
+      // ending in a face. (A section whose two ends sit outside OPPOSITE
+      // host edges — a branch wider than its host — is a straddle, not a
+      // gore: it falls through to the exact covered-strip clip below,
+      // which otherwise never ran and left a full-width coplanar ribbon
+      // z-fighting over the host.)
       const separation = inner.g;
       if (separation >= GORE_FILL || Math.abs(inner.dy) >= APRON_DY) return null;
       let width = clamp((GORE_FILL - separation) / 0.35, 0, 1);
@@ -1662,6 +1776,18 @@ export class HighwayMap {
     if (tMin >= tMax) return null; // host covers none of the section
     const coveredLo = -half + tMin * 2 * half;
     const coveredHi = -half + tMax * 2 * half;
+    // Deck-overlap gauge for physics/zone consumers: the host-covered
+    // lateral band and the (locally linear) branch-above-host offsets at
+    // the section ends. Recorded even when nothing ends up coplanar —
+    // a buried or shelving sheet still overlaps the host, and surface
+    // ownership must know about it.
+    frame._jxGauge = {
+      mouth,
+      covered: [coveredLo, coveredHi],
+      dyEnds: [lo.dy, hi.dy],
+      Lends: [lo.L, hi.L],
+      half,
+    };
     let planarLo = -half;
     let planarHi = half;
     if (Math.abs(hi.dy - lo.dy) < 1e-6) {
@@ -1695,7 +1821,17 @@ export class HighwayMap {
         flapHi: null,
       });
     }
-    frame._jx = { mouth, hostward, skip: intervals.length === 0, intervals };
+    frame._jx = {
+      mouth,
+      hostward,
+      skip: intervals.length === 0,
+      intervals,
+      // Coplanar strip handed to the host deck (frame laterals) — the
+      // authoritative "these decks are one surface here" record that
+      // junction zones and physics consume, so crossability, collision
+      // and the drawn union can never disagree.
+      removed: [removedLo, removedHi],
+    };
     return frame._jx;
   }
 
@@ -2041,6 +2177,12 @@ export class HighwayMap {
       // correction still applies, so keep the corridor.
       if (projection.endOvershoot > 4
         && this._endIsOpen(route, projection.u > 0.5 ? 1 : -1)) continue;
+      // Junction mouth: where the drawn cross-section strip was handed to
+      // the host deck (coplanar duplicate removed), the branch has no
+      // surface of its own — the host corridor owns physics there, same
+      // as it owns the visible asphalt.
+      if (route._zonesAsBranch
+        && this._surfaceDefersToHost(route, projection.distance, projection.signedLateral)) continue;
       const bank = this._bankAt(route, projection.distance);
       const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
       const vertical = position.y - deckY;
@@ -2051,6 +2193,39 @@ export class HighwayMap {
       });
     }
     return corridors;
+  }
+
+  /**
+   * TRUE when the drawn asphalt at this branch station/lateral is the
+   * HOST's deck: the junction-zone row nearest the station shows the
+   * lateral inside the host-covered band with the branch deck at or
+   * below the host's top surface (a removed coplanar strip or a buried
+   * sheet — neither carries the car; the host's surface is the road).
+   * A shelf rising above the host keeps its own corridor. Uses the
+   * precomputed zone rows — no projections at query time.
+   */
+  _surfaceDefersToHost(route, distance, lateral) {
+    for (const zone of route._zonesAsBranch) {
+      const [b0, b1] = zone.branchSpan;
+      if (distance < b0 - 2 || distance > b1 + 2) continue;
+      let best = null;
+      let bestDelta = Infinity;
+      for (const row of zone.samples) {
+        const delta = Math.abs(row.bS - distance);
+        if (delta < bestDelta) { bestDelta = delta; best = row; }
+      }
+      if (!best?.covered || lateral <= best.covered[0] || lateral >= best.covered[1]) continue;
+      const t = (lateral + best.half) / (2 * best.half);
+      const dy = best.dyEnds[0] + (best.dyEnds[1] - best.dyEnds[0]) * t;
+      // On a section that IS partially merged (a strip was removed), the
+      // whole covered band within the renderer's one-level tolerance
+      // (APRON_DY) rides the host: the leftover slivers hovering under
+      // 0.35 m are cosmetic ghosts, not decks. A section with NO strip
+      // keeps its corridor unless it is buried — a full-width ribbon
+      // above the host is a real second deck and carries the car.
+      if (dy < (best.removed ? 0.35 : 0.18)) return true;
+    }
+    return false;
   }
 
   /**
