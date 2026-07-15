@@ -145,8 +145,15 @@ for (const spec of CASES) {
     let run = null;
     for (let s = from; s <= to; s += 3) {
       const f = frameOf(route, s);
-      const probe = map._deckPoint(f, sideSign * (f.half - 0.42), 0.02);
-      const suppressed = map._barrierSuppressed(probe, route);
+      // same resolution the builder uses: zone ownership first, then probe
+      const mode = map._railZoneMode(route, sideSign, s);
+      let suppressed;
+      if (mode === 'off') suppressed = true;
+      else if (mode === 'on') suppressed = false;
+      else {
+        const probe = map._deckPoint(f, sideSign * (f.half - 0.42), 0.02);
+        suppressed = map._barrierSuppressed(probe, route);
+      }
       if (!suppressed && !run) run = { start: s };
       if (suppressed && run) { run.end = s; intervals.push(run); run = null; }
     }

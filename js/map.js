@@ -1403,6 +1403,10 @@ export class HighwayMap {
 
         const crossable = range(continuous);
         const open = range((r) => continuous(r) && r.unionOuter > r.hostHalf + 0.25);
+        // Host rail hand-off matches the branch outer rail's 0.6 m wing
+        // threshold: the host rail resumes where the branch rail ends
+        // (slight overlap over the last sliver of wing, never a gap).
+        const railOpen = range((r) => continuous(r) && r.unionOuter > r.hostHalf + 0.55);
         const dash = range((r) => continuous(r) && r.unionOuter - laneEdge >= 2.0);
         // Outer rail hand-off: rows are ordered from the mouth end outward,
         // so the FIRST row with a real wing marks the single tip boundary —
@@ -1419,12 +1423,31 @@ export class HighwayMap {
         const outerOn = tipIndex >= 0 ? { branch: branchInterval(tipIndex, lastEngaged) } : null;
         const outerOff = tipIndex > 0 ? { branch: branchInterval(0, tipIndex - 1) } : (tipIndex < 0 ? { branch: branchInterval(0, lastEngaged) } : null);
         const innerOff = range((r) => r.innerEdge < r.hostHalf + 0.9 && Math.abs(r.dy) < 2.5);
+        // Where the branch is fully covered (the glued tail), the host owns
+        // the union's edge and its rail must run — the yield probe would
+        // otherwise keep it dead because the branch corridor still overlaps.
+        let hostRailOn = null;
+        if (crossable) {
+          const tail = which === 'end'
+            ? [railOpen ? railOpen.host[1] : crossable.host[0] - 15, crossable.host[1] + 15]
+            : [crossable.host[0] - 15, railOpen ? railOpen.host[0] : crossable.host[1] + 15];
+          if (tail[1] > tail[0]) hostRailOn = tail;
+        }
+
+        // Branch-frame lateral sign pointing at the host, measured (the
+        // edge whose projection sits deeper inside the host) — a branch
+        // can wander across the host centreline, so -side is not reliable.
+        const midRow = rows[Math.floor(rows.length / 2)];
+        const midFrame = this._frameAt(route, midRow.bS);
+        const plusDepth = Math.abs(this._projectToRoute(host, this._deckPoint(midFrame, midFrame.half)).signedLateral);
+        const minusDepth = Math.abs(this._projectToRoute(host, this._deckPoint(midFrame, -midFrame.half)).signedLateral);
+        const branchHostward = plusDepth < minusDepth ? 1 : -1;
 
         const zone = {
           kind: mouth.kind,
           which,
           side,
-          hostwardSign: -side,
+          hostwardSign: branchHostward,
           host,
           branch: route,
           hostRef,
@@ -1436,7 +1459,8 @@ export class HighwayMap {
           crossable,
           hostEdgeSuppress: open ? open.host : null,
           dash: dash ? { from: dash.host[0], to: dash.host[1] } : null,
-          hostRailOpen: open ? [open.host[0] - 2, open.host[1] + 2] : null,
+          hostRailOpen: railOpen ? [railOpen.host[0] - 2, railOpen.host[1] + 2] : null,
+          hostRailOn,
           branchOuterRailOn: outerOn ? outerOn.branch : null,
           branchOuterRailOff: outerOff ? outerOff.branch : null,
           branchInnerRailOff: innerOff ? innerOff.branch : null,
@@ -1457,8 +1481,40 @@ export class HighwayMap {
         host._zonesAsHost.push(zone);
         if (!route._zonesAsBranch) route._zonesAsBranch = [];
         route._zonesAsBranch.push(zone);
+
+        // Rail ownership intervals for the barrier builder. Modes: 'off'
+        // (opening — never draw), 'on' (the union's outer edge — always
+        // draw, overriding the yield probe that used to kill a ramp's
+        // outer rail 1.6 m before the pavements even met). 'off' wins.
+        this._addRailZone(host, side, zone.hostRailOpen, 'off');
+        this._addRailZone(host, side, zone.hostRailOn, 'on');
+        this._addRailZone(route, branchHostward, zone.branchInnerRailOff, 'off');
+        this._addRailZone(route, -branchHostward, zone.branchOuterRailOn, 'on');
+        this._addRailZone(route, -branchHostward, zone.branchOuterRailOff, 'off');
       }
     }
+  }
+
+  /** Register a rail ownership interval (chainage pieces) on a route side. */
+  _addRailZone(route, sideSign, interval, mode) {
+    if (!interval) return;
+    if (!route._railZones) route._railZones = { 1: [], [-1]: [] };
+    for (const [from, to] of this._zoneIntervalPieces(route, interval)) {
+      route._railZones[sideSign].push({ from, to, mode });
+    }
+  }
+
+  /** Zone-forced rail mode at a chainage ('off' | 'on' | null = probe). */
+  _railZoneMode(route, sideSign, distance) {
+    const zones = route._railZones?.[sideSign];
+    if (!zones) return null;
+    let mode = null;
+    for (const zone of zones) {
+      if (distance < zone.from || distance > zone.to) continue;
+      if (zone.mode === 'off') return 'off';
+      mode = zone.mode;
+    }
+    return mode;
   }
 
   /**
@@ -3486,12 +3542,27 @@ export class HighwayMap {
    * a hollow open cross-section. The material is DoubleSide, so one face
    * serves both run ends.
    */
-  _emitBarrierEndCap(bucket, frame, side) {
-    const base = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
-    const top = this._deckPoint(frame, side * (frame.half - 0.3), 0.85);
-    const cap = this._deckPoint(frame, side * (frame.half - 0.06), 0.91);
-    const out = this._deckPoint(frame, side * frame.half, 0.0);
-    this._pushQuad(bucket, base, top, cap, out);
+  _emitBarrierEndCap(bucket, frame, side, factor = 1) {
+    const p = this._parapetProfile(frame, side, factor);
+    this._pushQuad(bucket, p.base, p.top, p.cap, p.out);
+  }
+
+  /**
+   * Parapet cross-section at one frame, scaled by a terminal factor:
+   * factor 1 is the full profile; toward 0 the profile sinks to deck level
+   * and squeezes toward the outer edge — the ramped end terminal every
+   * junction-mouth rail run now finishes with, instead of a full-height
+   * profile chopped mid-air.
+   */
+  _parapetProfile(frame, side, factor = 1) {
+    const squeeze = 0.36 * (1 - factor);
+    const lean = 0.02 + 0.83 * factor;
+    return {
+      base: this._deckPoint(frame, side * (frame.half - 0.42 + squeeze), 0.02),
+      top: this._deckPoint(frame, side * (frame.half - 0.3 + squeeze * 0.66), lean),
+      cap: this._deckPoint(frame, side * (frame.half - 0.06), lean + 0.06 * factor),
+      out: this._deckPoint(frame, side * frame.half, 0.0),
+    };
   }
 
   _buildRouteGeometry(route) {
@@ -3499,23 +3570,61 @@ export class HighwayMap {
     const barrierHeight = route.kind === 'service' ? 0.9 : 1.15;
     const medianHeight = 1.0;
 
-    // Surface frames can sit ~1.5 m apart; suppression zones (gore mouths, PA
-    // gates) span tens of metres, so re-probe _barrierSuppressed only every
-    // ~9 m per side — finer than the old 16-30 m step, at a fraction of the
-    // projections.
-    const suppressionCache = { 1: null, [-1]: null };
-    const barrierSuppressedNear = (probe, side) => {
-      const cached = suppressionCache[side];
-      if (cached && xzDistanceSq(cached.point, probe) < 9 * 9) return cached.result;
-      const result = this._barrierSuppressed(probe, route);
-      suppressionCache[side] = { point: probe.clone(), result };
-      return result;
+    // Rail visibility per surface frame per side. Inside a junction zone
+    // the zone's ownership intervals decide (exact chainage boundaries —
+    // 'off' across the drivable opening, 'on' along the union's outer
+    // edge); everywhere else the ~9 m-cached point probe decides (PA
+    // gates, braided complexes).
+    const frames = route.surfaceFrames;
+    const barrierVisible = { 1: new Array(frames.length), [-1]: new Array(frames.length) };
+    {
+      const cache = { 1: null, [-1]: null };
+      for (let i = 0; i < frames.length; i += 1) {
+        const frame = frames[i];
+        for (const side of [1, -1]) {
+          const mode = this._railZoneMode(route, side, frame.distance);
+          let visible;
+          if (mode === 'off') visible = false;
+          else if (mode === 'on') visible = true;
+          else {
+            const probe = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+            const cached = cache[side];
+            if (cached && xzDistanceSq(cached.point, probe) < 9 * 9) visible = cached.result;
+            else {
+              visible = !this._barrierSuppressed(probe, route);
+              cache[side] = { point: probe, result: visible };
+            }
+          }
+          barrierVisible[side][i] = visible;
+        }
+      }
+    }
+    // Terminal taper: within RAIL_TAPER metres of a visibility boundary the
+    // parapet profile ramps down to deck level (see _parapetProfile), so
+    // every run finishes as an intentional end terminal.
+    const RAIL_TAPER = 7;
+    const railFactor = (side, i) => {
+      const list = barrierVisible[side];
+      if (!list[i]) return 0;
+      const s = frames[i].distance;
+      let factor = 1;
+      for (let j = i + 1; j < list.length; j += 1) {
+        const d = frames[j].distance - s;
+        if (d > RAIL_TAPER) break;
+        if (!list[j]) { factor = Math.min(factor, Math.max(d, 0.8) / RAIL_TAPER); break; }
+      }
+      for (let j = i - 1; j >= 0; j -= 1) {
+        const d = s - frames[j].distance;
+        if (d > RAIL_TAPER) break;
+        if (!list[j]) { factor = Math.min(factor, Math.max(d, 0.8) / RAIL_TAPER); break; }
+      }
+      return factor;
     };
     // Parapet runs end/restart at junction-mouth openings; track the runs so
     // each terminal gets a closing face instead of an open hollow profile.
     const barrierRun = { 1: false, [-1]: false };
 
-    this._forEachSurfaceFrameSegment(route, (a, b) => {
+    this._forEachSurfaceFrameSegment(route, (a, b, segmentIndex) => {
       // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
       const mid = a.position.clone().lerp(b.position, 0.5);
       // Junction mouths draw a clipped deck that unions with the host
@@ -3551,42 +3660,39 @@ export class HighwayMap {
       // carriageway at a gore mouth or PA gate.
       const bucketBarrier = this._bucket(mid, 'barrier');
       const bucketRail = this._bucket(mid, 'railMetal');
+      const nextIndex = (segmentIndex + 1) % frames.length;
       for (const side of [1, -1]) {
-        const baseA = this._deckPoint(a, side * (a.half - 0.42), 0.02);
-        const baseB = this._deckPoint(b, side * (b.half - 0.42), 0.02);
-        const probe = TMP_B.copy(baseA).lerp(baseB, 0.5);
-        if (barrierSuppressedNear(probe, side)) {
-          // Run ends at a junction-mouth opening: close the profile cleanly
-          // instead of leaving a hollow open end across the mouth.
+        const drawn = barrierVisible[side][segmentIndex] && barrierVisible[side][nextIndex];
+        if (!drawn) {
+          // Run ends at a junction-mouth opening: close the (tapered)
+          // profile cleanly instead of leaving a hollow open end.
           if (barrierRun[side]) {
-            this._emitBarrierEndCap(bucketBarrier, a, side);
+            this._emitBarrierEndCap(bucketBarrier, a, side, railFactor(side, segmentIndex));
             barrierRun[side] = false;
           }
           continue;
         }
+        const fA = railFactor(side, segmentIndex);
+        const fB = railFactor(side, nextIndex);
         if (!barrierRun[side]) {
-          this._emitBarrierEndCap(bucketBarrier, a, side);
+          this._emitBarrierEndCap(bucketBarrier, a, side, fA);
           barrierRun[side] = true;
         }
-        const lean = 0.85;
-        const innerTopA = this._deckPoint(a, side * (a.half - 0.3), lean);
-        const innerTopB = this._deckPoint(b, side * (b.half - 0.3), lean);
-        const capA = this._deckPoint(a, side * (a.half - 0.06), lean + 0.06);
-        const capB = this._deckPoint(b, side * (b.half - 0.06), lean + 0.06);
-        const outA = this._deckPoint(a, side * a.half, 0.0);
-        const outB = this._deckPoint(b, side * b.half, 0.0);
+        const pA = this._parapetProfile(a, side, fA);
+        const pB = this._parapetProfile(b, side, fB);
         // `barrier` is DoubleSide: cap + outer wall preserve the same deck-edge
         // silhouette from chase and exterior views without storing a third,
         // hidden inner-profile sheet at every dense surface station.
         if (side > 0) {
-          this._pushQuad(bucketBarrier, innerTopA, innerTopB, capB, capA);
-          this._pushQuad(bucketBarrier, capB, outB, outA, capA);
+          this._pushQuad(bucketBarrier, pA.top, pB.top, pB.cap, pA.cap);
+          this._pushQuad(bucketBarrier, pB.cap, pB.out, pA.out, pA.cap);
         } else {
-          this._pushQuad(bucketBarrier, innerTopB, innerTopA, capA, capB);
-          this._pushQuad(bucketBarrier, capA, outA, outB, capB);
+          this._pushQuad(bucketBarrier, pB.top, pA.top, pA.cap, pB.cap);
+          this._pushQuad(bucketBarrier, pA.cap, pA.out, pB.out, pB.cap);
         }
-        // steel handrail on top of the parapet (skipped inside tunnels)
-        if (!a.tunnel) {
+        // steel handrail on top of the parapet (skipped inside tunnels and
+        // over end terminals — it must not float above a sunk profile)
+        if (!a.tunnel && fA > 0.96 && fB > 0.96) {
           const railA = this._deckPoint(a, side * (a.half - 0.18), 1.12);
           const railB = this._deckPoint(b, side * (b.half - 0.18), 1.12);
           const railTopA = railA.clone(); railTopA.y += 0.09;
