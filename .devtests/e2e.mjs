@@ -111,6 +111,86 @@ check('driving mode reached', true);
 const resInfo = await page.evaluate(() => { const c = document.getElementById('game-canvas'); return `${c.width}x${c.height}`; });
 console.log('   internal render resolution (medium):', resInfo);
 
+// --- Mobile debug menu + complete noclip controls ---
+await page.tap('.touch-utility button[data-action="debug"]');
+await page.waitForFunction(() => window.shutoko.debug.menuOpen);
+const debugMenuState = await page.evaluate(() => {
+  const menu = document.getElementById('debug-menu');
+  const rect = menu.getBoundingClientRect();
+  return {
+    visible: !menu.classList.contains('hidden') && menu.getAttribute('aria-hidden') === 'false',
+    insideViewport: rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth,
+  };
+});
+check('mobile DBG button opens debug menu', debugMenuState.visible);
+check('debug menu fits mobile viewport', debugMenuState.insideViewport);
+await page.tap('label.debug-toggle:has(#debug-noclip)');
+await page.tap('#debug-close');
+await page.waitForFunction(() => window.shutoko.debug.noclip && document.body.classList.contains('noclip-active'));
+const noclipUI = await page.evaluate(() => ({
+  move: getComputedStyle(document.querySelector('.touch-drone-move')).display !== 'none',
+  look: getComputedStyle(document.getElementById('touch-drone-look')).display !== 'none',
+  height: getComputedStyle(document.querySelector('.touch-drone-actions')).display !== 'none',
+  normalDriveHidden: getComputedStyle(document.querySelector('.touch-pedals')).display === 'none',
+}));
+check('noclip exposes dedicated mobile controls', noclipUI.move && noclipUI.look && noclipUI.height && noclipUI.normalDriveHidden);
+
+const droneStart = await page.evaluate(() => ({ ...window.shutoko.debug.position }));
+await page.dispatchEvent('.touch-drone-move button[data-code="KeyW"]', 'pointerdown', { pointerId: 31, isPrimary: true });
+await page.waitForTimeout(500);
+await page.dispatchEvent('.touch-drone-move button[data-code="KeyW"]', 'pointerup', { pointerId: 31, isPrimary: true });
+const droneForward = await page.evaluate(() => ({ ...window.shutoko.debug.position }));
+check('noclip mobile D-pad moves forward', Math.hypot(droneForward.x - droneStart.x, droneForward.z - droneStart.z) > 1);
+
+await page.dispatchEvent('.touch-drone-actions button[data-code="Space"]', 'pointerdown', { pointerId: 32, isPrimary: true });
+await page.waitForTimeout(300);
+await page.dispatchEvent('.touch-drone-actions button[data-code="Space"]', 'pointerup', { pointerId: 32, isPrimary: true });
+const droneRaised = await page.evaluate(() => window.shutoko.debug.position.y);
+check('noclip mobile height control moves up', droneRaised > droneForward.y + 1, `${(droneRaised - droneForward.y).toFixed(1)}m`);
+
+const lookBefore = await page.evaluate(() => ({ yaw: window.shutoko.debug.yaw, pitch: window.shutoko.debug.pitch }));
+await page.dispatchEvent('#touch-drone-look', 'pointerdown', { pointerId: 33, clientX: 500, clientY: 140, isPrimary: true });
+await page.dispatchEvent('#touch-drone-look', 'pointermove', { pointerId: 33, clientX: 570, clientY: 180, isPrimary: true });
+await page.dispatchEvent('#touch-drone-look', 'pointerup', { pointerId: 33, clientX: 570, clientY: 180, isPrimary: true });
+const lookAfter = await page.evaluate(() => ({ yaw: window.shutoko.debug.yaw, pitch: window.shutoko.debug.pitch }));
+check('noclip drag-to-look changes aim', Math.abs(lookAfter.yaw - lookBefore.yaw) > 0.1 && Math.abs(lookAfter.pitch - lookBefore.pitch) > 0.05);
+
+const speedBefore = await page.evaluate(() => window.shutoko.debug.moveSpeed);
+await page.tap('.touch-drone-speed-controls button[data-action="drone-faster"]');
+const speedAfter = await page.evaluate(() => window.shutoko.debug.moveSpeed);
+check('noclip mobile speed control works', speedAfter > speedBefore, `${speedBefore} -> ${speedAfter} m/s`);
+await page.screenshot({ path: join(OUT, '05-noclip-mobile.png') });
+
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(250);
+const portraitNoclipLayout = await page.evaluate(() => {
+  const controls = [...document.querySelectorAll('.touch-controls button')]
+    .filter((element) => getComputedStyle(element).display !== 'none')
+    .map((element) => ({ name: element.getAttribute('aria-label'), rect: element.getBoundingClientRect() }));
+  const overlaps = [];
+  for (let i = 0; i < controls.length; i += 1) for (let j = i + 1; j < controls.length; j += 1) {
+    const a = controls[i].rect; const b = controls[j].rect;
+    const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    if (ox > 6 && oy > 6) overlaps.push(`${controls[i].name}~${controls[j].name}`);
+  }
+  return overlaps;
+});
+check('noclip controls do not overlap in portrait', portraitNoclipLayout.length === 0, portraitNoclipLayout.join(', '));
+await page.screenshot({ path: join(OUT, '05b-noclip-mobile-portrait.png') });
+await page.setViewportSize({ width: 844, height: 390 });
+await page.waitForTimeout(250);
+
+await page.tap('.touch-utility button[data-action="debug"]');
+await page.tap('label.debug-toggle:has(#debug-noclip)');
+await page.tap('#debug-close');
+await page.waitForFunction(() => !window.shutoko.debug.noclip && !document.body.classList.contains('noclip-active'));
+check('mobile menu can disable noclip and restore driving controls', await page.evaluate(() => getComputedStyle(document.querySelector('.touch-pedals')).display !== 'none'));
+// The drone intentionally respawns the car at its free-flight position. Put
+// it back at a known road spawn before the existing handling regressions.
+await page.evaluate(() => window.shutoko.recover());
+await page.waitForTimeout(250);
+
 // Headless SwiftShader renders slowly, so measure in simulated frames.
 await page.evaluate(() => {
   window.__frames = 0;

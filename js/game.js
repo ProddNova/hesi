@@ -149,19 +149,31 @@ class ShutokoNights {
     const press=(button,e)=>{const code=button.dataset.code;if(!code)return;e.preventDefault();capture(button,e.pointerId);this.touchPointers.set(e.pointerId,{code,button});if(!this.keys[code])this.pressed.add(code);this.keys[code]=true;button.classList.add('active');this.audio?.unlock?.();navigator.vibrate?.(8);};
     const release=e=>{const held=this.touchPointers.get(e.pointerId);if(!held)return;this.touchPointers.delete(e.pointerId);if(![...this.touchPointers.values()].some(v=>v.code===held.code))this.keys[held.code]=false;held.button.classList.remove('active');};
     root.querySelectorAll('[data-code]').forEach(button=>{button.addEventListener('pointerdown',e=>press(button,e));button.addEventListener('pointerup',release);button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);button.addEventListener('contextmenu',e=>e.preventDefault());});
-    root.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('pointerdown',e=>{e.preventDefault();this.audio?.unlock?.();button.classList.add('active');setTimeout(()=>button.classList.remove('active'),100);const action=button.dataset.action;if(action==='phone'&&this.started&&!this.ui.pcOpen)this.ui.togglePhone(this.getPhoneContext());else if(action==='camera'&&this.mode==='driving')this.cycleCamera();else if(action==='recover'&&this.mode==='driving')this.recover();navigator.vibrate?.(10);}));
-    const look=document.getElementById('touch-look');let lookPointer=null,lastX=0,lastY=0;
-    look?.addEventListener('pointerdown',e=>{e.preventDefault();lookPointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;capture(look,e.pointerId);});
-    look?.addEventListener('pointermove',e=>{if(e.pointerId!==lookPointer||this.mode!=='garage')return;e.preventDefault();const movementX=e.clientX-lastX,movementY=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;this.garage?.onMouse?.({movementX:movementX*1.35,movementY:movementY*1.35});});
-    const endLook=e=>{if(e.pointerId===lookPointer)lookPointer=null;};look?.addEventListener('pointerup',endLook);look?.addEventListener('pointercancel',endLook);
+    root.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('pointerdown',e=>{
+      e.preventDefault();this.audio?.unlock?.();button.classList.add('active');setTimeout(()=>button.classList.remove('active'),100);const action=button.dataset.action;
+      if(action==='phone'&&this.started&&!this.ui.pcOpen)this.ui.togglePhone(this.getPhoneContext());
+      else if(action==='camera'&&this.mode==='driving')this.cycleCamera();
+      else if(action==='recover'&&this.mode==='driving')this.recover();
+      else if(action==='debug')this.toggleDebugMenu();
+      else if(action==='drone-faster'&&this.debug.noclip){this.debug.moveSpeed=clamp(this.debug.moveSpeed*1.25,5,400);this.updateDroneSpeedHUD();}
+      else if(action==='drone-slower'&&this.debug.noclip){this.debug.moveSpeed=clamp(this.debug.moveSpeed/1.25,5,400);this.updateDroneSpeedHUD();}
+      navigator.vibrate?.(10);
+    }));
+    const bindLook=(look,isActive,onMove)=>{let pointer=null,lastX=0,lastY=0;
+      look?.addEventListener('pointerdown',e=>{if(!isActive())return;e.preventDefault();pointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;capture(look,e.pointerId);});
+      look?.addEventListener('pointermove',e=>{if(e.pointerId!==pointer||!isActive())return;e.preventDefault();const movementX=e.clientX-lastX,movementY=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;onMove(movementX,movementY);});
+      const end=e=>{if(e.pointerId===pointer)pointer=null;};look?.addEventListener('pointerup',end);look?.addEventListener('pointercancel',end);look?.addEventListener('lostpointercapture',end);
+    };
+    bindLook(document.getElementById('touch-look'),()=>this.mode==='garage',(x,y)=>this.garage?.onMouse?.({movementX:x*1.35,movementY:y*1.35}));
+    bindLook(document.getElementById('touch-drone-look'),()=>this.debug.noclip&&!this.debug.menuOpen,(x,y)=>{this.debug.yaw-=x*.004;this.debug.pitch=clamp(this.debug.pitch-y*.004,-Math.PI*.49,Math.PI*.49);});
     this.releaseTouchInput=()=>{this.touchPointers?.forEach(({code,button})=>{this.keys[code]=false;button.classList.remove('active');});this.touchPointers?.clear();};
     document.addEventListener('visibilitychange',()=>{if(document.hidden){this.releaseTouchInput();this.persist();}});
     window.addEventListener('pagehide',()=>this.persist());
   }
 
   syncTouchUI(){
-    const root=document.getElementById('touch-controls');if(!root)return;const blocked=this.ui?.phoneOpen||this.ui?.pcOpen||!document.getElementById('run-over')?.classList.contains('hidden')||!document.getElementById('pause-help')?.classList.contains('hidden');
-    document.body.dataset.gameMode=this.mode;document.body.classList.toggle('controls-blocked',!!blocked);root.classList.toggle('hidden',!this.started||!['driving','garage'].includes(this.mode));
+    const root=document.getElementById('touch-controls');if(!root)return;const blocked=this.ui?.phoneOpen||this.ui?.pcOpen||this.debug.menuOpen||!document.getElementById('run-over')?.classList.contains('hidden')||!document.getElementById('pause-help')?.classList.contains('hidden');
+    document.body.dataset.gameMode=this.mode;document.body.classList.toggle('noclip-active',!!this.debug.noclip);document.body.classList.toggle('controls-blocked',!!blocked);root.classList.toggle('hidden',!this.started||!['driving','garage'].includes(this.mode));
     if(blocked)this.releaseTouchInput?.();
   }
 
@@ -243,7 +255,7 @@ class ShutokoNights {
   }
   toggleDebugMenu(force){
     const open=typeof force==='boolean'?force:!this.debug.menuOpen;this.debug.menuOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));
-    this.keys={};this.pressed.clear();if(open)document.exitPointerLock?.();else if(this.debug.noclip)this.requestDronePointerLock();
+    this.keys={};this.pressed.clear();this.releaseTouchInput?.();if(open)document.exitPointerLock?.();else if(this.debug.noclip&&!this.isTouchDevice)this.requestDronePointerLock();
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
   updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}

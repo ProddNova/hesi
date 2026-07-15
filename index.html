@@ -132,15 +132,16 @@
           <label><input type="checkbox" data-debug-hitbox="world"><span>Visible world bounds</span></label>
           <button id="debug-hitboxes-all">TOGGLE ALL</button>
         </details>
-        <div class="debug-controls"><b>DRONE CONTROLS</b><span>WASD move · mouse / arrows look</span><span>WHEEL speed · SPACE/CTRL height · SHIFT boost</span></div>
+        <div class="debug-controls"><b>DRONE CONTROLS</b><span>WASD move · mouse / arrows look</span><span>WHEEL speed · SPACE/CTRL height · SHIFT boost</span><span>TOUCH: D-pad move · drag look · UP/DOWN height</span></div>
       </div>
     </aside>
-    <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span id="debug-drone-speed">55 M/S</span><span>WHEEL SPEED · SHIFT BOOST</span><small>0 MENU</small></div>
+    <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span id="debug-drone-speed">55 M/S</span><span class="drone-help-desktop">WHEEL SPEED · SHIFT BOOST</span><span class="drone-help-touch">DRAG LOOK · BOOST</span><small class="drone-help-desktop">0 MENU</small><small class="drone-help-touch">DBG MENU</small></div>
 
     <div id="install-progress" class="install hidden"><span id="install-label">INSTALLING</span><div><i></i></div></div>
 
     <section id="touch-controls" class="touch-controls hidden" aria-label="Touch controls">
       <div class="touch-look garage-only" id="touch-look" aria-label="Drag to look"><span>DRAG TO LOOK</span></div>
+      <div class="touch-look touch-drone-look noclip-only" id="touch-drone-look" aria-label="Drag to aim drone"><span>DRAG TO LOOK</span></div>
       <div class="touch-pad touch-steer driving-only">
         <button data-code="KeyA" aria-label="Steer left">◀</button>
         <button data-code="KeyD" aria-label="Steer right">▶</button>
@@ -162,7 +163,23 @@
         <button data-code="KeyW" class="touch-throttle" aria-label="Throttle">GAS</button>
       </div>
       <button class="touch-interact garage-only" data-code="KeyE" aria-label="Interact">USE</button>
+      <div class="touch-pad touch-drone-move noclip-only" aria-label="Drone movement">
+        <button data-code="KeyW" aria-label="Fly forward">▲</button>
+        <button data-code="KeyA" aria-label="Fly left">◀</button>
+        <button data-code="KeyS" aria-label="Fly backward">▼</button>
+        <button data-code="KeyD" aria-label="Fly right">▶</button>
+      </div>
+      <div class="touch-drone-actions noclip-only" aria-label="Drone height and boost">
+        <button data-code="Space" aria-label="Fly up">UP</button>
+        <button data-code="KeyQ" aria-label="Fly down">DOWN</button>
+        <button data-code="ShiftLeft" class="touch-drone-boost" aria-label="Drone boost">BOOST</button>
+      </div>
+      <div class="touch-drone-speed-controls noclip-only" aria-label="Drone speed">
+        <button data-action="drone-slower" aria-label="Reduce drone speed">−</button>
+        <button data-action="drone-faster" aria-label="Increase drone speed">+</button>
+      </div>
       <div class="touch-utility">
+        <button data-action="debug" class="touch-debug" aria-label="Open debug menu">DBG</button>
         <button data-action="phone" aria-label="Open phone">PHONE</button>
         <button data-action="recover" class="driving-only" aria-label="Recover car">RESET</button>
       </div>
