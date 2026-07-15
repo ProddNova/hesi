@@ -6575,6 +6575,19 @@ export class HighwayMap {
         z: junction.point.z,
         routes: [...junction.routes],
       })),
+      prototypePins: this.progressiveTransitions.map((transition, index) => ({
+        id: transition.id,
+        pinId: `P${index + 1}`,
+        label: transition.label,
+        type: transition.type,
+        side: transition.side,
+        hostRouteId: transition.hostRouteId,
+        branchRouteId: transition.branchRouteId,
+        distance: (transition.parallelStart + transition.absorptionStart) * 0.5,
+        x: transition.pin.x,
+        y: transition.pin.y,
+        z: transition.pin.z,
+      })),
       networkLength: [...this.routes.values()].filter((route) => route.kind !== 'service').reduce((sum, route) => sum + route.length, 0),
     };
   }

@@ -28,6 +28,7 @@ for (const transition of map.progressiveTransitions) {
   check(transition.laneCentres.length === transition.temporaryLaneCount, `${transition.id}: lane-centre path count`);
   check(transition.laneMappings.length >= transition.hostLaneCount + 1, `${transition.id}: incomplete lane mappings`);
   check(transition.markingOwnership.every((boundary) => boundary.owner), `${transition.id}: ownerless boundary record`);
+  check(Number.isFinite(transition.pin.x + transition.pin.y + transition.pin.z), `${transition.id}: invalid developer-map pin`);
   check(transition.pavedEnvelope.length > 40, `${transition.id}: sparse paved envelope`);
   check(transition.crossableEnvelope.length > 20, `${transition.id}: sparse crossable envelope`);
   const first = transition.pavedEnvelope[0];
@@ -45,6 +46,8 @@ for (const transition of map.progressiveTransitions) {
     check(row.lateralMin < row.lateralMax, `${transition.id}: inverted envelope at ${row.hostS}`);
   }
 }
+check(map.getMinimapData().prototypePins.length === 4, 'minimap does not expose exactly four prototype pins');
+check(legacy.getMinimapData().prototypePins.length === 0, 'legacy minimap exposes prototype pins');
 
 console.log(`records=${map.progressiveTransitions.length} legacy=${legacy.progressiveTransitions.length}`);
 console.log(map.progressiveTransitions.map((transition) => (

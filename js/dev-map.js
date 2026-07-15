@@ -131,6 +131,7 @@ export class DeveloperMap {
           <dt>Zoom</dt><dd data-info="zoom">—</dd>
           <dt>Noclip</dt><dd data-info="noclip">—</dd>
           <dt>On route</dt><dd data-info="route">—</dd>
+          <dt>Prototypes</dt><dd data-info="prototypes">—</dd>
           <dt>Teleport</dt><dd data-info="teleport">—</dd>
         </dl>
         <p class="dev-map-help">M / Esc close · drag pan · wheel zoom · double-click centre · hover a road · click to teleport</p>
@@ -147,6 +148,7 @@ export class DeveloperMap {
       zoom: root.querySelector('[data-info="zoom"]'),
       noclip: root.querySelector('[data-info="noclip"]'),
       route: root.querySelector('[data-info="route"]'),
+      prototypes: root.querySelector('[data-info="prototypes"]'),
       teleport: root.querySelector('[data-info="teleport"]'),
     };
     this.followBtn = root.querySelector('[data-act="follow"]');
@@ -241,6 +243,7 @@ export class DeveloperMap {
       junctions: raw.junctions || [],
       serviceAreas: raw.serviceAreas || [],
       garage: raw.garage || null,
+      prototypePins: raw.prototypePins || [],
       // Draw minor roads first so mainlines sit on top.
       drawOrder: [...routes].sort((a, b) => (a.minor === b.minor ? 0 : a.minor ? -1 : 1)),
     };
@@ -532,6 +535,7 @@ export class DeveloperMap {
       ctx.arc(s.x, s.y, 2.4, 0, Math.PI * 2);
       ctx.fill();
     }
+    this._drawPrototypePins(ctx);
     for (const area of this.network.serviceAreas) {
       const s = this.worldToScreen(area.x, area.z);
       ctx.fillStyle = 'rgba(120,220,180,0.85)';
@@ -572,6 +576,36 @@ export class DeveloperMap {
       ctx.moveTo(0, s.y); ctx.lineTo(this.cssWidth, s.y);
     }
     ctx.stroke();
+  }
+
+  _drawPrototypePins(ctx) {
+    ctx.save();
+    ctx.font = '700 10px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (const pin of this.network.prototypePins) {
+      const s = this.worldToScreen(pin.x, pin.z);
+      if (s.x < -18 || s.x > this.cssWidth + 18 || s.y < -18 || s.y > this.cssHeight + 18) continue;
+      ctx.fillStyle = 'rgba(5,8,15,0.86)';
+      ctx.fillRect(s.x - 10, s.y - 24, 20, 12);
+      ctx.fillStyle = '#ff7be5';
+      ctx.fillText(pin.pinId, s.x, s.y - 13);
+      ctx.shadowColor = '#ff4fd8';
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#ff4fd8';
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - 8);
+      ctx.lineTo(s.x + 7, s.y);
+      ctx.lineTo(s.x, s.y + 8);
+      ctx.lineTo(s.x - 7, s.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   _strokeRoute(ctx, route, color, width, alpha) {
@@ -717,6 +751,10 @@ export class DeveloperMap {
     this.info.zoom.textContent = `${this.view.scale.toFixed(2)} px/m`;
     this.info.noclip.textContent = noclip ? 'ENABLED (drone)' : 'disabled';
     this.info.noclip.classList.toggle('is-on', !!noclip);
+    const pins = this.network?.prototypePins || [];
+    this.info.prototypes.textContent = pins.length
+      ? `${pins.length} pinned (${pins.map((pin) => pin.pinId).join(', ')})`
+      : 'none';
     this.info.teleport.textContent = this._teleportInfo ? this._teleportInfo.text : '—';
     // The current-route lookup is a network search; refresh it a few times a
     // second rather than every frame.

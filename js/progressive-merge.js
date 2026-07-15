@@ -99,6 +99,7 @@ function buildRecord(map, zone, prototype) {
   const record = {
     id: zone.id,
     label: prototype.label,
+    pin: { ...prototype.pin },
     hostRouteId: zone.host.id,
     branchRouteId: zone.branch.id,
     type: zone.kind,

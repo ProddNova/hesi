@@ -66,6 +66,40 @@ await page.waitForTimeout(400);
 await page.keyboard.press('m');
 await page.waitForTimeout(120);
 check('M opens the developer map', await page.evaluate(() => window.shutoko.devMap.isOpen() && !document.querySelector('.dev-map').hidden));
+const prototypePins = await page.evaluate(() => {
+  const dm = window.shutoko.devMap;
+  dm.fitNetwork();
+  dm._drawStatic();
+  const dpr = dm._dpr;
+  const expected = [
+    'J8:merge:r11_0:ramp_1:end',
+    'J0:merge:c1_0:c1_3:end',
+    'J10:merge:wangan_1:ramp_3:end',
+    'J2:diverge:c1_0:r1_0:start',
+  ];
+  const pins = dm.network.prototypePins;
+  const rendered = pins.every((pin) => {
+    const s = dm.worldToScreen(pin.x, pin.z);
+    const x = Math.max(0, Math.round((s.x - 9) * dpr));
+    const y = Math.max(0, Math.round((s.y - 9) * dpr));
+    const size = Math.max(1, Math.round(18 * dpr));
+    const data = dm.staticCtx.getImageData(x, y, size, size).data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 220 && data[i + 2] > 170 && data[i] > data[i + 1] * 1.25) return true;
+    }
+    return false;
+  });
+  return {
+    count: pins.length,
+    idsMatch: pins.map((pin) => pin.id).every((id, index) => id === expected[index]),
+    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P1,P2,P3,P4',
+    finite: pins.every((pin) => Number.isFinite(pin.x + pin.y + pin.z + pin.distance)),
+    rendered,
+    info: document.querySelector('[data-info="prototypes"]')?.textContent || '',
+  };
+});
+check('developer map exposes exactly four audited prototype pins', prototypePins.count === 4 && prototypePins.idsMatch && prototypePins.finite);
+check('prototype pins render as P1-P4', prototypePins.labelsMatch && prototypePins.rendered, prototypePins.info);
 await page.screenshot({ path: join(OUT, 'dev-01-fit-network.png') });
 await page.keyboard.press('m');
 await page.waitForTimeout(120);

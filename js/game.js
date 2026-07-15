@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260715h';
+import * as MapModule from './map.js?v=20260716a';
 import * as PhysicsModule from './physics.js?v=20260713a';
 import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
@@ -7,7 +7,7 @@ import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260713a';
 import { GameUI } from './ui.js?v=20260713a';
-import { DeveloperMap } from './dev-map.js?v=20260715f';
+import { DeveloperMap } from './dev-map.js?v=20260716a';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
@@ -303,7 +303,7 @@ class ShutokoNights {
         oneWay:meta?.oneWay,bidirectional:meta?.bidirectional,
         direction:meta?.oneWayDirection??1};
     });
-    return {routes,bounds:mm.bounds,junctions:mm.junctions,serviceAreas:mm.serviceAreas,garage:mm.garage};
+    return {routes,bounds:mm.bounds,junctions:mm.junctions,serviceAreas:mm.serviceAreas,garage:mm.garage,prototypePins:mm.prototypePins||[]};
   }
   _snapNoclipCamera(){
     const cp=Math.cos(this.debug.pitch),look=new THREE.Vector3(Math.sin(this.debug.yaw)*cp,Math.sin(this.debug.pitch),Math.cos(this.debug.yaw)*cp);
