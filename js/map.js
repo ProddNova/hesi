@@ -1856,6 +1856,63 @@ export class HighwayMap {
             return value >= interval[0] && value <= interval[1];
           },
         };
+        const branchDividers = this._laneDividerOffsets(route);
+        const hostDividers = this._laneDividerOffsets(host);
+        zone.markingBoundaries = [
+          {
+            id: `${zone.id}:branch-host-edge`,
+            physicalBoundary: 'branch edge facing host',
+            route: route.id,
+            lateral: branchHostward,
+            interval: markingOpening?.branch || null,
+            outsideOwner: `route:${route.id}`,
+            openingOwner: 'none',
+            reason: 'edge disappears into one crossable paved union',
+          },
+          {
+            id: `${zone.id}:branch-outer-edge`,
+            physicalBoundary: 'outer edge of paved union',
+            route: route.id,
+            lateral: -branchHostward,
+            interval: markingOpening?.branch || null,
+            outsideOwner: `route:${route.id}`,
+            openingOwner: `route:${route.id}`,
+            reason: 'separated physical road edge remains visible',
+          },
+          ...branchDividers.map((lateral, index) => ({
+            id: `${zone.id}:branch-divider:${index}`,
+            physicalBoundary: `branch lane divider ${index}`,
+            route: route.id,
+            lateral,
+            interval: markingOpening?.branch || null,
+            outsideOwner: `route:${route.id}`,
+            openingOwner: 'none',
+            reason: 'route-local lane topology is absorbed by the junction union',
+          })),
+          ...hostDividers.map((lateral, index) => ({
+            id: `${zone.id}:host-divider:${index}`,
+            physicalBoundary: `host lane divider ${index}`,
+            route: host.id,
+            lateral,
+            interval: markingOpening?.host || null,
+            outsideOwner: `route:${host.id}`,
+            openingOwner: `route:${host.id}`,
+            reason: 'unrelated host lane boundary continues through the opening',
+          })),
+          {
+            id: `${zone.id}:host-edge`,
+            physicalBoundary: 'host outer edge facing branch',
+            route: host.id,
+            lateral: side,
+            interval: hostEdgeSuppress,
+            pieces: hostEdgeSuppressPieces.map((piece) => [...piece]),
+            outsideOwner: `route:${host.id}`,
+            openingOwner: dashPieces.length ? `junction:${zone.id}` : 'none',
+            reason: dashPieces.length
+              ? 'junction owns the broken merge boundary'
+              : 'legal opening has no solid edge marking',
+          },
+        ];
         this.junctionZones.push(zone);
         mouth.zone = zone;
         if (!host._zonesAsHost) host._zonesAsHost = [];
@@ -4800,7 +4857,7 @@ export class HighwayMap {
         };
         if (route._zonesAsBranch) {
           for (const zone of route._zonesAsBranch) {
-            const removesBoundary = edgeSide === zone.hostwardSign;
+            const removesBoundary = boundaryRole === 'laneDivider' || edgeSide === zone.hostwardSign;
             if (!removesBoundary) continue;
             const opening = zone.markingOpening?.branch;
             const afterA = opening && (opening[0] <= 0.001
