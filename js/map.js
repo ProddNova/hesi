@@ -746,8 +746,13 @@ export class HighwayMap {
       blended.push(mixed);
     }
     const rest = ordered.slice(restFrom);
+    // TWO lead points on the glue line pin the curve's endpoint tangent to
+    // the host direction (an open Catmull-Rom's end tangent leans toward
+    // the next interior point — one lead alone let the mouth start/end
+    // 5-8 deg off-axis with a ~0.6 m bulge).
     const lead = edgePoint(hostDistanceAtMouth - alongSign * 30);
-    const merged = [lead, ...blended, ...rest];
+    const lead2 = edgePoint(hostDistanceAtMouth - alongSign * 15);
+    const merged = [lead, lead2, ...blended, ...rest];
     const result = which === 'start' ? merged : merged.reverse();
 
     if (which === 'start') {
@@ -1423,15 +1428,28 @@ export class HighwayMap {
         const outerOn = tipIndex >= 0 ? { branch: branchInterval(tipIndex, lastEngaged) } : null;
         const outerOff = tipIndex > 0 ? { branch: branchInterval(0, tipIndex - 1) } : (tipIndex < 0 ? { branch: branchInterval(0, lastEngaged) } : null);
         const innerOff = range((r) => r.innerEdge < r.hostHalf + 0.9 && Math.abs(r.dy) < 2.5);
-        // Where the branch is fully covered (the glued tail), the host owns
-        // the union's edge and its rail must run — the yield probe would
-        // otherwise keep it dead because the branch corridor still overlaps.
+        // Host rail intervals are BOUND TO THE SAME TIP ROW as the branch
+        // outer rail, so the hand-off happens at one envelope station by
+        // construction (on a slowly-forking equal-width branch, separate
+        // width thresholds landed nearly 100 m apart, leaving the edge
+        // unguarded between them). Mouth-side of the tip the host owns the
+        // edge (forced on through the glued tail — the yield probe would
+        // otherwise keep it dead); outward of the tip the opening is the
+        // branch rail's.
+        let hostRailOpen = null;
         let hostRailOn = null;
-        if (crossable) {
+        if (crossable && railOpen) {
+          const tipH = tipIndex >= 0 ? rows[tipIndex].hU : (which === 'end' ? railOpen.host[0] : railOpen.host[1]);
+          hostRailOpen = which === 'end'
+            ? [railOpen.host[0] - 2, tipH + 2]
+            : [tipH - 2, railOpen.host[1] + 2];
+          if (hostRailOpen[1] <= hostRailOpen[0]) hostRailOpen = null;
           const tail = which === 'end'
-            ? [railOpen ? railOpen.host[1] : crossable.host[0] - 15, crossable.host[1] + 15]
-            : [crossable.host[0] - 15, railOpen ? railOpen.host[0] : crossable.host[1] + 15];
+            ? [tipH, crossable.host[1] + 15]
+            : [crossable.host[0] - 15, tipH];
           if (tail[1] > tail[0]) hostRailOn = tail;
+        } else if (crossable) {
+          hostRailOn = [crossable.host[0] - 15, crossable.host[1] + 15];
         }
 
         // Branch-frame lateral sign pointing at the host, measured (the
@@ -1459,7 +1477,7 @@ export class HighwayMap {
           crossable,
           hostEdgeSuppress: open ? open.host : null,
           dash: dash ? { from: dash.host[0], to: dash.host[1] } : null,
-          hostRailOpen: railOpen ? [railOpen.host[0] - 2, railOpen.host[1] + 2] : null,
+          hostRailOpen,
           hostRailOn,
           branchOuterRailOn: outerOn ? outerOn.branch : null,
           branchOuterRailOff: outerOff ? outerOff.branch : null,
