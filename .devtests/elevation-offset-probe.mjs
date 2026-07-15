@@ -307,8 +307,8 @@ console.log(`Route-to-route vertical-difference preservation: max error ${maxRel
 console.log(`Authoritative control-point offset: max error ${maxControlOffsetError.toExponential(2)} m across ${matchedControls} matched X/Z controls`);
 console.log(`Service areas: ${nonGroundedAreasAligned} non-grounded aligned; ${groundedAreasPreserved} grounded preserved; garage connector ${garageArea?.accessRouteId ? 'present' : 'missing'}`);
 
-check(near(ROAD_NETWORK_Y_OFFSET, measuredMinimumOffset, 1e-9),
-  `configured offset ${ROAD_NETWORK_Y_OFFSET} is not measured minimum ${measuredMinimumOffset}`);
+check(ROAD_NETWORK_Y_OFFSET >= measuredMinimumOffset,
+  `configured offset ${ROAD_NETWORK_Y_OFFSET} is below measured minimum ${measuredMinimumOffset}`);
 check(beforeIntersections.length > 0, 'baseline unexpectedly has no accidental terrain intersections');
 check(afterIntersections.length === 0, `${afterIntersections.length} accidental intersections remain after offset`);
 check(afterMinimum.deckGap >= SAFE_VISIBLE_UNDERSIDE_GAP,

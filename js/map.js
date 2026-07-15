@@ -49,11 +49,17 @@ const CHUNK = 600;
 const CHUNK_VISIBLE = 1500;
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 
-// Measured by .devtests/elevation-offset-probe.mjs. Apply this once, at the
-// authoritative data-control-point boundary, so curves and every system
-// derived from them inherit exactly the same lift without changing X/Z or
-// any route-to-route height difference.
-export const ROAD_NETWORK_Y_OFFSET = 15.0;
+// Preserve the existing 15 m terrain lift and add the requested 10 m raise.
+// Apply the total once, at the authoritative data-control-point boundary, so
+// curves and every system derived from them inherit exactly the same lift
+// without changing X/Z or any route-to-route height difference.
+export const ROAD_NETWORK_BASE_Y_OFFSET = 15.0;
+export const ROAD_NETWORK_EXTRA_Y_OFFSET = 10.0;
+export const ROAD_NETWORK_Y_OFFSET = ROAD_NETWORK_BASE_Y_OFFSET + ROAD_NETWORK_EXTRA_Y_OFFSET;
+
+// One authoritative multiplier keeps every procedural city building and all
+// height-dependent rooftop details in proportion.
+export const CITY_BUILDING_HEIGHT_SCALE = 1.8;
 
 // TEMPORARY (lateral-junction rebuild): the synthesized PA access lanes —
 // the decel/accel legs and descent spirals _defineServiceAreas builds around
@@ -4537,6 +4543,7 @@ export class HighwayMap {
    * (signage/shopfront orientation).
    */
   _buildStructure(random, x, z, yaw, archetype, width, height, depth, opts = {}) {
+    height *= CITY_BUILDING_HEIGHT_SCALE;
     const baseY = opts.baseY ?? -0.1;
     const face = opts.face || null;
     const rx = Math.cos(yaw);
