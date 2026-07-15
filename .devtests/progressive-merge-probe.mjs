@@ -131,6 +131,28 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     }
     if (!progressiveHandOffs) fail(id, 'no branch-to-host surface hand-off');
 
+    // Drive every source-lane centre through the full progressive interval.
+    // This catches a collision hand-off that is geometrically inside the
+    // surface union but still too close to the current host-envelope edge for
+    // a vehicle footprint.
+    let driveSamples = 0;
+    const branchRoute = transition.sourceZone.branch;
+    for (let lane = 0; lane < branchRoute.lanes; lane += 1) {
+      let laneFailed = false;
+      for (let distance = transition.branchInterval[0]; distance <= transition.branchInterval[1]; distance += 2) {
+        driveSamples += 1;
+        const sample = map.sampleLane(branchRoute.id, distance, lane, 1);
+        const point = sample.position.clone();
+        point.y = sample.center.y + 0.4;
+        if (map.resolveWallCollision(point, 1).hit) {
+          fail(id, `source lane ${lane} wall at ${distance.toFixed(1)}`);
+          laneFailed = true;
+          break;
+        }
+      }
+      if (laneFailed) continue;
+    }
+
     // Markings: one transition owner, no route-local branch paint in the
     // claimed interval, exact solid/dash path alignment and intentional dash gaps only.
     const progressivePieces = map._markingLog.filter((piece) => piece.kind === 'strip'
@@ -181,7 +203,7 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       }
     }
 
-    console.log(`${id} PASS-CANDIDATE length=${transition.length.toFixed(1)}m laneStep=${worstLaneStep.toFixed(2)}m tangent=${worstTangentDelta.toFixed(2)}deg widthStep=${worstWidthStep.toFixed(2)}m height=${worstHeightError.toFixed(3)}m handoffs=${progressiveHandOffs}`);
+    console.log(`${id} PASS-CANDIDATE length=${transition.length.toFixed(1)}m laneStep=${worstLaneStep.toFixed(2)}m tangent=${worstTangentDelta.toFixed(2)}deg widthStep=${worstWidthStep.toFixed(2)}m height=${worstHeightError.toFixed(3)}m handoffs=${progressiveHandOffs} drive=${driveSamples}`);
   }
 
   if (failures.length) {

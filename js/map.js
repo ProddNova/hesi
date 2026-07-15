@@ -2653,17 +2653,29 @@ export class HighwayMap {
       if (zone.progressive) {
         const hostS = zone.progressive.hostAtBranch(distance);
         const phase = hostS === null ? null : zone.progressive.phaseAt(hostS);
-        if (hostS !== null && phase !== 'approach') {
+        // During approach the branch is still an independent carriageway.
+        // Once the opening begins, hand a point to the host only after the
+        // widened envelope contains a full vehicle footprint around it. The
+        // renderer keeps the branch's outside wing wherever that is not yet
+        // true, so collision follows the same visible surface union instead
+        // of putting an invisible wall through the source lane centre.
+        if (hostS !== null && phase === 'approach') return false;
+        if (hostS !== null) {
           const frame = this._frameAt(route, distance);
           const point = this._deckPoint(frame, lateral);
           const projection = this._projectToRoute(zone.host, point, this._hostSeedIndex(zone.host, hostS));
           const envelope = zone.progressive.envelopeAt(projection.distance);
           const bank = this._bankAt(zone.host, projection.distance);
           const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
-          if (projection.signedLateral > envelope.lateralMin + 0.02
-            && projection.signedLateral < envelope.lateralMax - 0.02
+          const handoffInset = 1.35;
+          if (projection.signedLateral > envelope.lateralMin + handoffInset
+            && projection.signedLateral < envelope.lateralMax - handoffInset
             && point.y - deckY < 0.8) return true;
         }
+        // The progressive record is authoritative for this interval. If its
+        // host envelope cannot own the full footprint yet, retain the branch
+        // corridor instead of falling through to the narrower legacy clip.
+        return false;
       }
       let best = null;
       let bestDelta = Infinity;
