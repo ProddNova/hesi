@@ -141,10 +141,15 @@ export class HighwayMap {
     this.wallSegments = [];
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
-    // options.markingDebug: per-piece paint records (see _paintStrip /
-    // _dressGores) consumed by .devtests/marking-orientation-probe.mjs.
+    // options.markingDebug: per-piece paint/suppression records (see
+    // _paintStrip / _dressGores). Besides orientation, the A-B junction
+    // probe needs to explain which system attempted every boundary and why
+    // a candidate span was retained or rejected.
     this._markingLog = [];
     this._markingTag = null;
+    this._markingOwner = null;
+    this._markingClassification = null;
+    this._markingBoundary = null;
     this.blinkers = [];
     // Quality-scalable effect layers (light pools / wet-asphalt streaks):
     // instanced meshes whose geometry name is in _effectTypes get collected so
@@ -1662,6 +1667,7 @@ export class HighwayMap {
         const branchHostward = plusDepth < minusDepth ? 1 : -1;
 
         const zone = {
+          id: `J${this.junctionZones.length}:${mouth.kind}:${host.id}:${route.id}:${which}`,
           kind: mouth.kind,
           which,
           side,
@@ -3624,6 +3630,30 @@ export class HighwayMap {
   }
 
   /**
+   * Diagnostic membership of a route-local span in the shared junction-zone
+   * model. Kept behind `markingDebug`: production rendering pays no cost.
+   */
+  _markingDebugContext(route, sFrom, sTo) {
+    const memberships = [];
+    for (const zone of route._zonesAsBranch || []) {
+      const interval = zone.crossable?.branch;
+      if (!interval || sTo < interval[0] || sFrom > interval[1]) continue;
+      memberships.push({ zoneId: zone.id, role: 'branch', opening: 'crossable' });
+    }
+    for (const zone of route._zonesAsHost || []) {
+      if (!zone.crossable?.host) continue;
+      const intersects = this._zoneIntervalPieces(route, zone.crossable.host)
+        .some(([from, to]) => sTo >= from && sFrom <= to);
+      if (intersects) memberships.push({ zoneId: zone.id, role: 'host', opening: 'crossable' });
+    }
+    return {
+      junctionZoneIds: memberships.map((entry) => entry.zoneId),
+      junctionMemberships: memberships,
+      intersectsTrueOpening: memberships.length > 0,
+    };
+  }
+
+  /**
    * Paint a longitudinal stripe [sStart, sEnd] onto the deck as merged quads.
    * The stripe walks the route's surface frames and interpolates the SAME
    * corner points the deck triangles interpolate, so paint sits in the drawn
@@ -3645,9 +3675,40 @@ export class HighwayMap {
       const lo = Math.max(sStart, segStart);
       const hi = Math.min(sEnd, segEnd);
       if (hi - lo < 0.05) continue;
-      const la = lateralAt(a);
-      const lb = lateralAt(b);
-      if (la === null || lb === null) continue;
+      const rawA = lateralAt(a);
+      const rawB = lateralAt(b);
+      const sampleOf = (value) => {
+        if (typeof value === 'number') return { lateral: value, suppressionReason: null, zoneId: null };
+        if (value && typeof value === 'object') return value;
+        return { lateral: null, suppressionReason: 'marking-path-undefined', zoneId: null };
+      };
+      const sampleA = sampleOf(rawA);
+      const sampleB = sampleOf(rawB);
+      const la = sampleA.lateral;
+      const lb = sampleB.lateral;
+      if (la === null || lb === null) {
+        if (this.options.markingDebug && materialName !== 'amber') {
+          const context = this._markingDebugContext(route, lo, hi);
+          this._markingLog.push({
+            kind: 'suppressedStrip',
+            tag: this._markingTag || 'untagged',
+            markingType: this._markingTag || 'untagged',
+            routeId: route.id,
+            owner: this._markingOwner || `route:${route.id}`,
+            classification: this._markingClassification || 'route-local',
+            boundary: this._markingBoundary,
+            material: materialName,
+            sFrom: lo,
+            sTo: hi,
+            latFrom: la,
+            latTo: lb,
+            suppressionReason: sampleA.suppressionReason || sampleB.suppressionReason || 'marking-path-undefined',
+            suppressionZoneId: sampleA.zoneId || sampleB.zoneId || null,
+            ...context,
+          });
+        }
+        continue;
+      }
       const span = Math.max(segEnd - segStart, EPSILON);
       let t0 = (lo - segStart) / span;
       let t1 = (hi - segStart) / span;
@@ -3656,7 +3717,29 @@ export class HighwayMap {
       // span merely because one endpoint is too narrow.
       const clearanceA = a.half - 0.3 - halfWidth - Math.abs(la);
       const clearanceB = b.half - 0.3 - halfWidth - Math.abs(lb);
-      if (clearanceA < 0 && clearanceB < 0) continue;
+      if (clearanceA < 0 && clearanceB < 0) {
+        if (this.options.markingDebug && materialName !== 'amber') {
+          const context = this._markingDebugContext(route, lo, hi);
+          this._markingLog.push({
+            kind: 'suppressedStrip',
+            tag: this._markingTag || 'untagged',
+            markingType: this._markingTag || 'untagged',
+            routeId: route.id,
+            owner: this._markingOwner || `route:${route.id}`,
+            classification: this._markingClassification || 'route-local',
+            boundary: this._markingBoundary,
+            material: materialName,
+            sFrom: lo,
+            sTo: hi,
+            latFrom: la,
+            latTo: lb,
+            suppressionReason: 'outside-route-paved-width',
+            suppressionZoneId: null,
+            ...context,
+          });
+        }
+        continue;
+      }
       if ((clearanceA < 0) !== (clearanceB < 0)) {
         const crossing = clamp(clearanceA / (clearanceA - clearanceB), 0, 1);
         if (clearanceA < 0) t0 = Math.max(t0, crossing);
@@ -3684,10 +3767,15 @@ export class HighwayMap {
         // constant-lateral stripe is parallel to it regardless of how
         // sharp the curve is, so only REAL lateral drift reads diagonal.
         const meanTangent = a.tangent.clone().add(b.tangent).normalize();
+        const context = this._markingDebugContext(route, lo, hi);
         this._markingLog.push({
           kind: 'strip',
           tag: this._markingTag || 'untagged',
+          markingType: this._markingTag || 'untagged',
           routeId: route.id,
+          owner: this._markingOwner || `route:${route.id}`,
+          classification: this._markingClassification || 'route-local',
+          boundary: this._markingBoundary,
           material: materialName,
           sFrom: lo,
           sTo: hi,
@@ -3696,6 +3784,10 @@ export class HighwayMap {
           start: { x: start.x, y: start.y, z: start.z },
           end: { x: end.x, y: end.y, z: end.z },
           tangent: { x: meanTangent.x, y: meanTangent.y, z: meanTangent.z },
+          tangentFrom: { x: a.tangent.x, y: a.tangent.y, z: a.tangent.z },
+          tangentTo: { x: b.tangent.x, y: b.tangent.y, z: b.tangent.z },
+          suppressionReason: null,
+          ...context,
         });
       }
     }
@@ -4344,23 +4436,25 @@ export class HighwayMap {
       const margin = width * 0.5 + 0.3;
       return (frame) => {
         const lat = latFn(frame);
-        if (lat === null) return null;
+        if (lat === null) return { lateral: null, suppressionReason: 'marking-path-undefined', zoneId: null };
         if (edgeSide !== null && route._zonesAsBranch) {
           for (const zone of route._zonesAsBranch) {
             if (!zone.crossable || edgeSide !== zone.hostwardSign) continue;
-            if (frame.distance >= zone.crossable.branch[0] - 1 && frame.distance <= zone.crossable.branch[1] + 1) return null;
+            if (frame.distance >= zone.crossable.branch[0] - 1 && frame.distance <= zone.crossable.branch[1] + 1) {
+              return { lateral: null, suppressionReason: 'junction-zone-owner-handoff', zoneId: zone.id };
+            }
           }
         }
         const jx = this._mouthClipAt(route, frame);
-        if (!jx) return lat;
-        if (jx.skip) return null;
+        if (!jx) return { lateral: lat, suppressionReason: null, zoneId: null };
+        if (jx.skip) return { lateral: null, suppressionReason: 'host-covers-branch-section', zoneId: jx.mouth.zone?.id || null };
         // paint must sit on a drawn interval, clear of any cut edge
         for (const interval of jx.intervals) {
           const loBound = interval.lo <= -frame.half + 0.01 ? interval.lo : interval.lo + margin;
           const hiBound = interval.hi >= frame.half - 0.01 ? interval.hi : interval.hi - margin;
-          if (lat >= loBound && lat <= hiBound) return lat;
+          if (lat >= loBound && lat <= hiBound) return { lateral: lat, suppressionReason: null, zoneId: jx.mouth.zone?.id || null };
         }
-        return null;
+        return { lateral: null, suppressionReason: 'outside-visible-branch-deck', zoneId: jx.mouth.zone?.id || null };
       };
     };
     const dividerOffsets = [];
@@ -4373,7 +4467,11 @@ export class HighwayMap {
       for (let lane = 1; lane < route.lanes; lane += 1) dividerOffsets.push((lane - route.lanes * 0.5) * route.laneWidth);
     }
     this._markingTag = 'laneDivider';
-    for (const offset of dividerOffsets) {
+    this._markingOwner = `route:${route.id}`;
+    this._markingClassification = 'route-local';
+    for (let dividerIndex = 0; dividerIndex < dividerOffsets.length; dividerIndex += 1) {
+      const offset = dividerOffsets[dividerIndex];
+      this._markingBoundary = `lane-divider:${dividerIndex}:${offset.toFixed(3)}`;
       this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14), 0.14, dashStep, dashLength, 6);
     }
     // Edge lines with junction-zone marking ownership. Where this route
@@ -4399,6 +4497,9 @@ export class HighwayMap {
       }
       if (route.length > cursor + 0.5) kept.push([cursor, route.length]);
       this._markingTag = 'edgeLine';
+      this._markingOwner = `route:${route.id}`;
+      this._markingClassification = 'route-local';
+      this._markingBoundary = `edge:${side}`;
       for (const [from, to] of kept) {
         this._paintStrip(route, 'marking', from, to,
           mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16, side), 0.16);
@@ -4415,11 +4516,17 @@ export class HighwayMap {
     this._markingTag = 'zoneDash';
     for (const zone of route._zonesAsHost || []) {
       if (!zone.dash) continue;
+      this._markingOwner = `junction:${zone.id}`;
+      this._markingClassification = 'junction-local';
+      this._markingBoundary = `merge-boundary:${zone.id}`;
       for (const [from, to] of this._zoneIntervalPieces(route, [zone.dash.from, zone.dash.to])) {
         this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
       }
     }
     this._markingTag = null;
+    this._markingOwner = null;
+    this._markingClassification = null;
+    this._markingBoundary = null;
 
     // Support pillars for elevated decks (every ~30 m per blueprint).
     if (!isService) {
