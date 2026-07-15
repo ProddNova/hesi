@@ -65,14 +65,15 @@ export const CITY_BUILDING_HEIGHT_SCALE = 1.8;
 // the decel/accel legs and descent spirals _defineServiceAreas builds around
 // each parking area — are broken and will be rebuilt in their own pass.
 // This flag removes them from the RUNTIME map only: no route is registered,
-// so their asphalt, collision corridor, guardrails/wall segments, markings
-// and traffic connections all disappear together. The raw (data/routes.js)
-// and smoothed (data/routes-smoothed.js) network data are untouched; set the
-// flag to false (or pass options.paAccessLanes = true) to restore every lane.
-// EXCEPTION — garage connector: the lane of the PA that hosts the player
-// garage (Shibaura, hasGarage in data) is kept, because the garage flow
-// drives through that lot (spawn/tow/exit land beside it on R11 and the
-// player must be able to drive in and out of the lot).
+// so their asphalt, collision corridor, guardrails/wall segments, markings,
+// minimap polyline and traffic connections all disappear together. The raw
+// (data/routes.js) and smoothed (data/routes-smoothed.js) network data are
+// untouched; set the flag to false (or pass options.paAccessLanes = true) to
+// restore every lane. This now includes the garage connector (Shibaura,
+// hasGarage in data): the lot and its dressing stay, but the lane is gone,
+// so the garage flow never drives it — spawn/tow/exit already land on the
+// R11 mainline (initialSpawn) and the ENTER GARAGE trigger relocates to the
+// mainline shoulder beside the lot (see _defineServiceAreas).
 const PA_ACCESS_LANES_DISABLED = true;
 
 function clamp(value, min, max) {
@@ -140,6 +141,10 @@ export class HighwayMap {
     this.wallSegments = [];
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
+    // options.markingDebug: per-piece paint records (see _paintStrip /
+    // _dressGores) consumed by .devtests/marking-orientation-probe.mjs.
+    this._markingLog = [];
+    this._markingTag = null;
     this.blinkers = [];
     // Quality-scalable effect layers (light pools / wet-asphalt streaks):
     // instanced meshes whose geometry name is in _effectTypes get collected so
@@ -972,16 +977,25 @@ export class HighwayMap {
       center.y = elevation;
       const tangent = sample.tangent.clone();
 
-      // PA access lanes are temporarily disabled (see PA_ACCESS_LANES_DISABLED)
-      // except the garage connector: the lot itself stays (dressing, refuel,
+      // PA access lanes are temporarily disabled (see PA_ACCESS_LANES_DISABLED),
+      // the garage connector included: the lot itself stays (dressing, refuel,
       // proximity, its own wall collision), but no access route, corridor,
-      // rails or edges are created for it.
-      const laneDisabled = (this.options.paAccessLanes === true ? false : PA_ACCESS_LANES_DISABLED)
-        && !def.hasGarage;
+      // rails or edges are created for it. The garage stays usable without
+      // its lane: the ENTER GARAGE trigger point (area.garageEntrance, read
+      // by getGarageTransition / getServiceAreaProximity / the minimap
+      // marker) moves onto the host carriageway's shoulder beside the lot,
+      // while the physical building keeps its lot anchor (garageLotAnchor).
+      const laneDisabled = this.options.paAccessLanes === true ? false : PA_ACCESS_LANES_DISABLED;
       if (laneDisabled) {
         const area = this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, null);
         area.sideSign = sideSign;
         area.accessDisabled = true;
+        if (area.hasGarage) {
+          const shoulder = sample.position.clone()
+            .addScaledVector(sample.normal, sideSign * Math.max(1.2, route.halfWidth - 1.8));
+          shoulder.y = sample.position.y + 0.15;
+          area.garageEntrance = shoulder;
+        }
         continue;
       }
 
@@ -1157,9 +1171,13 @@ export class HighwayMap {
       refuelPosition: center.clone().addScaledVector(outward, def.width * 0.18).addScaledVector(tangent, def.length * 0.22),
       bankRadius: Math.min(def.width, def.length) * 0.44,
     };
-    area.garageEntrance = def.hasGarage
+    // The lot-local anchor the garage BUILDING is dressed around; the
+    // functional entrance trigger (garageEntrance) defaults to it but moves
+    // to the mainline shoulder while the access lane is disabled.
+    area.garageLotAnchor = def.hasGarage
       ? center.clone().addScaledVector(outward, def.width * 0.46).addScaledVector(tangent, -14)
       : null;
+    area.garageEntrance = area.garageLotAnchor ? area.garageLotAnchor.clone() : null;
     this.serviceAreas.push(area);
     return area;
   }
@@ -1517,10 +1535,6 @@ export class HighwayMap {
         // the edge hands the boundary to the zone.
         const crossable = rangeIn(() => true);
         const open = rangeIn((r) => r.crossOuter > r.hostHalf + 0.25);
-        // Host rail hand-off matches the branch outer rail's 0.6 m wing
-        // threshold: the host rail resumes where the branch rail ends
-        // (slight overlap over the last sliver of wing, never a gap).
-        const railOpen = rangeIn((r) => r.crossOuter > r.hostHalf + 0.55);
         const dash = rangeIn((r) => r.crossOuter - laneEdge >= 2.0);
         // Outer rail hand-off: rows are ordered from the mouth end outward,
         // so the FIRST row with a real wing marks the single tip boundary —
@@ -1547,17 +1561,52 @@ export class HighwayMap {
         // branch rail's.
         let hostRailOpen = null;
         let hostRailOn = null;
-        if (crossable && railOpen) {
-          const tipH = tipIndex >= 0 ? rows[tipIndex].hU : (which === 'end' ? railOpen.host[0] : railOpen.host[1]);
-          hostRailOpen = which === 'end'
-            ? [railOpen.host[0] - 2, tipH + 2]
-            : [tipH - 2, railOpen.host[1] + 2];
-          if (hostRailOpen[1] <= hostRailOpen[0]) hostRailOpen = null;
-          const tail = which === 'end'
-            ? [tipH, crossable.host[1] + 15]
-            : [crossable.host[0] - 15, tipH];
-          if (tail[1] > tail[0]) hostRailOn = tail;
+        // THE RAIL-BLOCKED BAND — one physical rule for every opening:
+        // the host rail (footprint laterals [hostHalf - 0.42, hostHalf])
+        // must not stand where the branch pavement reaches under it
+        // (outer edge past hostHalf - 0.15) while the hostward edge has
+        // not cleared it (innerEdge < hostHalf + 0.5), with the branch
+        // surface inside the barrier's own height band (dy in
+        // (-1.6, 1.35), the _barrierSuppressed window: an at-level
+        // opening OR a second deck the rail must not pierce). This IS the
+        // paved opening envelope; the old tip-tied intervals either ran
+        // ~300 m past it or blanket-forced rail ACROSS the exit path.
+        const railBlocked = (r) => r.dy < 1.35 && r.dy > -1.6
+          && r.e + r.half > r.hostHalf - 0.15
+          && r.innerEdge < r.hostHalf + 0.5;
+        const bands = [];
+        if (c0 >= 0) {
+          for (let i = c0; i < rows.length; i += 1) {
+            if (!railBlocked(rows[i])) continue;
+            const band = { from: i, to: i };
+            while (i + 1 < rows.length && railBlocked(rows[i + 1])) { i += 1; band.to = i; }
+            bands.push(band);
+          }
+        }
+        // the band reaching past the crossable interior owns the opening
+        const band = bands.find((candidate) => candidate.to >= c1) || bands[bands.length - 1] || null;
+        const bandInterval = band
+          ? [Math.min(rows[band.from].hU, rows[band.to].hU) - 2, Math.max(rows[band.from].hU, rows[band.to].hU) + 2]
+          : null;
+        if (crossable && bandInterval) {
+          hostRailOpen = bandInterval;
+          // Force the rail ON through the covered interior (where the yield
+          // probe sees the buried branch corridor and would wrongly kill the
+          // widened host edge's rail), from 15 m mouthward of the transfer
+          // up to the opening. Outward of the opening the exact point probe
+          // rules: a wing still overlapping the host there is a real second
+          // deck the rail must not pierce ('off' wins inside the opening).
+          const interiorEnds = [rows[c0].hU, rows[band.from].hU];
+          const mouthward = rows[c0].hU <= rows[c1].hU ? -15 : 15;
+          hostRailOn = [
+            Math.min(interiorEnds[0] + mouthward, interiorEnds[1]),
+            Math.max(interiorEnds[0] + mouthward, interiorEnds[1]),
+          ];
+          if (hostRailOn[1] - hostRailOn[0] < 1) hostRailOn = null;
         } else if (crossable) {
+          // branch never blocks the rail line — keep the edge guarded
+          // through the union (the yield probe would kill it over the
+          // buried corridor)
           hostRailOn = [crossable.host[0] - 15, crossable.host[1] + 15];
         }
 
@@ -1629,6 +1678,60 @@ export class HighwayMap {
     for (const [from, to] of this._zoneIntervalPieces(route, interval)) {
       route._railZones[sideSign].push({ from, to, mode });
     }
+  }
+
+  /**
+   * Rail visibility per surface frame per side, with the decision source:
+   * zone ownership intervals where a junction zone claims the edge, the
+   * ~9 m-cached point probe elsewhere. Also records the visible RUNS per
+   * side on route._railRuns (chainage + end laterals + causes of the cuts)
+   * so the guardrail probe audits exactly what the builder drew.
+   */
+  _computeBarrierVisibility(route) {
+    const frames = route.surfaceFrames;
+    const barrierVisible = { 1: new Array(frames.length), [-1]: new Array(frames.length) };
+    const causes = { 1: new Array(frames.length), [-1]: new Array(frames.length) };
+    // Every frame probes EXACTLY. The old ~9 m verdict cache smeared stale
+    // results past the true suppression boundary (ragged 20-30 m holes
+    // near junction mouths) and skipped conflicts narrower than its
+    // radius (rails left standing across a crossing deck).
+    for (let i = 0; i < frames.length; i += 1) {
+      const frame = frames[i];
+      for (const side of [1, -1]) {
+        const mode = this._railZoneMode(route, side, frame.distance);
+        let visible;
+        let cause;
+        if (mode === 'off') { visible = false; cause = 'zone-off'; }
+        else if (mode === 'on') { visible = true; cause = 'zone-on'; }
+        else {
+          const probe = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+          visible = !this._barrierSuppressed(probe, route);
+          cause = visible ? 'probe-on' : 'probe-off';
+        }
+        barrierVisible[side][i] = visible;
+        causes[side][i] = cause;
+      }
+    }
+    route._railRuns = { 1: [], [-1]: [] };
+    for (const side of [1, -1]) {
+      let run = null;
+      for (let i = 0; i < frames.length; i += 1) {
+        if (barrierVisible[side][i]) {
+          if (!run) run = { from: frames[i].distance, fromIndex: i, fromHalf: frames[i].half };
+          run.to = frames[i].distance;
+          run.toIndex = i;
+          run.toHalf = frames[i].half;
+        } else if (run) {
+          run.cutCause = causes[side][i];
+          route._railRuns[side].push(run);
+          run = null;
+        }
+      }
+      if (run) route._railRuns[side].push(run);
+      // why each gap between runs exists (cause at the first hidden frame)
+      route._railRuns[side].gapCauses = causes[side];
+    }
+    return barrierVisible;
   }
 
   /** Zone-forced rail mode at a chainage ('off' | 'on' | null = probe). */
@@ -3523,6 +3626,31 @@ export class HighwayMap {
       const outer1 = outerA.lerp(outerB, t1);
       const bucket = this._bucket(TMP_A.copy(inner0).lerp(outer1, 0.5), materialName);
       this._pushQuad(bucket, outer0, outer1, inner1, inner0); // up-facing, like the deck
+      // Marking-orientation instrumentation (options.markingDebug): one
+      // record per painted piece — the piece's own world direction vs the
+      // intended marking-path tangent at that station — so a probe can
+      // detect diagonal/zig-zag paint instead of trusting interval maths.
+      if (this.options.markingDebug && materialName !== 'amber') {
+        const start = inner0.clone().lerp(outer0, 0.5);
+        const end = inner1.clone().lerp(outer1, 0.5);
+        // Mean end tangent ~ the mid tangent: on an arc, the chord of a
+        // constant-lateral stripe is parallel to it regardless of how
+        // sharp the curve is, so only REAL lateral drift reads diagonal.
+        const meanTangent = a.tangent.clone().add(b.tangent).normalize();
+        this._markingLog.push({
+          kind: 'strip',
+          tag: this._markingTag || 'untagged',
+          routeId: route.id,
+          material: materialName,
+          sFrom: lo,
+          sTo: hi,
+          latFrom: la + (lb - la) * t0,
+          latTo: la + (lb - la) * t1,
+          start: { x: start.x, y: start.y, z: start.z },
+          end: { x: end.x, y: end.y, z: end.z },
+          tangent: { x: meanTangent.x, y: meanTangent.y, z: meanTangent.z },
+        });
+      }
     }
   }
 
@@ -3571,16 +3699,36 @@ export class HighwayMap {
   _barrierSuppressed(point, route) {
     const yields = route.kind === 'ramp' || route.kind === 'service';
     const candidates = this._candidateRoutes(point);
-    for (const { route: other, index } of candidates.values()) {
+    for (const { route: other, index, distSq } of candidates.values()) {
       if (other === route) continue;
+      // conflicts need lateral <= half + 1.2; grid samples sit <= ~22 m
+      // from the true nearest curve point (40 m spacing + bowing), so
+      // anything further than half + 30 cannot conflict — skip the
+      // costly projection (this probe now runs for EVERY surface frame)
+      const reach = other.halfWidth + 30;
+      if (distSq > reach * reach) continue;
       const projection = this._projectToRoute(other, point, index);
       if (projection.endOvershoot > 2) continue; // beyond the other surface's end
       const half = this._halfWidthAt(other, projection.distance);
       const abs = Math.abs(projection.signedLateral);
       const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral;
-      if (Math.abs(point.y - deckY) > 4) continue;
+      // Conflict only when the other deck sits within the barrier's own
+      // height band: surface between 1.35 m below the base (a rail on a
+      // sunken sliver still reads doubled) and 1.6 m above it (a slab low
+      // enough to chop the profile). The old ±4 m band also killed
+      // parapets on decks BRIDGING another road 2-4 m away — read in game
+      // as unexplained 20-70 m rail holes at every close grade separation.
+      const dyRail = point.y - deckY;
+      if (dyRail > 1.35 || dyRail < -1.6) continue;
       if (abs < half - 0.2) return true;
       if (yields && other.kind !== 'ramp' && other.kind !== 'service' && abs < half + 1.2) return true;
+      // Doubled-rail tie-break: where another carriageway's own rail line
+      // (its edge at half - 0.42) runs within a metre at the same level —
+      // chain abutments, u-turn stubs, tight braids — exactly one of the
+      // two coincident rails may draw. The earlier-registered route owns
+      // the shared edge; this one yields.
+      if (Math.abs(abs - (half - 0.42)) < 1.0
+        && this.routeOrder.indexOf(other.id) < this.routeOrder.indexOf(route.id)) return true;
     }
     if (this._lotAt(point, 1.5)) return true;
     return false;
@@ -3769,29 +3917,7 @@ export class HighwayMap {
     // edge); everywhere else the ~9 m-cached point probe decides (PA
     // gates, braided complexes).
     const frames = route.surfaceFrames;
-    const barrierVisible = { 1: new Array(frames.length), [-1]: new Array(frames.length) };
-    {
-      const cache = { 1: null, [-1]: null };
-      for (let i = 0; i < frames.length; i += 1) {
-        const frame = frames[i];
-        for (const side of [1, -1]) {
-          const mode = this._railZoneMode(route, side, frame.distance);
-          let visible;
-          if (mode === 'off') visible = false;
-          else if (mode === 'on') visible = true;
-          else {
-            const probe = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
-            const cached = cache[side];
-            if (cached && xzDistanceSq(cached.point, probe) < 9 * 9) visible = cached.result;
-            else {
-              visible = !this._barrierSuppressed(probe, route);
-              cache[side] = { point: probe, result: visible };
-            }
-          }
-          barrierVisible[side][i] = visible;
-        }
-      }
-    }
+    const barrierVisible = this._computeBarrierVisibility(route);
     // Terminal taper: within RAIL_TAPER metres of a visibility boundary the
     // parapet profile ramps down to deck level (see _parapetProfile), so
     // every run finishes as an intentional end terminal.
@@ -4028,8 +4154,17 @@ export class HighwayMap {
   /**
    * Junction gore dressing. For every diverge/merge between a mainline and a
    * ramp: find the physical split point (where the two paved edges separate),
-   * paint the chevron wedge between the mouth and the split, and terminate
+   * paint the hatched wedge over the GENUINE gore nose only, and terminate
    * the barrier V with a yellow/black crash cushion.
+   *
+   * The wedge derives from the shared junction-zone record (the same one
+   * markings/rails/physics read): stations inside the zone's CROSSABLE
+   * interval are the merge/exit lane itself — the longitudinal dashed
+   * boundary owns them, and hatching there was the user-reported
+   * slash/backslash zig-zag. Stripes also require both paved edges at one
+   * level (a wedge between decks 0.3+ m apart is two separate surfaces,
+   * not a paintable gore) and are capped to a short nose band. All stripes
+   * of one gore lean the SAME way (real 導流帯 hatching), never alternating.
    */
   _dressGores() {
     for (const edge of this.edges) {
@@ -4041,6 +4176,9 @@ export class HighwayMap {
       if (!ramp || !main || ramp === main) continue;
       if (ramp.kind !== 'ramp' && ramp.kind !== 'service') continue;
       const fromStart = edge.kind === 'diverge';
+      const mouth = (ramp.junctionMouths || []).find((candidate) => (
+        candidate.host === main && candidate.which === (fromStart ? 'start' : 'end')));
+      const zone = mouth?.zone;
 
       // walk the ramp away from the shared mouth until the paved edges split;
       // wedge points sit on the BANKED deck surfaces (_frameAt), so the
@@ -4048,6 +4186,7 @@ export class HighwayMap {
       // floating at bare curve height.
       let tip = null;
       const stripes = [];
+      const NOSE_STRIPES_MAX = 6; // ~54 m of hatching, a readable nose band
       for (let s = 24; s <= Math.min(320, ramp.length - 6); s += 9) {
         const rampDist = fromStart ? s : ramp.length - s;
         if (rampDist < 2 || rampDist > ramp.length - 2) break;
@@ -4070,18 +4209,39 @@ export class HighwayMap {
           tip = { wedge, tangent: rampFrame.tangent.clone() };
           break;
         }
-        if (wedgeWidth > 1.1) stripes.push({ wedge, tangent: rampFrame.tangent.clone(), width: wedgeWidth });
+        // Crossable stations belong to the dashed merge/exit boundary, and
+        // split-level "wedges" are separate decks — no hatching on either.
+        const crossableHere = !!zone?.crossable
+          && (zone.hostContains(zone.crossable.host, projection.distance)
+            || (rampDist >= zone.crossable.branch[0] - 2 && rampDist <= zone.crossable.branch[1] + 2));
+        const oneLevel = Math.abs(mainEdge.y - rampEdge.y) < 0.25;
+        if (wedgeWidth > 1.1 && !crossableHere && oneLevel && stripes.length < NOSE_STRIPES_MAX) {
+          stripes.push({ wedge, tangent: rampFrame.tangent.clone(), width: wedgeWidth, sideSign });
+        }
       }
 
-      // chevron paint across the wedge
-      let flip = 1;
+      // parallel hatching across the wedge (mirrored by connection side)
       for (const stripe of stripes) {
         const position = stripe.wedge.clone();
         position.y += 0.06;
-        const skew = new THREE.Quaternion().setFromAxisAngle(UP, flip * 0.62);
-        flip *= -1;
+        const skewAngle = stripe.sideSign * 0.62;
+        const skew = new THREE.Quaternion().setFromAxisAngle(UP, skewAngle);
         const quaternion = yawQuaternion(stripe.tangent).multiply(skew);
         this._instance(position, vec(0.3, 0.025, Math.min(4.2, stripe.width * 1.15)), quaternion, null, 'box:marking');
+        if (this.options.markingDebug) {
+          this._markingLog.push({
+            kind: 'chevron',
+            tag: 'goreChevron',
+            routeId: ramp.id,
+            hostId: main.id,
+            edgeKind: edge.kind,
+            skewDeg: (skewAngle * 180) / Math.PI,
+            length: Math.min(4.2, stripe.width * 1.15),
+            wedgeWidth: stripe.width,
+            position: { x: position.x, y: position.y, z: position.z },
+            tangent: { x: stripe.tangent.x, y: stripe.tangent.y, z: stripe.tangent.z },
+          });
+        }
       }
 
       // crash cushion at the barrier split
@@ -4148,6 +4308,7 @@ export class HighwayMap {
     } else {
       for (let lane = 1; lane < route.lanes; lane += 1) dividerOffsets.push((lane - route.lanes * 0.5) * route.laneWidth);
     }
+    this._markingTag = 'laneDivider';
     for (const offset of dividerOffsets) {
       this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14), 0.14, dashStep, dashLength, 6);
     }
@@ -4173,6 +4334,7 @@ export class HighwayMap {
         cursor = Math.max(cursor, to);
       }
       if (route.length > cursor + 0.5) kept.push([cursor, route.length]);
+      this._markingTag = 'edgeLine';
       for (const [from, to] of kept) {
         this._paintStrip(route, 'marking', from, to,
           mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
@@ -4186,12 +4348,14 @@ export class HighwayMap {
     // along the host's outer lane edge through each zone's crossable
     // interval, ending where the merge lane stops being usable. Phase is
     // route-absolute like every other dash.
+    this._markingTag = 'zoneDash';
     for (const zone of route._zonesAsHost || []) {
       if (!zone.dash) continue;
       for (const [from, to] of this._zoneIntervalPieces(route, [zone.dash.from, zone.dash.to])) {
         this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
       }
     }
+    this._markingTag = null;
 
     // Support pillars for elevated decks (every ~30 m per blueprint).
     if (!isService) {
@@ -4987,17 +5151,21 @@ export class HighwayMap {
   }
 
   _buildGarageExterior(area) {
+    // Building, shutter and fascia sign stay on the LOT anchor; the pulsing
+    // transition ring + beacon follow the functional entrance trigger, which
+    // sits on the mainline shoulder while the access lane is disabled.
+    const lotAnchor = area.garageLotAnchor || area.garageEntrance;
     const frontNormal = area.normal.clone();
     const orientation = yawQuaternion(frontNormal);
-    const buildingPos = area.garageEntrance.clone().addScaledVector(frontNormal, 18);
+    const buildingPos = lotAnchor.clone().addScaledVector(frontNormal, 18);
     buildingPos.y = area.elevation + 6.2;
     this._instance(buildingPos, vec(48, 12.4, 34), orientation, null, 'box:garage');
 
-    const shutterPos = area.garageEntrance.clone().addScaledVector(frontNormal, 0.8);
+    const shutterPos = lotAnchor.clone().addScaledVector(frontNormal, 0.8);
     shutterPos.y = area.elevation + 3.45;
     this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:vending');
     const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', 17, 3.25, true);
-    const signPos = area.garageEntrance.clone().addScaledVector(frontNormal, 0.45);
+    const signPos = lotAnchor.clone().addScaledVector(frontNormal, 0.45);
     signPos.y = area.elevation + 8.5;
     sign.position.copy(signPos);
     sign.quaternion.copy(yawQuaternion(frontNormal.clone().multiplyScalar(-1)));

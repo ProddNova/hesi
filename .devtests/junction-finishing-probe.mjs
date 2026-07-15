@@ -129,15 +129,27 @@ for (const zone of map.junctionZones) {
     }
   }
 
-  // --- 5. rail endpoint continuity ------------------------------------------
-  if (zone.hostRailOpen && zone.branchOuterRailOn) {
-    const tipB = which === 'end' ? zone.branchOuterRailOn[1] : zone.branchOuterRailOn[0];
-    const tipRow = zone.samples.reduce((best, row) => (
-      Math.abs(row.bS - tipB) < Math.abs(best.bS - tipB) ? row : best));
-    const hostResume = which === 'end' ? zone.hostRailOpen[1] : zone.hostRailOpen[0];
-    const handoff = Math.abs(tipRow.hU - hostResume);
-    summary.worstRailHandoff = Math.max(summary.worstRailHandoff, handoff);
-    if (handoff > 18) fail(label, `rail hand-off gap ${handoff.toFixed(0)} m (branch tip vs host resume)`);
+  // --- 5. rail hand-off: no wide unguarded union edge -----------------------
+  // The union's outer edge must be guarded by SOMEBODY wherever it is wide
+  // enough to hold a rail profile (wing >= 0.6 m past the host edge):
+  // either the host's own rail stands there or the branch's outer rail has
+  // taken over. Sliver wings (< 0.6 m) are the intended flare at a gore
+  // tip and carry no rail. Measured against the builder's ACTUAL recorded
+  // rail runs, not interval bookkeeping.
+  {
+    const railVisibleAt = (route, sideSign, s) => (route._railRuns?.[sideSign] || [])
+      .some((run) => s >= run.from - 2 && s <= run.to + 2);
+    let unguarded = 0;
+    let worstRun = 0;
+    for (const row of zone.samples) {
+      const wing = row.unionOuter - row.hostHalf;
+      const wide = wing >= 0.6 && Math.abs(row.dy) < 1.0;
+      const guarded = railVisibleAt(host, side, map._normalizeDistance(host, row.hS))
+        || railVisibleAt(branch, -zone.hostwardSign, row.bS);
+      if (wide && !guarded) { unguarded += 4; worstRun = Math.max(worstRun, unguarded); } else unguarded = 0;
+    }
+    summary.worstRailHandoff = Math.max(summary.worstRailHandoff, worstRun);
+    if (worstRun > 18) fail(label, `union outer edge unguarded for ${worstRun.toFixed(0)} m (wing >= 0.6 m, no host or branch rail)`);
   }
 
   // --- 6. collision continuity across the union ------------------------------

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260715c';
+import * as MapModule from './map.js?v=20260715f';
 import * as PhysicsModule from './physics.js?v=20260713a';
 import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
@@ -83,8 +83,9 @@ class ShutokoNights {
   }
   buildWorld(){
     const mapBuildStarted=performance.now();
-    // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons (debug/screenshot A/B only)
-    try{const legacyMouths=typeof location!=='undefined'&&/[?&]legacyMouths=1/.test(location.search);this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?paAccessLanes=1
+    // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
+    try{const legacyMouths=typeof location!=='undefined'&&/[?&]legacyMouths=1/.test(location.search);const paAccessLanes=typeof location!=='undefined'&&/[?&]paAccessLanes=1/.test(location.search);this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor

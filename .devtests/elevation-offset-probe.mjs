@@ -305,7 +305,7 @@ console.log(`Representative pre-offset intersections: ${beforeIntersections
 console.log(`Intentional tunnel context: ${tunnelContextSpans.length} spans; connected ramps ${tunnelConnectedRamps.join(', ')}`);
 console.log(`Route-to-route vertical-difference preservation: max error ${maxRelativeDeltaError.toExponential(2)} m across ${relativePairs} nearby control pairs`);
 console.log(`Authoritative control-point offset: max error ${maxControlOffsetError.toExponential(2)} m across ${matchedControls} matched X/Z controls`);
-console.log(`Service areas: ${nonGroundedAreasAligned} non-grounded aligned; ${groundedAreasPreserved} grounded preserved; garage connector ${garageArea?.accessRouteId ? 'present' : 'missing'}`);
+console.log(`Service areas: ${nonGroundedAreasAligned} non-grounded aligned; ${groundedAreasPreserved} grounded preserved; garage connector ${garageArea?.accessRouteId ? 'present' : 'disabled (temporary PA pass)'}`);
 
 check(ROAD_NETWORK_Y_OFFSET >= measuredMinimumOffset,
   `configured offset ${ROAD_NETWORK_Y_OFFSET} is below measured minimum ${measuredMinimumOffset}`);
@@ -321,7 +321,12 @@ check(nonGroundedAreasAligned === map.serviceAreas.filter((area) => !sourceAreaB
   'a non-grounded service area no longer follows its host route');
 check(groundedAreasPreserved === map.serviceAreas.filter((area) => sourceAreaById.get(area.id)?.grounded).length,
   'a deliberately grounded service area moved off ground level');
-check(garageArea?.accessRouteId && map.routes.has(garageArea.accessRouteId), 'Shibaura garage connector is missing');
+// The garage connector is temporarily disabled with every other PA access
+// lane (PA_ACCESS_LANES_DISABLED covers hasGarage too since the junction
+// finishing pass); the garage flow lives on the R11 mainline meanwhile.
+// .devtests/pa-access-probe.mjs owns the disabled-state contract.
+check(garageArea?.accessRouteId === null && garageArea?.accessDisabled === true,
+  'Shibaura garage connector should be disabled during the temporary PA pass');
 
 if (failures.length) {
   for (const failure of failures) console.error(`FAIL  ${failure}`);
