@@ -88,7 +88,48 @@ lane absorption.
 
 ## Later phases
 
-The deterministic audit, four selected records, architecture, prototype test
-results, legacy/progressive image matrix, performance comparison, limitations,
-and developer-map test instructions will be appended here as each coherent
-phase lands.
+## Phase 1–2 — catalogue and representative selection
+
+`.devtests/progressive-merge-audit.mjs` constructs the runtime map and walks the
+same 56 authoritative junction zones used by rendering. Its deterministic
+machine-readable output is `.devtests/progressive-merge-audit.json`; the full
+readable table is [docs/progressive-merges/AUDIT.md](docs/progressive-merges/AUDIT.md).
+
+Audit summary:
+
+- 56 same-level graph connections: 27 merges, 29 diverges;
+- 37 left-side and 19 right-side connections;
+- 16 simple one-lane merges, 17 simple one-lane diverges, 11 multi-lane
+  merges, and 12 multi-lane diverges;
+- 22 curved but measurable/suitable cases;
+- 4 manual-review cases, all excluded from the prototype allow-list:
+  `J27` (`r6_0 -> ramp_18`), `J31` (`ramp_21 -> ramp_18`), `J36`
+  (`r6_3 -> ramp_27`), and `J53` (`ramp_46 -> ramp_27`);
+- `J36` and `J53` have only 72 m / 60 m available, while all four exhibit
+  extreme local curvature or relative-tangent change. They are not forced
+  through automation.
+
+Every audit row retains host/branch lane counts and widths, side/type, transfer
+tangent, maximum relative tangent, curvature, bank delta, transfer/opening/mouth
+height deltas, existing A–B and rail openings, available combined width,
+possible parallel/taper length, source quality, suitability, classification,
+manual-review reason, and world coordinates.
+
+### Exactly four selected prototypes
+
+The single allow-list is `js/progressive-merge-prototypes.js`.
+
+| Junction ID | Traffic route pair | Side | H/B lanes | World X, Y, Z | Selection reason |
+| --- | --- | --- | ---: | --- | --- |
+| `J8:merge:r11_0:ramp_1:end` | `ramp_1 -> r11_0` | left | 2/1 | `-1128.45, 73.04, -3825.43` | canonical 1→2 merge; only 20 m is currently crossable despite 136 m measured taper and 76 m parallel opportunity |
+| `J0:merge:c1_0:c1_3:end` | `c1_3 -> c1_0` | right | 2/2 | `-897.45, 52.37, -2806.42` | equal-width multi-lane merge with 164 m taper / 128 m parallel opportunity and known baseline lane-centre wall-hit samples |
+| `J10:merge:wangan_1:ramp_3:end` | `ramp_3 -> wangan_1` | left | 3/2 | `696.08, 29.71, -5832.86` | broad 2→3 motorway merge with 204 m taper / 172 m parallel opportunity |
+| `J2:diverge:c1_0:r1_0:start` | `c1_0 -> r1_0` | right | 2/2 | `-1094.38, 57.33, -3014.18` | curved inverse case with 164 m taper / 120 m parallel opportunity; prevents a merge-only design |
+
+The set deliberately spans left/right, merge/diverge, one-/two-lane branches,
+two-/three-lane hosts, a constrained opening, a broad opening, and curved
+geometry. No fifth connection is enabled.
+
+The shared transition architecture, implementation/probe results,
+legacy/progressive image matrix, performance comparison, limitations, and
+developer-map pin instructions will be appended as the remaining phases land.

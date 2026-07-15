@@ -1,0 +1,3510 @@
+{
+  "summary": {
+    "generatedFromBase": "e960f501776552cca3e46b911c7f46f684d45dfd",
+    "totalConnections": 56,
+    "merges": 27,
+    "diverges": 29,
+    "leftSide": 37,
+    "rightSide": 19,
+    "automaticSuitable": 52,
+    "manualReview": 4,
+    "selectedPrototypeIds": [
+      "J0:merge:c1_0:c1_3:end",
+      "J2:diverge:c1_0:r1_0:start",
+      "J8:merge:r11_0:ramp_1:end",
+      "J10:merge:wangan_1:ramp_3:end"
+    ],
+    "classificationCounts": {
+      "multi-lane merge": 11,
+      "multi-lane diverge": 12,
+      "curved but suitable": 22,
+      "simple 1-lane diverge": 17,
+      "simple 1-lane merge": 16,
+      "tangent mismatch too severe": 4,
+      "manual review required": 4,
+      "transition too short": 2
+    }
+  },
+  "connections": [
+    {
+      "id": "J0:merge:c1_0:c1_3:end",
+      "hostRouteId": "c1_0",
+      "branchRouteId": "c1_3",
+      "trafficRoutePair": "c1_3 -> c1_0",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9.7,
+      "availableExtraWidth": 8.34,
+      "tangentMismatchDeg": 0.06,
+      "maximumTangentMismatchAcrossMouthDeg": 11.02,
+      "curvatureDegPer100m": {
+        "host": 12.35,
+        "branch": 18.32,
+        "maximum": 18.32
+      },
+      "bankingDifferenceDeg": 3.06,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.62,
+        "maximumAcrossOpening": 0.169
+      },
+      "transferPlanDifference": 0.025,
+      "existingCrossableLength": 116,
+      "possibleParallelLength": 128,
+      "possibleTaperLength": 164,
+      "currentMarkingOpening": {
+        "branch": [
+          328.035,
+          447.311
+        ],
+        "host": [
+          11220.47,
+          11339.454
+        ],
+        "length": 119.28
+      },
+      "currentRailOpening": {
+        "host": [
+          11185.949,
+          11341.454
+        ],
+        "length": 155.5
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": true,
+      "prototypeLabel": "two-to-two merge",
+      "worldCoordinates": {
+        "x": -897.45,
+        "y": 52.37,
+        "z": -2806.42
+      }
+    },
+    {
+      "id": "J1:merge:c1_2:c1_6:end",
+      "hostRouteId": "c1_2",
+      "branchRouteId": "c1_6",
+      "trafficRoutePair": "c1_6 -> c1_2",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9.7,
+      "availableExtraWidth": 9.52,
+      "tangentMismatchDeg": 0.02,
+      "maximumTangentMismatchAcrossMouthDeg": 11.38,
+      "curvatureDegPer100m": {
+        "host": 16.85,
+        "branch": 23.54,
+        "maximum": 23.54
+      },
+      "bankingDifferenceDeg": 3.28,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.191,
+        "maximumAcrossOpening": 0.254
+      },
+      "transferPlanDifference": 0.032,
+      "existingCrossableLength": 96,
+      "possibleParallelLength": 104,
+      "possibleTaperLength": 148,
+      "currentMarkingOpening": {
+        "branch": [
+          254.203,
+          351.701
+        ],
+        "host": [
+          10807.901,
+          10900.344
+        ],
+        "length": 97.5
+      },
+      "currentRailOpening": {
+        "host": [
+          10766.506,
+          10845.864
+        ],
+        "length": 79.36
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1144.45,
+        "y": 50.99,
+        "z": -3025.86
+      }
+    },
+    {
+      "id": "J2:diverge:c1_0:r1_0:start",
+      "hostRouteId": "c1_0",
+      "branchRouteId": "r1_0",
+      "trafficRoutePair": "c1_0 -> r1_0",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9.7,
+      "availableExtraWidth": 12.8,
+      "tangentMismatchDeg": 0.44,
+      "maximumTangentMismatchAcrossMouthDeg": 21.4,
+      "curvatureDegPer100m": {
+        "host": 16.73,
+        "branch": 44.79,
+        "maximum": 44.79
+      },
+      "bankingDifferenceDeg": 3.63,
+      "verticalDifference": {
+        "atTransfer": 0.001,
+        "minimumAcrossMouth": 0.001,
+        "maximumAcrossMouth": 1.034,
+        "maximumAcrossOpening": 0.53
+      },
+      "transferPlanDifference": 0.021,
+      "existingCrossableLength": 152,
+      "possibleParallelLength": 120,
+      "possibleTaperLength": 164,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          153.932
+        ],
+        "host": [
+          10837.464,
+          10988.891
+        ],
+        "length": 153.93
+      },
+      "currentRailOpening": {
+        "host": [
+          10835.464,
+          10993.072
+        ],
+        "length": 157.61
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": true,
+      "prototypeLabel": "right-side diverge",
+      "worldCoordinates": {
+        "x": -1094.38,
+        "y": 57.33,
+        "z": -3014.18
+      }
+    },
+    {
+      "id": "J3:diverge:c1_2:r1_3:start",
+      "hostRouteId": "c1_2",
+      "branchRouteId": "r1_3",
+      "trafficRoutePair": "c1_2 -> r1_3",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9.7,
+      "availableExtraWidth": 12.93,
+      "tangentMismatchDeg": 0.08,
+      "maximumTangentMismatchAcrossMouthDeg": 10.72,
+      "curvatureDegPer100m": {
+        "host": 12.24,
+        "branch": 18.03,
+        "maximum": 18.03
+      },
+      "bankingDifferenceDeg": 2.96,
+      "verticalDifference": {
+        "atTransfer": 0.001,
+        "minimumAcrossMouth": 0.001,
+        "maximumAcrossMouth": 0.727,
+        "maximumAcrossOpening": 0.404
+      },
+      "transferPlanDifference": 0.033,
+      "existingCrossableLength": 168,
+      "possibleParallelLength": 124,
+      "possibleTaperLength": 192,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          168.041
+        ],
+        "host": [
+          10351.851,
+          10517
+        ],
+        "length": 168.04
+      },
+      "currentRailOpening": {
+        "host": [
+          10349.851,
+          10527.269
+        ],
+        "length": 177.42
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -884.65,
+        "y": 58.08,
+        "z": -2825.75
+      }
+    },
+    {
+      "id": "J4:diverge:c1_2:r6_0:start",
+      "hostRouteId": "c1_2",
+      "branchRouteId": "r6_0",
+      "trafficRoutePair": "c1_2 -> r6_0",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9.7,
+      "availableExtraWidth": 11.54,
+      "tangentMismatchDeg": 3.88,
+      "maximumTangentMismatchAcrossMouthDeg": 11.06,
+      "curvatureDegPer100m": {
+        "host": 43.67,
+        "branch": 32.22,
+        "maximum": 43.67
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.653,
+        "maximumAcrossOpening": 0.372
+      },
+      "transferPlanDifference": 0.031,
+      "existingCrossableLength": 180,
+      "possibleParallelLength": 152,
+      "possibleTaperLength": 212,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          180.607
+        ],
+        "host": [
+          6277.513,
+          6457.094
+        ],
+        "length": 180.61
+      },
+      "currentRailOpening": {
+        "host": [
+          6275.513,
+          6473.916
+        ],
+        "length": 198.4
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 535.96,
+        "y": 61,
+        "z": 466.78
+      }
+    },
+    {
+      "id": "J5:merge:c1_0:r6_3:end",
+      "hostRouteId": "c1_0",
+      "branchRouteId": "r6_3",
+      "trafficRoutePair": "r6_3 -> c1_0",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9.7,
+      "availableExtraWidth": 13.16,
+      "tangentMismatchDeg": 0.05,
+      "maximumTangentMismatchAcrossMouthDeg": 19.98,
+      "curvatureDegPer100m": {
+        "host": 54.04,
+        "branch": 49.42,
+        "maximum": 54.04
+      },
+      "bankingDifferenceDeg": 3.01,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 1.696,
+        "maximumAcrossOpening": 0.377
+      },
+      "transferPlanDifference": 0.016,
+      "existingCrossableLength": 160,
+      "possibleParallelLength": 140,
+      "possibleTaperLength": 184,
+      "currentMarkingOpening": {
+        "branch": [
+          1778.769,
+          1940.431
+        ],
+        "host": [
+          1407.666,
+          1564.623
+        ],
+        "length": 161.66
+      },
+      "currentRailOpening": {
+        "host": [
+          1394.838,
+          1566.623
+        ],
+        "length": 171.78
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 595.11,
+        "y": 51.64,
+        "z": 463.91
+      }
+    },
+    {
+      "id": "J6:diverge:r1_3:ramp_0:start",
+      "hostRouteId": "r1_3",
+      "branchRouteId": "ramp_0",
+      "trafficRoutePair": "r1_3 -> ramp_0",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 7.52,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 8.18,
+      "curvatureDegPer100m": {
+        "host": 0.14,
+        "branch": 27.32,
+        "maximum": 27.32
+      },
+      "bankingDifferenceDeg": 0.19,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.016,
+        "maximumAcrossMouth": 1.444,
+        "maximumAcrossOpening": 0.408
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 76,
+      "possibleParallelLength": 72,
+      "possibleTaperLength": 128,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          76.248
+        ],
+        "host": [
+          770.376,
+          846.928
+        ],
+        "length": 76.25
+      },
+      "currentRailOpening": {
+        "host": [
+          832.26,
+          884.017
+        ],
+        "length": 51.76
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1079.02,
+        "y": 52.05,
+        "z": -3512.04
+      }
+    },
+    {
+      "id": "J7:diverge:r11_0:ramp_1:start",
+      "hostRouteId": "r11_0",
+      "branchRouteId": "ramp_1",
+      "trafficRoutePair": "r11_0 -> ramp_1",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 1.38,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 2.58,
+      "curvatureDegPer100m": {
+        "host": 0,
+        "branch": 8.1,
+        "maximum": 8.1
+      },
+      "bankingDifferenceDeg": 0.11,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.001,
+        "maximumAcrossMouth": 2.89,
+        "maximumAcrossOpening": 0.195
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 76,
+      "possibleParallelLength": 80,
+      "possibleTaperLength": 108,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          79.885
+        ],
+        "host": [
+          2809.718,
+          2889.572
+        ],
+        "length": 79.88
+      },
+      "currentRailOpening": {
+        "host": [
+          2879.681,
+          2903.678
+        ],
+        "length": 24
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1110.71,
+        "y": 77.31,
+        "z": -4109.11
+      }
+    },
+    {
+      "id": "J8:merge:r11_0:ramp_1:end",
+      "hostRouteId": "r11_0",
+      "branchRouteId": "ramp_1",
+      "trafficRoutePair": "ramp_1 -> r11_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 2.4,
+      "tangentMismatchDeg": 0.84,
+      "maximumTangentMismatchAcrossMouthDeg": 5.89,
+      "curvatureDegPer100m": {
+        "host": 17.82,
+        "branch": 44.11,
+        "maximum": 44.11
+      },
+      "bankingDifferenceDeg": 3.6,
+      "verticalDifference": {
+        "atTransfer": 0.002,
+        "minimumAcrossMouth": 0.024,
+        "maximumAcrossMouth": 2.777,
+        "maximumAcrossOpening": 0.185
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 20,
+      "possibleParallelLength": 76,
+      "possibleTaperLength": 136,
+      "currentMarkingOpening": {
+        "branch": [
+          315.019,
+          335.568
+        ],
+        "host": [
+          3125.533,
+          3145.683
+        ],
+        "length": 20.55
+      },
+      "currentRailOpening": {
+        "host": [
+          3019.037,
+          3078.91
+        ],
+        "length": 59.87
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": true,
+      "prototypeLabel": "one-to-two merge",
+      "worldCoordinates": {
+        "x": -1128.45,
+        "y": 73.04,
+        "z": -3825.43
+      }
+    },
+    {
+      "id": "J9:diverge:wangan_0:ramp_2:start",
+      "hostRouteId": "wangan_0",
+      "branchRouteId": "ramp_2",
+      "trafficRoutePair": "wangan_0 -> ramp_2",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 5.21,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 8.05,
+      "curvatureDegPer100m": {
+        "host": 0.18,
+        "branch": 11.89,
+        "maximum": 11.89
+      },
+      "bankingDifferenceDeg": 0.03,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.002,
+        "maximumAcrossMouth": 2.35,
+        "maximumAcrossOpening": 0.127
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 128,
+      "possibleParallelLength": 136,
+      "possibleTaperLength": 172,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          131.896
+        ],
+        "host": [
+          28395.663,
+          28527.247
+        ],
+        "length": 131.9
+      },
+      "currentRailOpening": {
+        "host": [
+          28489.407,
+          28549.208
+        ],
+        "length": 59.8
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 672.24,
+        "y": 27.74,
+        "z": -5827.96
+      }
+    },
+    {
+      "id": "J10:merge:wangan_1:ramp_3:end",
+      "hostRouteId": "wangan_1",
+      "branchRouteId": "ramp_3",
+      "trafficRoutePair": "ramp_3 -> wangan_1",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 5.79,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 5.76,
+      "curvatureDegPer100m": {
+        "host": 0.13,
+        "branch": 14.57,
+        "maximum": 14.57
+      },
+      "bankingDifferenceDeg": 0.13,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.186,
+        "maximumAcrossOpening": 0.182
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 168,
+      "possibleParallelLength": 172,
+      "possibleTaperLength": 204,
+      "currentMarkingOpening": {
+        "branch": [
+          919.361,
+          1087.593
+        ],
+        "host": [
+          4428.08,
+          4595.896
+        ],
+        "length": 168.23
+      },
+      "currentRailOpening": {
+        "host": [
+          4406.453,
+          4490.267
+        ],
+        "length": 83.81
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": true,
+      "prototypeLabel": "two-to-three merge",
+      "worldCoordinates": {
+        "x": 696.08,
+        "y": 29.71,
+        "z": -5832.86
+      }
+    },
+    {
+      "id": "J11:diverge:c1_2:ramp_5:start",
+      "hostRouteId": "c1_2",
+      "branchRouteId": "ramp_5",
+      "trafficRoutePair": "c1_2 -> ramp_5",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 1.81,
+      "tangentMismatchDeg": 0.77,
+      "maximumTangentMismatchAcrossMouthDeg": 5.33,
+      "curvatureDegPer100m": {
+        "host": 35.56,
+        "branch": 42.97,
+        "maximum": 42.97
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.003,
+        "maximumAcrossMouth": 2.08,
+        "maximumAcrossOpening": 0.348
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 68,
+      "possibleParallelLength": 68,
+      "possibleTaperLength": 108,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          68.678
+        ],
+        "host": [
+          8169.427,
+          8237.686
+        ],
+        "length": 68.68
+      },
+      "currentRailOpening": {
+        "host": [
+          8247.231,
+          8259.11
+        ],
+        "length": 11.88
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 132.23,
+        "y": 24.23,
+        "z": -1029.81
+      }
+    },
+    {
+      "id": "J12:diverge:wangan_0:ramp_7:start",
+      "hostRouteId": "wangan_0",
+      "branchRouteId": "ramp_7",
+      "trafficRoutePair": "wangan_0 -> ramp_7",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 10.86,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 9.6,
+      "curvatureDegPer100m": {
+        "host": 0.56,
+        "branch": 29.24,
+        "maximum": 29.24
+      },
+      "bankingDifferenceDeg": 2.19,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.509,
+        "maximumAcrossOpening": 0.08
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 168,
+      "possibleParallelLength": 140,
+      "possibleTaperLength": 204,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          171.725
+        ],
+        "host": [
+          24301.026,
+          24471.832
+        ],
+        "length": 171.72
+      },
+      "currentRailOpening": {
+        "host": [
+          24394.41,
+          24490.567
+        ],
+        "length": 96.16
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1330.66,
+        "y": 30.35,
+        "z": -9035.76
+      }
+    },
+    {
+      "id": "J13:diverge:wangan_0:ramp_8:start",
+      "hostRouteId": "wangan_0",
+      "branchRouteId": "ramp_8",
+      "trafficRoutePair": "wangan_0 -> ramp_8",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 8.11,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 5.84,
+      "curvatureDegPer100m": {
+        "host": 0.91,
+        "branch": 11.55,
+        "maximum": 11.55
+      },
+      "bankingDifferenceDeg": 1.94,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.006,
+        "maximumAcrossMouth": 2.176,
+        "maximumAcrossOpening": 0.547
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 176,
+      "possibleParallelLength": 144,
+      "possibleTaperLength": 212,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          179.092
+        ],
+        "host": [
+          31327.254,
+          31505.857
+        ],
+        "length": 179.09
+      },
+      "currentRailOpening": {
+        "host": [
+          31413.62,
+          31524.593
+        ],
+        "length": 110.97
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 3159.28,
+        "y": 48.42,
+        "z": -4240.73
+      }
+    },
+    {
+      "id": "J14:merge:wangan_1:ramp_9:end",
+      "hostRouteId": "wangan_1",
+      "branchRouteId": "ramp_9",
+      "trafficRoutePair": "ramp_9 -> wangan_1",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 10.1,
+      "tangentMismatchDeg": 0.05,
+      "maximumTangentMismatchAcrossMouthDeg": 7.49,
+      "curvatureDegPer100m": {
+        "host": 12.6,
+        "branch": 14.01,
+        "maximum": 14.01
+      },
+      "bankingDifferenceDeg": 1.33,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.004,
+        "maximumAcrossMouth": 2.239,
+        "maximumAcrossOpening": 0.141
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 140,
+      "possibleParallelLength": 148,
+      "possibleTaperLength": 204,
+      "currentMarkingOpening": {
+        "branch": [
+          1094.986,
+          1236.257
+        ],
+        "host": [
+          1624.161,
+          1762.445
+        ],
+        "length": 141.27
+      },
+      "currentRailOpening": {
+        "host": [
+          1571.832,
+          1679.406
+        ],
+        "length": 107.57
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 3059.98,
+        "y": 47.98,
+        "z": -4300.73
+      }
+    },
+    {
+      "id": "J15:diverge:wangan_1:ramp_10:start",
+      "hostRouteId": "wangan_1",
+      "branchRouteId": "ramp_10",
+      "trafficRoutePair": "wangan_1 -> ramp_10",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 9.79,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 9.78,
+      "curvatureDegPer100m": {
+        "host": 29.58,
+        "branch": 21.84,
+        "maximum": 29.58
+      },
+      "bankingDifferenceDeg": 0.51,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.005,
+        "maximumAcrossMouth": 2.13,
+        "maximumAcrossOpening": 0.228
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 164,
+      "possibleParallelLength": 152,
+      "possibleTaperLength": 204,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          167.24
+        ],
+        "host": [
+          9998.116,
+          10164.763
+        ],
+        "length": 167.24
+      },
+      "currentRailOpening": {
+        "host": [
+          10115.992,
+          10187.638
+        ],
+        "length": 71.65
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1318.87,
+        "y": 48.13,
+        "z": -10530.35
+      }
+    },
+    {
+      "id": "J16:merge:r1_3:ramp_10:end",
+      "hostRouteId": "r1_3",
+      "branchRouteId": "ramp_10",
+      "trafficRoutePair": "ramp_10 -> r1_3",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9,
+      "availableExtraWidth": 7.35,
+      "tangentMismatchDeg": 0.02,
+      "maximumTangentMismatchAcrossMouthDeg": 6.45,
+      "curvatureDegPer100m": {
+        "host": 4.48,
+        "branch": 13.83,
+        "maximum": 13.83
+      },
+      "bankingDifferenceDeg": 4.77,
+      "verticalDifference": {
+        "atTransfer": 0.002,
+        "minimumAcrossMouth": 0.002,
+        "maximumAcrossMouth": 2.507,
+        "maximumAcrossOpening": 0.18
+      },
+      "transferPlanDifference": 0.04,
+      "existingCrossableLength": 28,
+      "possibleParallelLength": 168,
+      "possibleTaperLength": 192,
+      "currentMarkingOpening": {
+        "branch": [
+          2048.934,
+          2079.293
+        ],
+        "host": [
+          10334.383,
+          10363.955
+        ],
+        "length": 30.36
+      },
+      "currentRailOpening": {
+        "host": [
+          10307.863,
+          10328.3
+        ],
+        "length": 20.44
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1919.32,
+        "y": 46.54,
+        "z": -12267.59
+      }
+    },
+    {
+      "id": "J17:diverge:r1_2:ramp_11:start",
+      "hostRouteId": "r1_2",
+      "branchRouteId": "ramp_11",
+      "trafficRoutePair": "r1_2 -> ramp_11",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0.19,
+      "tangentMismatchDeg": 0.31,
+      "maximumTangentMismatchAcrossMouthDeg": 1.31,
+      "curvatureDegPer100m": {
+        "host": 5.46,
+        "branch": 4.38,
+        "maximum": 5.46
+      },
+      "bankingDifferenceDeg": 4.77,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.347,
+        "maximumAcrossOpening": 0.222
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 156,
+      "possibleParallelLength": 164,
+      "possibleTaperLength": 200,
+      "currentMarkingOpening": {
+        "branch": [
+          2.482,
+          160.807
+        ],
+        "host": [
+          369.095,
+          527.041
+        ],
+        "length": 158.32
+      },
+      "currentRailOpening": {
+        "host": [
+          468.256,
+          540.171
+        ],
+        "length": 71.91
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2307.96,
+        "y": 54,
+        "z": -14509.52
+      }
+    },
+    {
+      "id": "J18:merge:r1_2:ramp_11:end",
+      "hostRouteId": "r1_2",
+      "branchRouteId": "ramp_11",
+      "trafficRoutePair": "ramp_11 -> r1_2",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 1.76,
+      "tangentMismatchDeg": 1.27,
+      "maximumTangentMismatchAcrossMouthDeg": 3.3,
+      "curvatureDegPer100m": {
+        "host": 51.05,
+        "branch": 66.9,
+        "maximum": 66.9
+      },
+      "bankingDifferenceDeg": 1.31,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.023,
+        "maximumAcrossMouth": 2.329,
+        "maximumAcrossOpening": 0.141
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 16,
+      "possibleParallelLength": 164,
+      "possibleTaperLength": 200,
+      "currentMarkingOpening": {
+        "branch": [
+          674.33,
+          694.035
+        ],
+        "host": [
+          1041.239,
+          1060.82
+        ],
+        "length": 19.71
+      },
+      "currentRailOpening": {
+        "host": [
+          965.831,
+          990.657
+        ],
+        "length": 24.83
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2086.59,
+        "y": 51.76,
+        "z": -13956.28
+      }
+    },
+    {
+      "id": "J19:diverge:r1_3:ramp_12:start",
+      "hostRouteId": "r1_3",
+      "branchRouteId": "ramp_12",
+      "trafficRoutePair": "r1_3 -> ramp_12",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0.48,
+      "tangentMismatchDeg": 1.38,
+      "maximumTangentMismatchAcrossMouthDeg": 2.77,
+      "curvatureDegPer100m": {
+        "host": 77.74,
+        "branch": 76.54,
+        "maximum": 77.74
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.006,
+        "maximumAcrossMouth": 2.474,
+        "maximumAcrossOpening": 0.143
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 140,
+      "possibleParallelLength": 148,
+      "possibleTaperLength": 184,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          142.342
+        ],
+        "host": [
+          12558.739,
+          12699.602
+        ],
+        "length": 142.34
+      },
+      "currentRailOpening": {
+        "host": [
+          12658.627,
+          12726.744
+        ],
+        "length": 68.12
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2116.82,
+        "y": 55.18,
+        "z": -14010.92
+      }
+    },
+    {
+      "id": "J20:merge:r1_3:ramp_12:end",
+      "hostRouteId": "r1_3",
+      "branchRouteId": "ramp_12",
+      "trafficRoutePair": "ramp_12 -> r1_3",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 1.75,
+      "tangentMismatchDeg": 0.51,
+      "maximumTangentMismatchAcrossMouthDeg": 2.25,
+      "curvatureDegPer100m": {
+        "host": 20.73,
+        "branch": 23.4,
+        "maximum": 23.4
+      },
+      "bankingDifferenceDeg": 3.32,
+      "verticalDifference": {
+        "atTransfer": 0.001,
+        "minimumAcrossMouth": 0.007,
+        "maximumAcrossMouth": 1.348,
+        "maximumAcrossOpening": 0.208
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 68,
+      "possibleParallelLength": 228,
+      "possibleTaperLength": 344,
+      "currentMarkingOpening": {
+        "branch": [
+          621.19,
+          692.856
+        ],
+        "host": [
+          13177.41,
+          13246.812
+        ],
+        "length": 71.67
+      },
+      "currentRailOpening": {
+        "host": [
+          12903.592,
+          13143.31
+        ],
+        "length": 239.72
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2312,
+        "y": 58.21,
+        "z": -14558.93
+      }
+    },
+    {
+      "id": "J21:diverge:wangan_1:ramp_13:start",
+      "hostRouteId": "wangan_1",
+      "branchRouteId": "ramp_13",
+      "trafficRoutePair": "wangan_1 -> ramp_13",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 3,
+      "branchLaneCount": 1,
+      "hostWidth": 13.25,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0,
+      "tangentMismatchDeg": 0.08,
+      "maximumTangentMismatchAcrossMouthDeg": 10.22,
+      "curvatureDegPer100m": {
+        "host": 1.3,
+        "branch": 16.65,
+        "maximum": 16.65
+      },
+      "bankingDifferenceDeg": 3.17,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.004,
+        "maximumAcrossMouth": 2.708,
+        "maximumAcrossOpening": 0.187
+      },
+      "transferPlanDifference": 3.55,
+      "existingCrossableLength": 12,
+      "possibleParallelLength": 136,
+      "possibleTaperLength": 192,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          15.295
+        ],
+        "host": [
+          30110.715,
+          30126.315
+        ],
+        "length": 15.29
+      },
+      "currentRailOpening": null,
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -7519.79,
+        "y": 72.48,
+        "z": -23748.99
+      }
+    },
+    {
+      "id": "J22:diverge:wangan_1:ramp_14:start",
+      "hostRouteId": "wangan_1",
+      "branchRouteId": "ramp_14",
+      "trafficRoutePair": "wangan_1 -> ramp_14",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 6.46,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 5.32,
+      "curvatureDegPer100m": {
+        "host": 0.24,
+        "branch": 15.85,
+        "maximum": 15.85
+      },
+      "bankingDifferenceDeg": 0.09,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.001,
+        "maximumAcrossMouth": 2.25,
+        "maximumAcrossOpening": 0.198
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 172,
+      "possibleParallelLength": 176,
+      "possibleTaperLength": 204,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          173.307
+        ],
+        "host": [
+          3189.413,
+          3362.378
+        ],
+        "length": 173.31
+      },
+      "currentRailOpening": {
+        "host": [
+          3283.295,
+          3378.964
+        ],
+        "length": 95.67
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1723.88,
+        "y": 37.07,
+        "z": -5147.13
+      }
+    },
+    {
+      "id": "J23:diverge:wangan_0:ramp_15:start",
+      "hostRouteId": "wangan_0",
+      "branchRouteId": "ramp_15",
+      "trafficRoutePair": "wangan_0 -> ramp_15",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 1,
+      "hostWidth": 13.25,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 7.88,
+      "tangentMismatchDeg": 0.07,
+      "maximumTangentMismatchAcrossMouthDeg": 8.23,
+      "curvatureDegPer100m": {
+        "host": 24.25,
+        "branch": 7.44,
+        "maximum": 24.25
+      },
+      "bankingDifferenceDeg": 1.2,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.008,
+        "maximumAcrossMouth": 0.28,
+        "maximumAcrossOpening": 0.28
+      },
+      "transferPlanDifference": 3.55,
+      "existingCrossableLength": 180,
+      "possibleParallelLength": 140,
+      "possibleTaperLength": 204,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          180.1
+        ],
+        "host": [
+          1726.605,
+          1905.958
+        ],
+        "length": 180.1
+      },
+      "currentRailOpening": {
+        "host": [
+          1864.298,
+          1911.857
+        ],
+        "length": 47.56
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -8324.81,
+        "y": 73.87,
+        "z": -24404.71
+      }
+    },
+    {
+      "id": "J24:merge:wangan_0:ramp_16:end",
+      "hostRouteId": "wangan_0",
+      "branchRouteId": "ramp_16",
+      "trafficRoutePair": "ramp_16 -> wangan_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 1,
+      "hostWidth": 13.25,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 7.4,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 5.15,
+      "curvatureDegPer100m": {
+        "host": 1.71,
+        "branch": 8.43,
+        "maximum": 8.43
+      },
+      "bankingDifferenceDeg": 1.72,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.003,
+        "maximumAcrossMouth": 1.554,
+        "maximumAcrossOpening": 0.199
+      },
+      "transferPlanDifference": 3.55,
+      "existingCrossableLength": 16,
+      "possibleParallelLength": 180,
+      "possibleTaperLength": 220,
+      "currentMarkingOpening": {
+        "branch": [
+          1070.169,
+          1087.651
+        ],
+        "host": [
+          3039.139,
+          3053.565
+        ],
+        "length": 17.48
+      },
+      "currentRailOpening": {
+        "host": [
+          2855.056,
+          2954.801
+        ],
+        "length": 99.74
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -7377.42,
+        "y": 72.44,
+        "z": -23647.91
+      }
+    },
+    {
+      "id": "J25:diverge:k5_1:ramp_17:start",
+      "hostRouteId": "k5_1",
+      "branchRouteId": "ramp_17",
+      "trafficRoutePair": "k5_1 -> ramp_17",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.31,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0.65,
+      "tangentMismatchDeg": 0.19,
+      "maximumTangentMismatchAcrossMouthDeg": 2.42,
+      "curvatureDegPer100m": {
+        "host": 8.29,
+        "branch": 12.8,
+        "maximum": 12.8
+      },
+      "bankingDifferenceDeg": 3.35,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.001,
+        "maximumAcrossMouth": 2.196,
+        "maximumAcrossOpening": 0.131
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 68,
+      "possibleParallelLength": 72,
+      "possibleTaperLength": 92,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          71.346
+        ],
+        "host": [
+          3380.727,
+          3451.224
+        ],
+        "length": 71.35
+      },
+      "currentRailOpening": {
+        "host": [
+          3450.219,
+          3463.564
+        ],
+        "length": 13.34
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -8807.85,
+        "y": 76.7,
+        "z": -21237.5
+      }
+    },
+    {
+      "id": "J26:merge:k1_1:ramp_17:end",
+      "hostRouteId": "k1_1",
+      "branchRouteId": "ramp_17",
+      "trafficRoutePair": "ramp_17 -> k1_1",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0,
+      "tangentMismatchDeg": 0.1,
+      "maximumTangentMismatchAcrossMouthDeg": 3.78,
+      "curvatureDegPer100m": {
+        "host": 4.62,
+        "branch": 15.39,
+        "maximum": 15.39
+      },
+      "bankingDifferenceDeg": 2.41,
+      "verticalDifference": {
+        "atTransfer": 0.002,
+        "minimumAcrossMouth": 0.057,
+        "maximumAcrossMouth": 2.357,
+        "maximumAcrossOpening": 0.185
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 24,
+      "possibleParallelLength": 112,
+      "possibleTaperLength": 156,
+      "currentMarkingOpening": {
+        "branch": [
+          835.66,
+          863.568
+        ],
+        "host": [
+          5072.876,
+          5098.625
+        ],
+        "length": 27.91
+      },
+      "currentRailOpening": null,
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -8461.43,
+        "y": 37.56,
+        "z": -20711.72
+      }
+    },
+    {
+      "id": "J27:diverge:r6_0:ramp_18:start",
+      "hostRouteId": "r6_0",
+      "branchRouteId": "ramp_18",
+      "trafficRoutePair": "r6_0 -> ramp_18",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 7.35,
+      "tangentMismatchDeg": 4.38,
+      "maximumTangentMismatchAcrossMouthDeg": 5.64,
+      "curvatureDegPer100m": {
+        "host": 65.45,
+        "branch": 96.42,
+        "maximum": 96.42
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.006,
+        "maximumAcrossMouth": 0.472,
+        "maximumAcrossOpening": 0.18
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 40,
+      "possibleParallelLength": 192,
+      "possibleTaperLength": 212,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          40.178
+        ],
+        "host": [
+          896.269,
+          937.16
+        ],
+        "length": 40.18
+      },
+      "currentRailOpening": {
+        "host": [
+          930.904,
+          955.349
+        ],
+        "length": 24.44
+      },
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "classifications": [
+        "simple 1-lane diverge",
+        "tangent mismatch too severe",
+        "manual review required"
+      ],
+      "manualReviewReason": "96.4°/100 m local curvature",
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1088.68,
+        "y": 61,
+        "z": 25.13
+      }
+    },
+    {
+      "id": "J28:merge:r6_0:ramp_19:end",
+      "hostRouteId": "r6_0",
+      "branchRouteId": "ramp_19",
+      "trafficRoutePair": "ramp_19 -> r6_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.5,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0.43,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 1.51,
+      "curvatureDegPer100m": {
+        "host": 15,
+        "branch": 20.01,
+        "maximum": 20.01
+      },
+      "bankingDifferenceDeg": 2.68,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.004,
+        "maximumAcrossMouth": 2.37,
+        "maximumAcrossOpening": 0.177
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 96,
+      "possibleParallelLength": 160,
+      "possibleTaperLength": 184,
+      "currentMarkingOpening": {
+        "branch": [
+          400.255,
+          497.241
+        ],
+        "host": [
+          1624.714,
+          1721.62
+        ],
+        "length": 96.99
+      },
+      "currentRailOpening": {
+        "host": [
+          1547.467,
+          1607.71
+        ],
+        "length": 60.24
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1744.91,
+        "y": 76.39,
+        "z": 362.61
+      }
+    },
+    {
+      "id": "J29:diverge:r6_3:ramp_20:start",
+      "hostRouteId": "r6_3",
+      "branchRouteId": "ramp_20",
+      "trafficRoutePair": "r6_3 -> ramp_20",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9,
+      "availableExtraWidth": 5.07,
+      "tangentMismatchDeg": 0.04,
+      "maximumTangentMismatchAcrossMouthDeg": 5.85,
+      "curvatureDegPer100m": {
+        "host": 41.81,
+        "branch": 44.72,
+        "maximum": 44.72
+      },
+      "bankingDifferenceDeg": 4.02,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.608,
+        "maximumAcrossOpening": 0.179
+      },
+      "transferPlanDifference": 0.016,
+      "existingCrossableLength": 132,
+      "possibleParallelLength": 136,
+      "possibleTaperLength": 164,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          132.928
+        ],
+        "host": [
+          379.407,
+          512.383
+        ],
+        "length": 132.93
+      },
+      "currentRailOpening": {
+        "host": [
+          468.811,
+          529.163
+        ],
+        "length": 60.35
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1666.63,
+        "y": 72.63,
+        "z": 277.58
+      }
+    },
+    {
+      "id": "J30:diverge:r6_0:ramp_21:start",
+      "hostRouteId": "r6_0",
+      "branchRouteId": "ramp_21",
+      "trafficRoutePair": "r6_0 -> ramp_21",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 4.41,
+      "tangentMismatchDeg": 4.38,
+      "maximumTangentMismatchAcrossMouthDeg": 5.56,
+      "curvatureDegPer100m": {
+        "host": 65.45,
+        "branch": 67.87,
+        "maximum": 67.87
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.002,
+        "maximumAcrossMouth": 2.202,
+        "maximumAcrossOpening": 0.15
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 56,
+      "possibleParallelLength": 84,
+      "possibleTaperLength": 172,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          59.412
+        ],
+        "host": [
+          896.269,
+          954.793
+        ],
+        "length": 59.41
+      },
+      "currentRailOpening": {
+        "host": [
+          953.401,
+          965.229
+        ],
+        "length": 11.83
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1096.75,
+        "y": 61,
+        "z": 21.38
+      }
+    },
+    {
+      "id": "J31:merge:ramp_18:ramp_21:end",
+      "hostRouteId": "ramp_18",
+      "branchRouteId": "ramp_21",
+      "trafficRoutePair": "ramp_21 -> ramp_18",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 1,
+      "branchLaneCount": 1,
+      "hostWidth": 5.45,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 3.78,
+      "tangentMismatchDeg": 1.3,
+      "maximumTangentMismatchAcrossMouthDeg": 14.09,
+      "curvatureDegPer100m": {
+        "host": 64.42,
+        "branch": 98.52,
+        "maximum": 98.52
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.056,
+        "maximumAcrossOpening": 0.144
+      },
+      "transferPlanDifference": 0.002,
+      "existingCrossableLength": 24,
+      "possibleParallelLength": 88,
+      "possibleTaperLength": 120,
+      "currentMarkingOpening": {
+        "branch": [
+          457.571,
+          483.573
+        ],
+        "host": [
+          456.08,
+          482.056
+        ],
+        "length": 26
+      },
+      "currentRailOpening": {
+        "host": [
+          403.972,
+          472.052
+        ],
+        "length": 68.08
+      },
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "classifications": [
+        "simple 1-lane merge",
+        "tangent mismatch too severe",
+        "manual review required"
+      ],
+      "manualReviewReason": "98.5°/100 m local curvature",
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1494.08,
+        "y": 76.57,
+        "z": 123.53
+      }
+    },
+    {
+      "id": "J32:diverge:c1_0:ramp_22:start",
+      "hostRouteId": "c1_0",
+      "branchRouteId": "ramp_22",
+      "trafficRoutePair": "c1_0 -> ramp_22",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9,
+      "availableExtraWidth": 12.87,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 20.77,
+      "curvatureDegPer100m": {
+        "host": 20.3,
+        "branch": 22.93,
+        "maximum": 22.93
+      },
+      "bankingDifferenceDeg": 0.25,
+      "verticalDifference": {
+        "atTransfer": 0.001,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 0.688,
+        "maximumAcrossOpening": 0.671
+      },
+      "transferPlanDifference": 0.032,
+      "existingCrossableLength": 172,
+      "possibleParallelLength": 136,
+      "possibleTaperLength": 192,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          172.357
+        ],
+        "host": [
+          1087.91,
+          1256.862
+        ],
+        "length": 172.36
+      },
+      "currentRailOpening": {
+        "host": [
+          1179.812,
+          1264.822
+        ],
+        "length": 85.01
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 691.81,
+        "y": 45.48,
+        "z": 300.18
+      }
+    },
+    {
+      "id": "J33:merge:r6_0:ramp_22:end",
+      "hostRouteId": "r6_0",
+      "branchRouteId": "ramp_22",
+      "trafficRoutePair": "ramp_22 -> r6_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9,
+      "availableExtraWidth": 8.47,
+      "tangentMismatchDeg": 0.03,
+      "maximumTangentMismatchAcrossMouthDeg": 9.99,
+      "curvatureDegPer100m": {
+        "host": 45.44,
+        "branch": 56.31,
+        "maximum": 56.31
+      },
+      "bankingDifferenceDeg": 3.8,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.924,
+        "maximumAcrossOpening": 0.174
+      },
+      "transferPlanDifference": 0.019,
+      "existingCrossableLength": 124,
+      "possibleParallelLength": 128,
+      "possibleTaperLength": 200,
+      "currentMarkingOpening": {
+        "branch": [
+          566.238,
+          692.376
+        ],
+        "host": [
+          673.493,
+          799.511
+        ],
+        "length": 126.14
+      },
+      "currentRailOpening": {
+        "host": [
+          612.817,
+          709.848
+        ],
+        "length": 97.03
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 962.38,
+        "y": 60.26,
+        "z": 152.46
+      }
+    },
+    {
+      "id": "J34:diverge:r9_1:ramp_25:start",
+      "hostRouteId": "r9_1",
+      "branchRouteId": "ramp_25",
+      "trafficRoutePair": "r9_1 -> ramp_25",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 5.3,
+      "tangentMismatchDeg": 0.04,
+      "maximumTangentMismatchAcrossMouthDeg": 4.04,
+      "curvatureDegPer100m": {
+        "host": 7.11,
+        "branch": 7.83,
+        "maximum": 7.83
+      },
+      "bankingDifferenceDeg": 2.23,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.003,
+        "maximumAcrossMouth": 2.279,
+        "maximumAcrossOpening": 0.23
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 160,
+      "possibleParallelLength": 164,
+      "possibleTaperLength": 204,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          160.553
+        ],
+        "host": [
+          1479.594,
+          1639.573
+        ],
+        "length": 160.55
+      },
+      "currentRailOpening": {
+        "host": [
+          1568.179,
+          1664.942
+        ],
+        "length": 96.76
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 2856.29,
+        "y": 53.13,
+        "z": -799.13
+      }
+    },
+    {
+      "id": "J35:merge:r9_0:ramp_25:end",
+      "hostRouteId": "r9_0",
+      "branchRouteId": "ramp_25",
+      "trafficRoutePair": "ramp_25 -> r9_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0.46,
+      "tangentMismatchDeg": 1.07,
+      "maximumTangentMismatchAcrossMouthDeg": 2.18,
+      "curvatureDegPer100m": {
+        "host": 11.97,
+        "branch": 5.88,
+        "maximum": 11.97
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.006,
+        "maximumAcrossMouth": 2.81,
+        "maximumAcrossOpening": 0.203
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 60,
+      "possibleParallelLength": 168,
+      "possibleTaperLength": 200,
+      "currentMarkingOpening": {
+        "branch": [
+          1096.901,
+          1159.688
+        ],
+        "host": [
+          3252.848,
+          3314.229
+        ],
+        "length": 62.79
+      },
+      "currentRailOpening": {
+        "host": [
+          3129.413,
+          3133.413
+        ],
+        "length": 4
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 2688.62,
+        "y": 57.6,
+        "z": -777.93
+      }
+    },
+    {
+      "id": "J36:diverge:r6_3:ramp_27:start",
+      "hostRouteId": "r6_3",
+      "branchRouteId": "ramp_27",
+      "trafficRoutePair": "r6_3 -> ramp_27",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 3.58,
+      "tangentMismatchDeg": 0.62,
+      "maximumTangentMismatchAcrossMouthDeg": 23.94,
+      "curvatureDegPer100m": {
+        "host": 68.48,
+        "branch": 122.3,
+        "maximum": 122.3
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.05,
+        "maximumAcrossMouth": 2.414,
+        "maximumAcrossOpening": 0.173
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 52,
+      "possibleParallelLength": 48,
+      "possibleTaperLength": 72,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          55.506
+        ],
+        "host": [
+          4.017,
+          58.626
+        ],
+        "length": 55.51
+      },
+      "currentRailOpening": {
+        "host": [
+          57.081,
+          64.753
+        ],
+        "length": 7.67
+      },
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "classifications": [
+        "simple 1-lane diverge",
+        "transition too short",
+        "tangent mismatch too severe",
+        "manual review required"
+      ],
+      "manualReviewReason": "only 72 m of measured mouth span; 122.3°/100 m local curvature",
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1970.19,
+        "y": 73,
+        "z": 558.6
+      }
+    },
+    {
+      "id": "J37:merge:c1_2:ramp_29:end",
+      "hostRouteId": "c1_2",
+      "branchRouteId": "ramp_29",
+      "trafficRoutePair": "ramp_29 -> c1_2",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 1.8,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 6.53,
+      "curvatureDegPer100m": {
+        "host": 0.8,
+        "branch": 14.01,
+        "maximum": 14.01
+      },
+      "bankingDifferenceDeg": 2.74,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.155,
+        "maximumAcrossOpening": 0.49
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 68,
+      "possibleParallelLength": 64,
+      "possibleTaperLength": 108,
+      "currentMarkingOpening": {
+        "branch": [
+          48.883,
+          117.936
+        ],
+        "host": [
+          8337.149,
+          8406.267
+        ],
+        "length": 69.05
+      },
+      "currentRailOpening": null,
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 16.34,
+        "y": 23.96,
+        "z": -1152.75
+      }
+    },
+    {
+      "id": "J38:merge:wangan_0:ramp_30:end",
+      "hostRouteId": "wangan_0",
+      "branchRouteId": "ramp_30",
+      "trafficRoutePair": "ramp_30 -> wangan_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 7.06,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 5.56,
+      "curvatureDegPer100m": {
+        "host": 0.28,
+        "branch": 10.85,
+        "maximum": 10.85
+      },
+      "bankingDifferenceDeg": 0.09,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.636,
+        "maximumAcrossOpening": 0.159
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 152,
+      "possibleParallelLength": 156,
+      "possibleTaperLength": 192,
+      "currentMarkingOpening": {
+        "branch": [
+          654.063,
+          808.311
+        ],
+        "host": [
+          29549.088,
+          29701.881
+        ],
+        "length": 154.25
+      },
+      "currentRailOpening": {
+        "host": [
+          29529.465,
+          29621.597
+        ],
+        "length": 92.13
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1640.16,
+        "y": 32.16,
+        "z": -5182.13
+      }
+    },
+    {
+      "id": "J39:merge:r6_3:ramp_31:end",
+      "hostRouteId": "r6_3",
+      "branchRouteId": "ramp_31",
+      "trafficRoutePair": "ramp_31 -> r6_3",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 8.9,
+      "tangentMismatchDeg": 0.03,
+      "maximumTangentMismatchAcrossMouthDeg": 19.31,
+      "curvatureDegPer100m": {
+        "host": 0.29,
+        "branch": 56.46,
+        "maximum": 56.46
+      },
+      "bankingDifferenceDeg": 2.39,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.002,
+        "maximumAcrossMouth": 2.326,
+        "maximumAcrossOpening": 0.137
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 40,
+      "possibleParallelLength": 60,
+      "possibleTaperLength": 92,
+      "currentMarkingOpening": {
+        "branch": [
+          235.384,
+          278.418
+        ],
+        "host": [
+          686.551,
+          728.956
+        ],
+        "length": 43.03
+      },
+      "currentRailOpening": {
+        "host": [
+          649.65,
+          691.659
+        ],
+        "length": 42.01
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1437.84,
+        "y": 67.87,
+        "z": 150.13
+      }
+    },
+    {
+      "id": "J40:merge:r1_2:ramp_32:end",
+      "hostRouteId": "r1_2",
+      "branchRouteId": "ramp_32",
+      "trafficRoutePair": "ramp_32 -> r1_2",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 4.72,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 3.63,
+      "curvatureDegPer100m": {
+        "host": 0.37,
+        "branch": 7.67,
+        "maximum": 7.67
+      },
+      "bankingDifferenceDeg": 0.01,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.479,
+        "maximumAcrossOpening": 0.191
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 156,
+      "possibleParallelLength": 160,
+      "possibleTaperLength": 192,
+      "currentMarkingOpening": {
+        "branch": [
+          646.644,
+          802.974
+        ],
+        "host": [
+          8288.694,
+          8444.694
+        ],
+        "length": 156.33
+      },
+      "currentRailOpening": {
+        "host": [
+          8271.05,
+          8361.923
+        ],
+        "length": 90.87
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1740.94,
+        "y": 37,
+        "z": -7777.71
+      }
+    },
+    {
+      "id": "J41:diverge:k5_1:ramp_35:start",
+      "hostRouteId": "k5_1",
+      "branchRouteId": "ramp_35",
+      "trafficRoutePair": "k5_1 -> ramp_35",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 7.72,
+      "tangentMismatchDeg": 0.13,
+      "maximumTangentMismatchAcrossMouthDeg": 6.96,
+      "curvatureDegPer100m": {
+        "host": 12.19,
+        "branch": 14.5,
+        "maximum": 14.5
+      },
+      "bankingDifferenceDeg": 3.65,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.007,
+        "maximumAcrossMouth": 3.01,
+        "maximumAcrossOpening": 0.124
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 148,
+      "possibleParallelLength": 172,
+      "possibleTaperLength": 200,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          149.252
+        ],
+        "host": [
+          3131.093,
+          3278.827
+        ],
+        "length": 149.25
+      },
+      "currentRailOpening": {
+        "host": [
+          3223.64,
+          3315.347
+        ],
+        "length": 91.71
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -8712.76,
+        "y": 64.89,
+        "z": -21424.98
+      }
+    },
+    {
+      "id": "J42:merge:k1_0:ramp_35:end",
+      "hostRouteId": "k1_0",
+      "branchRouteId": "ramp_35",
+      "trafficRoutePair": "ramp_35 -> k1_0",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 6.53,
+      "tangentMismatchDeg": 2.63,
+      "maximumTangentMismatchAcrossMouthDeg": 6.4,
+      "curvatureDegPer100m": {
+        "host": 33.22,
+        "branch": 13.62,
+        "maximum": 33.22
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.006,
+        "maximumAcrossMouth": 2.127,
+        "maximumAcrossOpening": 0.175
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 100,
+      "possibleParallelLength": 148,
+      "possibleTaperLength": 176,
+      "currentMarkingOpening": {
+        "branch": [
+          1068.414,
+          1169.6
+        ],
+        "host": [
+          10000.486,
+          10101.761
+        ],
+        "length": 101.19
+      },
+      "currentRailOpening": {
+        "host": [
+          9935.679,
+          10019.812
+        ],
+        "length": 84.13
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -9453.8,
+        "y": 49,
+        "z": -21227.75
+      }
+    },
+    {
+      "id": "J43:diverge:k1_0:ramp_36:start",
+      "hostRouteId": "k1_0",
+      "branchRouteId": "ramp_36",
+      "trafficRoutePair": "k1_0 -> ramp_36",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9,
+      "availableExtraWidth": 0,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 4.07,
+      "curvatureDegPer100m": {
+        "host": 0.08,
+        "branch": 10.17,
+        "maximum": 10.17
+      },
+      "bankingDifferenceDeg": 0.24,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.352,
+        "maximumAcrossOpening": 0.02
+      },
+      "transferPlanDifference": 0.021,
+      "existingCrossableLength": 68,
+      "possibleParallelLength": 136,
+      "possibleTaperLength": 164,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          69.748
+        ],
+        "host": [
+          9082.229,
+          9150.992
+        ],
+        "length": 69.75
+      },
+      "currentRailOpening": null,
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -8622.15,
+        "y": 48.06,
+        "z": -20804.11
+      }
+    },
+    {
+      "id": "J44:diverge:r1_2:ramp_37:start",
+      "hostRouteId": "r1_2",
+      "branchRouteId": "ramp_37",
+      "trafficRoutePair": "r1_2 -> ramp_37",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 3.1,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 8.58,
+      "curvatureDegPer100m": {
+        "host": 17.76,
+        "branch": 43.57,
+        "maximum": 43.57
+      },
+      "bankingDifferenceDeg": 1.96,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.004,
+        "maximumAcrossMouth": 0.438,
+        "maximumAcrossOpening": 0.175
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 84,
+      "possibleParallelLength": 68,
+      "possibleTaperLength": 96,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          85.705
+        ],
+        "host": [
+          5013.103,
+          5097.53
+        ],
+        "length": 85.71
+      },
+      "currentRailOpening": {
+        "host": [
+          5082.098,
+          5110.815
+        ],
+        "length": 28.72
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2412.63,
+        "y": 28.83,
+        "z": -10587.98
+      }
+    },
+    {
+      "id": "J45:merge:r1_2:ramp_37:end",
+      "hostRouteId": "r1_2",
+      "branchRouteId": "ramp_37",
+      "trafficRoutePair": "ramp_37 -> r1_2",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 3.12,
+      "tangentMismatchDeg": 0.63,
+      "maximumTangentMismatchAcrossMouthDeg": 5.41,
+      "curvatureDegPer100m": {
+        "host": 8.37,
+        "branch": 44.28,
+        "maximum": 44.28
+      },
+      "bankingDifferenceDeg": 4.83,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.031,
+        "maximumAcrossMouth": 0.486,
+        "maximumAcrossOpening": 0.163
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 28,
+      "possibleParallelLength": 80,
+      "possibleTaperLength": 96,
+      "currentMarkingOpening": {
+        "branch": [
+          155.723,
+          188.183
+        ],
+        "host": [
+          5168.947,
+          5201.37
+        ],
+        "length": 32.46
+      },
+      "currentRailOpening": {
+        "host": [
+          5105.181,
+          5165.654
+        ],
+        "length": 60.47
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2472.22,
+        "y": 29.38,
+        "z": -10472.94
+      }
+    },
+    {
+      "id": "J46:diverge:r6_0:ramp_39:start",
+      "hostRouteId": "r6_0",
+      "branchRouteId": "ramp_39",
+      "trafficRoutePair": "r6_0 -> ramp_39",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 2.69,
+      "tangentMismatchDeg": 0.59,
+      "maximumTangentMismatchAcrossMouthDeg": 4.53,
+      "curvatureDegPer100m": {
+        "host": 8.02,
+        "branch": 16.97,
+        "maximum": 16.97
+      },
+      "bankingDifferenceDeg": 3.05,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.006,
+        "maximumAcrossMouth": 2.259,
+        "maximumAcrossOpening": 0.259
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 76,
+      "possibleParallelLength": 80,
+      "possibleTaperLength": 120,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          76.908
+        ],
+        "host": [
+          1288.536,
+          1366.214
+        ],
+        "length": 76.91
+      },
+      "currentRailOpening": {
+        "host": [
+          1358.286,
+          1394.285
+        ],
+        "length": 36
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane diverge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1455.8,
+        "y": 72.06,
+        "z": 174.73
+      }
+    },
+    {
+      "id": "J47:merge:r6_3:ramp_40:end",
+      "hostRouteId": "r6_3",
+      "branchRouteId": "ramp_40",
+      "trafficRoutePair": "ramp_40 -> r6_3",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 3.11,
+      "tangentMismatchDeg": 0.04,
+      "maximumTangentMismatchAcrossMouthDeg": 5.22,
+      "curvatureDegPer100m": {
+        "host": 2.05,
+        "branch": 18.55,
+        "maximum": 18.55
+      },
+      "bankingDifferenceDeg": 3.88,
+      "verticalDifference": {
+        "atTransfer": 0.001,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.206,
+        "maximumAcrossOpening": 0.128
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 100,
+      "possibleParallelLength": 108,
+      "possibleTaperLength": 148,
+      "currentMarkingOpening": {
+        "branch": [
+          267.287,
+          368.691
+        ],
+        "host": [
+          830.628,
+          931.92
+        ],
+        "length": 101.4
+      },
+      "currentRailOpening": {
+        "host": [
+          802.14,
+          837.934
+        ],
+        "length": 35.79
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1288.25,
+        "y": 64.13,
+        "z": 62.68
+      }
+    },
+    {
+      "id": "J48:merge:wangan_1:ramp_41:end",
+      "hostRouteId": "wangan_1",
+      "branchRouteId": "ramp_41",
+      "trafficRoutePair": "ramp_41 -> wangan_1",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 12.68,
+      "tangentMismatchDeg": 0.32,
+      "maximumTangentMismatchAcrossMouthDeg": 14.31,
+      "curvatureDegPer100m": {
+        "host": 14.68,
+        "branch": 23.67,
+        "maximum": 23.67
+      },
+      "bankingDifferenceDeg": 3,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.003,
+        "maximumAcrossMouth": 0.473,
+        "maximumAcrossOpening": 0.161
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 144,
+      "possibleParallelLength": 136,
+      "possibleTaperLength": 200,
+      "currentMarkingOpening": {
+        "branch": [
+          586.46,
+          733.481
+        ],
+        "host": [
+          30965.993,
+          31113.061
+        ],
+        "length": 147.02
+      },
+      "currentRailOpening": {
+        "host": [
+          30927.489,
+          31006.886
+        ],
+        "length": 79.4
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "multi-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -8237.54,
+        "y": 76.22,
+        "z": -24308.5
+      }
+    },
+    {
+      "id": "J49:diverge:k1_0:ramp_42:start",
+      "hostRouteId": "k1_0",
+      "branchRouteId": "ramp_42",
+      "trafficRoutePair": "k1_0 -> ramp_42",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 8.02,
+      "tangentMismatchDeg": 2.04,
+      "maximumTangentMismatchAcrossMouthDeg": 9.8,
+      "curvatureDegPer100m": {
+        "host": 36.67,
+        "branch": 46.12,
+        "maximum": 46.12
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.11,
+        "maximumAcrossMouth": 0.394,
+        "maximumAcrossOpening": 0.171
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 84,
+      "possibleParallelLength": 88,
+      "possibleTaperLength": 144,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          85.775
+        ],
+        "host": [
+          558.749,
+          644.957
+        ],
+        "length": 85.78
+      },
+      "currentRailOpening": {
+        "host": [
+          637.35,
+          684.843
+        ],
+        "length": 47.49
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2575.81,
+        "y": 49,
+        "z": -15512.26
+      }
+    },
+    {
+      "id": "J50:merge:k1_0:ramp_42:end",
+      "hostRouteId": "k1_0",
+      "branchRouteId": "ramp_42",
+      "trafficRoutePair": "ramp_42 -> k1_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 7.9,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 10.23,
+      "curvatureDegPer100m": {
+        "host": 1.36,
+        "branch": 24.53,
+        "maximum": 24.53
+      },
+      "bankingDifferenceDeg": 1.64,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.002,
+        "maximumAcrossMouth": 0.743,
+        "maximumAcrossOpening": 0.219
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 104,
+      "possibleParallelLength": 76,
+      "possibleTaperLength": 128,
+      "currentMarkingOpening": {
+        "branch": [
+          231.068,
+          335.714
+        ],
+        "host": [
+          789.569,
+          894.156
+        ],
+        "length": 104.65
+      },
+      "currentRailOpening": {
+        "host": [
+          776.474,
+          824.782
+        ],
+        "length": 48.31
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "suitable",
+      "classifications": [
+        "simple 1-lane merge"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -2580.38,
+        "y": 49,
+        "z": -15751.62
+      }
+    },
+    {
+      "id": "J51:diverge:r1_0:ramp_43:start",
+      "hostRouteId": "r1_0",
+      "branchRouteId": "ramp_43",
+      "trafficRoutePair": "r1_0 -> ramp_43",
+      "type": "diverge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 1.18,
+      "tangentMismatchDeg": 0.01,
+      "maximumTangentMismatchAcrossMouthDeg": 4.51,
+      "curvatureDegPer100m": {
+        "host": 26.25,
+        "branch": 27.6,
+        "maximum": 27.6
+      },
+      "bankingDifferenceDeg": 1.31,
+      "verticalDifference": {
+        "atTransfer": 0.001,
+        "minimumAcrossMouth": 0.012,
+        "maximumAcrossMouth": 0.876,
+        "maximumAcrossOpening": 0.178
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 32,
+      "possibleParallelLength": 72,
+      "possibleTaperLength": 84,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          32.775
+        ],
+        "host": [
+          480.311,
+          513.252
+        ],
+        "length": 32.78
+      },
+      "currentRailOpening": {
+        "host": [
+          546.42,
+          566.385
+        ],
+        "length": 19.97
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -997.61,
+        "y": 56.92,
+        "z": -3328.09
+      }
+    },
+    {
+      "id": "J52:merge:r1_3:ramp_43:end",
+      "hostRouteId": "r1_3",
+      "branchRouteId": "ramp_43",
+      "trafficRoutePair": "ramp_43 -> r1_3",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 2,
+      "branchLaneCount": 1,
+      "hostWidth": 9.7,
+      "branchWidth": 5.45,
+      "availableExtraWidth": 0.11,
+      "tangentMismatchDeg": 0.09,
+      "maximumTangentMismatchAcrossMouthDeg": 5.38,
+      "curvatureDegPer100m": {
+        "host": 20.17,
+        "branch": 29.63,
+        "maximum": 29.63
+      },
+      "bankingDifferenceDeg": 3.05,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.008,
+        "maximumAcrossMouth": 0.828,
+        "maximumAcrossOpening": 0.138
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 68,
+      "possibleParallelLength": 76,
+      "possibleTaperLength": 84,
+      "currentMarkingOpening": {
+        "branch": [
+          89.042,
+          160.47
+        ],
+        "host": [
+          679.99,
+          751.49
+        ],
+        "length": 71.43
+      },
+      "currentRailOpening": {
+        "host": [
+          686.617,
+          713.66
+        ],
+        "length": 27.04
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "simple 1-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1038.56,
+        "y": 53.23,
+        "z": -3428
+      }
+    },
+    {
+      "id": "J53:merge:ramp_27:ramp_46:end",
+      "hostRouteId": "ramp_27",
+      "branchRouteId": "ramp_46",
+      "trafficRoutePair": "ramp_46 -> ramp_27",
+      "type": "merge",
+      "side": "right",
+      "hostLaneCount": 1,
+      "branchLaneCount": 2,
+      "hostWidth": 5.45,
+      "branchWidth": 9,
+      "availableExtraWidth": 15.9,
+      "tangentMismatchDeg": 0.08,
+      "maximumTangentMismatchAcrossMouthDeg": 97.33,
+      "curvatureDegPer100m": {
+        "host": 162.39,
+        "branch": 396.74,
+        "maximum": 396.74
+      },
+      "bankingDifferenceDeg": 2,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 0.367,
+        "maximumAcrossOpening": 0.199
+      },
+      "transferPlanDifference": 0.009,
+      "existingCrossableLength": 44,
+      "possibleParallelLength": 36,
+      "possibleTaperLength": 60,
+      "currentMarkingOpening": {
+        "branch": [
+          40.986,
+          86.48
+        ],
+        "host": [
+          395.104,
+          440.199
+        ],
+        "length": 45.49
+      },
+      "currentRailOpening": {
+        "host": [
+          388.788,
+          442.199
+        ],
+        "length": 53.41
+      },
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "classifications": [
+        "multi-lane merge",
+        "transition too short",
+        "tangent mismatch too severe",
+        "manual review required"
+      ],
+      "manualReviewReason": "only 60 m of measured mouth span; 396.7°/100 m local curvature",
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": 1707.12,
+        "y": 49.53,
+        "z": 277.95
+      }
+    },
+    {
+      "id": "J54:diverge:r1_2:ramp_47:start",
+      "hostRouteId": "r1_2",
+      "branchRouteId": "ramp_47",
+      "trafficRoutePair": "r1_2 -> ramp_47",
+      "type": "diverge",
+      "side": "left",
+      "hostLaneCount": 2,
+      "branchLaneCount": 2,
+      "hostWidth": 9.7,
+      "branchWidth": 9,
+      "availableExtraWidth": 6.58,
+      "tangentMismatchDeg": 0.45,
+      "maximumTangentMismatchAcrossMouthDeg": 6.71,
+      "curvatureDegPer100m": {
+        "host": 37.06,
+        "branch": 34.53,
+        "maximum": 37.06
+      },
+      "bankingDifferenceDeg": 0,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0,
+        "maximumAcrossMouth": 2.881,
+        "maximumAcrossOpening": 0.562
+      },
+      "transferPlanDifference": 0.01,
+      "existingCrossableLength": 124,
+      "possibleParallelLength": 116,
+      "possibleTaperLength": 172,
+      "currentMarkingOpening": {
+        "branch": [
+          0,
+          126.568
+        ],
+        "host": [
+          3190.743,
+          3319.923
+        ],
+        "length": 126.57
+      },
+      "currentRailOpening": {
+        "host": [
+          3266.042,
+          3353.412
+        ],
+        "length": 87.37
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane diverge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1928.84,
+        "y": 59.26,
+        "z": -12276.5
+      }
+    },
+    {
+      "id": "J55:merge:wangan_0:ramp_47:end",
+      "hostRouteId": "wangan_0",
+      "branchRouteId": "ramp_47",
+      "trafficRoutePair": "ramp_47 -> wangan_0",
+      "type": "merge",
+      "side": "left",
+      "hostLaneCount": 3,
+      "branchLaneCount": 2,
+      "hostWidth": 13.25,
+      "branchWidth": 9,
+      "availableExtraWidth": 12.1,
+      "tangentMismatchDeg": 0,
+      "maximumTangentMismatchAcrossMouthDeg": 10.34,
+      "curvatureDegPer100m": {
+        "host": 28.58,
+        "branch": 20.2,
+        "maximum": 28.58
+      },
+      "bankingDifferenceDeg": 0.08,
+      "verticalDifference": {
+        "atTransfer": 0,
+        "minimumAcrossMouth": 0.002,
+        "maximumAcrossMouth": 2.046,
+        "maximumAcrossOpening": 0.171
+      },
+      "transferPlanDifference": 1.775,
+      "existingCrossableLength": 156,
+      "possibleParallelLength": 124,
+      "possibleTaperLength": 200,
+      "currentMarkingOpening": {
+        "branch": [
+          1993.329,
+          2151.452
+        ],
+        "host": [
+          22820.727,
+          22975.08
+        ],
+        "length": 158.12
+      },
+      "currentRailOpening": {
+        "host": [
+          22800.51,
+          22864.337
+        ],
+        "length": 63.83
+      },
+      "sourceDataQuality": "measured-clean",
+      "automaticGenerationSuitability": "curved-suitable",
+      "classifications": [
+        "multi-lane merge",
+        "curved but suitable"
+      ],
+      "manualReviewReason": null,
+      "selectedPrototype": false,
+      "prototypeLabel": null,
+      "worldCoordinates": {
+        "x": -1335.71,
+        "y": 48.03,
+        "z": -10524.15
+      }
+    }
+  ]
+}
