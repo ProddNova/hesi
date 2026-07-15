@@ -14,8 +14,6 @@
 [overlap-clearance] same-level overlap k5_1 d=234 with ramp_41 d=629 plan -7.9 m, vertical 3.8 m at (-8215, -24287)
 [overlap-clearance] same-level overlap k5_1 d=243 with wangan_1 d=31007 plan -8.4 m, vertical 4.3 m at (-8221, -24280)
 [overlap-clearance] same-level overlap k5_1 d=243 with ramp_41 d=627 plan -2.1 m, vertical 4.3 m at (-8221, -24280)
-[overlap-clearance] same-level overlap daikoku_pa_access d=1881 with k5_0 d=3414 plan -3.8 m, vertical 4.2 m at (-8146, -24333)
-[overlap-clearance] same-level overlap daikoku_pa_access d=1890 with k5_0 d=3417 plan -3.5 m, vertical 3.9 m at (-8149, -24342)
 [ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.27 m over 2 m @74
 [ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.29 m over 2 m @76
 [ramp-drive] diverge k5_1@3382 -> ramp_17 [branch]: height step 0.31 m over 2 m @78
@@ -61,8 +59,6 @@
 [ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.39 m over 2 m @16
 [ramp-drive] merge ramp_46 -> ramp_27@439 [ramp end]: height step -0.33 m over 2 m @18
 [ramp-drive] continuation ramp_39 -> ramp_46: transfer jump 8.2 m
-[ramp-drive] diverge wangan_1@30419 -> daikoku_pa_access: transfer jump 8.6 m
-[ramp-drive] merge daikoku_pa_access -> k5_1@509 [ramp end]: height step 0.28 m over 2 m @1940
 [smoothness] ramp_17: height discontinuity 0.16 m @79
 [smoothness] ramp_17: height discontinuity 0.16 m @80
 [smoothness] ramp_17: height discontinuity 0.17 m @81
@@ -123,5 +119,3 @@
 [smoothness] ramp_46: height discontinuity 0.20 m @15
 [smoothness] ramp_46: height discontinuity 0.19 m @16
 [smoothness] ramp_46: height discontinuity 0.18 m @17
-[smoothness] daikoku_pa_access: height discontinuity 0.30 m @843
-[smoothness] daikoku_pa_access: height discontinuity 0.29 m @844
