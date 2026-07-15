@@ -49,6 +49,20 @@ const CHUNK = 600;
 const CHUNK_VISIBLE = 1500;
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 
+// TEMPORARY (lateral-junction rebuild): the synthesized PA access lanes —
+// the decel/accel legs and descent spirals _defineServiceAreas builds around
+// each parking area — are broken and will be rebuilt in their own pass.
+// This flag removes them from the RUNTIME map only: no route is registered,
+// so their asphalt, collision corridor, guardrails/wall segments, markings
+// and traffic connections all disappear together. The raw (data/routes.js)
+// and smoothed (data/routes-smoothed.js) network data are untouched; set the
+// flag to false (or pass options.paAccessLanes = true) to restore every lane.
+// EXCEPTION — garage connector: the lane of the PA that hosts the player
+// garage (Shibaura, hasGarage in data) is kept, because the garage flow
+// drives through that lot (spawn/tow/exit land beside it on R11 and the
+// player must be able to drive in and out of the lot).
+const PA_ACCESS_LANES_DISABLED = true;
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -97,7 +111,8 @@ export class HighwayMap {
   constructor(sceneOrOptions = null, maybeOptions = {}) {
     const isScene = sceneOrOptions && sceneOrOptions.isScene;
     this.scene = isScene ? sceneOrOptions : (sceneOrOptions?.scene || null);
-    this.options = isScene ? maybeOptions : (sceneOrOptions || {});
+    // (null, options) — headless probes — must not silently drop options
+    this.options = isScene ? maybeOptions : (sceneOrOptions || maybeOptions || {});
     this.seed = Number.isFinite(this.options.seed) ? this.options.seed : 0x51a7c1;
     this.random = mulberry32(this.seed);
 
@@ -902,6 +917,19 @@ export class HighwayMap {
       center.y = elevation;
       const tangent = sample.tangent.clone();
 
+      // PA access lanes are temporarily disabled (see PA_ACCESS_LANES_DISABLED)
+      // except the garage connector: the lot itself stays (dressing, refuel,
+      // proximity, its own wall collision), but no access route, corridor,
+      // rails or edges are created for it.
+      const laneDisabled = (this.options.paAccessLanes === true ? false : PA_ACCESS_LANES_DISABLED)
+        && !def.hasGarage;
+      if (laneDisabled) {
+        const area = this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, null);
+        area.sideSign = sideSign;
+        area.accessDisabled = true;
+        continue;
+      }
+
       // Entry and exit hosts are chosen independently: a roadside PA uses
       // its own carriageway for both, but a JCT-island PA (Daikoku) enters
       // from one road and exits onto another, exactly like the real lot.
@@ -1139,6 +1167,247 @@ export class HighwayMap {
     return this.edges.some((edge) => edge.from.routeId === route.id
       && Math.abs(edge.from.distance - endDistance) < 60 && edge.kind !== 'diverge')
       || this.edges.some((edge) => edge.to.routeId === route.id && Math.abs(edge.to.distance - endDistance) < 60);
+  }
+
+  // ------------------------------------------------------------------
+  // Same-level lateral junction mouths
+  //
+  // Every diverge/merge edge joins a BRANCH end to a HOST carriageway with
+  // an anchored taper whose heights are glued to the host deck. Before this
+  // pass the branch drew its own full-width ribbon through that taper —
+  // coplanar duplicated asphalt z-fighting on the host — and a sliver hole
+  // opened between the two paved edges at the gore. The mouth system turns
+  // each junction into ONE coherent paved surface, purely by construction
+  // of the drawn deck; physics (corridor union), wall segments and the
+  // authoritative road frames are untouched:
+  //
+  //  - where a branch cross-section lies inside the host's paved surface at
+  //    deck level, it is not drawn (the host IS the surface there);
+  //  - where it straddles the host's edge, the branch deck starts exactly
+  //    at the host edge and tucks 0.35 m under it (watertight against the
+  //    host's chorded edge, no coplanar overlap);
+  //  - where a narrow near-level gap opens at the gore, an apron extends
+  //    the branch deck across the sliver and under the host edge, closing
+  //    the hole until the surfaces have genuinely separated;
+  //  - branch cross-sections that are inside the host's plan extent but
+  //    vertically clear of its surface (a ramp lifting away, a stacked
+  //    deck) are drawn untouched — vertical separations are real geometry
+  //    and stay out of this system's scope.
+  // ------------------------------------------------------------------
+
+  /** Register mouth spans on each branch route (called once, before build). */
+  _prepareJunctionMouths() {
+    const SCAN_STEP = 7;
+    const SCAN_MAX = 340;
+    for (const edge of this.edges) {
+      if (edge.kind !== 'diverge' && edge.kind !== 'merge') continue;
+      const isDiverge = edge.kind === 'diverge';
+      const branch = this.routes.get(isDiverge ? edge.to.routeId : edge.from.routeId);
+      const host = this.routes.get(isDiverge ? edge.from.routeId : edge.to.routeId);
+      if (!branch || !host || branch === host || branch.closed) continue;
+      const which = isDiverge ? 'start' : 'end';
+      // Side of the host the branch peels to/arrives from (base normal +1 =
+      // driver's left). Prefer the anchoring's own record, measure otherwise.
+      let side = edge.side;
+      if (side === undefined) {
+        const probeAt = which === 'start'
+          ? Math.min(60, branch.length * 0.4)
+          : Math.max(branch.length - 60, branch.length * 0.6);
+        const probe = this._sampleCenter(branch, probeAt, 1);
+        side = this._projectToRoute(host, probe.position).signedLateral >= 0 ? 1 : -1;
+      }
+      // Scan the branch away from the mouth: the mouth span lasts while the
+      // branch corridor stays laterally engaged with the host (overlapping
+      // or within gore-gap range) at ~deck level. It ends where the paved
+      // edges have clearly separated or the decks part vertically.
+      let span = 0;
+      let clear = 0;
+      for (let s = 0; s <= Math.min(SCAN_MAX, branch.length); s += SCAN_STEP) {
+        const station = which === 'start' ? s : branch.length - s;
+        const sample = this._sampleCenter(branch, station, 1);
+        const projection = this._projectToRoute(host, sample.position);
+        if (projection.endOvershoot > 4) break;
+        const hostHalf = this._halfWidthAt(host, projection.distance);
+        const branchHalf = this._halfWidthAt(branch, station);
+        const separation = Math.abs(projection.signedLateral) - (hostHalf + branchHalf);
+        const bank = this._bankAt(host, projection.distance);
+        const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+        const dy = Math.abs(sample.position.y - deckY);
+        if (separation < 1.6 && dy < 2.0) {
+          span = s;
+          clear = 0;
+        } else {
+          clear += 1;
+          if (clear >= 2) break;
+        }
+      }
+      if (span <= 0) continue;
+      span = Math.min(span + SCAN_STEP, branch.length);
+      if (!branch.junctionMouths) branch.junctionMouths = [];
+      branch.junctionMouths.push({ which, host, side, span, kind: edge.kind });
+    }
+    // Both ends of a short connector can own mouths; keep them disjoint so
+    // one frame is never claimed by two mouths.
+    for (const route of this.routes.values()) {
+      const mouths = route.junctionMouths;
+      if (!mouths || mouths.length < 2) continue;
+      const start = mouths.find((mouth) => mouth.which === 'start');
+      const end = mouths.find((mouth) => mouth.which === 'end');
+      if (start && end && start.span + end.span > route.length) {
+        const overflow = start.span + end.span - route.length;
+        start.span -= overflow * 0.5;
+        end.span -= overflow * 0.5;
+      }
+    }
+  }
+
+  /**
+   * Junction-mouth clip record for one branch surface/render frame, cached
+   * on the frame. null = draw the cross-section untouched. Otherwise the
+   * record lists the DRAWN lateral intervals of the cross-section (at most
+   * two — the wing outside the removed strip and, when the decks scissor,
+   * a lifted shelf on the far side), each with optional flap vertices that
+   * skirt the interval's cut edge down under the host surface. `skip`
+   * means the host covers the whole section.
+   *
+   * The removed strip is exactly {inside the host's paved extent} ∩
+   * {|Δy to the host surface| < COPLANAR}: the coplanar duplicate. Parts
+   * of the section vertically clear of the host (a ramp lifting away, a
+   * stacked deck, a buried sheet) are real geometry and stay drawn.
+   */
+  _mouthClipAt(route, frame) {
+    if (frame._jx !== undefined) return frame._jx;
+    frame._jx = null;
+    const mouths = route.junctionMouths;
+    if (!mouths) return null;
+    const mouth = mouths.find((candidate) => (candidate.which === 'start'
+      ? frame.distance <= candidate.span
+      : frame.distance >= route.length - candidate.span));
+    if (!mouth) return null;
+    const host = mouth.host;
+    const half = frame.half;
+
+    // Signed distance of a cross-section point OUTSIDE the host's paved
+    // edge on the branch's side (g < 0 = inside the host surface), plus the
+    // vertical gap to the host's banked deck there.
+    const measure = (lateral) => {
+      const point = this._deckPoint(frame, lateral);
+      const projection = this._projectToRoute(host, point, this._hostSeedIndex(host, frame._jxSeed));
+      frame._jxSeed = projection.distance;
+      const hostHalf = this._halfWidthAt(host, projection.distance);
+      const bank = this._bankAt(host, projection.distance);
+      const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+      return {
+        g: mouth.side * projection.signedLateral - hostHalf,
+        dy: point.y - deckY,
+        overshoot: projection.endOvershoot,
+      };
+    };
+    const lo = measure(-half);
+    const hi = measure(half);
+    if (lo.overshoot > 2 || hi.overshoot > 2) return null;
+    const hostward = hi.g < lo.g ? 1 : -1;
+    const inner = hostward > 0 ? hi : lo;   // cross-section end nearer the host centre
+    // g and dy are locally linear across the short cross-section
+    const valueAt = (lat) => {
+      const t = (lat + half) / (2 * half);
+      return { g: lo.g + (hi.g - lo.g) * t, dy: lo.dy + (hi.dy - lo.dy) * t };
+    };
+    const latForG = (g) => {
+      if (Math.abs(hi.g - lo.g) < 1e-6) return null;
+      return -half + ((g - lo.g) / (hi.g - lo.g)) * (2 * half);
+    };
+    const latForDy = (dy) => {
+      if (Math.abs(hi.dy - lo.dy) < 1e-6) return null;
+      return -half + ((dy - lo.dy) / (hi.dy - lo.dy)) * (2 * half);
+    };
+    // Flap vertex: at `lat`, hug the host surface from just below.
+    const flapVertex = (rawLat) => {
+      if (rawLat === null) return null;
+      const lat = clamp(rawLat, -half - 3, half + 3); // ill-conditioned crossings stay local
+      const gauge = measure(lat);
+      const point = this._deckPoint(frame, lat);
+      point.y = (point.y - gauge.dy) - 0.06; // host deck surface − 6 cm (clear of the z-fight band)
+      return { lat, point };
+    };
+
+    const COPLANAR = 0.12;  // |dy| below which host/branch decks are one surface
+    const TUCK = 0.35;      // how far a cut edge slides under the host surface
+    const GORE_FILL = 1.2;  // widest sliver the gore apron closes
+    const APRON_DY = 0.35;  // largest level offset the apron may bridge
+
+    if (inner.g >= 0) {
+      // Fully outside the host pavement: close the gore sliver while the
+      // gap is narrow and the decks are still at one level. The apron
+      // fades back to the branch's own edge as the gap or level offset
+      // grows, so the fill closes smoothly instead of ending in a face.
+      const separation = inner.g;
+      if (separation >= GORE_FILL || Math.abs(inner.dy) >= APRON_DY) return null;
+      let width = clamp((GORE_FILL - separation) / 0.35, 0, 1);
+      width *= clamp((APRON_DY - Math.abs(inner.dy)) / 0.15, 0, 1);
+      if (width <= 0.02) return null;
+      const flap = flapVertex(latForG(-TUCK * width + separation * (1 - width)));
+      if (!flap) return null;
+      const interval = hostward > 0
+        ? { lo: -half, hi: half, flapLo: null, flapHi: flap }
+        : { lo: -half, hi: half, flapLo: flap, flapHi: null };
+      frame._jx = { mouth, hostward, skip: false, intervals: [interval] };
+      return frame._jx;
+    }
+
+    // Removed strip R = {g < 0} ∩ {|dy| < COPLANAR} ∩ section.
+    let coveredLo = -half;
+    let coveredHi = half;
+    const gRoot = latForG(0);
+    if (gRoot !== null) {
+      if (hostward > 0) coveredLo = Math.max(coveredLo, gRoot);
+      else coveredHi = Math.min(coveredHi, gRoot);
+    } else if (lo.g >= 0) {
+      coveredLo = half; // nothing covered
+    }
+    let planarLo = -half;
+    let planarHi = half;
+    if (Math.abs(hi.dy - lo.dy) < 1e-6) {
+      if (Math.abs(lo.dy) >= COPLANAR) planarLo = half; // nowhere coplanar
+    } else {
+      const rootA = latForDy(-COPLANAR);
+      const rootB = latForDy(COPLANAR);
+      planarLo = Math.max(planarLo, Math.min(rootA, rootB));
+      planarHi = Math.min(planarHi, Math.max(rootA, rootB));
+    }
+    const removedLo = Math.max(coveredLo, planarLo);
+    const removedHi = Math.min(coveredHi, planarHi);
+    if (removedHi - removedLo < 0.05) return null; // nothing coplanar-covered
+
+    const intervals = [];
+    if (removedLo - (-half) > 0.25) {
+      const flapWidth = Math.min(TUCK, removedHi - removedLo);
+      intervals.push({
+        lo: -half,
+        hi: removedLo,
+        flapLo: null,
+        flapHi: flapVertex(removedLo + flapWidth),
+      });
+    }
+    if (half - removedHi > 0.25) {
+      const flapWidth = Math.min(TUCK, removedHi - removedLo);
+      intervals.push({
+        lo: removedHi,
+        hi: half,
+        flapLo: flapVertex(removedHi - flapWidth),
+        flapHi: null,
+      });
+    }
+    frame._jx = { mouth, hostward, skip: intervals.length === 0, intervals };
+    return frame._jx;
+  }
+
+  /** Sample-index seed for host projections near a known host distance. */
+  _hostSeedIndex(host, distance) {
+    if (!Number.isFinite(distance) || !host.samples.length) return null;
+    const spacing = host.length / host.samples.length;
+    const index = Math.round(distance / Math.max(1e-6, spacing));
+    return clamp(index, 0, host.samples.length - 1);
   }
 
   // ------------------------------------------------------------------
@@ -2380,6 +2649,14 @@ export class HighwayMap {
     bucket.indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
   }
 
+  /** Push a single triangle a→b→c (junction mouth apexes). */
+  _pushTri(bucket, a, b, c) {
+    const start = bucket.positions.length / 3;
+    bucket.positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    bucket.uvs.push(0, 0, 1, 0, 1, 1);
+    bucket.indices.push(start, start + 1, start + 2);
+  }
+
   _pushBox(bucket, center, size, quaternion = null) {
     const hx = size.x * 0.5;
     const hy = size.y * 0.5;
@@ -2494,6 +2771,7 @@ export class HighwayMap {
 
   _buildWorld() {
     this._buildEnvironment();
+    this._prepareJunctionMouths();
     for (const route of this.routes.values()) {
       this._prepareRenderFrames(route);
       this._buildRouteGeometry(route);
@@ -2801,9 +3079,165 @@ export class HighwayMap {
     return false;
   }
 
-  _buildRouteGeometry(route) {
-    const roadMaterialName = route.kind === 'service' ? 'roadService'
+  _roadMaterialName(route) {
+    return route.kind === 'service' ? 'roadService'
       : (this.routeOrder.indexOf(route.id) % 2 ? 'roadAlt' : 'road');
+  }
+
+  /**
+   * Junction-mouth deck emission for one branch surface-frame segment.
+   * Returns false when neither frame carries a mouth clip (caller draws the
+   * normal full-width deck), true when the segment was handled here:
+   *
+   *  - removed (host-covered coplanar) strips draw nothing — the host deck
+   *    IS the junction surface there;
+   *  - each drawn interval sits on the authoritative frame plane; its cut
+   *    edges carry flaps that skirt 0.35 m past the cut and tuck 3 cm under
+   *    the host surface, so the union is watertight against the host's
+   *    chorded edge with no coplanar overlap;
+   *  - gore slivers are closed by the same flap mechanism (an apron off the
+   *    wing's host-side edge);
+   *  - intervals appearing/disappearing between stations emit apex
+   *    triangles so wings grow progressively instead of popping.
+   *
+   * Mouth quads use the HOST's road material so the junction reads as one
+   * paved surface. Wall segments, corridors and barrier logic are untouched.
+   */
+  _emitMouthDeck(route, a, b, mid) {
+    if (this.options.junctionMouthSurfaces === false) return false; // A/B: legacy ribbons
+    if (!route.junctionMouths) return false;
+    const jxA = this._mouthClipAt(route, a);
+    const jxB = this._mouthClipAt(route, b);
+    if (!jxA && !jxB) return false;
+    const record = jxA || jxB;
+    const full = (frame) => [{ lo: -frame.half, hi: frame.half, flapLo: null, flapHi: null }];
+    const listA = jxA ? (jxA.skip ? [] : jxA.intervals) : full(a);
+    const listB = jxB ? (jxB.skip ? [] : jxB.intervals) : full(b);
+    if (!listA.length && !listB.length) return true; // host covers the whole segment
+
+    const bucketRoad = this._bucket(mid, this._roadMaterialName(record.mouth.host));
+    const bucketFascia = this._bucket(mid, 'concreteDark');
+    const elevated = a.position.y > 2.5 && !a.tunnel;
+    const fasciaDepth = elevated ? 1.35 : 0.5;
+    const P = (frame, lat) => this._deckPoint(frame, lat);
+
+    // Up-facing winding: higher-lateral corners first (matches the base deck).
+    const quad = (hiA, hiB, loB, loA) => this._pushQuad(bucketRoad, hiA, hiB, loB, loA);
+
+    const emitPair = (ivA, ivB) => {
+      const aLo = P(a, ivA.lo);
+      const aHi = P(a, ivA.hi);
+      const bLo = P(b, ivB.lo);
+      const bHi = P(b, ivB.hi);
+      quad(aHi, bHi, bLo, aLo);
+      // flaps: skirt strips past the cut edges (degenerate side → triangle)
+      const flapStrip = (edgeA, edgeB, flapA, flapB, highSide) => {
+        if (!flapA && !flapB) return;
+        const fA = flapA ? flapA.point : edgeA;
+        const fB = flapB ? flapB.point : edgeB;
+        if (flapA && flapB) {
+          if (highSide) quad(fA, fB, edgeB, edgeA);
+          else quad(edgeA, edgeB, fB, fA);
+        } else if (flapA) {
+          if (highSide) this._pushTri(bucketRoad, fA, edgeB, edgeA);
+          else this._pushTri(bucketRoad, edgeA, edgeB, fA);
+        } else {
+          if (highSide) this._pushTri(bucketRoad, fB, edgeB, edgeA);
+          else this._pushTri(bucketRoad, edgeA, edgeB, fB);
+        }
+      };
+      flapStrip(aHi, bHi, ivA.flapHi, ivB.flapHi, true);
+      flapStrip(aLo, bLo, ivA.flapLo, ivB.flapLo, false);
+      // fascia only on a true outer deck edge (not on cut edges)
+      const fasciaEdge = (latA, latB, highSide) => {
+        const eA = P(a, latA);
+        const eB = P(b, latB);
+        const dA = eA.clone(); dA.y -= fasciaDepth;
+        const dB = eB.clone(); dB.y -= fasciaDepth;
+        if (highSide) this._pushQuad(bucketFascia, dA, dB, eB, eA);
+        else this._pushQuad(bucketFascia, eA, eB, dB, dA);
+      };
+      if (ivA.hi > a.half - 0.01 && ivB.hi > b.half - 0.01) fasciaEdge(ivA.hi, ivB.hi, true);
+      if (ivA.lo < -a.half + 0.01 && ivB.lo < -b.half + 0.01) fasciaEdge(ivA.lo, ivB.lo, false);
+    };
+
+    // An interval with no partner at the other station transitions into a
+    // region the host covers: emit the full quad, with the missing side's
+    // corners tucked under BOTH decks (min of branch plane and host
+    // surface, minus 3 cm) so the deck dives cleanly under the covering
+    // surface instead of leaving an unpaved notch.
+    const host = record.mouth.host;
+    const tucked = (frame, lat) => {
+      const point = this._deckPoint(frame, lat);
+      const projection = this._projectToRoute(host, point);
+      const bank = this._bankAt(host, projection.distance);
+      const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+      point.y = Math.min(point.y, deckY) - 0.06;
+      return point;
+    };
+    const emitTucked = (iv, solidFrame, emptyFrame, solidIsA) => {
+      const sLo = P(solidFrame, iv.lo);
+      const sHi = P(solidFrame, iv.hi);
+      const eLo = tucked(emptyFrame, iv.lo);
+      const eHi = tucked(emptyFrame, iv.hi);
+      if (solidIsA) quad(sHi, eHi, eLo, sLo);
+      else quad(eHi, sHi, sLo, eLo);
+      const flapStrip = (flap, edge, edgeLat, highSide) => {
+        if (!flap) return;
+        const eFlap = tucked(emptyFrame, flap.lat);
+        const eEdge = tucked(emptyFrame, edgeLat);
+        if (highSide) {
+          if (solidIsA) quad(flap.point, eFlap, eEdge, edge);
+          else quad(eFlap, flap.point, edge, eEdge);
+        } else {
+          if (solidIsA) quad(edge, eEdge, eFlap, flap.point);
+          else quad(eEdge, edge, flap.point, eFlap);
+        }
+      };
+      flapStrip(iv.flapHi, sHi, iv.hi, true);
+      flapStrip(iv.flapLo, sLo, iv.lo, false);
+    };
+
+    // Pair intervals across the two stations by lateral overlap.
+    const usedB = new Set();
+    for (const ivA of listA) {
+      let best = null;
+      let bestOverlap = 0.01;
+      for (const ivB of listB) {
+        if (usedB.has(ivB)) continue;
+        const overlap = Math.min(ivA.hi, ivB.hi) - Math.max(ivA.lo, ivB.lo);
+        if (overlap > bestOverlap) { bestOverlap = overlap; best = ivB; }
+      }
+      if (best) {
+        usedB.add(best);
+        emitPair(ivA, best);
+      } else {
+        emitTucked(ivA, a, b, true);
+      }
+    }
+    for (const ivB of listB) {
+      if (!usedB.has(ivB)) emitTucked(ivB, b, a, false);
+    }
+    return true;
+  }
+
+  /**
+   * Closing face for a parapet run terminal (junction-mouth openings): the
+   * capped profile is sealed with one vertical quad so rails terminate
+   * cleanly before a gore and restart cleanly after it, instead of showing
+   * a hollow open cross-section. The material is DoubleSide, so one face
+   * serves both run ends.
+   */
+  _emitBarrierEndCap(bucket, frame, side) {
+    const base = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+    const top = this._deckPoint(frame, side * (frame.half - 0.3), 0.85);
+    const cap = this._deckPoint(frame, side * (frame.half - 0.06), 0.91);
+    const out = this._deckPoint(frame, side * frame.half, 0.0);
+    this._pushQuad(bucket, base, top, cap, out);
+  }
+
+  _buildRouteGeometry(route) {
+    const roadMaterialName = this._roadMaterialName(route);
     const barrierHeight = route.kind === 'service' ? 0.9 : 1.15;
     const medianHeight = 1.0;
 
@@ -2819,31 +3253,38 @@ export class HighwayMap {
       suppressionCache[side] = { point: probe.clone(), result };
       return result;
     };
+    // Parapet runs end/restart at junction-mouth openings; track the runs so
+    // each terminal gets a closing face instead of an open hollow profile.
+    const barrierRun = { 1: false, [-1]: false };
 
     this._forEachSurfaceFrameSegment(route, (a, b) => {
       // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
       const mid = a.position.clone().lerp(b.position, 0.5);
-      const bucketRoad = this._bucket(mid, roadMaterialName);
-      const leftA = this._deckPoint(a, a.half);
-      const leftB = this._deckPoint(b, b.half);
-      const rightA = this._deckPoint(a, -a.half);
-      const rightB = this._deckPoint(b, -b.half);
-      // Deck top, wound UP-facing. It was wound the other way for years: the
-      // single-sided road material culled the real deck from above and the
-      // game was actually showing the fascia UNDERSIDE 0.5-1.35 m below the
-      // physics surface — the reported "glass floor over a sunken road".
-      this._pushQuad(bucketRoad, leftA, leftB, rightB, rightA);
+      // Junction mouths draw a clipped deck that unions with the host
+      // surface (see _emitMouthDeck); everywhere else the full deck.
+      if (!this._emitMouthDeck(route, a, b, mid)) {
+        const bucketRoad = this._bucket(mid, roadMaterialName);
+        const leftA = this._deckPoint(a, a.half);
+        const leftB = this._deckPoint(b, b.half);
+        const rightA = this._deckPoint(a, -a.half);
+        const rightB = this._deckPoint(b, -b.half);
+        // Deck top, wound UP-facing. It was wound the other way for years:
+        // the single-sided road material culled the real deck from above and
+        // the game was actually showing the fascia UNDERSIDE 0.5-1.35 m below
+        // the physics surface — the reported "glass floor over a sunken road".
+        this._pushQuad(bucketRoad, leftA, leftB, rightB, rightA);
 
-      // fascia (deck sides) for elevated sections — outward faces
-      const elevated = a.position.y > 2.5 && !a.tunnel;
-      const fasciaDepth = elevated ? 1.35 : 0.5;
-      const bucketFascia = this._bucket(mid, 'concreteDark');
-      const dropLA = leftA.clone(); dropLA.y -= fasciaDepth;
-      const dropLB = leftB.clone(); dropLB.y -= fasciaDepth;
-      const dropRA = rightA.clone(); dropRA.y -= fasciaDepth;
-      const dropRB = rightB.clone(); dropRB.y -= fasciaDepth;
-      this._pushQuad(bucketFascia, dropLA, dropLB, leftB, leftA);
-      this._pushQuad(bucketFascia, rightA, rightB, dropRB, dropRA);
+        // fascia (deck sides) for elevated sections — outward faces
+        const elevated = a.position.y > 2.5 && !a.tunnel;
+        const fasciaDepth = elevated ? 1.35 : 0.5;
+        const bucketFascia = this._bucket(mid, 'concreteDark');
+        const dropLA = leftA.clone(); dropLA.y -= fasciaDepth;
+        const dropLB = leftB.clone(); dropLB.y -= fasciaDepth;
+        const dropRA = rightA.clone(); dropRA.y -= fasciaDepth;
+        const dropRB = rightB.clone(); dropRB.y -= fasciaDepth;
+        this._pushQuad(bucketFascia, dropLA, dropLB, leftB, leftA);
+        this._pushQuad(bucketFascia, rightA, rightB, dropRB, dropRA);
+      }
 
       // Outer barriers — capped concrete parapet + steel handrail,
       // PS2-highway style. Every metre of the
@@ -2856,7 +3297,19 @@ export class HighwayMap {
         const baseA = this._deckPoint(a, side * (a.half - 0.42), 0.02);
         const baseB = this._deckPoint(b, side * (b.half - 0.42), 0.02);
         const probe = TMP_B.copy(baseA).lerp(baseB, 0.5);
-        if (barrierSuppressedNear(probe, side)) continue;
+        if (barrierSuppressedNear(probe, side)) {
+          // Run ends at a junction-mouth opening: close the profile cleanly
+          // instead of leaving a hollow open end across the mouth.
+          if (barrierRun[side]) {
+            this._emitBarrierEndCap(bucketBarrier, a, side);
+            barrierRun[side] = false;
+          }
+          continue;
+        }
+        if (!barrierRun[side]) {
+          this._emitBarrierEndCap(bucketBarrier, a, side);
+          barrierRun[side] = true;
+        }
         const lean = 0.85;
         const innerTopA = this._deckPoint(a, side * (a.half - 0.3), lean);
         const innerTopB = this._deckPoint(b, side * (b.half - 0.3), lean);
@@ -2918,12 +3371,36 @@ export class HighwayMap {
       const mid = a.position.clone().lerp(b.position, 0.5);
       const elevated = a.position.y > 2.5 && !a.tunnel;
       if (elevated) {
+        // Inside a junction mouth the underside follows the clipped deck
+        // footprint (covered sections have no underside of their own — the
+        // host's covers the area).
+        const mouthy = route.junctionMouths && this.options.junctionMouthSurfaces !== false;
+        const jxA = mouthy ? this._mouthClipAt(route, a) : null;
+        const jxB = mouthy ? this._mouthClipAt(route, b) : null;
         const fasciaDepth = 1.35;
-        const dropLA = this._deckPoint(a, a.half); dropLA.y -= fasciaDepth;
-        const dropLB = this._deckPoint(b, b.half); dropLB.y -= fasciaDepth;
-        const dropRA = this._deckPoint(a, -a.half); dropRA.y -= fasciaDepth;
-        const dropRB = this._deckPoint(b, -b.half); dropRB.y -= fasciaDepth;
-        this._pushQuad(this._bucket(mid, 'concreteDark'), dropRA, dropRB, dropLB, dropLA);
+        if (!jxA && !jxB) {
+          const dropLA = this._deckPoint(a, a.half); dropLA.y -= fasciaDepth;
+          const dropLB = this._deckPoint(b, b.half); dropLB.y -= fasciaDepth;
+          const dropRA = this._deckPoint(a, -a.half); dropRA.y -= fasciaDepth;
+          const dropRB = this._deckPoint(b, -b.half); dropRB.y -= fasciaDepth;
+          this._pushQuad(this._bucket(mid, 'concreteDark'), dropRA, dropRB, dropLB, dropLA);
+        } else if (!(jxA?.skip) && !(jxB?.skip)) {
+          // Underside spans the full drawn footprint (intervals + flaps).
+          const span = (frame, jx) => {
+            if (!jx) return [-frame.half, frame.half];
+            const first = jx.intervals[0];
+            const last = jx.intervals[jx.intervals.length - 1];
+            return [first.flapLo ? first.flapLo.lat : first.lo, last.flapHi ? last.flapHi.lat : last.hi];
+          };
+          const [loA, hiA] = span(a, jxA);
+          const [loB, hiB] = span(b, jxB);
+          const dropLoA = this._deckPoint(a, loA); dropLoA.y -= fasciaDepth;
+          const dropLoB = this._deckPoint(b, loB); dropLoB.y -= fasciaDepth;
+          const dropHiA = this._deckPoint(a, hiA); dropHiA.y -= fasciaDepth;
+          const dropHiB = this._deckPoint(b, hiB); dropHiB.y -= fasciaDepth;
+          // down-facing: lower-lateral corners first, like the base underside
+          this._pushQuad(this._bucket(mid, 'concreteDark'), dropLoA, dropLoB, dropHiB, dropHiA);
+        }
       }
       for (const side of [1, -1]) {
         this.wallSegments.push({
@@ -3008,30 +3485,35 @@ export class HighwayMap {
       if (ramp.kind !== 'ramp' && ramp.kind !== 'service') continue;
       const fromStart = edge.kind === 'diverge';
 
-      // walk the ramp away from the shared mouth until the paved edges split
+      // walk the ramp away from the shared mouth until the paved edges split;
+      // wedge points sit on the BANKED deck surfaces (_frameAt), so the
+      // chevron paint and the cushion follow grade and roll instead of
+      // floating at bare curve height.
       let tip = null;
       const stripes = [];
       for (let s = 24; s <= Math.min(320, ramp.length - 6); s += 9) {
         const rampDist = fromStart ? s : ramp.length - s;
         if (rampDist < 2 || rampDist > ramp.length - 2) break;
-        const sample = this._sampleCenter(ramp, rampDist, 1);
-        const projection = this._projectToRoute(main, sample.position);
-        if (Math.abs(sample.position.y - projection.point.y) > 5) break;
-        const halfMain = this._halfWidthAt(main, projection.distance);
+        const rampFrame = this._frameAt(ramp, rampDist);
+        const projection = this._projectToRoute(main, rampFrame.position);
+        if (Math.abs(rampFrame.position.y - projection.point.y) > 5) break;
+        const mainFrame = this._frameAt(main, projection.distance);
+        const halfMain = mainFrame.half;
         const gap = Math.abs(projection.signedLateral) + ramp.halfWidth - halfMain;
         const sideSign = projection.signedLateral >= 0 ? 1 : -1;
-        const mainEdge = projection.point.clone().addScaledVector(projection.normal, sideSign * (halfMain - 0.55));
-        const toMain = projection.point.clone().sub(sample.position).setY(0);
+        const mainEdge = this._deckPoint(mainFrame, sideSign * (halfMain - 0.55));
+        const toMain = projection.point.clone().sub(rampFrame.position).setY(0);
         if (toMain.lengthSq() < EPSILON) toMain.copy(projection.normal).multiplyScalar(-sideSign);
         toMain.normalize();
-        const rampEdge = sample.position.clone().addScaledVector(toMain, ramp.halfWidth - 0.55);
+        const rampSideSign = toMain.dot(rampFrame.normal) >= 0 ? 1 : -1;
+        const rampEdge = this._deckPoint(rampFrame, rampSideSign * (ramp.halfWidth - 0.55));
         const wedge = mainEdge.clone().lerp(rampEdge, 0.5);
         const wedgeWidth = mainEdge.distanceTo(rampEdge);
         if (gap > 1.2) {
-          tip = { wedge, tangent: sample.tangent.clone() };
+          tip = { wedge, tangent: rampFrame.tangent.clone() };
           break;
         }
-        if (wedgeWidth > 1.1) stripes.push({ wedge, tangent: sample.tangent.clone(), width: wedgeWidth });
+        if (wedgeWidth > 1.1) stripes.push({ wedge, tangent: rampFrame.tangent.clone(), width: wedgeWidth });
       }
 
       // chevron paint across the wedge
@@ -3075,6 +3557,31 @@ export class HighwayMap {
     // horizontal boxes.
     const dashStep = isService ? 26 : 15;
     const dashLength = 6.2;
+    // Junction mouths: paint only on the drawn part of the deck. Sections
+    // covered by the host carry the HOST's paint; lines within the clipped
+    // strip would float on (or duplicate over) the host surface. Where the
+    // gore opens, the branch's host-side edge line reappears naturally and
+    // becomes the ramp-side gore line. Dash phase is untouched — clipping
+    // skips stations, never re-bases route distance.
+    const mouthPaintLat = (latFn, width) => {
+      if (this.options.junctionMouthSurfaces === false) return latFn;
+      if (!route.junctionMouths) return latFn;
+      const margin = width * 0.5 + 0.3;
+      return (frame) => {
+        const lat = latFn(frame);
+        if (lat === null) return null;
+        const jx = this._mouthClipAt(route, frame);
+        if (!jx) return lat;
+        if (jx.skip) return null;
+        // paint must sit on a drawn interval, clear of any cut edge
+        for (const interval of jx.intervals) {
+          const loBound = interval.lo <= -frame.half + 0.01 ? interval.lo : interval.lo + margin;
+          const hiBound = interval.hi >= frame.half - 0.01 ? interval.hi : interval.hi - margin;
+          if (lat >= loBound && lat <= hiBound) return lat;
+        }
+        return null;
+      };
+    };
     const dividerOffsets = [];
     if (route.bidirectional) {
       for (let lane = 1; lane < route.lanes; lane += 1) {
@@ -3085,11 +3592,11 @@ export class HighwayMap {
       for (let lane = 1; lane < route.lanes; lane += 1) dividerOffsets.push((lane - route.lanes * 0.5) * route.laneWidth);
     }
     for (const offset of dividerOffsets) {
-      this._paintDashedStrip(route, 'marking', () => offset, 0.14, dashStep, dashLength, 6);
+      this._paintDashedStrip(route, 'marking', mouthPaintLat(() => offset, 0.14), 0.14, dashStep, dashLength, 6);
     }
     for (const side of [1, -1]) {
       this._paintStrip(route, 'marking', 0, route.length,
-        (frame) => side * (frame.half - 0.75), 0.16);
+        mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16), 0.16);
       if (route.bidirectional) {
         this._paintStrip(route, 'amber', 0, route.length,
           () => side * (route.medianWidth * 0.5 + 0.28), 0.13);
@@ -3568,6 +4075,7 @@ export class HighwayMap {
     }
     // PA advance boards (blue P), on poles, facing their carriageway.
     for (const area of this.serviceAreas) {
+      if (area.accessDisabled) continue; // no access lane — don't advertise the exit
       if (!area.routeId || !this.routes.has(area.routeId)) continue;
       const route = this.routes.get(area.routeId);
       for (const ahead of [500, 300, 100]) {
