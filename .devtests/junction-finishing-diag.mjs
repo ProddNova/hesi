@@ -84,24 +84,39 @@ for (const spec of CASES) {
 
   // --- 2. traffic transfer snap ----------------------------------------
   if (spec.which === 'end') {
-    const laneRef = { routeId: branch.id, laneIndex: 0, direction: 1, length: branch.length, closed: false, laneCount: branch.lanes };
-    const s0 = branch.length - 3;
-    const before = map.sampleLane(branch.id, s0, 0, 1);
-    const result = map.advanceTraffic({ laneRef, s: s0, distance: 6, vehicle: { poolIndex: 1 } });
-    console.log(`  MERGE TRANSFER: ${branch.id}@${s0.toFixed(0)} -> ${result.routeId}@${result.s.toFixed(0)} lane=${result.laneIndex} lateralJump=${result.lateralJump.toFixed(2)} m (transferred=${result.transferred})`);
+    const travel = 6;
+    for (let L = 0; L < branch.lanes; L += 1) {
+      const laneRef = { routeId: branch.id, laneIndex: L, direction: 1, length: branch.length, closed: false, laneCount: branch.lanes };
+      const s0 = branch.length - 3;
+      const before = map.sampleLane(branch.id, s0, L, 1);
+      const result = map.advanceTraffic({ laneRef, s: s0, distance: travel, vehicle: { poolIndex: 1 } });
+      const excess = Math.abs(before.position.distanceTo(result.position) - travel);
+      console.log(`  MERGE TRANSFER lane ${L}: ${branch.id}@${s0.toFixed(0)} -> ${result.routeId}@${result.s.toFixed(0)} lane=${result.laneIndex} excessDisplacement=${excess.toFixed(2)} m (transferred=${result.transferred})`);
+    }
+    const before = map.sampleLane(branch.id, branch.length - 3, 0, 1);
     const beforeLat = map._projectToRoute(host, before.position).signedLateral;
-    console.log(`  branch lane-0 end lateral in host frame: ${beforeLat.toFixed(2)} vs outer lane centre ${laneCentre.toFixed(2)} -> offset ${(beforeLat - laneCentre).toFixed(2)} m`);
+    console.log(`  branch lane-0 end lateral in host frame: ${beforeLat.toFixed(2)} (outer lane centre ${laneCentre.toFixed(2)})`);
   } else {
-    // diverge hop: outermost host lane crossing edge.from.distance
+    // diverge hop: vehicle crossing edge.from.distance on the exit-side lane
     const d = edge.from.distance;
-    const eligibleLane = host.lanes - 1; // current code: only outermost NEGATIVE lane diverges
-    const laneRef = { routeId: host.id, laneIndex: eligibleLane, direction: 1, length: host.length, closed: host.closed, laneCount: host.lanes };
-    const before = map.sampleLane(host.id, d - 2, eligibleLane, 1);
-    const target = map.sampleLane(branch.id, 4, 0, 1);
-    console.log(`  DIVERGE HOP (as coded, lane ${eligibleLane}): host@${d.toFixed(0)} -> branch@4; hop distance=${before.position.distanceTo(target.position).toFixed(2)} m; edge.side=${edge.side}`);
-    const sideLane = edge.side > 0 ? 0 : host.lanes - 1;
-    const beforeSide = map.sampleLane(host.id, d - 2, sideLane, 1);
-    console.log(`  DIVERGE HOP (side-correct lane ${sideLane}): hop distance=${beforeSide.position.distanceTo(target.position).toFixed(2)} m`);
+    const exitLane = (edge.side ?? -1) > 0 ? 0 : host.lanes - 1;
+    const laneRef = { routeId: host.id, laneIndex: exitLane, direction: 1, length: host.length, closed: host.closed, laneCount: host.lanes };
+    // force the probabilistic hop by checking geometry directly
+    const landingLane = (edge.side ?? -1) > 0 ? 0 : branch.lanes - 1;
+    const travel = 6;
+    const before = map.sampleLane(host.id, d - 2, exitLane, 1);
+    const target = map.sampleLane(branch.id, 4, landingLane, 1);
+    const excess = Math.abs(before.position.distanceTo(target.position) - travel);
+    console.log(`  DIVERGE HOP lane ${exitLane} -> branch lane ${landingLane}: excessDisplacement=${excess.toFixed(2)} m (edge.side=${edge.side})`);
+  }
+  // zone record summary
+  const zone = (branch._zonesAsBranch || []).find((z) => z.host === host && z.which === spec.which);
+  if (zone) {
+    const fmt = (iv) => (iv ? `${iv[0].toFixed(0)}..${iv[1].toFixed(0)}` : 'none');
+    console.log(`  ZONE: crossable(host)=${fmt(zone.crossable?.host)} edgeSuppress=${fmt(zone.hostEdgeSuppress)} dash=${zone.dash ? `${zone.dash.from.toFixed(0)}..${zone.dash.to.toFixed(0)}@lat ${zone.dashLat.toFixed(2)}` : 'none'}`);
+    console.log(`  ZONE rails: hostOpen=${fmt(zone.hostRailOpen)} branchOuterOn=${fmt(zone.branchOuterRailOn)} branchOuterOff=${fmt(zone.branchOuterRailOff)} branchInnerOff=${fmt(zone.branchInnerRailOff)}`);
+  } else {
+    console.log('  ZONE: MISSING');
   }
 
   // --- 3. markings: solid host edge line across the mergeable zone -----

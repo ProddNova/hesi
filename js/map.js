@@ -593,12 +593,15 @@ export class HighwayMap {
       const endDrop = Math.abs(routeData.points[0][1] - routeData.points[routeData.points.length - 1][1]);
       const steep = endDrop > routeData.length * 0.05;
       const anchorSpan = steep ? 30 : Math.min(95, Math.max(30, routeData.length * 0.22));
-      if (startEdge && startEdge.kind === 'diverge' && this.routes.has(startEdge.from.route)) {
-        divergeInfo = this._anchorEndpoint(points, routeData, startEdge, 'start', anchorSpan);
+      const anchorsStart = !!(startEdge && startEdge.kind === 'diverge' && this.routes.has(startEdge.from.route));
+      const anchorsEnd = !!(endEdge && endEdge.kind === 'merge' && this.routes.has(endEdge.to.route));
+      const doubleAnchored = anchorsStart && anchorsEnd;
+      if (anchorsStart) {
+        divergeInfo = this._anchorEndpoint(points, routeData, startEdge, 'start', anchorSpan, doubleAnchored);
         if (divergeInfo) points = divergeInfo.points;
       }
-      if (endEdge && endEdge.kind === 'merge' && this.routes.has(endEdge.to.route)) {
-        mergeInfo = this._anchorEndpoint(points, routeData, endEdge, 'end', anchorSpan);
+      if (anchorsEnd) {
+        mergeInfo = this._anchorEndpoint(points, routeData, endEdge, 'end', anchorSpan, doubleAnchored);
         if (mergeInfo) points = mergeInfo.points;
       }
     }
@@ -637,6 +640,7 @@ export class HighwayMap {
       if (startEdge) startEdge._handled = true;
     }
     if (mergeInfo) {
+      const host = this.routes.get(mergeInfo.hostId);
       const edge = this._addEdge({
         from: { routeId: route.id, distance: 'end', direction: 1 },
         to: { routeId: mergeInfo.hostId, distance: mergeInfo.hostDistance, direction: 1 },
@@ -644,8 +648,11 @@ export class HighwayMap {
         name: routeData.name || route.id,
       });
       edge.side = mergeInfo.side;
-      // vehicles arriving from a side merge land in the lane on that side
-      edge.mergeLane = mergeInfo.side < 0 ? null : 0;
+      // The branch's lanes are glued onto the host's outermost lanes on
+      // that side (see _anchorEndpoint), so branch lane L lands exactly on
+      // host lane mergeLaneBase + L — a zero-jump hand-off.
+      edge.mergeLaneBase = mergeInfo.side > 0 ? 0 : Math.max(0, host.lanes - route.lanes);
+      edge.mergeLane = edge.mergeLaneBase;
       if (endEdge) endEdge._handled = true;
     }
     return route;
@@ -657,7 +664,7 @@ export class HighwayMap {
    * (shifted 30 m along travel so transfers land where the vehicle already
    * is).
    */
-  _anchorEndpoint(points, routeData, edge, which, anchorSpan) {
+  _anchorEndpoint(points, routeData, edge, which, anchorSpan, doubleAnchored = false) {
     const host = this.routes.get(which === 'start' ? edge.from.route : edge.to.route);
     const connection = vec(edge.point[0], 0, edge.point[1]);
     const projection = this._projectToRoute(host, connection);
@@ -676,20 +683,48 @@ export class HighwayMap {
     const probe = this._pointAlongPolyline(points, which === 'start' ? 45 : -45);
     const probeProjection = this._projectToRoute(host, probe);
     const side = (probeProjection.signedLateral >= 0 ? 1 : -1);
-    const hostHalf = this._halfWidthAt(host, hostDistanceAtMouth);
-    const lateral = side * Math.max(0.6, hostHalf - 2.0);
+    // LANE-ALIGNED glue line: the branch's lanes overlap the host's
+    // outermost `branchLanes` lanes on that side, so the transition ends ON
+    // the host's lane grid. This is width-continuous by construction (a
+    // ramp's narrower shoulder ends 0.35 m inside the host's paved edge, an
+    // equal-width merge overlaps exactly) and traffic transfers land where
+    // the vehicle already is — the old edge-anchored line (hostHalf − 2 m)
+    // left every branch ~1.1 m outside the outer lane centre, so vehicles
+    // rode the shoulder and snapped laterally at the hand-off.
+    const branchLanes = Math.max(1, routeData.lanes || (routeData.kind === 'ramp' ? 1 : 2));
+    const lateral = side * Math.max(0, host.lanes - branchLanes) * (host.laneWidth || LANE_W) * 0.5;
 
     const edgePoint = (distance) => {
       const sample = this._sampleCenter(host, this._normalizeDistance(host, distance), 1);
       return sample.position.clone().addScaledVector(sample.normal, lateral);
     };
 
-    // BLENDED TAPER: over the first 2*anchorSpan of the branch, each point
-    // is a smoothstep mix of the host's outer edge (at the matching
-    // station) and the raw geometry — a true transition curve with no
-    // corner anywhere. Beyond the blend, raw geometry continues untouched.
-    const blendLength = anchorSpan * 2;
+    // BLENDED TAPER: over the first `blendLength` of the branch, each point
+    // mixes the host's lane-aligned glue line (at the matching station)
+    // with the raw geometry using a SQUARED smoothstep — tangent-continuous
+    // at both ends (weight slope 0 at t=0 and t=1), and heavily skewed so
+    // the branch is fully glued near the mouth and does its lateral glide
+    // far out where the pavements are still separate: no last-moment
+    // diagonal at the merge point. The length comes from route metadata:
+    // at least the anchoring span, stretched to what the branch's speed
+    // limit needs for a comfortable glide, capped by available geometry
+    // (steep diving ramps keep the short span — their heights are pinned
+    // to the host only briefly; double-anchored connectors keep their two
+    // blends disjoint).
+    const speedNeed = ((routeData.speedLimit || 60) / 3.6) * 9;
+    const lengthCap = routeData.length * (doubleAnchored ? 0.45 : 0.7);
     const ordered = which === 'start' ? points : [...points].reverse();
+    // The blend must never reach the branch's FAR endpoint: that point can
+    // be another route's continuation anchor (ramp_39 hands off onto
+    // ramp_46's start), and pulling it toward the glue line tears the
+    // hand-off open. Cap by the polyline's own arc so the far end always
+    // keeps raw geometry.
+    let polylineArc = 0;
+    for (let i = 1; i < ordered.length; i += 1) polylineArc += ordered[i].distanceTo(ordered[i - 1]);
+    const blendLength = Math.min(
+      Math.max(anchorSpan * 2, Math.min(anchorSpan > 31 ? speedNeed : 0, lengthCap, 240)),
+      polylineArc * 0.8,
+    );
     const alongSign = which === 'start' ? 1 : -1;
     const blended = [];
     let travelled = 0;
@@ -698,7 +733,8 @@ export class HighwayMap {
       if (i > 0) travelled += ordered[i].distanceTo(ordered[i - 1]);
       if (travelled > blendLength) { restFrom = i; break; }
       const t = travelled / blendLength;
-      const smooth = t * t * (3 - 2 * t);
+      const step = t * t * (3 - 2 * t);
+      const smooth = step * step;
       const station = hostDistanceAtMouth + alongSign * travelled;
       const hostEdge = edgePoint(station);
       const rawY = ordered[i].y;
@@ -1273,6 +1309,156 @@ export class HighwayMap {
         end.span -= overflow * 0.5;
       }
     }
+    this._prepareJunctionZones();
+  }
+
+  /**
+   * ONE data-driven local representation per same-level merge/diverge —
+   * the single source every consumer reads (asphalt already reads the
+   * mouth clip, which is this envelope in per-frame detail; markings,
+   * guardrails, traffic and the probes read the records built here), so
+   * no subsystem guesses on its own where a junction begins or ends.
+   *
+   * Everything is measured from the actual route curves and widths:
+   *   e          side-signed lateral of the branch centre in the host frame
+   *   unionOuter side-signed outer edge of the paved union at that station
+   *   innerEdge  side-signed hostward edge of the branch pavement
+   *   dy         branch deck height above the host's banked deck
+   *
+   * Derived intervals (host or branch chainage; on a closed host they are
+   * stored unwrapped around `hostRef` — use zone.hostContains):
+   *   crossable         branch pavement continuous with the host (the
+   *                     boundary a driver may cross)
+   *   hostEdgeSuppress  host solid edge line suppressed (union wider than
+   *                     the host, pavement continuous)
+   *   dash              dashed lane-separation boundary (crossable AND the
+   *                     merge/exit lane is usable), at host lateral dashLat
+   *   hostRailOpen      host-side rail suppressed
+   *   branchOuterRailOn branch outer rail forced on (it is the union's
+   *                     outer edge through the zone)
+   *   branchOuterRailOff branch outer rail forced off (thin-wing tail
+   *                     where the host rail has resumed)
+   *   branchInnerRailOff branch hostward rail forced off (crossable zone
+   *                     and gore nose — no rail between joined lanes)
+   */
+  _prepareJunctionZones() {
+    this.junctionZones = [];
+    for (const route of this.routes.values()) {
+      if (!route.junctionMouths) continue;
+      for (const mouth of route.junctionMouths) {
+        const host = mouth.host;
+        const side = mouth.side;
+        const which = mouth.which;
+        const laneEdge = host.lanes * host.laneWidth * 0.5;
+        const step = 4;
+        const rows = [];
+        for (let s = 0; s <= mouth.span + step; s += step) {
+          const bS = which === 'start'
+            ? Math.min(s, route.length)
+            : Math.max(0, route.length - s);
+          const frame = this._frameAt(route, bS);
+          const projection = this._projectToRoute(host, frame.position);
+          if (projection.endOvershoot > 4) continue;
+          const hostHalf = this._halfWidthAt(host, projection.distance);
+          const bank = this._bankAt(host, projection.distance);
+          const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+          const e = side * projection.signedLateral;
+          rows.push({
+            bS,
+            hS: projection.distance,
+            e,
+            hostHalf,
+            unionOuter: Math.max(hostHalf, e + frame.half),
+            innerEdge: e - frame.half,
+            dy: frame.position.y - deckY,
+          });
+        }
+        if (rows.length < 2) continue;
+        // Unwrap host chainage around the zone middle so intervals on a
+        // closed loop crossing station 0 stay contiguous.
+        const hostRef = rows[Math.floor(rows.length / 2)].hS;
+        const unwrap = (h) => {
+          if (!host.closed) return h;
+          let delta = h - hostRef;
+          delta -= Math.round(delta / host.length) * host.length;
+          return hostRef + delta;
+        };
+        for (const row of rows) row.hU = unwrap(row.hS);
+
+        const continuous = (r) => Math.abs(r.dy) < 1.5 && r.innerEdge < r.hostHalf - 0.3;
+        const range = (pred) => {
+          let hLo = Infinity;
+          let hHi = -Infinity;
+          let bLo = Infinity;
+          let bHi = -Infinity;
+          for (const r of rows) {
+            if (!pred(r)) continue;
+            hLo = Math.min(hLo, r.hU);
+            hHi = Math.max(hHi, r.hU);
+            bLo = Math.min(bLo, r.bS);
+            bHi = Math.max(bHi, r.bS);
+          }
+          return hLo <= hHi ? { host: [hLo, hHi], branch: [bLo, bHi] } : null;
+        };
+
+        const crossable = range(continuous);
+        const open = range((r) => continuous(r) && r.unionOuter > r.hostHalf + 0.25);
+        const dash = range((r) => continuous(r) && r.unionOuter - laneEdge >= 2.0);
+        // Outer rail hand-off: rows are ordered from the mouth end outward,
+        // so the FIRST row with a real wing marks the single tip boundary —
+        // tailward of it the host rail owns the edge (branch rail off),
+        // outward of it the branch's outer edge is the union's edge and its
+        // rail is forced on through the whole engaged region (the old point
+        // probe made it flicker with every small width change).
+        let tipIndex = -1;
+        for (let i = 0; i < rows.length; i += 1) {
+          if (rows[i].unionOuter >= rows[i].hostHalf + 0.6) { tipIndex = i; break; }
+        }
+        const lastEngaged = rows.length - 1;
+        const branchInterval = (a, b) => [Math.min(rows[a].bS, rows[b].bS), Math.max(rows[a].bS, rows[b].bS)];
+        const outerOn = tipIndex >= 0 ? { branch: branchInterval(tipIndex, lastEngaged) } : null;
+        const outerOff = tipIndex > 0 ? { branch: branchInterval(0, tipIndex - 1) } : (tipIndex < 0 ? { branch: branchInterval(0, lastEngaged) } : null);
+        const innerOff = range((r) => r.innerEdge < r.hostHalf + 0.9 && Math.abs(r.dy) < 2.5);
+
+        const zone = {
+          kind: mouth.kind,
+          which,
+          side,
+          hostwardSign: -side,
+          host,
+          branch: route,
+          hostRef,
+          laneEdge,
+          dashLat: side * laneEdge,
+          samples: rows,
+          branchSpan: [Math.min(rows[0].bS, rows[rows.length - 1].bS), Math.max(rows[0].bS, rows[rows.length - 1].bS)],
+          hostSpan: crossable ? crossable.host : null,
+          crossable,
+          hostEdgeSuppress: open ? open.host : null,
+          dash: dash ? { from: dash.host[0], to: dash.host[1] } : null,
+          hostRailOpen: open ? [open.host[0] - 2, open.host[1] + 2] : null,
+          branchOuterRailOn: outerOn ? outerOn.branch : null,
+          branchOuterRailOff: outerOff ? outerOff.branch : null,
+          branchInnerRailOff: innerOff ? innerOff.branch : null,
+          hostContains(interval, h) {
+            if (!interval) return false;
+            let value = h;
+            if (host.closed) {
+              let delta = value - hostRef;
+              delta -= Math.round(delta / host.length) * host.length;
+              value = hostRef + delta;
+            }
+            return value >= interval[0] && value <= interval[1];
+          },
+        };
+        this.junctionZones.push(zone);
+        mouth.zone = zone;
+        if (!host._zonesAsHost) host._zonesAsHost = [];
+        host._zonesAsHost.push(zone);
+        if (!route._zonesAsBranch) route._zonesAsBranch = [];
+        route._zonesAsBranch.push(zone);
+      }
+    }
   }
 
   /**
@@ -1302,8 +1488,12 @@ export class HighwayMap {
     const half = frame.half;
 
     // Signed distance of a cross-section point OUTSIDE the host's paved
-    // edge on the branch's side (g < 0 = inside the host surface), plus the
-    // vertical gap to the host's banked deck there.
+    // edge (g < 0 = inside the host surface), plus the vertical gap to the
+    // host's banked deck there. Side-agnostic on purpose: a lane-aligned
+    // branch can drift across the host centreline (or a lifting 2-lane
+    // ramp can lean over the "wrong" side for a stretch), and the old
+    // side-signed distance then reported points far PAST the opposite
+    // paved edge as deeply inside — clipping real wing surface into holes.
     const measure = (lateral) => {
       const point = this._deckPoint(frame, lateral);
       const projection = this._projectToRoute(host, point, this._hostSeedIndex(host, frame._jxSeed));
@@ -1312,7 +1502,9 @@ export class HighwayMap {
       const bank = this._bankAt(host, projection.distance);
       const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
       return {
-        g: mouth.side * projection.signedLateral - hostHalf,
+        L: projection.signedLateral,
+        H: hostHalf,
+        g: Math.abs(projection.signedLateral) - hostHalf,
         dy: point.y - deckY,
         overshoot: projection.endOvershoot,
       };
@@ -1322,18 +1514,20 @@ export class HighwayMap {
     if (lo.overshoot > 2 || hi.overshoot > 2) return null;
     const hostward = hi.g < lo.g ? 1 : -1;
     const inner = hostward > 0 ? hi : lo;   // cross-section end nearer the host centre
-    // g and dy are locally linear across the short cross-section
-    const valueAt = (lat) => {
-      const t = (lat + half) / (2 * half);
-      return { g: lo.g + (hi.g - lo.g) * t, dy: lo.dy + (hi.dy - lo.dy) * t };
-    };
-    const latForG = (g) => {
-      if (Math.abs(hi.g - lo.g) < 1e-6) return null;
-      return -half + ((g - lo.g) / (hi.g - lo.g)) * (2 * half);
-    };
+    // dy is locally linear across the short cross-section
     const latForDy = (dy) => {
       if (Math.abs(hi.dy - lo.dy) < 1e-6) return null;
       return -half + ((dy - lo.dy) / (hi.dy - lo.dy)) * (2 * half);
+    };
+    // Signed-linear "outside the pavement" distance on the section's own
+    // side of the host — only used by the apron path, where the section is
+    // fully outside and therefore cannot straddle the host centreline.
+    const sideSign = (hostward > 0 ? hi.L : lo.L) >= 0 ? 1 : -1;
+    const gSide0 = sideSign * lo.L - lo.H;
+    const gSide1 = sideSign * hi.L - hi.H;
+    const latForG = (g) => {
+      if (Math.abs(gSide1 - gSide0) < 1e-6) return null;
+      return -half + ((g - gSide0) / (gSide1 - gSide0)) * (2 * half);
     };
     // Flap vertex: at `lat`, hug the host surface from just below.
     const flapVertex = (rawLat) => {
@@ -1345,7 +1539,11 @@ export class HighwayMap {
       return { lat, point };
     };
 
-    const COPLANAR = 0.12;  // |dy| below which host/branch decks are one surface
+    // |dy| below which host/branch decks are one surface. Wide enough that
+    // the linear endpoint interpolation of dy across the section (true dy
+    // curves with bank/projection differences) cannot leave drawn strips
+    // grazing the host within the z-fight band.
+    const COPLANAR = 0.18;
     const TUCK = 0.35;      // how far a cut edge slides under the host surface
     const GORE_FILL = 1.2;  // widest sliver the gore apron closes
     const APRON_DY = 0.35;  // largest level offset the apron may bridge
@@ -1369,16 +1567,27 @@ export class HighwayMap {
       return frame._jx;
     }
 
-    // Removed strip R = {g < 0} ∩ {|dy| < COPLANAR} ∩ section.
-    let coveredLo = -half;
-    let coveredHi = half;
-    const gRoot = latForG(0);
-    if (gRoot !== null) {
-      if (hostward > 0) coveredLo = Math.max(coveredLo, gRoot);
-      else coveredHi = Math.min(coveredHi, gRoot);
-    } else if (lo.g >= 0) {
-      coveredLo = half; // nothing covered
-    }
+    // Removed strip R = {covered by host pavement} ∩ {|dy| < COPLANAR}.
+    // Covered = {|L(t)| ≤ H(t)} solved exactly as two linear constraints
+    // (L−H ≤ 0 and L+H ≥ 0): a lane-aligned branch can lie fully inside
+    // the host or straddle its centreline, where any single-root cut
+    // misclassifies half the section (drawn coplanar sheets or holes).
+    let tMin = 0;
+    let tMax = 1;
+    const clipConstraint = (f0, f1, keepNegative) => {
+      const s0 = keepNegative ? f0 : -f0;
+      const s1 = keepNegative ? f1 : -f1; // want s ≤ 0
+      if (s0 > 0 && s1 > 0) { tMin = 1; tMax = 0; return; }
+      if (s0 <= 0 && s1 <= 0) return;
+      const root = s0 / (s0 - s1);
+      if (s0 > 0) tMin = Math.max(tMin, root);
+      else tMax = Math.min(tMax, root);
+    };
+    clipConstraint(lo.L - lo.H, hi.L - hi.H, true);
+    clipConstraint(lo.L + lo.H, hi.L + hi.H, false);
+    if (tMin >= tMax) return null; // host covers none of the section
+    const coveredLo = -half + tMin * 2 * half;
+    const coveredHi = -half + tMax * 2 * half;
     let planarLo = -half;
     let planarHi = half;
     if (Math.abs(hi.dy - lo.dy) < 1e-6) {
@@ -2254,7 +2463,12 @@ export class HighwayMap {
       }
       const edge = options[Math.abs(branchIndex) % options.length];
       const nextRoute = this.routes.get(edge.to.routeId);
-      if (edge.kind === 'merge') laneIndex = edge.mergeLane ?? nextRoute.lanes - 1;
+      if (edge.kind === 'merge') {
+        // lane-aligned hand-off: branch lane L sits ON host lane base + L
+        laneIndex = edge.mergeLaneBase !== undefined
+          ? edge.mergeLaneBase + laneIndex
+          : (edge.mergeLane ?? nextRoute.lanes - 1);
+      }
       laneIndex = clamp(laneIndex, 0, nextRoute.lanes - 1);
       route = nextRoute;
       distance = edge.to.distance;
@@ -2431,7 +2645,9 @@ export class HighwayMap {
     const edge = options[Math.floor(rng() * options.length)];
     const nextRoute = this.routes.get(edge.to.routeId);
     const laneIndex = edge.kind === 'merge'
-      ? (edge.mergeLane ?? nextRoute.lanes - 1)
+      ? (edge.mergeLaneBase !== undefined
+        ? edge.mergeLaneBase + (laneRef.laneIndex ?? 0)
+        : (edge.mergeLane ?? nextRoute.lanes - 1))
       : clamp(laneRef.laneIndex ?? 0, 0, nextRoute.lanes - 1);
     return this._laneRefFor(nextRoute, laneIndex, edge.to.direction);
   }
@@ -2465,12 +2681,17 @@ export class HighwayMap {
     const vehicle = request.vehicle || null;
     const beforePosition = this.sampleLane(route.id, s0, laneIndex, direction).position;
 
-    // Mid-route diverge: outermost lane only, seeded per vehicle+edge.
-    if (route.traffic && laneIndex === route.lanes - 1 && travel > 0) {
+    // Mid-route diverge: only from the outermost lane ON THE EXIT'S SIDE
+    // (a left exit takes left-lane vehicles — the old outermost-right gate
+    // sent cars snapping across the full carriageway at left diverges),
+    // seeded per vehicle+edge. They land in the branch's matching lane.
+    if (route.traffic && travel > 0) {
       const s1 = s0 + travel * direction;
       for (const edge of this.edges) {
         if (edge.kind !== 'diverge' || edge.probability <= 0) continue;
         if (edge.from.routeId !== route.id || edge.from.direction !== direction) continue;
+        const exitLane = (edge.side ?? -1) > 0 ? 0 : route.lanes - 1;
+        if (laneIndex !== exitLane) continue;
         const d = edge.from.distance;
         const crossed = direction > 0 ? (s0 < d && s1 >= d) : (s0 > d && s1 <= d);
         if (!crossed) continue;
@@ -2479,7 +2700,8 @@ export class HighwayMap {
         const hash = ((vehicle?.poolIndex ?? 0) * 2654435761 + Math.floor(d)) >>> 0;
         if ((hash % 1000) / 1000 >= edge.probability) continue;
         const overrun = Math.abs(s1 - d);
-        const sample = this.sampleLane(targetRoute.id, edge.to.distance + overrun, 0, edge.to.direction);
+        const landingLane = (edge.side ?? -1) > 0 ? 0 : targetRoute.lanes - 1;
+        const sample = this.sampleLane(targetRoute.id, edge.to.distance + overrun, landingLane, edge.to.direction);
         return this._trafficResult(sample, beforePosition, true);
       }
     }
