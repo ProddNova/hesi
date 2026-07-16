@@ -53,9 +53,45 @@ no image files. The described P4 defect is being reproduced from deterministic
 repository cameras and geometry instrumentation; no missing visual is being
 invented.
 
-**Exact resume point:** Phase B will capture failing-first P4 continuity
-evidence and identical-camera before images, then repair only P4's diverge
-topology/envelope. P5 remains disabled unless P4 passes all gates.
+Phase A commit: `19d710e` (`Classify progressive junction deck topology`),
+pushed to `origin/codex/progressive-merge-prototype`.
+
+### Phase B complete — P4 failing-first evidence
+
+`.devtests/p4-diverge-continuity-probe.mjs` derives the expected handoff from
+the actual `r1_0` lane-0 trajectory. It holds the fully opened auxiliary centre
+until that source lane reaches it, then uses a zero-slope blend into the branch.
+It also grades the emitted parapet vertices, production corridor collision and
+transition-owned paint. No threshold is inferred from the output under test.
+
+The unmodified Checkpoint 1 P4 correctly fails seven assertions, recorded in
+`docs/progressive-merges/checkpoint-2/P4-BEFORE.json`:
+
+- usable extra width falls to 0.847 m before source-derived alignment (3.55 m
+  is required), with premature closure beginning at host s=10968.401;
+- the auxiliary endpoint is 9.390 m from `r1_0` lane 0;
+- three emitted host-parapet samples lie inside the authoritative shared paved
+  union after the branch becomes the exterior;
+- 17.098 m of progressive solid edge marking crosses the exit handoff;
+- the temporary boundary ends 5.537 m from its branch boundary;
+- the intended reference path itself currently has no production-corridor
+  pavement holes or collision corrections, so the repair must preserve that
+  existing collision connectedness rather than masking the topology defect.
+
+The measured landmarks are host/branch s=10982.425/148 for lane alignment,
+10991.072/156 for physical planar separation, and 10973.973/140 for exterior
+ownership handoff. The eight fixed cameras in
+`.devtests/p4-diverge-shots.mjs` do not depend on progressive phases. Their
+directly inspected before set is in `docs/progressive-merges/checkpoint-2/before/`
+and includes plan, approach, auxiliary, branch handoff, guardrail, collision
+hitbox, host continuation and branch continuation views. The plan/hitbox views
+show the host envelope and red wall path returning across the exit instead of
+handing exterior ownership to the branch.
+
+**Exact resume point:** Phase C will implement the source-derived P4 lane-0
+handoff and paved-envelope phase boundaries in the shared model. Rail and paint
+ownership will then be corrected against the same exterior/split landmarks.
+P5 remains disabled unless P4 passes all gates.
 
 ## Checkpoint contract
 
