@@ -85,7 +85,9 @@ const prototypePins = await page.evaluate(() => {
     const size = Math.max(1, Math.round(18 * dpr));
     const data = dm.staticCtx.getImageData(x, y, size, size).data;
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 220 && data[i + 2] > 170 && data[i] > data[i + 1] * 1.25) return true;
+      const magenta = data[i] > 220 && data[i + 2] > 170 && data[i] > data[i + 1] * 1.25;
+      const amber = data[i] > 180 && data[i + 1] > 120 && data[i + 2] < 150;
+      if (magenta || amber) return true;
     }
     return false;
   });
@@ -94,20 +96,32 @@ const prototypePins = await page.evaluate(() => {
     idsMatch: pins.map((pin) => pin.id).every((id, index) => id === expected[index]),
     labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P1,P2,P3,P4',
     finite: pins.every((pin) => Number.isFinite(pin.x + pin.y + pin.z + pin.distance)),
-    metadataComplete: pins.every((pin) => pin.category === 'progressive-prototype'
+    metadataComplete: pins.every((pin) => ['progressive-prototype', 'deferred-progressive-candidate'].includes(pin.category)
       && ['merge', 'diverge'].includes(pin.type)
       && ['left', 'right'].includes(pin.side)
       && Number.isInteger(pin.hostLaneCount) && pin.hostLaneCount > 0
       && Number.isInteger(pin.branchLaneCount) && pin.branchLaneCount > 0
-      && pin.status === 'prototype-enabled'
+      && (pin.status === 'prototype-enabled' || pin.status.startsWith('deferred-'))
+      && typeof pin.classification === 'string'
       && pin.teleportRouteId === pin.hostRouteId),
+    categoryCounts: {
+      active: pins.filter((pin) => pin.category === 'progressive-prototype').length,
+      deferred: pins.filter((pin) => pin.category === 'deferred-progressive-candidate').length,
+    },
+    p4: pins.find((pin) => pin.pinId === 'P4'),
     rendered,
     info: document.querySelector('[data-info="prototypes"]')?.textContent || '',
   };
 });
 check('developer map exposes exactly four audited prototype pins', prototypePins.count === 4 && prototypePins.idsMatch && prototypePins.finite);
 check('prototype pins render as P1-P4', prototypePins.labelsMatch && prototypePins.rendered, prototypePins.info);
-check('prototype pin data exposes topology and status', prototypePins.metadataComplete);
+check('prototype pin data exposes topology and status', prototypePins.metadataComplete
+  && prototypePins.categoryCounts.active === 1 && prototypePins.categoryCounts.deferred === 3);
+check('P4 exposes left-side active phases', prototypePins.p4?.side === 'left'
+  && prototypePins.p4?.status === 'prototype-enabled'
+  && prototypePins.p4?.classification === 'same-level-simple'
+  && prototypePins.p4?.phases
+  && Object.values(prototypePins.p4.phases).every(Number.isFinite));
 
 const prototypeInteractions = await page.evaluate(() => {
   const g = window.shutoko;

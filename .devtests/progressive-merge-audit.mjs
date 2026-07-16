@@ -9,11 +9,12 @@
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from '../js/progressive-merge-prototypes.js';
+import { classifyProgressiveJunction } from '../js/progressive-junction-classifier.js';
 
 const { HighwayMap } = await import('../js/map.js');
 const originalWarn = console.warn;
 console.warn = () => {};
-const map = new HighwayMap(null, { addLighting: false, markingDebug: true });
+const map = new HighwayMap(null, { addLighting: false, markingDebug: true, progressiveMerges: false });
 console.warn = originalWarn;
 
 const deg = (radians) => radians * 180 / Math.PI;
@@ -110,6 +111,7 @@ for (const zone of map.junctionZones) {
     ? (zone.markingOpening.host[0] + zone.markingOpening.host[1]) * 0.5
     : hostValue(zone, projected.distance);
   const coordinateSample = map._sampleCenter(host, map._normalizeDistance(host, openingMid), 1);
+  const deckClassification = classifyProgressiveJunction(map, zone);
 
   const categories = [];
   const oneLane = branch.lanes === 1;
@@ -129,13 +131,14 @@ for (const zone of map.junctionZones) {
       ? `${round(curvature, 1)}°/100 m local curvature`
       : `${round(maximumTangentMismatchAcrossMouth, 1)}° maximum relative tangent across the mouth`);
   }
-  // Branches are expected to peel vertically after a same-level mouth, so
-  // source suitability is decided over the authoritative crossable opening,
-  // not over the complete later separation span. The latter remains recorded
-  // for audit/debugging.
-  if (maxOpeningVerticalDifference > 0.75 || transferVerticalDifference > 0.6) {
-    categories.push('vertical incompatibility');
-    issues.push(`${round(maxOpeningVerticalDifference, 2)} m maximum deck difference inside the opening`);
+  // A same-level progressive transition must retain the same render/collision
+  // deck owner until the paved envelopes have separated laterally. The old
+  // audit only sampled vertical difference inside the short mouth opening and
+  // produced false positives when a branch became a ramp farther downstream.
+  categories.push(deckClassification.category);
+  if (!deckClassification.eligible) {
+    categories.push('deck-ownership incompatibility');
+    issues.push(deckClassification.reason);
   }
   if (duplicateSuspicion) {
     categories.push('duplicate/suspicious route');
@@ -152,6 +155,7 @@ for (const zone of map.junctionZones) {
     'vertical incompatibility',
     'duplicate/suspicious route',
     'malformed source data',
+    'deck-ownership incompatibility',
   ].includes(category))) {
     automationStatus = 'manual-review';
     categories.push('manual review required');
@@ -166,7 +170,7 @@ for (const zone of map.junctionZones) {
     branchRouteId: branch.id,
     trafficRoutePair: zone.kind === 'merge' ? `${branch.id} -> ${host.id}` : `${host.id} -> ${branch.id}`,
     type: zone.kind,
-    side: zone.side > 0 ? 'left' : 'right',
+    side: zone.side > 0 ? 'right' : 'left',
     hostLaneCount: host.lanes,
     branchLaneCount: branch.lanes,
     hostWidth: round(map._halfWidthAt(host, projected.distance) * 2, 2),
@@ -201,6 +205,7 @@ for (const zone of map.junctionZones) {
     } : null,
     sourceDataQuality: issues.length ? 'requires-review' : 'measured-clean',
     automaticGenerationSuitability: automationStatus,
+    progressiveDeckClassification: deckClassification,
     classifications: categories,
     manualReviewReason: issues.length ? issues.join('; ') : null,
     selectedPrototype: selectedById.has(zone.id),
@@ -237,13 +242,17 @@ const summary = {
   automaticSuitable: connections.filter((connection) => connection.automaticGenerationSuitability !== 'manual-review').length,
   manualReview: connections.filter((connection) => connection.automaticGenerationSuitability === 'manual-review').length,
   selectedPrototypeIds: selected.map((connection) => connection.id),
+  activePrototypeIds: selected.filter((connection) => connection.progressiveDeckClassification.eligible)
+    .map((connection) => connection.id),
+  deferredPrototypeIds: selected.filter((connection) => !connection.progressiveDeckClassification.eligible)
+    .map((connection) => connection.id),
   classificationCounts,
 };
 
 const jsonPath = fileURLToPath(new URL('./progressive-merge-audit.json', import.meta.url));
 writeFileSync(jsonPath, `${JSON.stringify({ summary, connections }, null, 2)}\n`);
 
-const selectedRows = selected.map((connection) => `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${connection.worldCoordinates.x}, ${connection.worldCoordinates.y}, ${connection.worldCoordinates.z} | ${connection.prototypeLabel} |`).join('\n');
+const selectedRows = selected.map((connection) => `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${connection.progressiveDeckClassification.eligible ? 'active' : 'deferred'} | ${connection.progressiveDeckClassification.category} | ${connection.worldCoordinates.x}, ${connection.worldCoordinates.y}, ${connection.worldCoordinates.z} |`).join('\n');
 const catalogueRows = connections.map((connection) => `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${connection.existingCrossableLength} | ${connection.possibleParallelLength} | ${connection.tangentMismatchDeg} | ${connection.verticalDifference.maximumAcrossOpening} | ${connection.automaticGenerationSuitability} | ${connection.classifications.join(', ')} |`).join('\n');
 const counts = Object.entries(classificationCounts)
   .sort(([left], [right]) => left.localeCompare(right))
@@ -260,19 +269,24 @@ junction-zone measurements on base \`${summary.generatedFromBase}\`.
 - Side: ${summary.leftSide} left, ${summary.rightSide} right
 - Automatic/curved suitable: ${summary.automaticSuitable}
 - Manual review: ${summary.manualReview}
-- Selected prototypes: exactly ${selected.length}
+- Audited/pinned candidates: exactly ${selected.length}
+- Active same-level prototypes: ${summary.activePrototypeIds.length}
+- Deferred multi-level/manual candidates: ${summary.deferredPrototypeIds.length}
 
 ${counts}
 
 ## Selected representative prototype set
 
-| Junction ID | Traffic route pair | Side | Host/branch lanes | World X, Y, Z | Reason |
-| --- | --- | --- | ---: | --- | --- |
+| Junction ID | Traffic route pair | Side | Host/branch lanes | Status | Classification | World X, Y, Z |
+| --- | --- | --- | ---: | --- | --- | --- |
 ${selectedRows}
 
-All four are reachable in the developer map. Open it with **M**, enable labels,
-then use the prototype pins added by the finishing phase; the coordinates above
-remain the exact fallback teleport/search locations.
+All four are reachable through stable P1-P4 developer-map pins. P4 is the only
+active same-level prototype; P1-P3 retain legacy geometry and are visibly
+classified as deferred/manual. The classifier consumes the renderer's own
+cross-section ownership: an ownership break while pavement still overlaps in
+plan is a multi-level transition, even if the short transfer opening itself is
+nearly level.
 
 ## Complete same-level catalogue
 

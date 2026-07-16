@@ -661,15 +661,18 @@ export class DeveloperMap {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     for (const pin of this.network.prototypePins) {
+      const active = pin.category === 'progressive-prototype';
+      const markerColor = active ? '#ff4fd8' : '#d6a84f';
+      const labelColor = active ? '#ff7be5' : '#f2ca78';
       const s = this.worldToScreen(pin.x, pin.z);
       if (s.x < -18 || s.x > this.cssWidth + 18 || s.y < -18 || s.y > this.cssHeight + 18) continue;
       ctx.fillStyle = 'rgba(5,8,15,0.86)';
       ctx.fillRect(s.x - 10, s.y - 24, 20, 12);
-      ctx.fillStyle = '#ff7be5';
+      ctx.fillStyle = labelColor;
       ctx.fillText(pin.pinId, s.x, s.y - 13);
-      ctx.shadowColor = '#ff4fd8';
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = '#ff4fd8';
+      ctx.shadowColor = markerColor;
+      ctx.shadowBlur = active ? 8 : 3;
+      ctx.fillStyle = active ? markerColor : 'rgba(5,8,15,0.94)';
       ctx.beginPath();
       ctx.moveTo(s.x, s.y - 8);
       ctx.lineTo(s.x + 7, s.y);
@@ -678,7 +681,7 @@ export class DeveloperMap {
       ctx.closePath();
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = active ? '#ffffff' : markerColor;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
@@ -841,13 +844,21 @@ export class DeveloperMap {
 
   _drawPrototypeTooltip(ctx, hit) {
     const pin = hit.pin;
+    const active = pin.category === 'progressive-prototype';
+    const title = active ? 'ACTIVE PROGRESSIVE PROTOTYPE' : 'DEFERRED / MANUAL REVIEW';
     const lines = [
-      `${pin.pinId}  PROGRESSIVE PROTOTYPE`,
+      `${pin.pinId}  ${title}`,
       `junction: ${pin.id}`,
       `host: ${pin.hostRouteId} · ${pin.hostLaneCount} lanes`,
       `branch: ${pin.branchRouteId} · ${pin.branchLaneCount} lanes`,
       `${pin.type} · ${pin.side}`,
       `status: ${pin.status}`,
+      `class: ${pin.classification}`,
+      ...(active && pin.phases ? [
+        `phases: ${pin.phases.approachStart.toFixed(0)} / ${pin.phases.openingStart.toFixed(0)} / ${pin.phases.parallelStart.toFixed(0)}`,
+        `        ${pin.phases.absorptionStart.toFixed(0)} / ${pin.phases.transitionEnd.toFixed(0)} m`,
+      ] : []),
+      ...(!active && pin.classificationReason ? [`reason: ${pin.classificationReason}`] : []),
       `click: teleport to ${pin.teleportRouteId || pin.hostRouteId}`,
       `world: ${pin.x.toFixed(0)}, ${pin.y.toFixed(0)}, ${pin.z.toFixed(0)}`,
     ];
@@ -864,13 +875,13 @@ export class DeveloperMap {
     if (x + width > this.cssWidth) x = screen.x - width - 16;
     if (y + height > this.cssHeight) y = this.cssHeight - height - 4;
     if (y < 4) y = 4;
-    ctx.fillStyle = 'rgba(15,6,18,0.94)';
-    ctx.strokeStyle = '#ff4fd8';
+    ctx.fillStyle = active ? 'rgba(15,6,18,0.94)' : 'rgba(18,14,6,0.95)';
+    ctx.strokeStyle = active ? '#ff4fd8' : '#d6a84f';
     ctx.lineWidth = 1.5;
     ctx.fillRect(x, y, width, height);
     ctx.strokeRect(x, y, width, height);
     for (let index = 0; index < lines.length; index += 1) {
-      ctx.fillStyle = index === 0 ? '#ff7be5' : '#f5e7f4';
+      ctx.fillStyle = index === 0 ? (active ? '#ff7be5' : '#f2ca78') : '#f5e7f4';
       ctx.fillText(lines[index], x + pad, y + pad + index * lineH);
     }
   }
@@ -884,11 +895,15 @@ export class DeveloperMap {
     this.info.noclip.classList.toggle('is-on', !!noclip);
     const pins = this.network?.prototypePins || [];
     const hoveredPin = this.hovered?.kind === 'prototype' ? this.hovered.pin : null;
+    const activePinCount = pins.filter((pin) => pin.category === 'progressive-prototype').length;
+    const deferredPinCount = pins.length - activePinCount;
     this.info.prototypes.textContent = hoveredPin
       ? `${hoveredPin.pinId} ${hoveredPin.id} · ${hoveredPin.type}/${hoveredPin.side} · `
         + `${hoveredPin.hostRouteId} ${hoveredPin.hostLaneCount}L + `
         + `${hoveredPin.branchRouteId} ${hoveredPin.branchLaneCount}L · ${hoveredPin.status}`
-      : (pins.length ? `${pins.length} pinned (${pins.map((pin) => pin.pinId).join(', ')})` : 'none');
+      : (pins.length
+        ? `${activePinCount} active · ${deferredPinCount} deferred (${pins.map((pin) => pin.pinId).join(', ')})`
+        : 'none');
     this.info.teleport.textContent = this._teleportInfo ? this._teleportInfo.text : '—';
     // The current-route lookup is a network search; refresh it a few times a
     // second rather than every frame.

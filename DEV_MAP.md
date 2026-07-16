@@ -35,26 +35,29 @@ Files:
 | **Follow: ON/OFF** | Keep the live position centred every frame |
 | **Labels: ON/OFF** | Draw route codes at sensible zooms (de-cluttered) |
 
-## Progressive prototype pins
+## Progressive candidate pins
 
-The four Checkpoint 1 progressive-transition prototypes are pinned as bright
-magenta diamonds `P1`–`P4`. Open the map with `M`, choose **Fit network**, zoom
-to the desired pin, then hover it for junction/topology/status metadata and
-click the diamond itself to teleport to the host transition. The info line
-must read `4 pinned (P1, P2, P3, P4)`.
+The four audited candidates retain stable `P1`–`P4` pins. The active same-level
+prototype is a bright magenta diamond; deferred multi-level/manual candidates
+are hollow amber diamonds. Open the map with `M` or the mobile **DEV MAP**
+button, choose **Fit network**, hover a pin for classification/topology/status
+metadata, and click the diamond to teleport to the host transition. The info
+line reads `1 active · 3 deferred (P1, P2, P3, P4)`.
 
-| Pin | Junction | Route pair | World X, Y, Z |
-| --- | --- | --- | --- |
-| P1 | `J8:merge:r11_0:ramp_1:end` | `ramp_1 → r11_0` | `-1128.45, 73.04, -3825.43` |
-| P2 | `J0:merge:c1_0:c1_3:end` | `c1_3 → c1_0` | `-897.45, 52.37, -2806.42` |
-| P3 | `J10:merge:wangan_1:ramp_3:end` | `ramp_3 → wangan_1` | `696.08, 29.71, -5832.86` |
-| P4 | `J2:diverge:c1_0:r1_0:start` | `c1_0 → r1_0` | `-1094.38, 57.33, -3014.18` |
+| Pin | Junction | Route pair | Side | Status | World X, Y, Z |
+| --- | --- | --- | --- | --- | --- |
+| P1 | `J8:merge:r11_0:ramp_1:end` | `ramp_1 → r11_0` | right | deferred vertical ramp | `-1128.45, 73.04, -3825.43` |
+| P2 | `J0:merge:c1_0:c1_3:end` | `c1_3 → c1_0` | left | deferred vertical ramp | `-897.45, 52.37, -2806.42` |
+| P3 | `J10:merge:wangan_1:ramp_3:end` | `ramp_3 → wangan_1` | right | deferred vertical ramp | `696.08, 29.71, -5832.86` |
+| P4 | `J2:diverge:c1_0:r1_0:start` | `c1_0 → r1_0` | left | active same-level prototype | `-1094.38, 57.33, -3014.18` |
 
-Pins are a distinct read-only `progressive-prototype` marker category. Their
-junction ID, host/branch IDs, merge/diverge type, side, lane counts, status and
-teleport route come directly from the active transition records; presentation
-and interaction contain no per-junction conditionals. In legacy comparison
-mode (`?legacyProgressiveMerges=1`) the map exposes no prototype pins.
+Pins use the read-only `progressive-prototype` and
+`deferred-progressive-candidate` categories. Junction ID, host/branch IDs,
+merge/diverge type, driver-relative side, lane counts, classification, phase
+boundaries, status and teleport route all come from the shared candidate
+configuration/classifier records; presentation and interaction contain no
+per-junction conditionals. In legacy comparison mode
+(`?legacyProgressiveMerges=1`) the map exposes no candidate pins.
 
 While the map is open, gameplay is **frozen** — the vehicle and noclip drone
 stay put and all gameplay keys are swallowed. Freezing is intentional and

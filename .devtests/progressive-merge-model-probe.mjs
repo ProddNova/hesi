@@ -12,9 +12,12 @@ const distance = (left, right) => Math.hypot(
 
 const map = new HighwayMap(null, { addLighting: false });
 const legacy = new HighwayMap(null, { addLighting: false, progressiveMerges: false });
-check(map.progressiveTransitions.length === 4, `active record count ${map.progressiveTransitions.length} != 4`);
+check(map.progressiveTransitions.length === 1, `active record count ${map.progressiveTransitions.length} != 1`);
 check(legacy.progressiveTransitions.length === 0, `legacy record count ${legacy.progressiveTransitions.length} != 0`);
 check(PROGRESSIVE_MERGE_PROTOTYPES.length === 4, 'prototype allow-list is not exactly four');
+check(map.progressiveCandidateClassifications.length === 4, 'candidate classification count is not exactly four');
+check(map.progressiveCandidateClassifications.filter((candidate) => !candidate.active).length === 3,
+  'expected exactly three deferred candidates');
 
 for (const transition of map.progressiveTransitions) {
   check(PROGRESSIVE_PHASES.every((phase, index) => transition.phaseOrder[index] === phase), `${transition.id}: phase order`);
@@ -47,6 +50,12 @@ for (const transition of map.progressiveTransitions) {
   }
 }
 check(map.getMinimapData().prototypePins.length === 4, 'minimap does not expose exactly four prototype pins');
+check(map.getMinimapData().prototypePins.filter((pin) => pin.category === 'progressive-prototype').length === 1,
+  'minimap does not expose exactly one active prototype');
+check(map.getMinimapData().prototypePins.filter((pin) => pin.category === 'deferred-progressive-candidate').length === 3,
+  'minimap does not expose exactly three deferred candidates');
+check(map.getMinimapData().prototypePins.find((pin) => pin.pinId === 'P4')?.side === 'left',
+  'P4 is not labelled from the driver-relative lateral convention');
 check(legacy.getMinimapData().prototypePins.length === 0, 'legacy minimap exposes prototype pins');
 
 console.log(`records=${map.progressiveTransitions.length} legacy=${legacy.progressiveTransitions.length}`);

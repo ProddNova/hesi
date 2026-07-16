@@ -142,6 +142,7 @@ export class HighwayMap {
     this.serviceAreas = [];
     this.wallSegments = [];
     this.progressiveTransitions = [];
+    this.progressiveCandidateClassifications = [];
     this.progressiveTransitionById = new Map();
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
@@ -6632,23 +6633,33 @@ export class HighwayMap {
         z: junction.point.z,
         routes: [...junction.routes],
       })),
-      prototypePins: this.progressiveTransitions.map((transition, index) => ({
-        id: transition.id,
-        pinId: `P${index + 1}`,
-        label: transition.label,
-        category: 'progressive-prototype',
-        type: transition.type,
-        side: transition.side,
-        hostRouteId: transition.hostRouteId,
-        branchRouteId: transition.branchRouteId,
-        hostLaneCount: transition.hostLaneCount,
-        branchLaneCount: transition.branchLaneCount,
-        status: transition.automationStatus,
-        teleportRouteId: transition.hostRouteId,
-        distance: (transition.parallelStart + transition.absorptionStart) * 0.5,
-        x: transition.pin.x,
-        y: transition.pin.y,
-        z: transition.pin.z,
+      prototypePins: this.progressiveCandidateClassifications.map((candidate) => ({
+        id: candidate.id,
+        pinId: candidate.pinId,
+        label: candidate.label,
+        category: candidate.active ? 'progressive-prototype' : 'deferred-progressive-candidate',
+        classification: candidate.classification.category,
+        classificationReason: candidate.classification.reason,
+        collisionDeckOwnership: candidate.classification.metrics.collisionDeckOwnership,
+        type: candidate.type,
+        side: candidate.side,
+        hostRouteId: candidate.hostRouteId,
+        branchRouteId: candidate.branchRouteId,
+        hostLaneCount: candidate.hostLaneCount,
+        branchLaneCount: candidate.branchLaneCount,
+        status: candidate.active ? candidate.transition.automationStatus : `deferred-${candidate.classification.category}`,
+        teleportRouteId: candidate.hostRouteId,
+        distance: candidate.distance,
+        phases: candidate.active ? {
+          approachStart: candidate.transition.approachStart,
+          openingStart: candidate.transition.openingStart,
+          parallelStart: candidate.transition.parallelStart,
+          absorptionStart: candidate.transition.absorptionStart,
+          transitionEnd: candidate.transition.transitionEnd,
+        } : null,
+        x: candidate.pin.x,
+        y: candidate.pin.y,
+        z: candidate.pin.z,
       })),
       networkLength: [...this.routes.values()].filter((route) => route.kind !== 'service').reduce((sum, route) => sum + route.length, 0),
     };

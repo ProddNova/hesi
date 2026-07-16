@@ -1,5 +1,62 @@
 # Progressive Merge Checkpoint Status
 
+## Checkpoint 2 — live status (2026-07-16)
+
+Checkpoint 2 supersedes the Checkpoint 1 eligibility conclusions below while
+retaining its implementation history and visual evidence. The candidate set is
+still exactly P1–P4; no network-wide rollout is active.
+
+### Phase A complete — deck classification and legacy restoration
+
+The generic classifier in `js/progressive-junction-classifier.js` now consumes
+the same per-cross-section `row.merged` decision used by rendering and
+collision. A simple lateral transition must remain one owned deck while its
+paved envelopes overlap in plan. If ownership breaks before measured lateral
+separation, the case is multi-level/vertical and is not passed into the shared
+progressive model.
+
+The old audit was a false positive because it considered only the maximum
+vertical delta inside the short crossable mouth. That accepts a branch which is
+nearly level at transfer but becomes a ramp while still overlapping the host in
+plan. The corrected invariant measures ownership all the way to physical
+lateral separation:
+
+| Pin | Junction | Driver side | Classification | Deck evidence | Runtime |
+| --- | --- | --- | --- | --- | --- |
+| P1 | `J8:merge:r11_0:ramp_1:end` | right | `vertical-ramp-complex` | 27 overlap rows lose ownership; vertical span 2.777 m | deferred; legacy restored |
+| P2 | `J0:merge:c1_0:c1_3:end` | left | `vertical-ramp-complex` | 9 overlap rows lose ownership; vertical span 2.620 m | deferred; legacy restored |
+| P3 | `J10:merge:wangan_1:ramp_3:end` | right | `vertical-ramp-complex` | 9 overlap rows lose ownership; vertical span 2.186 m | deferred; legacy restored |
+| P4 | `J2:diverge:c1_0:r1_0:start` | left | `same-level-simple` | continuous ownership through 152 m of planar overlap | active prototype |
+
+The side correction is data-derived, not junction-specific:
+`horizontalNormal()` is documented as the driver's right, so a negative
+`zone.side` is left. P4's source geometry and travel direction therefore agree
+with the reported left departure; Checkpoint 1's presentation label was
+reversed.
+
+The developer map still consumes the four-item shared candidate configuration.
+It shows P4 as the magenta active prototype and P1–P3 as hollow amber deferred
+candidates, with stable P1–P4 IDs, full topology/classification metadata, phase
+boundaries for P4, and click-to-teleport on every pin. Mobile and desktop use
+the same map renderer and records.
+
+Focused verification after Phase A:
+
+- progressive junction classification: PASS;
+- progressive model: PASS (1 active, 3 deferred, 0 active in legacy mode);
+- progressive geometry/paint/rail/collision probe: PASS for P4 baseline;
+- Dev Map Playwright regression: PASS 34/34;
+- A–B clipping, guardrail, merge-guardrail and merge-marking probes: PASS.
+
+Checkpoint 2's supplied attachment directory contained the textual brief but
+no image files. The described P4 defect is being reproduced from deterministic
+repository cameras and geometry instrumentation; no missing visual is being
+invented.
+
+**Exact resume point:** Phase B will capture failing-first P4 continuity
+evidence and identical-camera before images, then repair only P4's diverge
+topology/envelope. P5 remains disabled unless P4 passes all gates.
+
 ## Checkpoint contract
 
 - Branch: `codex/progressive-merge-prototype`

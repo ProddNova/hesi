@@ -4,24 +4,37 @@
     "totalConnections": 56,
     "merges": 27,
     "diverges": 29,
-    "leftSide": 37,
-    "rightSide": 19,
-    "automaticSuitable": 52,
-    "manualReview": 4,
+    "leftSide": 19,
+    "rightSide": 37,
+    "automaticSuitable": 2,
+    "manualReview": 54,
     "selectedPrototypeIds": [
       "J0:merge:c1_0:c1_3:end",
       "J2:diverge:c1_0:r1_0:start",
       "J8:merge:r11_0:ramp_1:end",
       "J10:merge:wangan_1:ramp_3:end"
     ],
+    "activePrototypeIds": [
+      "J2:diverge:c1_0:r1_0:start"
+    ],
+    "deferredPrototypeIds": [
+      "J0:merge:c1_0:c1_3:end",
+      "J8:merge:r11_0:ramp_1:end",
+      "J10:merge:wangan_1:ramp_3:end"
+    ],
     "classificationCounts": {
       "multi-lane merge": 11,
+      "vertical-ramp-complex": 44,
+      "deck-ownership incompatibility": 52,
+      "manual review required": 54,
       "multi-lane diverge": 12,
-      "curved but suitable": 22,
+      "same-level-simple": 4,
+      "curved but suitable": 1,
+      "multi-level-transition": 5,
       "simple 1-lane diverge": 17,
       "simple 1-lane merge": 16,
+      "manual-review": 3,
       "tangent mismatch too severe": 4,
-      "manual review required": 4,
       "transition too short": 2
     }
   },
@@ -32,7 +45,7 @@
       "branchRouteId": "c1_3",
       "trafficRoutePair": "c1_3 -> c1_0",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -74,12 +87,36 @@
         ],
         "length": 155.5
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 164,
+          "connectedDeckLength": 124,
+          "connectedFraction": 0.756,
+          "ownershipBreakRows": 9,
+          "maximumVerticalDeckSeparation": 2.62,
+          "maximumGradeDifference": 0.0834,
+          "minimumPlanarDy": -2.62,
+          "maximumPlanarDy": 0.184,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane merge"
+        "multi-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": true,
       "prototypeLabel": "two-to-two merge",
       "worldCoordinates": {
@@ -94,7 +131,7 @@
       "branchRouteId": "c1_6",
       "trafficRoutePair": "c1_6 -> c1_2",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -136,12 +173,36 @@
         ],
         "length": 79.36
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 144,
+          "connectedDeckLength": 104,
+          "connectedFraction": 0.722,
+          "ownershipBreakRows": 9,
+          "maximumVerticalDeckSeparation": 1.931,
+          "maximumGradeDifference": 0.0847,
+          "minimumPlanarDy": -1.931,
+          "maximumPlanarDy": 0.285,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane merge"
+        "multi-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -156,7 +217,7 @@
       "branchRouteId": "r1_0",
       "trafficRoutePair": "c1_0 -> r1_0",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -200,13 +261,35 @@
       },
       "sourceDataQuality": "measured-clean",
       "automaticGenerationSuitability": "curved-suitable",
+      "progressiveDeckClassification": {
+        "category": "same-level-simple",
+        "eligible": true,
+        "reason": null,
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 152,
+          "connectedDeckLength": 152,
+          "connectedFraction": 1,
+          "ownershipBreakRows": 0,
+          "maximumVerticalDeckSeparation": 1.056,
+          "maximumGradeDifference": 0.0041,
+          "minimumPlanarDy": -0.53,
+          "maximumPlanarDy": 0.086,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "continuous-to-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane diverge",
+        "same-level-simple",
         "curved but suitable"
       ],
       "manualReviewReason": null,
       "selectedPrototype": true,
-      "prototypeLabel": "right-side diverge",
+      "prototypeLabel": "left-side diverge",
       "worldCoordinates": {
         "x": -1094.38,
         "y": 57.33,
@@ -219,7 +302,7 @@
       "branchRouteId": "r1_3",
       "trafficRoutePair": "c1_2 -> r1_3",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -261,12 +344,36 @@
         ],
         "length": 177.42
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "multi-level-transition",
+        "eligible": false,
+        "reason": "deck ownership breaks for 0 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 172,
+          "connectedDeckLength": 168,
+          "connectedFraction": 0.977,
+          "ownershipBreakRows": 1,
+          "maximumVerticalDeckSeparation": 0.643,
+          "maximumGradeDifference": 0.009,
+          "minimumPlanarDy": -0.456,
+          "maximumPlanarDy": 0.077,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane diverge"
+        "multi-lane diverge",
+        "multi-level-transition",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 0 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -281,7 +388,7 @@
       "branchRouteId": "r6_0",
       "trafficRoutePair": "c1_2 -> r6_0",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -323,13 +430,36 @@
         ],
         "length": 198.4
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 16 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 200,
+          "connectedDeckLength": 180,
+          "connectedFraction": 0.9,
+          "ownershipBreakRows": 5,
+          "maximumVerticalDeckSeparation": 1.667,
+          "maximumGradeDifference": 0.0647,
+          "minimumPlanarDy": -1.667,
+          "maximumPlanarDy": 0.023,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 16 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -344,7 +474,7 @@
       "branchRouteId": "r6_3",
       "trafficRoutePair": "r6_3 -> c1_0",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -386,13 +516,36 @@
         ],
         "length": 171.78
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 8 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 172,
+          "connectedDeckLength": 160,
+          "connectedFraction": 0.93,
+          "ownershipBreakRows": 3,
+          "maximumVerticalDeckSeparation": 1.033,
+          "maximumGradeDifference": 0.0365,
+          "minimumPlanarDy": -0.937,
+          "maximumPlanarDy": 0.059,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 8 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -407,7 +560,7 @@
       "branchRouteId": "ramp_0",
       "trafficRoutePair": "r1_3 -> ramp_0",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -449,13 +602,36 @@
         ],
         "length": 51.76
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 24 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 104,
+          "connectedDeckLength": 76,
+          "connectedFraction": 0.731,
+          "ownershipBreakRows": 7,
+          "maximumVerticalDeckSeparation": 1.518,
+          "maximumGradeDifference": 0.051,
+          "minimumPlanarDy": -1.438,
+          "maximumPlanarDy": 0.124,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 24 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -470,7 +646,7 @@
       "branchRouteId": "ramp_1",
       "trafficRoutePair": "r11_0 -> ramp_1",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -512,12 +688,36 @@
         ],
         "length": 24
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 108,
+          "connectedDeckLength": 76,
+          "connectedFraction": 0.704,
+          "ownershipBreakRows": 8,
+          "maximumVerticalDeckSeparation": 2.89,
+          "maximumGradeDifference": 0.0949,
+          "minimumPlanarDy": -2.89,
+          "maximumPlanarDy": 0.195,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -532,7 +732,7 @@
       "branchRouteId": "ramp_1",
       "trafficRoutePair": "ramp_1 -> r11_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -574,13 +774,36 @@
         ],
         "length": 59.87
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 100 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 136,
+          "connectedDeckLength": 24,
+          "connectedFraction": 0.176,
+          "ownershipBreakRows": 27,
+          "maximumVerticalDeckSeparation": 2.777,
+          "maximumGradeDifference": 0.1019,
+          "minimumPlanarDy": -2.777,
+          "maximumPlanarDy": 0.526,
+          "verticalPassThrough": true,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 100 m while pavements still overlap in plan",
       "selectedPrototype": true,
       "prototypeLabel": "one-to-two merge",
       "worldCoordinates": {
@@ -595,7 +818,7 @@
       "branchRouteId": "ramp_2",
       "trafficRoutePair": "wangan_0 -> ramp_2",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -637,12 +860,36 @@
         ],
         "length": 59.8
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 40 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 172,
+          "connectedDeckLength": 128,
+          "connectedFraction": 0.744,
+          "ownershipBreakRows": 11,
+          "maximumVerticalDeckSeparation": 2.35,
+          "maximumGradeDifference": 0.0635,
+          "minimumPlanarDy": -0.127,
+          "maximumPlanarDy": 2.35,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane diverge"
+        "multi-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 40 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -657,7 +904,7 @@
       "branchRouteId": "ramp_3",
       "trafficRoutePair": "ramp_3 -> wangan_1",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -699,12 +946,36 @@
         ],
         "length": 83.81
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 32 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 204,
+          "connectedDeckLength": 168,
+          "connectedFraction": 0.824,
+          "ownershipBreakRows": 9,
+          "maximumVerticalDeckSeparation": 2.186,
+          "maximumGradeDifference": 0.0606,
+          "minimumPlanarDy": -0.147,
+          "maximumPlanarDy": 2.186,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane merge"
+        "multi-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 32 m while pavements still overlap in plan",
       "selectedPrototype": true,
       "prototypeLabel": "two-to-three merge",
       "worldCoordinates": {
@@ -719,7 +990,7 @@
       "branchRouteId": "ramp_5",
       "trafficRoutePair": "c1_2 -> ramp_5",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -761,13 +1032,36 @@
         ],
         "length": 11.88
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 36 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 108,
+          "connectedDeckLength": 68,
+          "connectedFraction": 0.63,
+          "ownershipBreakRows": 10,
+          "maximumVerticalDeckSeparation": 2.08,
+          "maximumGradeDifference": 0.0607,
+          "minimumPlanarDy": -2.08,
+          "maximumPlanarDy": 0.046,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 36 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -782,7 +1076,7 @@
       "branchRouteId": "ramp_7",
       "trafficRoutePair": "wangan_0 -> ramp_7",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -824,13 +1118,36 @@
         ],
         "length": 96.16
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 12 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 184,
+          "connectedDeckLength": 168,
+          "connectedFraction": 0.913,
+          "ownershipBreakRows": 4,
+          "maximumVerticalDeckSeparation": 0.883,
+          "maximumGradeDifference": 0.0767,
+          "minimumPlanarDy": -0.074,
+          "maximumPlanarDy": 0.813,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 12 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -845,7 +1162,7 @@
       "branchRouteId": "ramp_8",
       "trafficRoutePair": "wangan_0 -> ramp_8",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -887,12 +1204,36 @@
         ],
         "length": 110.97
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 32 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 212,
+          "connectedDeckLength": 176,
+          "connectedFraction": 0.83,
+          "ownershipBreakRows": 9,
+          "maximumVerticalDeckSeparation": 2.176,
+          "maximumGradeDifference": 0.0672,
+          "minimumPlanarDy": -0.547,
+          "maximumPlanarDy": 2.176,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane diverge"
+        "multi-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 32 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -907,7 +1248,7 @@
       "branchRouteId": "ramp_9",
       "trafficRoutePair": "ramp_9 -> wangan_1",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -949,12 +1290,36 @@
         ],
         "length": 107.57
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 48 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 192,
+          "connectedDeckLength": 140,
+          "connectedFraction": 0.729,
+          "ownershipBreakRows": 13,
+          "maximumVerticalDeckSeparation": 1.811,
+          "maximumGradeDifference": 0.0609,
+          "minimumPlanarDy": -0.077,
+          "maximumPlanarDy": 1.329,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane merge"
+        "multi-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 48 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -969,7 +1334,7 @@
       "branchRouteId": "ramp_10",
       "trafficRoutePair": "wangan_1 -> ramp_10",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -1011,13 +1376,36 @@
         ],
         "length": 71.65
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 196,
+          "connectedDeckLength": 164,
+          "connectedFraction": 0.837,
+          "ownershipBreakRows": 8,
+          "maximumVerticalDeckSeparation": 1.64,
+          "maximumGradeDifference": 0.0474,
+          "minimumPlanarDy": -0.228,
+          "maximumPlanarDy": 1.64,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1032,7 +1420,7 @@
       "branchRouteId": "ramp_10",
       "trafficRoutePair": "ramp_10 -> r1_3",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -1074,12 +1462,36 @@
         ],
         "length": 20.44
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "manual-review",
+        "eligible": false,
+        "reason": "transfer is not a mouth-connected shared render/collision deck",
+        "metrics": {
+          "transferConnected": false,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 192,
+          "connectedDeckLength": 136,
+          "connectedFraction": 0.708,
+          "ownershipBreakRows": 12,
+          "maximumVerticalDeckSeparation": 2.507,
+          "maximumGradeDifference": 0.1276,
+          "minimumPlanarDy": -0.23,
+          "maximumPlanarDy": 2.507,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane merge"
+        "multi-lane merge",
+        "manual-review",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "transfer is not a mouth-connected shared render/collision deck",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1094,7 +1506,7 @@
       "branchRouteId": "ramp_11",
       "trafficRoutePair": "r1_2 -> ramp_11",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -1136,12 +1548,36 @@
         ],
         "length": 71.91
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "manual-review",
+        "eligible": false,
+        "reason": "transfer is not a mouth-connected shared render/collision deck",
+        "metrics": {
+          "transferConnected": false,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 200,
+          "connectedDeckLength": 156,
+          "connectedFraction": 0.78,
+          "ownershipBreakRows": 10,
+          "maximumVerticalDeckSeparation": 2.347,
+          "maximumGradeDifference": 0.0625,
+          "minimumPlanarDy": -2.347,
+          "maximumPlanarDy": 0.131,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "manual-review",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "transfer is not a mouth-connected shared render/collision deck",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1156,7 +1592,7 @@
       "branchRouteId": "ramp_11",
       "trafficRoutePair": "ramp_11 -> r1_2",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -1198,13 +1634,36 @@
         ],
         "length": 24.83
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 144 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 200,
+          "connectedDeckLength": 36,
+          "connectedFraction": 0.18,
+          "ownershipBreakRows": 39,
+          "maximumVerticalDeckSeparation": 2.329,
+          "maximumGradeDifference": 0.0567,
+          "minimumPlanarDy": -2.329,
+          "maximumPlanarDy": 0.303,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 144 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1219,7 +1678,7 @@
       "branchRouteId": "ramp_12",
       "trafficRoutePair": "r1_3 -> ramp_12",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -1261,13 +1720,36 @@
         ],
         "length": 68.12
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 40 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 184,
+          "connectedDeckLength": 140,
+          "connectedFraction": 0.761,
+          "ownershipBreakRows": 11,
+          "maximumVerticalDeckSeparation": 2.474,
+          "maximumGradeDifference": 0.0667,
+          "minimumPlanarDy": -2.474,
+          "maximumPlanarDy": -0.006,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 40 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1282,7 +1764,7 @@
       "branchRouteId": "ramp_12",
       "trafficRoutePair": "ramp_12 -> r1_3",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -1324,12 +1806,36 @@
         ],
         "length": 239.72
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 188 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 344,
+          "connectedDeckLength": 144,
+          "connectedFraction": 0.419,
+          "ownershipBreakRows": 49,
+          "maximumVerticalDeckSeparation": 1.385,
+          "maximumGradeDifference": 0.0241,
+          "minimumPlanarDy": -1.348,
+          "maximumPlanarDy": 0.333,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 188 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1344,7 +1850,7 @@
       "branchRouteId": "ramp_13",
       "trafficRoutePair": "wangan_1 -> ramp_13",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 3,
       "branchLaneCount": 1,
       "hostWidth": 13.25,
@@ -1380,12 +1886,36 @@
         "length": 15.29
       },
       "currentRailOpening": null,
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 64 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 192,
+          "connectedDeckLength": 116,
+          "connectedFraction": 0.604,
+          "ownershipBreakRows": 18,
+          "maximumVerticalDeckSeparation": 2.708,
+          "maximumGradeDifference": 0.0722,
+          "minimumPlanarDy": -0.195,
+          "maximumPlanarDy": 2.708,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 64 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1400,7 +1930,7 @@
       "branchRouteId": "ramp_14",
       "trafficRoutePair": "wangan_1 -> ramp_14",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -1442,12 +1972,36 @@
         ],
         "length": 95.67
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 204,
+          "connectedDeckLength": 172,
+          "connectedFraction": 0.843,
+          "ownershipBreakRows": 8,
+          "maximumVerticalDeckSeparation": 2.25,
+          "maximumGradeDifference": 0.0746,
+          "minimumPlanarDy": -0.198,
+          "maximumPlanarDy": 2.25,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane diverge"
+        "multi-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1462,7 +2016,7 @@
       "branchRouteId": "ramp_15",
       "trafficRoutePair": "wangan_0 -> ramp_15",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 1,
       "hostWidth": 13.25,
@@ -1506,8 +2060,30 @@
       },
       "sourceDataQuality": "measured-clean",
       "automaticGenerationSuitability": "suitable",
+      "progressiveDeckClassification": {
+        "category": "same-level-simple",
+        "eligible": true,
+        "reason": null,
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 180,
+          "connectedDeckLength": 180,
+          "connectedFraction": 1,
+          "ownershipBreakRows": 0,
+          "maximumVerticalDeckSeparation": 0.663,
+          "maximumGradeDifference": 0.0032,
+          "minimumPlanarDy": -0.28,
+          "maximumPlanarDy": 0.156,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "continuous-to-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "same-level-simple"
       ],
       "manualReviewReason": null,
       "selectedPrototype": false,
@@ -1524,7 +2100,7 @@
       "branchRouteId": "ramp_16",
       "trafficRoutePair": "ramp_16 -> wangan_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 1,
       "hostWidth": 13.25,
@@ -1566,12 +2142,36 @@
         ],
         "length": 99.74
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 44 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 192,
+          "connectedDeckLength": 136,
+          "connectedFraction": 0.708,
+          "ownershipBreakRows": 13,
+          "maximumVerticalDeckSeparation": 0.712,
+          "maximumGradeDifference": 0.0285,
+          "minimumPlanarDy": -0.263,
+          "maximumPlanarDy": 0.695,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 44 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1586,7 +2186,7 @@
       "branchRouteId": "ramp_17",
       "trafficRoutePair": "k5_1 -> ramp_17",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.31,
@@ -1628,12 +2228,36 @@
         ],
         "length": 13.34
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 20 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 92,
+          "connectedDeckLength": 68,
+          "connectedFraction": 0.739,
+          "ownershipBreakRows": 6,
+          "maximumVerticalDeckSeparation": 2.196,
+          "maximumGradeDifference": 0.1057,
+          "minimumPlanarDy": -0.109,
+          "maximumPlanarDy": 2.196,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 20 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1648,7 +2272,7 @@
       "branchRouteId": "ramp_17",
       "trafficRoutePair": "ramp_17 -> k1_1",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -1684,12 +2308,36 @@
         "length": 27.91
       },
       "currentRailOpening": null,
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 84 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 156,
+          "connectedDeckLength": 44,
+          "connectedFraction": 0.282,
+          "ownershipBreakRows": 25,
+          "maximumVerticalDeckSeparation": 2.357,
+          "maximumGradeDifference": 0.1969,
+          "minimumPlanarDy": -1.26,
+          "maximumPlanarDy": 2.357,
+          "verticalPassThrough": true,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 84 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1704,7 +2352,7 @@
       "branchRouteId": "ramp_18",
       "trafficRoutePair": "r6_0 -> ramp_18",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -1748,9 +2396,31 @@
       },
       "sourceDataQuality": "requires-review",
       "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "same-level-simple",
+        "eligible": true,
+        "reason": null,
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 180,
+          "connectedDeckLength": 132,
+          "connectedFraction": 0.733,
+          "ownershipBreakRows": 10,
+          "maximumVerticalDeckSeparation": 0.251,
+          "maximumGradeDifference": 0.0111,
+          "minimumPlanarDy": -0.223,
+          "maximumPlanarDy": 0.251,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "continuous-to-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
         "tangent mismatch too severe",
+        "same-level-simple",
         "manual review required"
       ],
       "manualReviewReason": "96.4°/100 m local curvature",
@@ -1768,7 +2438,7 @@
       "branchRouteId": "ramp_19",
       "trafficRoutePair": "ramp_19 -> r6_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.5,
@@ -1810,12 +2480,36 @@
         ],
         "length": 60.24
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 56 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 184,
+          "connectedDeckLength": 116,
+          "connectedFraction": 0.63,
+          "ownershipBreakRows": 16,
+          "maximumVerticalDeckSeparation": 2.37,
+          "maximumGradeDifference": 0.1076,
+          "minimumPlanarDy": -0.047,
+          "maximumPlanarDy": 2.37,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 56 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1830,7 +2524,7 @@
       "branchRouteId": "ramp_20",
       "trafficRoutePair": "r6_3 -> ramp_20",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -1872,13 +2566,36 @@
         ],
         "length": 60.35
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 164,
+          "connectedDeckLength": 132,
+          "connectedFraction": 0.805,
+          "ownershipBreakRows": 8,
+          "maximumVerticalDeckSeparation": 2.608,
+          "maximumGradeDifference": 0.0886,
+          "minimumPlanarDy": -0.16,
+          "maximumPlanarDy": 2.608,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1893,7 +2610,7 @@
       "branchRouteId": "ramp_21",
       "trafficRoutePair": "r6_0 -> ramp_21",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -1935,13 +2652,36 @@
         ],
         "length": 11.83
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 96 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 172,
+          "connectedDeckLength": 64,
+          "connectedFraction": 0.372,
+          "ownershipBreakRows": 26,
+          "maximumVerticalDeckSeparation": 2.202,
+          "maximumGradeDifference": 0.0383,
+          "minimumPlanarDy": -0.203,
+          "maximumPlanarDy": 2.202,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 96 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -1956,7 +2696,7 @@
       "branchRouteId": "ramp_21",
       "trafficRoutePair": "ramp_21 -> ramp_18",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 1,
       "branchLaneCount": 1,
       "hostWidth": 5.45,
@@ -2000,12 +2740,35 @@
       },
       "sourceDataQuality": "requires-review",
       "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 68 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 120,
+          "connectedDeckLength": 32,
+          "connectedFraction": 0.267,
+          "ownershipBreakRows": 20,
+          "maximumVerticalDeckSeparation": 2.056,
+          "maximumGradeDifference": 0.0625,
+          "minimumPlanarDy": -0.356,
+          "maximumPlanarDy": 2.056,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane merge",
         "tangent mismatch too severe",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
         "manual review required"
       ],
-      "manualReviewReason": "98.5°/100 m local curvature",
+      "manualReviewReason": "98.5°/100 m local curvature; deck ownership breaks for 68 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2020,7 +2783,7 @@
       "branchRouteId": "ramp_22",
       "trafficRoutePair": "c1_0 -> ramp_22",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -2062,12 +2825,36 @@
         ],
         "length": 85.01
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "multi-level-transition",
+        "eligible": false,
+        "reason": "deck ownership breaks for 0 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 176,
+          "connectedDeckLength": 172,
+          "connectedFraction": 0.977,
+          "ownershipBreakRows": 1,
+          "maximumVerticalDeckSeparation": 1.174,
+          "maximumGradeDifference": 0.0139,
+          "minimumPlanarDy": -0.688,
+          "maximumPlanarDy": 0.056,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane diverge"
+        "multi-lane diverge",
+        "multi-level-transition",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 0 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2082,7 +2869,7 @@
       "branchRouteId": "ramp_22",
       "trafficRoutePair": "ramp_22 -> r6_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -2124,13 +2911,36 @@
         ],
         "length": 97.03
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 72 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 200,
+          "connectedDeckLength": 124,
+          "connectedFraction": 0.62,
+          "ownershipBreakRows": 19,
+          "maximumVerticalDeckSeparation": 2.924,
+          "maximumGradeDifference": 0.1305,
+          "minimumPlanarDy": -0.027,
+          "maximumPlanarDy": 2.924,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 72 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2145,7 +2955,7 @@
       "branchRouteId": "ramp_25",
       "trafficRoutePair": "r9_1 -> ramp_25",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2187,12 +2997,36 @@
         ],
         "length": 96.76
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 36 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 200,
+          "connectedDeckLength": 160,
+          "connectedFraction": 0.8,
+          "ownershipBreakRows": 10,
+          "maximumVerticalDeckSeparation": 2.135,
+          "maximumGradeDifference": 0.0548,
+          "minimumPlanarDy": -2.135,
+          "maximumPlanarDy": 0.115,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 36 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2207,7 +3041,7 @@
       "branchRouteId": "ramp_25",
       "trafficRoutePair": "ramp_25 -> r9_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2249,12 +3083,36 @@
         ],
         "length": 4
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 56 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 200,
+          "connectedDeckLength": 132,
+          "connectedFraction": 0.66,
+          "ownershipBreakRows": 16,
+          "maximumVerticalDeckSeparation": 2.81,
+          "maximumGradeDifference": 0.0914,
+          "minimumPlanarDy": -2.81,
+          "maximumPlanarDy": 0.234,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 56 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2269,7 +3127,7 @@
       "branchRouteId": "ramp_27",
       "trafficRoutePair": "r6_3 -> ramp_27",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2313,13 +3171,36 @@
       },
       "sourceDataQuality": "requires-review",
       "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 16 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 72,
+          "connectedDeckLength": 52,
+          "connectedFraction": 0.722,
+          "ownershipBreakRows": 5,
+          "maximumVerticalDeckSeparation": 2.414,
+          "maximumGradeDifference": 0.2244,
+          "minimumPlanarDy": -2.414,
+          "maximumPlanarDy": 0.173,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
         "transition too short",
         "tangent mismatch too severe",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
         "manual review required"
       ],
-      "manualReviewReason": "only 72 m of measured mouth span; 122.3°/100 m local curvature",
+      "manualReviewReason": "only 72 m of measured mouth span; 122.3°/100 m local curvature; deck ownership breaks for 16 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2334,7 +3215,7 @@
       "branchRouteId": "ramp_29",
       "trafficRoutePair": "ramp_29 -> c1_2",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2370,12 +3251,36 @@
         "length": 69.05
       },
       "currentRailOpening": null,
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 36 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 108,
+          "connectedDeckLength": 68,
+          "connectedFraction": 0.63,
+          "ownershipBreakRows": 10,
+          "maximumVerticalDeckSeparation": 2.155,
+          "maximumGradeDifference": 0.0646,
+          "minimumPlanarDy": -2.155,
+          "maximumPlanarDy": 0.064,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 36 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2390,7 +3295,7 @@
       "branchRouteId": "ramp_30",
       "trafficRoutePair": "ramp_30 -> wangan_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -2432,12 +3337,36 @@
         ],
         "length": 92.13
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 36 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 192,
+          "connectedDeckLength": 152,
+          "connectedFraction": 0.792,
+          "ownershipBreakRows": 10,
+          "maximumVerticalDeckSeparation": 2.636,
+          "maximumGradeDifference": 0.0718,
+          "minimumPlanarDy": -0.159,
+          "maximumPlanarDy": 2.636,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane merge"
+        "multi-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 36 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2452,7 +3381,7 @@
       "branchRouteId": "ramp_31",
       "trafficRoutePair": "ramp_31 -> r6_3",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2494,13 +3423,36 @@
         ],
         "length": 42.01
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 24 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 80,
+          "connectedDeckLength": 44,
+          "connectedFraction": 0.55,
+          "ownershipBreakRows": 8,
+          "maximumVerticalDeckSeparation": 1.023,
+          "maximumGradeDifference": 0.1059,
+          "minimumPlanarDy": -0.905,
+          "maximumPlanarDy": 0.337,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 24 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2515,7 +3467,7 @@
       "branchRouteId": "ramp_32",
       "trafficRoutePair": "ramp_32 -> r1_2",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2557,12 +3509,36 @@
         ],
         "length": 90.87
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 32 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 192,
+          "connectedDeckLength": 156,
+          "connectedFraction": 0.813,
+          "ownershipBreakRows": 9,
+          "maximumVerticalDeckSeparation": 2.479,
+          "maximumGradeDifference": 0.0676,
+          "minimumPlanarDy": -0.191,
+          "maximumPlanarDy": 2.479,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 32 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2577,7 +3553,7 @@
       "branchRouteId": "ramp_35",
       "trafficRoutePair": "k5_1 -> ramp_35",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2619,12 +3595,36 @@
         ],
         "length": 91.71
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 16 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 176,
+          "connectedDeckLength": 152,
+          "connectedFraction": 0.864,
+          "ownershipBreakRows": 5,
+          "maximumVerticalDeckSeparation": 0.478,
+          "maximumGradeDifference": 0.0803,
+          "minimumPlanarDy": -0.145,
+          "maximumPlanarDy": 0.316,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 16 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2639,7 +3639,7 @@
       "branchRouteId": "ramp_35",
       "trafficRoutePair": "ramp_35 -> k1_0",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2681,13 +3681,36 @@
         ],
         "length": 84.13
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 40 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 160,
+          "connectedDeckLength": 108,
+          "connectedFraction": 0.675,
+          "ownershipBreakRows": 12,
+          "maximumVerticalDeckSeparation": 1.145,
+          "maximumGradeDifference": 0.0541,
+          "minimumPlanarDy": 0.006,
+          "maximumPlanarDy": 0.991,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 40 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2702,7 +3725,7 @@
       "branchRouteId": "ramp_36",
       "trafficRoutePair": "k1_0 -> ramp_36",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -2738,12 +3761,36 @@
         "length": 69.75
       },
       "currentRailOpening": null,
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 92 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 164,
+          "connectedDeckLength": 68,
+          "connectedFraction": 0.415,
+          "ownershipBreakRows": 24,
+          "maximumVerticalDeckSeparation": 2.352,
+          "maximumGradeDifference": 0.071,
+          "minimumPlanarDy": -0.153,
+          "maximumPlanarDy": 2.352,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane diverge"
+        "multi-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 92 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2758,7 +3805,7 @@
       "branchRouteId": "ramp_37",
       "trafficRoutePair": "r1_2 -> ramp_37",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2800,13 +3847,36 @@
         ],
         "length": 28.72
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "multi-level-transition",
+        "eligible": false,
+        "reason": "deck ownership breaks for 8 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 96,
+          "connectedDeckLength": 84,
+          "connectedFraction": 0.875,
+          "ownershipBreakRows": 3,
+          "maximumVerticalDeckSeparation": 0.636,
+          "maximumGradeDifference": 0.0343,
+          "minimumPlanarDy": -0.438,
+          "maximumPlanarDy": 0.112,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
-        "curved but suitable"
+        "multi-level-transition",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 8 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2821,7 +3891,7 @@
       "branchRouteId": "ramp_37",
       "trafficRoutePair": "ramp_37 -> r1_2",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2863,13 +3933,36 @@
         ],
         "length": 60.47
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "manual-review",
+        "eligible": false,
+        "reason": "transfer is not a mouth-connected shared render/collision deck",
+        "metrics": {
+          "transferConnected": false,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 96,
+          "connectedDeckLength": 44,
+          "connectedFraction": 0.458,
+          "ownershipBreakRows": 11,
+          "maximumVerticalDeckSeparation": 0.758,
+          "maximumGradeDifference": 0.0395,
+          "minimumPlanarDy": -0.486,
+          "maximumPlanarDy": 0.262,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane merge",
-        "curved but suitable"
+        "manual-review",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "transfer is not a mouth-connected shared render/collision deck",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2884,7 +3977,7 @@
       "branchRouteId": "ramp_39",
       "trafficRoutePair": "r6_0 -> ramp_39",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2926,12 +4019,36 @@
         ],
         "length": 36
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 40 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 120,
+          "connectedDeckLength": 76,
+          "connectedFraction": 0.633,
+          "ownershipBreakRows": 11,
+          "maximumVerticalDeckSeparation": 2.259,
+          "maximumGradeDifference": 0.056,
+          "minimumPlanarDy": -2.259,
+          "maximumPlanarDy": 0.134,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane diverge"
+        "simple 1-lane diverge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 40 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -2946,7 +4063,7 @@
       "branchRouteId": "ramp_40",
       "trafficRoutePair": "ramp_40 -> r6_3",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -2988,12 +4105,36 @@
         ],
         "length": 35.79
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 44 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 148,
+          "connectedDeckLength": 100,
+          "connectedFraction": 0.676,
+          "ownershipBreakRows": 12,
+          "maximumVerticalDeckSeparation": 2.206,
+          "maximumGradeDifference": 0.0389,
+          "minimumPlanarDy": -0.128,
+          "maximumPlanarDy": 2.206,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 44 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -3008,7 +4149,7 @@
       "branchRouteId": "ramp_41",
       "trafficRoutePair": "ramp_41 -> wangan_1",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -3050,12 +4191,36 @@
         ],
         "length": 79.4
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 12 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 180,
+          "connectedDeckLength": 160,
+          "connectedFraction": 0.889,
+          "ownershipBreakRows": 4,
+          "maximumVerticalDeckSeparation": 0.634,
+          "maximumGradeDifference": 0.0335,
+          "minimumPlanarDy": -0.269,
+          "maximumPlanarDy": 0.161,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "multi-lane merge"
+        "multi-lane merge",
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 12 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -3070,7 +4235,7 @@
       "branchRouteId": "ramp_42",
       "trafficRoutePair": "k1_0 -> ramp_42",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -3112,13 +4277,36 @@
         ],
         "length": 47.49
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "multi-level-transition",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 116,
+          "connectedDeckLength": 84,
+          "connectedFraction": 0.724,
+          "ownershipBreakRows": 8,
+          "maximumVerticalDeckSeparation": 0.485,
+          "maximumGradeDifference": 0,
+          "minimumPlanarDy": 0.11,
+          "maximumPlanarDy": 0.394,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
-        "curved but suitable"
+        "multi-level-transition",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -3133,7 +4321,7 @@
       "branchRouteId": "ramp_42",
       "trafficRoutePair": "ramp_42 -> k1_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -3175,12 +4363,36 @@
         ],
         "length": 48.31
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "multi-level-transition",
+        "eligible": false,
+        "reason": "deck ownership breaks for 0 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 108,
+          "connectedDeckLength": 104,
+          "connectedFraction": 0.963,
+          "ownershipBreakRows": 1,
+          "maximumVerticalDeckSeparation": 0.39,
+          "maximumGradeDifference": 0,
+          "minimumPlanarDy": -0.075,
+          "maximumPlanarDy": 0.299,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
-        "simple 1-lane merge"
+        "simple 1-lane merge",
+        "multi-level-transition",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 0 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -3195,7 +4407,7 @@
       "branchRouteId": "ramp_43",
       "trafficRoutePair": "r1_0 -> ramp_43",
       "type": "diverge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -3237,13 +4449,36 @@
         ],
         "length": 19.97
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 16 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 84,
+          "connectedDeckLength": 56,
+          "connectedFraction": 0.667,
+          "ownershipBreakRows": 6,
+          "maximumVerticalDeckSeparation": 0.876,
+          "maximumGradeDifference": 0.0447,
+          "minimumPlanarDy": -0.876,
+          "maximumPlanarDy": 0.208,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 16 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -3258,7 +4493,7 @@
       "branchRouteId": "ramp_43",
       "trafficRoutePair": "ramp_43 -> r1_3",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 2,
       "branchLaneCount": 1,
       "hostWidth": 9.7,
@@ -3300,13 +4535,36 @@
         ],
         "length": 27.04
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 12 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 84,
+          "connectedDeckLength": 68,
+          "connectedFraction": 0.81,
+          "ownershipBreakRows": 4,
+          "maximumVerticalDeckSeparation": 0.828,
+          "maximumGradeDifference": 0.0537,
+          "minimumPlanarDy": -0.025,
+          "maximumPlanarDy": 0.828,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "simple 1-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 12 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -3321,7 +4579,7 @@
       "branchRouteId": "ramp_46",
       "trafficRoutePair": "ramp_46 -> ramp_27",
       "type": "merge",
-      "side": "right",
+      "side": "left",
       "hostLaneCount": 1,
       "branchLaneCount": 2,
       "hostWidth": 5.45,
@@ -3365,10 +4623,32 @@
       },
       "sourceDataQuality": "requires-review",
       "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "same-level-simple",
+        "eligible": true,
+        "reason": null,
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 52,
+          "connectedDeckLength": 44,
+          "connectedFraction": 0.846,
+          "ownershipBreakRows": 2,
+          "maximumVerticalDeckSeparation": 0.35,
+          "maximumGradeDifference": 0.018,
+          "minimumPlanarDy": -0.03,
+          "maximumPlanarDy": 0.267,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": false,
+          "collisionDeckOwnership": "continuous-to-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane merge",
         "transition too short",
         "tangent mismatch too severe",
+        "same-level-simple",
         "manual review required"
       ],
       "manualReviewReason": "only 60 m of measured mouth span; 396.7°/100 m local curvature",
@@ -3386,7 +4666,7 @@
       "branchRouteId": "ramp_47",
       "trafficRoutePair": "r1_2 -> ramp_47",
       "type": "diverge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 2,
       "branchLaneCount": 2,
       "hostWidth": 9.7,
@@ -3428,13 +4708,36 @@
         ],
         "length": 87.37
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 28 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": false,
+          "reconnectsAfterOwnershipBreak": true,
+          "planarOverlapLength": 172,
+          "connectedDeckLength": 132,
+          "connectedFraction": 0.767,
+          "ownershipBreakRows": 9,
+          "maximumVerticalDeckSeparation": 2.881,
+          "maximumGradeDifference": 0.1358,
+          "minimumPlanarDy": -0.65,
+          "maximumPlanarDy": 2.881,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane diverge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {
@@ -3449,7 +4752,7 @@
       "branchRouteId": "ramp_47",
       "trafficRoutePair": "ramp_47 -> wangan_0",
       "type": "merge",
-      "side": "left",
+      "side": "right",
       "hostLaneCount": 3,
       "branchLaneCount": 2,
       "hostWidth": 13.25,
@@ -3491,13 +4794,36 @@
         ],
         "length": 63.83
       },
-      "sourceDataQuality": "measured-clean",
-      "automaticGenerationSuitability": "curved-suitable",
+      "sourceDataQuality": "requires-review",
+      "automaticGenerationSuitability": "manual-review",
+      "progressiveDeckClassification": {
+        "category": "vertical-ramp-complex",
+        "eligible": false,
+        "reason": "deck ownership breaks for 16 m while pavements still overlap in plan",
+        "metrics": {
+          "transferConnected": true,
+          "lateralSeparationReached": true,
+          "reconnectsAfterOwnershipBreak": false,
+          "planarOverlapLength": 176,
+          "connectedDeckLength": 156,
+          "connectedFraction": 0.886,
+          "ownershipBreakRows": 5,
+          "maximumVerticalDeckSeparation": 1.662,
+          "maximumGradeDifference": 0.064,
+          "minimumPlanarDy": -0.171,
+          "maximumPlanarDy": 1.32,
+          "verticalPassThrough": false,
+          "requiresVerticalRamp": true,
+          "collisionDeckOwnership": "breaks-before-lateral-separation"
+        }
+      },
       "classifications": [
         "multi-lane merge",
-        "curved but suitable"
+        "vertical-ramp-complex",
+        "deck-ownership incompatibility",
+        "manual review required"
       ],
-      "manualReviewReason": null,
+      "manualReviewReason": "deck ownership breaks for 16 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
       "worldCoordinates": {

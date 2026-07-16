@@ -7,6 +7,8 @@
  * boundaries independently.
  */
 
+import { classifyProgressiveJunction } from './progressive-junction-classifier.js';
+
 export const PROGRESSIVE_PHASES = Object.freeze([
   'approach',
   'opening',
@@ -103,7 +105,8 @@ function buildRecord(map, zone, prototype) {
     hostRouteId: zone.host.id,
     branchRouteId: zone.branch.id,
     type: zone.kind,
-    side: zone.side > 0 ? 'left' : 'right',
+    // horizontalNormal() is the driver's right, so negative lateral is left.
+    side: zone.side > 0 ? 'right' : 'left',
     sideSign: zone.side,
     which: zone.which,
     approachStart,
@@ -338,6 +341,7 @@ function buildRecord(map, zone, prototype) {
 }
 
 export function buildProgressiveTransitions(map, prototypes) {
+  map.progressiveCandidateClassifications = [];
   if (map.options.progressiveMerges === false) return [];
   const records = [];
   for (const prototype of prototypes) {
@@ -349,12 +353,33 @@ export function buildProgressiveTransitions(map, prototypes) {
       || zone.which !== prototype.which) {
       throw new Error(`Progressive prototype identity drift: ${prototype.id}`);
     }
+    const classification = classifyProgressiveJunction(map, zone);
+    const candidate = {
+      ...prototype,
+      pin: { ...prototype.pin },
+      classification,
+      active: false,
+      side: zone.side > 0 ? 'right' : 'left',
+      sideSign: zone.side,
+      hostLaneCount: zone.host.lanes,
+      branchLaneCount: zone.branch.lanes,
+      distance: zone.hostRef,
+      sourceZone: zone,
+      transition: null,
+    };
+    map.progressiveCandidateClassifications.push(candidate);
+    zone.progressiveClassification = classification;
+    if (!classification.eligible) continue;
     const record = buildRecord(map, zone, prototype);
+    record.classification = classification;
     zone.progressive = record;
     if (!zone.host._progressiveTransitionsAsHost) zone.host._progressiveTransitionsAsHost = [];
     if (!zone.branch._progressiveTransitionsAsBranch) zone.branch._progressiveTransitionsAsBranch = [];
     zone.host._progressiveTransitionsAsHost.push(record);
     zone.branch._progressiveTransitionsAsBranch.push(record);
+    candidate.active = true;
+    candidate.distance = (record.parallelStart + record.absorptionStart) * 0.5;
+    candidate.transition = record;
     records.push(record);
   }
   return records;
