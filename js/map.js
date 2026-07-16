@@ -2632,7 +2632,8 @@ export class HighwayMap {
       if (route._zonesAsBranch
         && this._surfaceDefersToHost(route, projection.distance, projection.signedLateral)) continue;
       const bank = this._bankAt(route, projection.distance);
-      const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+      const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral
+        + this._progressiveBranchDeckOffsetAt(route, projection.distance, projection.signedLateral);
       const vertical = position.y - deckY;
       if (vertical < -verticalWindow || vertical > verticalWindow + 2.5) continue;
       corridors.push({
@@ -3964,6 +3965,14 @@ export class HighwayMap {
   }
 
   /** Deck edge point with banking applied. lateral along the base normal. */
+  _progressiveBranchDeckOffsetAt(route, distance, lateral) {
+    const transitions = route?._progressiveTransitionsAsBranch;
+    if (!transitions) return 0;
+    let offset = 0;
+    for (const transition of transitions) offset += transition.branchDeckOffsetAt(distance, lateral);
+    return offset;
+  }
+
   _deckPoint(frame, lateral, lift = 0) {
     const point = frame.position.clone().addScaledVector(frame.normal, lateral);
     point.y += Math.tan(frame.bank) * lateral;
@@ -3971,12 +3980,7 @@ export class HighwayMap {
     // shared transition phases. This removes the sub-metre shelf that would
     // otherwise remain when two audited centrelines meet at slightly
     // different bank/elevation samples.
-    const branchTransitions = frame.route?._progressiveTransitionsAsBranch;
-    if (branchTransitions) {
-      for (const transition of branchTransitions) {
-        point.y += transition.branchDeckOffsetAt(frame.distance, lateral);
-      }
-    }
+    point.y += this._progressiveBranchDeckOffsetAt(frame.route, frame.distance, lateral);
     point.y += lift;
     return point;
   }
@@ -4393,7 +4397,8 @@ export class HighwayMap {
       if (projection.endOvershoot > 2) continue; // beyond the other surface's end
       const half = this._halfWidthAt(other, projection.distance);
       const abs = Math.abs(projection.signedLateral);
-      const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral;
+      const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral
+        + this._progressiveBranchDeckOffsetAt(other, projection.distance, projection.signedLateral);
       // Conflict only when the other deck sits within the barrier's own
       // height band: surface between 1.35 m below the base (a rail on a
       // sunken sliver still reads doubled) and 1.6 m above it (a slab low
