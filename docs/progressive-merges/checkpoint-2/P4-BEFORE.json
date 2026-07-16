@@ -1,0 +1,55 @@
+{
+  "expectedInvariant": "open auxiliary -> source-derived branch lane 0 handoff",
+  "metrics": {
+    "junctionId": "J2:diverge:c1_0:r1_0:start",
+    "side": "left",
+    "hostRouteId": "c1_0",
+    "branchRouteId": "r1_0",
+    "hostLaneCount": 2,
+    "branchLaneCount": 2,
+    "alignment": {
+      "hostS": 10982.425,
+      "branchS": 148
+    },
+    "physicalSplit": {
+      "hostS": 10991.072,
+      "branchS": 156
+    },
+    "exteriorHandoff": {
+      "hostS": 10973.973,
+      "branchS": 140
+    },
+    "auxiliary": {
+      "width": 3.55,
+      "minimumUsableExtraWidth": 0.847,
+      "prematureClosureHostS": 10968.401,
+      "endpointGapToBranchLane0": 9.39,
+      "maximumReferencePathGap": 9.39,
+      "maximumTangentStepDeg": 2.672
+    },
+    "pavementCollision": {
+      "sampledStations": 28,
+      "pavementHoleSamples": 0,
+      "collisionCorrectionSamples": 0,
+      "maximumCollisionCorrection": 0
+    },
+    "guardrail": {
+      "emittedInteriorSamples": 3,
+      "firstInteriorHostS": 10976.184
+    },
+    "markings": {
+      "illegalSolidAcrossExitLength": 17.098,
+      "maximumDashGap": 5,
+      "handoffGapToBranchBoundary": 5.537
+    }
+  },
+  "failures": [
+    "auxiliary width closes to 0.85 m before branch alignment",
+    "premature lane closure starts at host s=10968.4",
+    "auxiliary endpoint is 9.39 m from branch lane 0",
+    "auxiliary path departs the source-derived handoff by 9.39 m",
+    "3 emitted host-rail samples lie inside the shared paved union",
+    "17.1 m solid marking crosses the exit handoff",
+    "temporary boundary ends 5.54 m from the branch boundary"
+  ]
+}

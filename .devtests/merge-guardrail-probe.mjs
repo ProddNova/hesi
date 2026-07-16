@@ -38,10 +38,98 @@ const fail = (label, detail) => {
 };
 
 const zones = map.junctionZones.filter((z) => z.crossable);
-const summary = { convergenceChecked: 0, worstConvergence: 0, openingCrossed: 0, unexplainedGaps: 0 };
+const summary = {
+  convergenceChecked: 0,
+  worstConvergence: 0,
+  openingCrossed: 0,
+  unexplainedGaps: 0,
+  progressiveOwnershipTransfers: 0,
+};
+
+// The old chainage-only assertion produced a false positive once a progressive
+// host rail remained visible through the former mouth opening: it could not
+// distinguish an illegal rail on the stable host edge from the correct rail
+// relocated to the widened carriageway exterior. Compare emitted parapet
+// vertices with the shared envelope. A truly interior rail still mismatches
+// both outer and base laterals and fails this invariant.
+const progressiveRailFollowsExterior = (zone, from, to) => {
+  const samples = (zone.host._progressiveRailSamples || []).filter((sample) => (
+    sample.transitionId === zone.progressive.id
+    && sample.side === zone.side
+    && sample.distance >= from - 0.01
+    && sample.distance <= to + 0.01));
+  return samples.length > 0 && samples.every((sample) => {
+    const envelope = zone.progressive.envelopeAt(sample.distance);
+    const squeeze = 0.36 * (1 - sample.terminalFactor);
+    const expectedBase = envelope.outerLateral - zone.side * (0.42 - squeeze);
+    return Math.abs(sample.actualOuterLateral - envelope.outerLateral) < 0.03
+      && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+  });
+};
 
 // 1. outer-rail convergence continuity
 for (const zone of zones) {
+  if (zone.progressive) {
+    summary.convergenceChecked += 1;
+    const first = zone.progressive.guardrailEnvelope[0];
+    const last = zone.progressive.guardrailEnvelope.at(-1);
+    const firstFrame = map._frameAt(zone.host, first.hostS);
+    const lastFrame = map._frameAt(zone.host, last.hostS);
+    const firstBase = zone.side * map._halfWidthAt(zone.host, first.hostS);
+    const lastBase = zone.side * map._halfWidthAt(zone.host, last.hostS);
+    if (zone.progressive.type !== 'diverge') {
+      const difference = Math.max(Math.abs(first.lateral - firstBase), Math.abs(last.lateral - lastBase));
+      summary.worstConvergence = Math.max(summary.worstConvergence, difference);
+      if (difference > 0.05 || !firstFrame || !lastFrame) {
+        fail('outer-rail-convergence', `${zone.id}: progressive envelope does not return to the stable host edge (${difference.toFixed(2)} m)`);
+      }
+      continue;
+    }
+    // Old false-positive logic required the diverge host envelope to return
+    // to its original edge. That is precisely the premature lane closure P4
+    // must prohibit. Grade the actual exterior ownership transfer instead:
+    // widened host terminal -> branch exterior terminal, each on its own
+    // authoritative paved boundary, with a bounded world-space handoff gap.
+    const hostSamples = (zone.host._progressiveRailSamples || []).filter((sample) => (
+      sample.transitionId === zone.progressive.id && sample.role === 'host-exterior'));
+    const branchSamples = (zone.branch._progressiveRailSamples || []).filter((sample) => (
+      sample.transitionId === zone.progressive.id && sample.role === 'branch-exterior'));
+    let valid = hostSamples.length > 0 && branchSamples.length > 0;
+    valid &&= hostSamples.every((sample) => {
+      const envelope = zone.progressive.envelopeAt(sample.distance);
+      const squeeze = 0.36 * (1 - sample.terminalFactor);
+      const expectedBase = envelope.outerLateral - zone.side * (0.42 - squeeze);
+      return Math.abs(sample.actualOuterLateral - envelope.outerLateral) < 0.03
+        && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+    });
+    valid &&= branchSamples.every((sample) => {
+      const frame = map._frameAt(zone.branch, sample.distance);
+      const expectedOuter = sample.side * frame.half;
+      const squeeze = 0.36 * (1 - sample.terminalFactor);
+      const expectedBase = expectedOuter - sample.side * (0.42 - squeeze);
+      return Math.abs(sample.actualOuterLateral - expectedOuter) < 0.03
+        && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+    });
+    const hostEnd = hostSamples.at(-1)?.actualBasePosition;
+    const branchStart = branchSamples[0]?.actualBasePosition;
+    const handoffGap = hostEnd && branchStart ? Math.hypot(
+      hostEnd.x - branchStart.x,
+      hostEnd.y - branchStart.y,
+      hostEnd.z - branchStart.z,
+    ) : Infinity;
+    summary.worstConvergence = Math.max(summary.worstConvergence, handoffGap);
+    valid &&= handoffGap <= 6;
+    // Machine rounding can place an exact 3.55 m envelope one ulp below the
+    // source lane-width literal. This epsilon is numerical only; the emitted
+    // vertex/envelope checks above retain their 0.03 m physical tolerance.
+    valid &&= Math.abs(last.lateral - lastBase) + 1e-6 >= zone.progressive.auxiliaryWidth;
+    if (!valid) {
+      fail('outer-rail-convergence', `${zone.id}: invalid host-to-branch exterior ownership handoff (${handoffGap.toFixed(2)} m)`);
+    } else {
+      summary.progressiveOwnershipTransfers += 1;
+    }
+    continue;
+  }
   const pieces = zone.branchOuterRailOnPieces?.length ? zone.branchOuterRailOnPieces
     : (zone.branchOuterRailOn ? [zone.branchOuterRailOn] : null);
   if (!zone.hostRailOpen || !pieces) continue;
@@ -81,6 +169,11 @@ for (const zone of zones) {
     for (const [from, to] of map._zoneIntervalPieces(zone.host, [lo + 2, hi - 2])) {
       const overlap = Math.min(run.to, to) - Math.max(run.from, from);
       if (overlap > 4) {
+        if (zone.progressive) {
+          const overlapFrom = Math.max(run.from, from);
+          const overlapTo = Math.min(run.to, to);
+          if (progressiveRailFollowsExterior(zone, overlapFrom, overlapTo)) continue;
+        }
         summary.openingCrossed += 1;
         fail('rail-across-merge-opening', `${zone.kind} ${zone.branch.id} on ${zone.host.id}: run ${run.from.toFixed(0)}..${run.to.toFixed(0)} crosses opening ${lo.toFixed(0)}..${hi.toFixed(0)} by ${overlap.toFixed(0)} m`);
       }
@@ -109,7 +202,7 @@ for (const zone of zones) {
     const step = Math.max(1, Math.floor(inside.length / 6));
     let suppressedAll = true;
     for (let k = 0; k < inside.length; k += step) {
-      const probe = map._deckPoint(frames[inside[k]], side * (frames[inside[k]].half - 0.42), 0.02);
+      const probe = map._deckPoint(frames[inside[k]], map._surfaceEdgeLateral(frames[inside[k]], side, 0.42), 0.02);
       if (!map._barrierSuppressed(probe, branch)) { suppressedAll = false; break; }
     }
     if (!suppressedAll) {
@@ -121,5 +214,6 @@ for (const zone of zones) {
 
 console.log(`\nzones with crossable=${zones.length} convergence-checked=${summary.convergenceChecked}`);
 console.log(`worst convergence diff=${summary.worstConvergence.toFixed(2)} m | opening-crossed=${summary.openingCrossed} | unexplained-branch-gaps=${summary.unexplainedGaps}`);
+console.log(`progressive exterior ownership transfers=${summary.progressiveOwnershipTransfers}`);
 if (failures) { console.log(`MERGE GUARDRAIL PROBE: FAIL (${failures})`); process.exit(1); }
 console.log('MERGE GUARDRAIL PROBE: PASS');

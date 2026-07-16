@@ -1,7 +1,8 @@
 # Developer network map (`M`)
 
 A full-screen, interactive top-down map of the entire runtime highway network,
-opened with the **M** key. It is a development / debugging tool, separate from
+opened with the **M** key or the **DEV MAP** touch button. It is a development /
+debugging tool, separate from
 the in-fiction phone minimap, for inspecting routes and teleporting the car (or
 the noclip drone) anywhere on the network.
 
@@ -10,7 +11,9 @@ Files:
 - `js/dev-map.js` — the self-contained `DeveloperMap` module (overlay, canvas
   renderer, transforms, hit-testing, teleport selection). Owns no game state.
 - `styles/dev-map.css` — the overlay styling (isolated from `styles.css`).
-- `.devtests/dev-map-test.mjs` — focused Playwright regression (27 checks).
+- `.devtests/dev-map-test.mjs` — focused Playwright regression (33 checks).
+- `.devtests/e2e.mjs` — generic mobile touch entry, responsive layout, pinch,
+  pan, close, and control-overlap regression.
 - Integration lives in `js/game.js` (`setupDevMap`, `getDevNetwork`,
   `teleportToRoutePoint`) and one `<link>` in `index.html`.
 
@@ -19,10 +22,11 @@ Files:
 | Input | Action |
 |-------|--------|
 | `M` | Toggle the developer map (ignored while typing in an input/textarea/select) |
+| `DEV MAP` touch button | Open the same developer map on any coarse-pointer/mobile layout |
 | `Escape` | Close the map |
 | Close button | Close the map |
-| Drag empty map (left button) | Pan (disables follow) |
-| Mouse wheel | Zoom around the cursor |
+| Drag empty map / one-finger drag | Pan (disables follow) |
+| Mouse wheel / two-finger pinch | Zoom around the cursor or gesture centre |
 | Double-click | Centre on the current position |
 | Hover a road | Highlight it + show a tooltip of real metadata |
 | Click a road | Teleport to the closest point on it |
@@ -31,10 +35,42 @@ Files:
 | **Follow: ON/OFF** | Keep the live position centred every frame |
 | **Labels: ON/OFF** | Draw route codes at sensible zooms (de-cluttered) |
 
+## Progressive candidate pins
+
+The four audited candidates retain stable `P1`–`P4` pins. The active same-level
+prototype is a bright magenta diamond; deferred multi-level/manual candidates
+are hollow amber diamonds. Open the map with `M` or the mobile **DEV MAP**
+button, choose **Fit network**, hover a pin for classification/topology/status
+metadata, and click the diamond to teleport to the host transition. The info
+line reads `1 active · 3 deferred (P1, P2, P3, P4)`.
+
+| Pin | Junction | Route pair | Side | Status | World X, Y, Z |
+| --- | --- | --- | --- | --- | --- |
+| P1 | `J8:merge:r11_0:ramp_1:end` | `ramp_1 → r11_0` | right | deferred vertical ramp | `-1128.45, 73.04, -3825.43` |
+| P2 | `J0:merge:c1_0:c1_3:end` | `c1_3 → c1_0` | left | deferred vertical ramp | `-897.45, 52.37, -2806.42` |
+| P3 | `J10:merge:wangan_1:ramp_3:end` | `ramp_3 → wangan_1` | right | deferred vertical ramp | `696.08, 29.71, -5832.86` |
+| P4 | `J2:diverge:c1_0:r1_0:start` | `c1_0 → r1_0` | left | active same-level prototype | `-1094.38, 57.33, -3014.18` |
+
+Pins use the read-only `progressive-prototype` and
+`deferred-progressive-candidate` categories. Junction ID, host/branch IDs,
+merge/diverge type, driver-relative side, lane counts, classification, phase
+boundaries, status and teleport route all come from the shared candidate
+configuration/classifier records; presentation and interaction contain no
+per-junction conditionals. In legacy comparison mode
+(`?legacyProgressiveMerges=1`) the map exposes no candidate pins.
+
 While the map is open, gameplay is **frozen** — the vehicle and noclip drone
 stay put and all gameplay keys are swallowed. Freezing is intentional and
 preferable to letting the car or drone drift on a stuck key. Closing restores
 normal controls and, deliberately, does **not** re-acquire pointer lock.
+
+The touch entry point is part of the shared utility-control group and is shown
+in driving, garage, and noclip modes on coarse-pointer/mobile layouts. It calls
+the same `toggleDevMap()` path as the keyboard shortcut; there is no separate
+mobile map state or renderer. Safe-area insets, a responsive toolbar,
+one-finger pan, two-finger pinch zoom, tap-to-teleport, and the in-map Close
+button cover both portrait and landscape devices rather than targeting a
+specific phone model.
 
 ## Architecture
 

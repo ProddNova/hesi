@@ -1,0 +1,68 @@
+{
+  "expectedInvariant": "once usable, P4 corridor remains positive and transfers into real r1_0 lane 0",
+  "metrics": {
+    "junctionId": "J2:diverge:c1_0:r1_0:start",
+    "side": "left",
+    "feed": {
+      "branchRouteId": "r1_0",
+      "branchLane": 0,
+      "centreLateral": 1.775,
+      "innerBoundaryLateral": 3.55,
+      "outerBoundaryLateral": 0
+    },
+    "phases": {
+      "usableHostS": 10888.887,
+      "handoffHostS": 10971.878,
+      "transferCompleteHostS": 10998.16,
+      "transferCompleteBranchS": 164,
+      "goreHostS": 10998.16,
+      "goreBranchS": 164
+    },
+    "corridor": {
+      "sections": 60,
+      "acceptedLaneWidth": 3.4,
+      "minimumWidth": 3.55,
+      "prematureClosureHostS": null,
+      "minimumConsecutiveOverlap": 0.586,
+      "maximumCentreTangentStepDeg": 2.283,
+      "maximumCentreMidpointError": 0,
+      "maximumPavedEnvelopeRetreat": 0,
+      "endpointCentreGap": 0,
+      "endpointInnerGap": 0,
+      "endpointOuterGap": 0,
+      "branchTangentHandoffDeg": 0.019,
+      "firstBranchOwnershipHostS": 10998.16
+    },
+    "pavementCollision": {
+      "sampledInteriorPoints": 300,
+      "pavementHoleSamples": 0,
+      "collisionCorrectionSamples": 0,
+      "maximumCollisionCorrection": 0,
+      "continuingBranchSamples": 25,
+      "continuingBranchPavementHoles": 0,
+      "continuingBranchWallHits": 0
+    },
+    "guardrailCollision": {
+      "emittedRailSamples": 52,
+      "intrusiveRailSamples": 0,
+      "transitionWallSegments": 29,
+      "intrusiveWallSegments": 0
+    },
+    "markings": {
+      "prematureGorePieces": 0,
+      "hostOuterPieces": 44,
+      "hostInnerPieces": 31,
+      "branchInnerPieces": 3,
+      "branchDividerPieces": 4,
+      "branchGorePieces": 8,
+      "maximumModelBoundaryGap": 0,
+      "maximumEmittedBoundaryDeviation": 0.421,
+      "outerSolidToDividerGap": 0.699,
+      "innerDashRouteHandoffGap": 6.056,
+      "innerDashToGoreGap": 1.389,
+      "dividerDashRouteHandoffGap": 8.802,
+      "goreSolidRouteEdgeGap": 1.491
+    }
+  },
+  "failures": []
+}

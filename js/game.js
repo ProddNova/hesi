@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260715h';
+import * as MapModule from './map.js?v=20260716a';
 import * as PhysicsModule from './physics.js?v=20260713a';
 import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
@@ -7,7 +7,7 @@ import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260713a';
 import { GameUI } from './ui.js?v=20260713a';
-import { DeveloperMap } from './dev-map.js?v=20260715f';
+import { DeveloperMap } from './dev-map.js?v=20260716a';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
@@ -85,9 +85,10 @@ class ShutokoNights {
   }
   buildWorld(){
     const mapBuildStarted=performance.now();
-    // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?paAccessLanes=1
+    // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?legacyProgressiveMerges=1
+    // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
-    try{const legacyMouths=typeof location!=='undefined'&&/[?&]legacyMouths=1/.test(location.search);const paAccessLanes=typeof location!=='undefined'&&/[?&]paAccessLanes=1/.test(location.search);this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
@@ -162,6 +163,7 @@ class ShutokoNights {
       else if(action==='camera'&&this.mode==='driving')this.cycleCamera();
       else if(action==='recover'&&this.mode==='driving')this.recover();
       else if(action==='debug')this.toggleDebugMenu();
+      else if(action==='dev-map'&&this.started&&!this.ui.phoneOpen&&!this.ui.pcOpen&&!this.debug.menuOpen)this.toggleDevMap();
       else if(action==='drone-faster'&&this.debug.noclip){this.debug.moveSpeed=clamp(this.debug.moveSpeed*1.25,5,400);this.updateDroneSpeedHUD();}
       else if(action==='drone-slower'&&this.debug.noclip){this.debug.moveSpeed=clamp(this.debug.moveSpeed/1.25,5,400);this.updateDroneSpeedHUD();}
       navigator.vibrate?.(10);
@@ -198,11 +200,11 @@ class ShutokoNights {
   enterGarage(reason='service'){
     this.ui.fade(true);setTimeout(()=>{
       if(reason==='crash'||reason==='tow'){this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};}
-      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Shiba PA workshop // Shift complete','amber');
+      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Shiba PA workshop // Shift complete','amber');if(this.p4CaptureView)setTimeout(()=>this.exitGarage(),80);
     },480);
   }
   exitGarage(){
-    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('C1 access ramp // Drive safe','amber');},480);
+    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('C1 access ramp // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
   }
 
   getInput(){
@@ -302,11 +304,69 @@ class ShutokoNights {
         oneWay:meta?.oneWay,bidirectional:meta?.bidirectional,
         direction:meta?.oneWayDirection??1};
     });
-    return {routes,bounds:mm.bounds,junctions:mm.junctions,serviceAreas:mm.serviceAreas,garage:mm.garage};
+    return {routes,bounds:mm.bounds,junctions:mm.junctions,serviceAreas:mm.serviceAreas,garage:mm.garage,prototypePins:mm.prototypePins||[]};
   }
   _snapNoclipCamera(){
     const cp=Math.cos(this.debug.pitch),look=new THREE.Vector3(Math.sin(this.debug.yaw)*cp,Math.sin(this.debug.pitch),Math.cos(this.debug.yaw)*cp);
     this.camera.position.copy(this.debug.position);this.camera.up.set(0,1,0);this.camera.lookAt(this.debug.position.clone().add(look));this.camera.fov=64;this.camera.updateProjectionMatrix();
+  }
+  applyP4CaptureView(name){
+    // Deterministic, query-only visual-audit cameras. These source-chainage
+    // fixtures are intentionally independent of progressive phase output so
+    // legacy/progressive comparisons use identical transforms.
+    const views={
+      'high-plan':{routeId:'c1_0',distance:10928,lane:null,up:150,back:0,lateral:0,plan:true},
+      'corridor-debug':{routeId:'c1_0',distance:10945,lane:null,up:125,back:0,lateral:-4,plan:true},
+      'host-approach':{routeId:'c1_0',distance:10882,lane:1,up:7,back:58,lateral:0},
+      'auxiliary-lane':{routeId:'c1_0',distance:10928,lane:null,targetLateral:-5.325,up:6,back:42,lateral:0},
+      'branch-handoff':{routeId:'r1_0',distance:148,lane:0,up:8,back:48,lateral:0},
+      'guardrail-opening':{routeId:'r1_0',distance:140,lane:null,targetLateral:-4.1,up:13,back:30,lateral:-15},
+      'collision-hitbox':{routeId:'c1_0',distance:10982.425,lane:null,up:72,back:0,lateral:0,plan:true,hitboxes:true},
+      'normal-chase':{position:{x:-1052.7282169,y:64.8843403,z:-3016.0130739},target:{x:-1012.7993393,y:60.0715092,z:-3026.8561882}},
+      'close-marking':{routeId:'r1_0',distance:154,lane:0,up:7,back:28,lateral:0},
+      'guardrail-side':{routeId:'r1_0',distance:145,lane:null,targetLateral:-4.1,up:11,back:26,lateral:-16},
+      'host-continuation':{routeId:'c1_0',distance:11035,lane:1,up:7,back:45,lateral:0},
+      'branch-continuation':{routeId:'r1_0',distance:215,lane:0,up:7,back:45,lateral:0},
+    };
+    const view=views[name];if(!view||!this.map)return false;
+    this.traffic?.setDensity?.(0);this.traffic?.vehicles?.forEach?.(vehicle=>{if(vehicle.mesh)vehicle.mesh.visible=false;});
+    this.debug.noclip=true;this.debug.trafficDisabled=true;if(this.playerMesh)this.playerMesh.visible=false;
+    this.setDebugHitbox?.('roads',!!view.hitboxes);this.setDebugHitbox?.('walls',!!view.hitboxes);
+    const clutter=new Set([this.map.materials.facadeOffice,this.map.materials.facadeDark,this.map.materials.facadeHotel,this.map.materials.facadeIndustrial,this.map.materials.building]);this.map.group.traverse(object=>{if(object.isMesh&&clutter.has(object.material))object.visible=false;});
+    document.querySelector('#hud')?.setAttribute('style','display:none!important');document.querySelector('#debug-drone-hud')?.setAttribute('style','display:none!important');
+    let target,tangent,normal;
+    if(view.position&&view.target){
+      this.debug.position.copy(vec(view.position));target=vec(view.target);tangent=target.clone().sub(this.debug.position).normalize();normal=new THREE.Vector3(tangent.z,0,-tangent.x).normalize();
+    }else if(view.path==='auxiliary'){
+      const transition=this.map.progressiveTransitionById.get('J2:diverge:c1_0:r1_0:start'),path=transition.laneCentres.find(entry=>entry.id==='aux:0').points;
+      const sampleAt=hostS=>{let upper=1;while(upper<path.length&&path[upper].hostS<hostS)upper++;const right=path[Math.min(upper,path.length-1)],left=path[Math.max(0,upper-1)],t=clamp((hostS-left.hostS)/Math.max(1e-6,right.hostS-left.hostS),0,1);return vec(left.position).lerp(vec(right.position),t);};
+      const anchor=sampleAt(view.hostS),look=sampleAt(Math.min(transition.transferComplete,view.hostS+view.lookAhead));target=look;tangent=look.clone().sub(sampleAt(view.hostS-2)).normalize();normal=new THREE.Vector3(tangent.z,0,-tangent.x).normalize();
+      this.debug.position.copy(anchor).addScaledVector(tangent,-view.back).addScaledVector(normal,view.lateral);this.debug.position.y=anchor.y+view.up;
+    }else{
+      const route=this.map.routes.get(view.routeId),frame=this.map._frameAt(route,view.distance);target=view.lane===null?this.map._deckPoint(frame,view.targetLateral||0,.1):this.map.sampleLane(view.routeId,view.distance,view.lane,1).position;tangent=frame.tangent;normal=frame.normal;
+      this.debug.position.set(target.x-tangent.x*view.back+normal.x*view.lateral,target.y+view.up,target.z-tangent.z*view.back+normal.z*view.lateral);
+    }
+    const x=this.debug.position.x,y=this.debug.position.y,z=this.debug.position.z;
+    this.debug.position.set(x,y,z);this.debug.yaw=Math.atan2(target.x-x,target.z-z);const horizontal=Math.hypot(target.x-x,target.z-z);this.debug.pitch=Math.atan2(target.y-y,Math.max(.001,horizontal));
+    this._snapNoclipCamera();this.map._visibleKey=null;this.map.update(this.debug.position,performance.now()/1000);
+    if(name==='corridor-debug')this.installP4CorridorLegend();if(this.p4OwnershipDebug)this.installP4OwnershipLegend();
+    return true;
+  }
+  installP4CorridorLegend(){
+    if(document.querySelector('#p4-corridor-legend'))return;
+    const transition=this.map?.progressiveTransitionById?.get?.('J2:diverge:c1_0:r1_0:start');if(!transition)return;
+    const legend=document.createElement('div');legend.id='p4-corridor-legend';legend.style.cssText='position:fixed;left:18px;top:18px;z-index:9999;padding:12px 14px;background:rgba(2,5,12,.88);border:1px solid #78e8ff;color:#f4f7ff;font:600 14px/1.45 ui-monospace,monospace;pointer-events:none;text-shadow:0 1px 2px #000';
+    const minimum=Math.min(...transition.auxiliaryCorridor.map(section=>section.width)),minimumLane=Math.min(...transition.auxiliaryLaneCorridors.flat().map(section=>section.width));
+    legend.innerHTML=`<div style="color:#fff;font-size:15px">P4 ${transition.id} · ${transition.topology}</div><div><span style="color:#29e6ff">━━</span> exit lane 0 centre</div><div><span style="color:#6e7dff">━━</span> exit lane 1 centre</div><div><span style="color:#ffa52f">━━</span> host/exit boundary</div><div><span style="color:#fff">━━</span> exit lane divider</div><div><span style="color:#ff3fd2">━━</span> exit outer boundary</div><div><span style="color:#70ff55">━━</span> target r1_0 lanes ${transition.branchExitLanes.join(' + ')}</div><div><span style="color:#fff">┃</span> total width · min ${minimum.toFixed(2)} m</div><div><span style="color:#fff">┃</span> per-lane width · min ${minimumLane.toFixed(2)} m</div><div><span style="color:#ffe52a">┃</span> outer marked lane · ${transition.auxiliaryMarkedWidth.toFixed(2)} m</div><div><span style="color:#ffee22">●</span> ownership @ host ${transition.transferComplete.toFixed(2)} / branch ${transition.transferCompleteBranch.toFixed(2)}</div>`;
+    document.body.append(legend);
+  }
+  installP4OwnershipLegend(){
+    if(document.querySelector('#p4-ownership-legend'))return;
+    const data=this.map?.progressiveOwnershipDebugOverlay?.userData;if(!data)return;
+    const markings=data.markings,rails=data.rails;
+    const legend=document.createElement('div');legend.id='p4-ownership-legend';legend.style.cssText='position:fixed;right:18px;top:18px;z-index:9999;padding:12px 14px;background:rgba(2,5,12,.9);border:1px solid #fff;color:#f4f7ff;font:600 13px/1.42 ui-monospace,monospace;pointer-events:none;text-shadow:0 1px 2px #000;max-width:360px';
+    legend.innerHTML=`<div style="color:#fff;font-size:15px">P4 emitted ownership</div><div style="color:#ff2a2a">RED host markings · ${markings.host}</div><div style="color:#38ff68">GREEN branch markings · ${markings.branch}</div><div style="color:#ffe52a">YELLOW transition markings · ${markings.transition}</div><div style="color:#ff29e6">MAGENTA illegal retained · ${markings.illegalRetained}</div><div style="color:#9d9d9d">suppressed attempts · ${markings.suppressedAttempts}</div><div style="margin-top:5px;color:#2485ff">BLUE host rail · ${rails.hostSegments}</div><div style="color:#ff8b24">ORANGE branch rail · ${rails.branchSegments}</div><div style="color:#fff">WHITE transition rail · ${rails.transitionSegments}</div><div style="color:#ff0022">BRIGHT RED blocked opening · ${rails.blocked}</div><div style="color:#24f5ff">CYAN unexplained gap · ${rails.unexplainedGaps}</div><div style="color:#d7d7d7">owner handoff gap · ${rails.handoffGap.toFixed(2)} m</div>`;
+    document.body.append(legend);
   }
   teleportToRoutePoint({routeId,distance,lane=0,direction=1}){
     // Use the authoritative route sampler for the exact centre, road height and

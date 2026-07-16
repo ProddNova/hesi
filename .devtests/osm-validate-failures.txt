@@ -27,8 +27,6 @@
 [ramp-drive] merge c1_6 -> c1_2@10900 [ramp end]: wall hit in lane centre @244 (-1087, -3032)
 [ramp-drive] merge c1_6 -> c1_2@10900 [ramp end]: wall hit in lane centre @246 (-1089, -3032)
 [ramp-drive] merge c1_6 -> c1_2@10900 [ramp end]: wall hit in lane centre @248 (-1091, -3032)
-[ramp-drive] diverge c1_0@10837 -> r1_0 [branch]: wall hit in lane centre @142 (-1029, -3021)
-[ramp-drive] diverge c1_0@10837 -> r1_0 [branch]: wall hit in lane centre @144 (-1027, -3022)
 [ramp-drive] diverge c1_2@10352 -> r1_3 [branch]: wall hit in lane centre @124 (-883, -2867)
 [ramp-drive] diverge c1_2@10352 -> r1_3 [branch]: wall hit in lane centre @126 (-883, -2869)
 [ramp-drive] diverge c1_2@10352 -> r1_3 [branch]: wall hit in lane centre @128 (-883, -2871)

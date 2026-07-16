@@ -4,6 +4,8 @@ import * as THREE from 'three';
 // XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
 // any extractor run).
 import ROUTE_DATA from '../data/routes-smoothed.js';
+import { buildProgressiveTransitions } from './progressive-merge.js';
+import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -139,6 +141,9 @@ export class HighwayMap {
     this.junctions = [];
     this.serviceAreas = [];
     this.wallSegments = [];
+    this.progressiveTransitions = [];
+    this.progressiveCandidateClassifications = [];
+    this.progressiveTransitionById = new Map();
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
     // options.markingDebug: per-piece paint/suppression records (see
@@ -177,6 +182,8 @@ export class HighwayMap {
     this._defineServiceAreas();
     this._finalizeNetwork();
     this._buildWorld();
+    if (this.options.progressiveCorridorDebug) this._buildProgressiveCorridorDebugOverlay();
+    if (this.options.progressiveOwnershipDebug) this._buildP4OwnershipDebugOverlay();
     this._buildMinimapData();
 
     // Group aliases resolve to that group's longest carriageway.
@@ -1239,6 +1246,28 @@ export class HighwayMap {
     return half;
   }
 
+  /** Active one-sided progressive envelope for a host route station. */
+  _progressiveEnvelopeAt(route, distance) {
+    const transitions = route._progressiveTransitionsAsHost;
+    if (!transitions) return null;
+    for (const transition of transitions) {
+      if (!transition.containsHost(distance, 0.01)) continue;
+      return { transition, envelope: transition.envelopeAt(distance) };
+    }
+    return null;
+  }
+
+  /** True rendered/collision edge lateral, including a progressive envelope. */
+  _surfaceEdgeLateral(frame, side, inset = 0) {
+    const progressive = frame.route
+      ? this._progressiveEnvelopeAt(frame.route, frame.distance)
+      : null;
+    if (progressive && progressive.transition.sideSign === side) {
+      return progressive.envelope.outerLateral - side * inset;
+    }
+    return side * (frame.half - inset);
+  }
+
   _endIsOpen(route, whichEnd) {
     if (route.closed) return true;
     const endDistance = whichEnd > 0 ? route.length : 0;
@@ -1338,6 +1367,10 @@ export class HighwayMap {
       }
     }
     this._prepareJunctionZones();
+    this.progressiveTransitions = buildProgressiveTransitions(this, PROGRESSIVE_MERGE_PROTOTYPES);
+    this.progressiveTransitionById = new Map(
+      this.progressiveTransitions.map((transition) => [transition.id, transition]),
+    );
   }
 
   /**
@@ -1979,7 +2012,7 @@ export class HighwayMap {
         if (mode === 'off') { visible = false; cause = 'zone-off'; }
         else if (mode === 'on') { visible = true; cause = 'zone-on'; }
         else {
-          const probe = this._deckPoint(frame, side * (frame.half - 0.42), 0.02);
+          const probe = this._deckPoint(frame, this._surfaceEdgeLateral(frame, side, 0.42), 0.02);
           visible = !this._barrierSuppressed(probe, route);
           cause = visible ? 'probe-on' : 'probe-off';
         }
@@ -1992,10 +2025,14 @@ export class HighwayMap {
       let run = null;
       for (let i = 0; i < frames.length; i += 1) {
         if (barrierVisible[side][i]) {
-          if (!run) run = { from: frames[i].distance, fromIndex: i, fromHalf: frames[i].half };
+          if (!run) run = {
+            from: frames[i].distance,
+            fromIndex: i,
+            fromHalf: Math.abs(this._surfaceEdgeLateral(frames[i], side)),
+          };
           run.to = frames[i].distance;
           run.toIndex = i;
-          run.toHalf = frames[i].half;
+          run.toHalf = Math.abs(this._surfaceEdgeLateral(frames[i], side));
         } else if (run) {
           run.cutCause = causes[side][i];
           route._railRuns[side].push(run);
@@ -2011,6 +2048,25 @@ export class HighwayMap {
 
   /** Zone-forced rail mode at a chainage ('off' | 'on' | null = probe). */
   _railZoneMode(route, sideSign, distance) {
+    const hostTransitions = route._progressiveTransitionsAsHost;
+    if (hostTransitions) {
+      for (const transition of hostTransitions) {
+        if (transition.sideSign === sideSign && transition.containsHost(distance, 0.01)) {
+          return transition.hostRailModeAt?.(distance) || 'on';
+        }
+      }
+    }
+    const branchTransitions = route._progressiveTransitionsAsBranch;
+    if (branchTransitions) {
+      for (const transition of branchTransitions) {
+        const explicitMode = transition.branchRailModeAt?.(distance, sideSign);
+        if (explicitMode) return explicitMode;
+        const phase = transition.phaseAtBranch(distance);
+        if (!phase) continue;
+        if (transition.type === 'merge' && phase !== 'approach') return 'off';
+        if (transition.type === 'diverge' && (phase === 'approach' || phase === 'opening' || phase === 'parallel')) return 'off';
+      }
+    }
     const zones = route._railZones?.[sideSign];
     if (!zones) return null;
     let mode = null;
@@ -2060,12 +2116,22 @@ export class HighwayMap {
       const projection = this._projectToRoute(host, point, this._hostSeedIndex(host, frame._jxSeed));
       frame._jxSeed = projection.distance;
       const hostHalf = this._halfWidthAt(host, projection.distance);
+      const progressive = this._progressiveEnvelopeAt(host, projection.distance);
+      const lower = progressive?.envelope.lateralMin ?? -hostHalf;
+      const upper = progressive?.envelope.lateralMax ?? hostHalf;
       const bank = this._bankAt(host, projection.distance);
       const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+      let outside;
+      if (projection.signedLateral < lower) outside = lower - projection.signedLateral;
+      else if (projection.signedLateral > upper) outside = projection.signedLateral - upper;
+      else outside = -Math.min(projection.signedLateral - lower, upper - projection.signedLateral);
       return {
         L: projection.signedLateral,
         H: hostHalf,
-        g: Math.abs(projection.signedLateral) - hostHalf,
+        lower,
+        upper,
+        progressive: progressive?.transition || null,
+        g: outside,
         dy: point.y - deckY,
         overshoot: projection.endOvershoot,
       };
@@ -2084,8 +2150,8 @@ export class HighwayMap {
     // side of the host — only used by the apron path, where the section is
     // fully outside and therefore cannot straddle the host centreline.
     const sideSign = (hostward > 0 ? hi.L : lo.L) >= 0 ? 1 : -1;
-    const gSide0 = sideSign * lo.L - lo.H;
-    const gSide1 = sideSign * hi.L - hi.H;
+    const gSide0 = sideSign * lo.L - (sideSign > 0 ? lo.upper : -lo.lower);
+    const gSide1 = sideSign * hi.L - (sideSign > 0 ? hi.upper : -hi.lower);
     const latForG = (g) => {
       if (Math.abs(gSide1 - gSide0) < 1e-6) return null;
       return -half + ((g - gSide0) / (gSide1 - gSide0)) * (2 * half);
@@ -2104,7 +2170,12 @@ export class HighwayMap {
     // the linear endpoint interpolation of dy across the section (true dy
     // curves with bank/projection differences) cannot leave drawn strips
     // grazing the host within the z-fight band.
-    const COPLANAR = 0.18;
+    // A progressive transition owns one shared host plane. It may absorb a
+    // source branch whose centre plane is still easing by up to 0.75 m; its
+    // cut flap lands on the host plane, and physics defers to the same host
+    // envelope. Legacy mouths retain the exact 0.18 m coplanar tolerance.
+    const progressiveOwner = lo.progressive || hi.progressive;
+    const COPLANAR = progressiveOwner ? 0.75 : 0.18;
     const TUCK = 0.35;      // how far a cut edge slides under the host surface
     const GORE_FILL = 1.2;  // widest sliver the gore apron closes
     const APRON_DY = 0.35;  // largest level offset the apron may bridge
@@ -2149,8 +2220,8 @@ export class HighwayMap {
       if (s0 > 0) tMin = Math.max(tMin, root);
       else tMax = Math.min(tMax, root);
     };
-    clipConstraint(lo.L - lo.H, hi.L - hi.H, true);
-    clipConstraint(lo.L + lo.H, hi.L + hi.H, false);
+    clipConstraint(lo.L - lo.upper, hi.L - hi.upper, true);
+    clipConstraint(lo.lower - lo.L, hi.lower - hi.L, true);
     if (tMin >= tMax) return null; // host covers none of the section
     const coveredLo = -half + tMin * 2 * half;
     const coveredHi = -half + tMax * 2 * half;
@@ -2204,6 +2275,7 @@ export class HighwayMap {
       hostward,
       skip: intervals.length === 0,
       intervals,
+      progressive: progressiveOwner?.id || null,
       // Coplanar strip handed to the host deck (frame laterals) — the
       // authoritative "these decks are one surface here" record that
       // junction zones and physics consume, so crossability, collision
@@ -2548,8 +2620,13 @@ export class HighwayMap {
       if (Math.abs(position.y - projection.point.y) > 8) {
         projection = this._projectToRoute(route, position);
       }
-      const half = this._halfWidthAt(route, projection.distance);
-      if (Math.abs(projection.signedLateral) > half + lateralMargin + 14) continue;
+      const baseHalf = this._halfWidthAt(route, projection.distance);
+      const progressive = this._progressiveEnvelopeAt(route, projection.distance);
+      const lateralMin = progressive?.envelope.lateralMin ?? -baseHalf;
+      const lateralMax = progressive?.envelope.lateralMax ?? baseHalf;
+      const half = Math.max(Math.abs(lateralMin), Math.abs(lateralMax));
+      if (projection.signedLateral < lateralMin - lateralMargin - 14
+        || projection.signedLateral > lateralMax + lateralMargin + 14) continue;
       // Past an OPEN end the corridor no longer exists (the continuation
       // route's corridor takes over); past a CLOSED end the end wall
       // correction still applies, so keep the corridor.
@@ -2562,11 +2639,14 @@ export class HighwayMap {
       if (route._zonesAsBranch
         && this._surfaceDefersToHost(route, projection.distance, projection.signedLateral)) continue;
       const bank = this._bankAt(route, projection.distance);
-      const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+      const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral
+        + this._progressiveBranchDeckOffsetAt(route, projection.distance, projection.signedLateral);
       const vertical = position.y - deckY;
       if (vertical < -verticalWindow || vertical > verticalWindow + 2.5) continue;
       corridors.push({
-        route, projection, half, bank, deckY, vertical,
+        route, projection, half, baseHalf, lateralMin, lateralMax,
+        transition: progressive?.transition || null,
+        bank, deckY, vertical,
         absLateral: Math.abs(projection.signedLateral),
       });
     }
@@ -2586,6 +2666,33 @@ export class HighwayMap {
     for (const zone of route._zonesAsBranch) {
       const [b0, b1] = zone.branchSpan;
       if (distance < b0 - 2 || distance > b1 + 2) continue;
+      if (zone.progressive) {
+        const hostS = zone.progressive.hostAtBranch(distance);
+        const phase = hostS === null ? null : zone.progressive.phaseAt(hostS);
+        // During approach the branch is still an independent carriageway.
+        // Once the opening begins, hand a point to the host only after the
+        // widened envelope contains a full vehicle footprint around it. The
+        // renderer keeps the branch's outside wing wherever that is not yet
+        // true, so collision follows the same visible surface union instead
+        // of putting an invisible wall through the source lane centre.
+        if (hostS !== null && phase === 'approach' && zone.progressive.type === 'merge') return false;
+        if (hostS !== null) {
+          const frame = this._frameAt(route, distance);
+          const point = this._deckPoint(frame, lateral);
+          const projection = this._projectToRoute(zone.host, point, this._hostSeedIndex(zone.host, hostS));
+          const envelope = zone.progressive.envelopeAt(projection.distance);
+          const bank = this._bankAt(zone.host, projection.distance);
+          const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+          const handoffInset = 1.35;
+          if (projection.signedLateral > envelope.lateralMin + handoffInset
+            && projection.signedLateral < envelope.lateralMax - handoffInset
+            && point.y - deckY < 0.8) return true;
+        }
+        // The progressive record is authoritative for this interval. If its
+        // host envelope cannot own the full footprint yet, retain the branch
+        // corridor instead of falling through to the narrower legacy clip.
+        return false;
+      }
       let best = null;
       let bestDelta = Infinity;
       for (const row of zone.samples) {
@@ -2612,7 +2719,15 @@ export class HighwayMap {
    */
   _lateralCorrection(corridor, lateral, radius) {
     const route = corridor.route;
-    const outer = Math.max(0.4, corridor.half - Math.max(0.35, radius));
+    const inset = Math.max(0.35, radius);
+    if (corridor.transition) {
+      const minimum = corridor.lateralMin + inset;
+      const maximum = corridor.lateralMax - inset;
+      if (lateral < minimum) return minimum - lateral;
+      if (lateral > maximum) return maximum - lateral;
+      return 0;
+    }
+    const outer = Math.max(0.4, corridor.half - inset);
     if (route.bidirectional) {
       const inner = route.medianWidth * 0.5 + Math.max(0.35, radius) * 0.72;
       const side = lateral >= 0 ? 1 : -1;
@@ -2686,7 +2801,9 @@ export class HighwayMap {
     const route = best.route;
     const projection = best.projection;
     const absLateral = best.absLateral;
-    const onSurface = absLateral <= best.half + 0.3 && Math.abs(best.vertical) < 5.5;
+    const onSurface = projection.signedLateral >= (best.lateralMin ?? -best.half) - 0.3
+      && projection.signedLateral <= (best.lateralMax ?? best.half) + 0.3
+      && Math.abs(best.vertical) < 5.5;
     let direction = 1;
     let lane = 0;
     let medianDistance = Infinity;
@@ -2740,7 +2857,13 @@ export class HighwayMap {
       roadHalfWidth: best.half,
       halfWidth: best.half,
       roadWidth: best.half * 2,
-      edgeDistance: best.half - absLateral,
+      lateralMin: best.lateralMin ?? -best.half,
+      lateralMax: best.lateralMax ?? best.half,
+      transitionId: best.transition?.id || null,
+      edgeDistance: Math.min(
+        projection.signedLateral - (best.lateralMin ?? -best.half),
+        (best.lateralMax ?? best.half) - projection.signedLateral,
+      ),
       medianDistance,
       onRoadSurface: onSurface,
       onRoad: drivable,
@@ -2910,8 +3033,8 @@ export class HighwayMap {
       side,
       innerLimit,
       outerLimit,
-      minLateral: route.bidirectional ? side * innerLimit : -outerLimit,
-      maxLateral: side * outerLimit,
+      minLateral: route.bidirectional ? side * innerLimit : (info.lateralMin ?? -outerLimit) + vehicleRadius,
+      maxLateral: route.bidirectional ? side * outerLimit : (info.lateralMax ?? outerLimit) - vehicleRadius,
       junction: info.junction,
       disabled: false,
       tunnel: info.tunnel,
@@ -3714,6 +3837,7 @@ export class HighwayMap {
     if (up.y < 0) up.multiplyScalar(-1);
     up.normalize();
     return {
+      route,
       u,
       distance: normalized,
       position,
@@ -3740,12 +3864,15 @@ export class HighwayMap {
     const spanError = (a, b, samples) => {
       let vertical = 0;
       let lateral = 0;
-      const startPoints = [-1, 0, 1].map((side) => this._deckPoint(a, side * a.half));
-      const endPoints = [-1, 0, 1].map((side) => this._deckPoint(b, side * b.half));
+      const startPoints = [-1, 0, 1].map((side) => this._deckPoint(a,
+        side === 0 ? 0 : this._surfaceEdgeLateral(a, side)));
+      const endPoints = [-1, 0, 1].map((side) => this._deckPoint(b,
+        side === 0 ? 0 : this._surfaceEdgeLateral(b, side)));
       for (const sample of samples) {
         for (let track = 0; track < 3; track += 1) {
           const side = track - 1;
-          const analytic = this._deckPoint(sample.frame, side * sample.frame.half);
+          const analytic = this._deckPoint(sample.frame,
+            side === 0 ? 0 : this._surfaceEdgeLateral(sample.frame, side));
           const chord = startPoints[track].clone().lerp(endPoints[track], sample.t);
           vertical = Math.max(vertical, Math.abs(analytic.y - chord.y));
           lateral = Math.max(lateral, Math.hypot(analytic.x - chord.x, analytic.z - chord.z));
@@ -3845,10 +3972,37 @@ export class HighwayMap {
   }
 
   /** Deck edge point with banking applied. lateral along the base normal. */
+  _progressiveBranchDeckOffsetAt(route, distance, lateral) {
+    const transitions = route?._progressiveTransitionsAsBranch;
+    if (!transitions) return 0;
+    let offset = 0;
+    for (const transition of transitions) offset += transition.branchDeckOffsetAt(distance, lateral);
+    return offset;
+  }
+
   _deckPoint(frame, lateral, lift = 0) {
     const point = frame.position.clone().addScaledVector(frame.normal, lateral);
-    point.y += Math.tan(frame.bank) * lateral + lift;
+    point.y += Math.tan(frame.bank) * lateral;
+    // The source route eases onto/off the authoritative host plane over the
+    // shared transition phases. This removes the sub-metre shelf that would
+    // otherwise remain when two audited centrelines meet at slightly
+    // different bank/elevation samples.
+    point.y += this._progressiveBranchDeckOffsetAt(frame.route, frame.distance, lateral);
+    point.y += lift;
     return point;
+  }
+
+  /** Signed room from a marking path to the current one-sided paved edge. */
+  _markingClearance(frame, lateral, halfWidth) {
+    const progressive = frame.route
+      ? this._progressiveEnvelopeAt(frame.route, frame.distance)
+      : null;
+    const lower = progressive?.envelope.lateralMin ?? -frame.half;
+    const upper = progressive?.envelope.lateralMax ?? frame.half;
+    return Math.min(
+      lateral - lower - 0.3 - halfWidth,
+      upper - lateral - 0.3 - halfWidth,
+    );
   }
 
   /**
@@ -3909,7 +4063,7 @@ export class HighwayMap {
       if (intended === null) {
         allowed = false;
         reason ||= 'marking-path-undefined';
-      } else if (frame.half - 0.3 - halfWidth - Math.abs(intended) < 0) {
+      } else if (this._markingClearance(frame, intended, halfWidth) < 0) {
         allowed = false;
         reason = 'outside-route-paved-width';
       }
@@ -4115,8 +4269,8 @@ export class HighwayMap {
       // A lane boundary can enter/leave the paved deck during a width taper.
       // Clip at that exact crossing instead of discarding this entire render
       // span merely because one endpoint is too narrow.
-      const clearanceA = a.half - 0.3 - halfWidth - Math.abs(la);
-      const clearanceB = b.half - 0.3 - halfWidth - Math.abs(lb);
+      const clearanceA = this._markingClearance(a, la, halfWidth);
+      const clearanceB = this._markingClearance(b, lb, halfWidth);
       if (clearanceA < 0 && clearanceB < 0) {
         if (this.options.markingDebug && materialName !== 'amber') {
           const context = this._markingDebugContext(route, lo, hi);
@@ -4194,6 +4348,101 @@ export class HighwayMap {
   }
 
   /**
+   * Paint one transition-owned world path. Progressive 2+2 markings can run
+   * across the union of host and branch pavement while being outside either
+   * route ribbon considered alone; routing those pieces through _paintStrip
+   * therefore created a real gap between the two independent painters.
+   * These points already come from the authoritative, deck-conformed model.
+   */
+  _paintProgressivePathStrip(route, path, materialName, sStart, sEnd, width) {
+    if (!path?.points?.length || sEnd <= sStart) return;
+    const halfWidth = width * 0.5;
+    for (let index = 1; index < path.points.length; index += 1) {
+      const left = path.points[index - 1];
+      const right = path.points[index];
+      const lo = Math.max(sStart, left.hostS);
+      const hi = Math.min(sEnd, right.hostS);
+      if (hi - lo < 0.004) continue;
+      const span = Math.max(1e-6, right.hostS - left.hostS);
+      const t0 = clamp((lo - left.hostS) / span, 0, 1);
+      const t1 = clamp((hi - left.hostS) / span, 0, 1);
+      const start = new THREE.Vector3(
+        left.position.x + (right.position.x - left.position.x) * t0,
+        left.position.y + (right.position.y - left.position.y) * t0,
+        left.position.z + (right.position.z - left.position.z) * t0,
+      );
+      const end = new THREE.Vector3(
+        left.position.x + (right.position.x - left.position.x) * t1,
+        left.position.y + (right.position.y - left.position.y) * t1,
+        left.position.z + (right.position.z - left.position.z) * t1,
+      );
+      const dx = end.x - start.x;
+      const dz = end.z - start.z;
+      const length = Math.hypot(dx, dz);
+      if (length < 1e-5) continue;
+      const normal = new THREE.Vector3(-dz / length * halfWidth, 0, dx / length * halfWidth);
+      const leftStart = start.clone().add(normal);
+      const leftEnd = end.clone().add(normal);
+      const rightStart = start.clone().sub(normal);
+      const rightEnd = end.clone().sub(normal);
+      this._pushQuad(
+        this._bucket(start.clone().lerp(end, 0.5), materialName),
+        leftStart,
+        leftEnd,
+        rightEnd,
+        rightStart,
+      );
+      if (this.options.markingDebug && materialName !== 'amber') {
+        const context = this._markingDebugContext(route, lo, hi);
+        const tangent = end.clone().sub(start).normalize();
+        this._markingLog.push({
+          kind: 'strip',
+          tag: this._markingTag || 'untagged',
+          markingType: this._markingTag || 'untagged',
+          routeId: route.id,
+          owner: this._markingOwner || `route:${route.id}`,
+          classification: this._markingClassification || 'route-local',
+          boundary: this._markingBoundary,
+          material: materialName,
+          sFrom: lo,
+          sTo: hi,
+          latFrom: left.lateral + (right.lateral - left.lateral) * t0,
+          latTo: left.lateral + (right.lateral - left.lateral) * t1,
+          start: { x: start.x, y: start.y, z: start.z },
+          end: { x: end.x, y: end.y, z: end.z },
+          tangent: { x: tangent.x, y: tangent.y, z: tangent.z },
+          tangentFrom: { x: tangent.x, y: tangent.y, z: tangent.z },
+          tangentTo: { x: tangent.x, y: tangent.y, z: tangent.z },
+          suppressionReason: null,
+          ...context,
+        });
+      }
+    }
+  }
+
+  _paintProgressivePathDashed(
+    route,
+    path,
+    materialName,
+    width,
+    period,
+    dashLength,
+    phase,
+    sFrom,
+    sTo,
+  ) {
+    const first = Math.ceil((sFrom - dashLength * 0.5 - phase) / period);
+    const last = Math.floor((sTo + dashLength * 0.5 - phase) / period);
+    for (let index = first; index <= last; index += 1) {
+      const centre = phase + index * period;
+      const lo = Math.max(sFrom, centre - dashLength * 0.5);
+      const hi = Math.min(sTo, centre + dashLength * 0.5);
+      if (hi - lo < 0.05) continue;
+      this._paintProgressivePathStrip(route, path, materialName, lo, hi, width);
+    }
+  }
+
+  /**
    * Paint dashes from one route-absolute phase; frames/chunks never reset
    * it, and a clipped range (junction-zone dashed boundaries) never
    * re-bases it — dashes inside [sFrom, sTo] land exactly where the
@@ -4250,7 +4499,8 @@ export class HighwayMap {
       if (projection.endOvershoot > 2) continue; // beyond the other surface's end
       const half = this._halfWidthAt(other, projection.distance);
       const abs = Math.abs(projection.signedLateral);
-      const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral;
+      const deckY = projection.point.y + Math.tan(this._bankAt(other, projection.distance)) * projection.signedLateral
+        + this._progressiveBranchDeckOffsetAt(other, projection.distance, projection.signedLateral);
       // Conflict only when the other deck sits within the barrier's own
       // height band: surface between 1.35 m below the base (a rail on a
       // sunken sliver still reads doubled) and 1.6 m above it (a slab low
@@ -4437,11 +4687,12 @@ export class HighwayMap {
   _parapetProfile(frame, side, factor = 1) {
     const squeeze = 0.36 * (1 - factor);
     const lean = 0.02 + 0.83 * factor;
+    const edge = this._surfaceEdgeLateral(frame, side);
     return {
-      base: this._deckPoint(frame, side * (frame.half - 0.42 + squeeze), 0.02),
-      top: this._deckPoint(frame, side * (frame.half - 0.3 + squeeze * 0.66), lean),
-      cap: this._deckPoint(frame, side * (frame.half - 0.06), lean + 0.06 * factor),
-      out: this._deckPoint(frame, side * frame.half, 0.0),
+      base: this._deckPoint(frame, edge - side * (0.42 - squeeze), 0.02),
+      top: this._deckPoint(frame, edge - side * (0.3 - squeeze * 0.66), lean),
+      cap: this._deckPoint(frame, edge - side * 0.06, lean + 0.06 * factor),
+      out: this._deckPoint(frame, edge, 0.0),
     };
   }
 
@@ -4481,6 +4732,43 @@ export class HighwayMap {
     // Parapet runs end/restart at junction-mouth openings; track the runs so
     // each terminal gets a closing face instead of an open hollow profile.
     const barrierRun = { 1: false, [-1]: false };
+    // Focused geometry diagnostics for progressive host rails. These samples
+    // are taken from the parapet vertices that are actually emitted below,
+    // rather than re-deriving a nominal lateral in the guardrail probes. Only
+    // the four short prototype intervals are retained (hundreds of records,
+    // not a network-wide per-frame log).
+    const progressiveHostTransitions = route._progressiveTransitionsAsHost || [];
+    const progressiveBranchTransitions = route._progressiveTransitionsAsBranch || [];
+    const progressiveRailTransitions = [...progressiveHostTransitions, ...progressiveBranchTransitions];
+    const progressiveRailSampleKeys = progressiveRailTransitions.length ? new Set() : null;
+    if (progressiveRailTransitions.length) route._progressiveRailSamples = [];
+    const recordProgressiveRailSample = (frame, side, profile, factor) => {
+      if (!progressiveRailTransitions.length) return;
+      let role = 'host-exterior';
+      let transition = progressiveHostTransitions.find((candidate) => (
+        candidate.sideSign === side && candidate.containsHost(frame.distance, 0.01)));
+      if (!transition) {
+        transition = progressiveBranchTransitions.find((candidate) => (
+          candidate.branchRailModeAt?.(frame.distance, side) === 'on'));
+        role = side === transition?.sourceZone.hostwardSign ? 'branch-gore' : 'branch-exterior';
+      }
+      if (!transition) return;
+      const key = `${transition.id}:${role}:${side}:${frame.distance.toFixed(5)}`;
+      if (progressiveRailSampleKeys.has(key)) return;
+      progressiveRailSampleKeys.add(key);
+      const lateralOf = (point) => (point.x - frame.position.x) * frame.normal.x
+        + (point.z - frame.position.z) * frame.normal.z;
+      route._progressiveRailSamples.push({
+        transitionId: transition.id,
+        role,
+        side,
+        distance: frame.distance,
+        terminalFactor: factor,
+        actualOuterLateral: lateralOf(profile.out),
+        actualBaseLateral: lateralOf(profile.base),
+        actualBasePosition: { x: profile.base.x, y: profile.base.y, z: profile.base.z },
+      });
+    };
 
     this._forEachSurfaceFrameSegment(route, (a, b, segmentIndex) => {
       // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
@@ -4489,10 +4777,10 @@ export class HighwayMap {
       // surface (see _emitMouthDeck); everywhere else the full deck.
       if (!this._emitMouthDeck(route, a, b, mid)) {
         const bucketRoad = this._bucket(mid, roadMaterialName);
-        const leftA = this._deckPoint(a, a.half);
-        const leftB = this._deckPoint(b, b.half);
-        const rightA = this._deckPoint(a, -a.half);
-        const rightB = this._deckPoint(b, -b.half);
+        const leftA = this._deckPoint(a, this._surfaceEdgeLateral(a, 1));
+        const leftB = this._deckPoint(b, this._surfaceEdgeLateral(b, 1));
+        const rightA = this._deckPoint(a, this._surfaceEdgeLateral(a, -1));
+        const rightB = this._deckPoint(b, this._surfaceEdgeLateral(b, -1));
         // Deck top, wound UP-facing. It was wound the other way for years:
         // the single-sided road material culled the real deck from above and
         // the game was actually showing the fascia UNDERSIDE 0.5-1.35 m below
@@ -4538,6 +4826,8 @@ export class HighwayMap {
         }
         const pA = this._parapetProfile(a, side, fA);
         const pB = this._parapetProfile(b, side, fB);
+        recordProgressiveRailSample(a, side, pA, fA);
+        recordProgressiveRailSample(b, side, pB, fB);
         // `barrier` is DoubleSide: cap + outer wall preserve the same deck-edge
         // silhouette from chase and exterior views without storing a third,
         // hidden inner-profile sheet at every dense surface station.
@@ -4551,8 +4841,8 @@ export class HighwayMap {
         // steel handrail on top of the parapet (skipped inside tunnels and
         // over end terminals — it must not float above a sunk profile)
         if (!a.tunnel && fA > 0.96 && fB > 0.96) {
-          const railA = this._deckPoint(a, side * (a.half - 0.18), 1.12);
-          const railB = this._deckPoint(b, side * (b.half - 0.18), 1.12);
+          const railA = this._deckPoint(a, this._surfaceEdgeLateral(a, side, 0.18), 1.12);
+          const railB = this._deckPoint(b, this._surfaceEdgeLateral(b, side, 0.18), 1.12);
           const railTopA = railA.clone(); railTopA.y += 0.09;
           const railTopB = railB.clone(); railTopB.y += 0.09;
           if (side > 0) this._pushQuad(bucketRail, railA, railB, railTopB, railTopA);
@@ -4601,10 +4891,10 @@ export class HighwayMap {
         const jxB = mouthy ? this._mouthClipAt(route, b) : null;
         const fasciaDepth = 1.35;
         if (!jxA && !jxB) {
-          const dropLA = this._deckPoint(a, a.half); dropLA.y -= fasciaDepth;
-          const dropLB = this._deckPoint(b, b.half); dropLB.y -= fasciaDepth;
-          const dropRA = this._deckPoint(a, -a.half); dropRA.y -= fasciaDepth;
-          const dropRB = this._deckPoint(b, -b.half); dropRB.y -= fasciaDepth;
+          const dropLA = this._deckPoint(a, this._surfaceEdgeLateral(a, 1)); dropLA.y -= fasciaDepth;
+          const dropLB = this._deckPoint(b, this._surfaceEdgeLateral(b, 1)); dropLB.y -= fasciaDepth;
+          const dropRA = this._deckPoint(a, this._surfaceEdgeLateral(a, -1)); dropRA.y -= fasciaDepth;
+          const dropRB = this._deckPoint(b, this._surfaceEdgeLateral(b, -1)); dropRB.y -= fasciaDepth;
           this._pushQuad(this._bucket(mid, 'concreteDark'), dropRA, dropRB, dropLB, dropLA);
         } else if (!(jxA?.skip) && !(jxB?.skip)) {
           // Underside spans the full drawn footprint (intervals + flaps).
@@ -4625,12 +4915,22 @@ export class HighwayMap {
         }
       }
       for (const side of [1, -1]) {
+        const transitionManagedWall = progressiveHostTransitions.some((transition) => (
+          transition.sideSign === side && transition.containsHost(a.distance, 1.5)))
+          || progressiveBranchTransitions.some((transition) => (
+            transition.branchRailModeAt?.(a.distance, side) !== null));
+        const emittedBarrier = this._railZoneMode(route, side, a.distance) !== 'off'
+          && this._railZoneMode(route, side, b.distance) !== 'off';
+        if (transitionManagedWall && !emittedBarrier) continue;
         this.wallSegments.push({
           routeId: route.id, type: 'outer', side,
-          start: this._deckPoint(a, side * (a.half - 0.42), 0.02),
-          end: this._deckPoint(b, side * (b.half - 0.42), 0.02),
+          start: this._deckPoint(a, this._surfaceEdgeLateral(a, side, 0.42), 0.02),
+          end: this._deckPoint(b, this._surfaceEdgeLateral(b, side, 0.42), 0.02),
           height: barrierHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
+          progressiveTransitionId: transitionManagedWall
+            ? (progressiveHostTransitions[0]?.id || progressiveBranchTransitions[0]?.id)
+            : null,
         });
       }
       if (route.bidirectional) {
@@ -4718,6 +5018,10 @@ export class HighwayMap {
       const mouth = (ramp.junctionMouths || []).find((candidate) => (
         candidate.host === main && candidate.which === (fromStart ? 'start' : 'end')));
       const zone = mouth?.zone;
+      // The progressive transition owns its complete lane-drop/split zone.
+      // It intentionally uses longitudinal guidance only; the legacy gore
+      // hatching/cushion would sit inside the new drivable auxiliary lane.
+      if (zone?.progressive) continue;
 
       // walk the ramp away from the shared mouth until the paved edges split;
       // wedge points sit on the BANKED deck surfaces (_frameAt), so the
@@ -4857,6 +5161,24 @@ export class HighwayMap {
         };
         if (route._zonesAsBranch) {
           for (const zone of route._zonesAsBranch) {
+            if (zone.progressive) {
+              const phase = zone.progressive.phaseAtBranch(frame.distance);
+              const ownsEdgeSettle = zone.progressive.type === 'diverge'
+                && edgeSide === zone.hostwardSign
+                && frame.distance >= zone.progressive.transferCompleteBranch - 0.01
+                && frame.distance <= zone.progressive.markingSettleEnd + 0.01;
+              const transitionOwns = zone.progressive.type === 'merge'
+                ? phase && phase !== 'approach'
+                : (!!phase || ownsEdgeSettle);
+              if (transitionOwns) {
+                return {
+                  lateral: null,
+                  intendedLateral: lat,
+                  suppressionReason: 'progressive-transition-owner-handoff',
+                  zoneId: zone.id,
+                };
+              }
+            }
             const removesBoundary = boundaryRole === 'laneDivider' || edgeSide === zone.hostwardSign;
             if (!removesBoundary) continue;
             const opening = zone.markingOpening?.branch;
@@ -4937,6 +5259,10 @@ export class HighwayMap {
           : [zone.hostEdgeSuppress];
         for (const piece of pieces) suppress.push(...this._zoneIntervalPieces(route, piece));
       }
+      for (const transition of route._progressiveTransitionsAsHost || []) {
+        if (transition.sideSign !== side) continue;
+        suppress.push(...this._zoneIntervalPieces(route, transition.hostInterval));
+      }
       suppress.sort((a, b) => a[0] - b[0]);
       const kept = [];
       let cursor = 0;
@@ -4964,6 +5290,7 @@ export class HighwayMap {
     // route-absolute like every other dash.
     this._markingTag = 'zoneDash';
     for (const zone of route._zonesAsHost || []) {
+      if (zone.progressive) continue;
       if (!zone.dash) continue;
       this._markingOwner = `junction:${zone.id}`;
       this._markingClassification = 'junction-local';
@@ -4973,6 +5300,140 @@ export class HighwayMap {
         for (const [from, to] of this._zoneIntervalPieces(route, [piece.from, piece.to])) {
           this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
         }
+      }
+    }
+    // Progressive transition-owned paint. The host and branch route painters
+    // are suppressed over the claimed paths above; this is the sole owner of
+    // the moving exterior edge and the temporary auxiliary-lane boundary.
+    for (const transition of route._progressiveTransitionsAsHost || []) {
+      this._markingClassification = 'progressive-transition';
+      this._markingOwner = `progressive:${transition.id}`;
+      if (transition.type === 'diverge') {
+        const path = (id) => transition.markingPaths.find((candidate) => candidate.id === id);
+        this._markingTag = 'progressiveOuterEdge';
+        this._markingBoundary = `progressive-outer-edge:${transition.id}`;
+        this._paintProgressivePathStrip(
+          route,
+          path('aux-outer-marking'),
+          'marking',
+          transition.approachStart,
+          transition.transferComplete,
+          0.16,
+        );
+        this._markingTag = 'progressiveAuxBoundary';
+        this._markingBoundary = `progressive-aux-boundary:${transition.id}`;
+        this._paintProgressivePathDashed(
+          route,
+          path('aux-inner-marking'),
+          'marking',
+          0.18,
+          10,
+          5,
+          6,
+          transition.openingStart,
+          transition.transferComplete,
+        );
+        this._markingTag = 'progressiveExitDivider';
+        this._markingBoundary = `progressive-exit-divider:${transition.id}`;
+        // Match the final transition dash to the last normal r1_0 dash that
+        // is suppressed before transfer. Host/branch chainages do not advance
+        // at exactly 1:1 here, so mapping that real dash endpoint avoids the
+        // small but visible phase drift left by a constant chainage offset.
+        const dividerPeriod = 15;
+        const dividerLength = 6.2;
+        const routeDividerPhase = 6;
+        const lastSuppressedDash = Math.floor((
+          transition.transferCompleteBranch
+          - dividerLength * 0.5
+          - routeDividerPhase
+        ) / dividerPeriod);
+        const lastSuppressedDashEnd = routeDividerPhase
+          + lastSuppressedDash * dividerPeriod
+          + dividerLength * 0.5;
+        const dividerPhase = transition.hostAtBranch(lastSuppressedDashEnd)
+          - dividerLength * 0.5;
+        this._paintProgressivePathDashed(
+          route,
+          path('aux-divider-marking'),
+          'marking',
+          0.14,
+          dividerPeriod,
+          dividerLength,
+          dividerPhase,
+          transition.openingStart,
+          transition.transferComplete,
+        );
+        continue;
+      }
+      this._markingTag = 'progressiveOuterEdge';
+      this._markingBoundary = `progressive-outer-edge:${transition.id}`;
+      const hostOuterIntervals = transition.type === 'diverge'
+        // The exterior line changes owner where the branch can render the
+        // same authoritative path. Keeping host ownership until the later
+        // source-deck split extrapolates the curve beyond the widened host
+        // envelope, so the painter clips it and leaves a real longitudinal
+        // gap. Branch ownership begins at the measured exterior handoff.
+        ? [[transition.approachStart, transition.exteriorHandoffStart]]
+        : [transition.hostInterval];
+      for (const interval of hostOuterIntervals) {
+        for (const [from, to] of this._zoneIntervalPieces(route, interval)) {
+          this._paintStrip(
+            route,
+            'marking',
+            from,
+            to,
+            (frame) => transition.type === 'diverge'
+              ? transition.auxOuterMarkingLateralAt(frame.distance)
+              : transition.outerMarkingLateralAt(frame.distance),
+            0.16,
+          );
+        }
+      }
+      this._markingTag = 'progressiveAuxBoundary';
+      this._markingBoundary = `progressive-aux-boundary:${transition.id}`;
+      const hostDashInterval = transition.type === 'diverge'
+        ? [transition.openingStart, transition.physicalSplitStart]
+        : transition.crossableInterval;
+      for (const [from, to] of this._zoneIntervalPieces(route, hostDashInterval)) {
+        this._paintDashedStrip(
+          route,
+          'marking',
+          (frame) => transition.type === 'diverge'
+            ? transition.auxInnerMarkingLateralAt(frame.distance)
+            : transition.boundaryLateralAt(frame.distance),
+          0.18,
+          10,
+          5,
+          6,
+          from,
+          to,
+        );
+      }
+    }
+    // Branch-owned paint must be emitted while the branch itself is being
+    // dressed. Route dressing is intentionally sequential, so attempting to
+    // paint this from the host loop can run before the branch has surface
+    // frames and silently emit no geometry. Keeping both halves under the
+    // transition owner still gives one source of truth, while using the
+    // correct route's authoritative deck frames.
+    for (const transition of route._progressiveTransitionsAsBranch || []) {
+      if (transition.type !== 'diverge') continue;
+      this._markingClassification = 'progressive-transition';
+      this._markingOwner = `progressive:${transition.id}`;
+      this._markingTag = 'progressiveBranchGoreEdge';
+      this._markingBoundary = `progressive-branch-gore-edge:${transition.id}`;
+      for (const [from, to] of this._zoneIntervalPieces(
+        route,
+        [transition.transferCompleteBranch, transition.markingSettleEnd],
+      )) {
+        this._paintStrip(
+          route,
+          'marking',
+          from,
+          to,
+          (frame) => transition.settledBranchInnerMarkingLateralAt(frame.distance),
+          0.16,
+        );
       }
     }
     this._markingTag = null;
@@ -6397,6 +6858,34 @@ export class HighwayMap {
         z: junction.point.z,
         routes: [...junction.routes],
       })),
+      prototypePins: this.progressiveCandidateClassifications.map((candidate) => ({
+        id: candidate.id,
+        pinId: candidate.pinId,
+        label: candidate.label,
+        category: candidate.active ? 'progressive-prototype' : 'deferred-progressive-candidate',
+        classification: candidate.classification.category,
+        classificationReason: candidate.classification.reason,
+        collisionDeckOwnership: candidate.classification.metrics.collisionDeckOwnership,
+        type: candidate.type,
+        side: candidate.side,
+        hostRouteId: candidate.hostRouteId,
+        branchRouteId: candidate.branchRouteId,
+        hostLaneCount: candidate.hostLaneCount,
+        branchLaneCount: candidate.branchLaneCount,
+        status: candidate.active ? candidate.transition.automationStatus : `deferred-${candidate.classification.category}`,
+        teleportRouteId: candidate.hostRouteId,
+        distance: candidate.distance,
+        phases: candidate.active ? {
+          approachStart: candidate.transition.approachStart,
+          openingStart: candidate.transition.openingStart,
+          parallelStart: candidate.transition.parallelStart,
+          absorptionStart: candidate.transition.absorptionStart,
+          transitionEnd: candidate.transition.transitionEnd,
+        } : null,
+        x: candidate.pin.x,
+        y: candidate.pin.y,
+        z: candidate.pin.z,
+      })),
       networkLength: [...this.routes.values()].filter((route) => route.kind !== 'service').reduce((sum, route) => sum + route.length, 0),
     };
   }
@@ -6427,6 +6916,390 @@ export class HighwayMap {
       edgeCount: this.edges.length,
       chunkCount: this._chunks.size,
     };
+  }
+
+  /**
+   * Query-only P4 ownership overlay. Every coloured segment comes from paint
+   * quads, parapet vertices, or collision walls that were actually emitted by
+   * the production builders; the overlay never reconstructs nominal geometry
+   * from presentation constants. This makes a missing owner just as visible as
+   * a duplicate one.
+   */
+  _buildP4OwnershipDebugOverlay() {
+    const transition = this.progressiveTransitionById.get('J2:diverge:c1_0:r1_0:start');
+    if (!transition) return;
+    const host = transition.sourceZone.host;
+    const branch = transition.sourceZone.branch;
+    const group = new THREE.Group();
+    group.name = 'P4 emitted ownership debug overlay';
+    group.renderOrder = 1100;
+    const addRibbon = (name, segments, color, width = 0.3, lift = 0.62) => {
+      if (!segments.length) return null;
+      const positions = [];
+      const indices = [];
+      for (const segment of segments) {
+        const start = segment.start;
+        const end = segment.end;
+        const dx = end.x - start.x;
+        const dz = end.z - start.z;
+        const length = Math.hypot(dx, dz);
+        if (length < 1e-4) continue;
+        const nx = -dz / length * width * 0.5;
+        const nz = dx / length * width * 0.5;
+        const base = positions.length / 3;
+        positions.push(
+          start.x + nx, start.y + lift, start.z + nz,
+          start.x - nx, start.y + lift, start.z - nz,
+          end.x + nx, end.y + lift, end.z + nz,
+          end.x - nx, end.y + lift, end.z - nz,
+        );
+        indices.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+      }
+      if (!positions.length) return null;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+        color,
+        side: THREE.DoubleSide,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      }));
+      mesh.name = name;
+      mesh.renderOrder = 1100;
+      mesh.frustumCulled = false;
+      group.add(mesh);
+      return mesh;
+    };
+    const addMarkers = (name, records, color) => {
+      if (!records.length) return;
+      const material = new THREE.MeshBasicMaterial({
+        color, depthTest: false, depthWrite: false, toneMapped: false,
+      });
+      for (const [index, record] of records.entries()) {
+        const marker = new THREE.Mesh(new THREE.SphereGeometry(0.48, 10, 7), material);
+        marker.name = `${name} ${index + 1}`;
+        marker.position.set(record.x, record.y + 0.9, record.z);
+        marker.renderOrder = 1102;
+        marker.frustumCulled = false;
+        group.add(marker);
+      }
+    };
+    const overlaps = (from, to, interval) => to > interval[0] + 0.01
+      && from < interval[1] - 0.01;
+    const inP4Vicinity = (piece) => {
+      if (piece.routeId === host.id) {
+        return overlaps(piece.sFrom, piece.sTo, [transition.approachStart - 8, transition.transferComplete + 8]);
+      }
+      if (piece.routeId === branch.id) {
+        return overlaps(piece.sFrom, piece.sTo, [0, transition.markingSettleEnd + 20]);
+      }
+      return false;
+    };
+    const retainedPaint = this._markingLog.filter((piece) => (
+      piece.kind === 'strip' && inP4Vicinity(piece)));
+    const isTransitionPaint = (piece) => piece.owner === `progressive:${transition.id}`;
+    const isIllegalRetained = (piece) => {
+      if (isTransitionPaint(piece)) return false;
+      if (piece.routeId === host.id) {
+        return piece.owner === `route:${host.id}`
+          && piece.boundary === `edge:${transition.sideSign}`
+          && overlaps(piece.sFrom, piece.sTo, transition.hostInterval);
+      }
+      if (piece.routeId !== branch.id || piece.owner !== `route:${branch.id}`) return false;
+      if (overlaps(piece.sFrom, piece.sTo, transition.branchInterval)) return true;
+      return piece.boundary === `edge:${transition.sourceZone.hostwardSign}`
+        && overlaps(
+          piece.sFrom,
+          piece.sTo,
+          [transition.transferCompleteBranch, transition.markingSettleEnd],
+        );
+    };
+    const illegalPaint = retainedPaint.filter(isIllegalRetained);
+    const legalPaint = retainedPaint.filter((piece) => !isIllegalRetained(piece));
+    const hostPaint = legalPaint.filter((piece) => (
+      piece.routeId === host.id && !isTransitionPaint(piece)));
+    const branchPaint = legalPaint.filter((piece) => (
+      piece.routeId === branch.id && !isTransitionPaint(piece)));
+    const transitionPaint = legalPaint.filter(isTransitionPaint);
+    addRibbon('host-emitted markings (red)', hostPaint, 0xff2a2a, 0.3, 0.7);
+    addRibbon('branch-emitted markings (green)', branchPaint, 0x38ff68, 0.3, 0.72);
+    addRibbon('transition-emitted markings (yellow)', transitionPaint, 0xffe52a, 0.36, 0.78);
+    addRibbon('illegal retained markings (magenta)', illegalPaint, 0xff29e6, 0.52, 0.9);
+    const suppressedAttempts = this._markingLog.filter((piece) => (
+      piece.kind === 'suppressedStrip' && inP4Vicinity(piece)));
+
+    const hostRailSamples = (host._progressiveRailSamples || [])
+      .filter((sample) => sample.transitionId === transition.id)
+      .sort((left, right) => left.distance - right.distance);
+    const branchRailSamples = (branch._progressiveRailSamples || [])
+      .filter((sample) => sample.transitionId === transition.id)
+      .sort((left, right) => left.distance - right.distance);
+    const railSegments = (samples) => samples.slice(1).map((sample, index) => ({
+      start: samples[index].actualBasePosition,
+      end: sample.actualBasePosition,
+      from: samples[index],
+      to: sample,
+    }));
+    const hostRailSegments = railSegments(hostRailSamples);
+    const branchRailSegments = railSegments(branchRailSamples);
+    addRibbon(
+      'host guardrail (blue)',
+      hostRailSegments.filter((segment) => (
+        (segment.from.distance + segment.to.distance) * 0.5 < transition.openingStart)),
+      0x2485ff,
+      0.42,
+      0.95,
+    );
+    const sharedRailSegments = [
+      ...hostRailSegments.filter((segment) => (
+        (segment.from.distance + segment.to.distance) * 0.5 >= transition.openingStart)),
+      ...branchRailSegments.filter((segment) => (
+        segment.from.role === 'branch-gore' && segment.to.role === 'branch-gore')),
+    ];
+    addRibbon('transition-owned guardrail (white)', sharedRailSegments, 0xffffff, 0.46, 1.0);
+    const branchExteriorSegments = branchRailSegments.filter((segment) => (
+      segment.from.role === 'branch-exterior' && segment.to.role === 'branch-exterior'));
+    addRibbon('branch guardrail (orange)', branchExteriorSegments, 0xff8b24, 0.42, 0.98);
+
+    const handoffHost = hostRailSamples.at(-1)?.actualBasePosition;
+    const exteriorBranchSamples = branchRailSamples.filter((sample) => sample.role === 'branch-exterior');
+    const handoffBranch = exteriorBranchSamples[0]?.actualBasePosition;
+    const handoffGap = handoffHost && handoffBranch ? Math.hypot(
+      handoffHost.x - handoffBranch.x,
+      handoffHost.y - handoffBranch.y,
+      handoffHost.z - handoffBranch.z,
+    ) : Infinity;
+    if (Number.isFinite(handoffGap) && handoffGap <= 6) {
+      addRibbon(
+        'bounded transition rail handoff (white)',
+        [{ start: handoffHost, end: handoffBranch }],
+        0xffffff,
+        0.2,
+        1.04,
+      );
+    }
+    const unexplainedRailGaps = [];
+    if (!Number.isFinite(handoffGap) || handoffGap > 6) {
+      if (handoffHost && handoffBranch) unexplainedRailGaps.push({ start: handoffHost, end: handoffBranch });
+    }
+    addRibbon('unexplained guardrail gaps (cyan)', unexplainedRailGaps, 0x24f5ff, 0.58, 1.14);
+
+    const corridor = transition.auxiliaryCorridor;
+    const proximityToCorridor = (value) => {
+      const section = corridor.reduce((best, candidate) => (
+        xzDistanceSq(value, candidate.centre) < xzDistanceSq(value, best.centre)
+          ? candidate : best
+      ));
+      const dx = section.outer.x - section.inner.x;
+      const dz = section.outer.z - section.inner.z;
+      const denominator = dx * dx + dz * dz;
+      const t = denominator > 1e-9
+        ? clamp(((value.x - section.inner.x) * dx + (value.z - section.inner.z) * dz) / denominator, 0, 1)
+        : 0;
+      return {
+        t,
+        distance: Math.hypot(
+          value.x - (section.inner.x + dx * t),
+          value.z - (section.inner.z + dz * t),
+        ),
+      };
+    };
+    const blockedRailSamples = [...hostRailSamples, ...branchRailSamples]
+      .filter((sample) => {
+        const proximity = proximityToCorridor(sample.actualBasePosition);
+        return proximity.t > 0.03 && proximity.t < 0.97 && proximity.distance < 0.45;
+      });
+    const blockedWallSegments = this.wallSegments.filter((segment) => {
+      if (segment.progressiveTransitionId !== transition.id) return false;
+      const middle = segment.start.clone().lerp(segment.end, 0.5);
+      return [segment.start, middle, segment.end].some((value) => {
+        const proximity = proximityToCorridor(value);
+        return proximity.t > 0.03 && proximity.t < 0.97 && proximity.distance < 0.45;
+      });
+    });
+    addMarkers(
+      'blocked drivable opening (bright red)',
+      [
+        ...blockedRailSamples.map((sample) => sample.actualBasePosition),
+        ...blockedWallSegments.flatMap((segment) => [segment.start, segment.end]),
+      ],
+      0xff0022,
+    );
+    group.userData = {
+      readOnly: true,
+      junctionId: transition.id,
+      markings: {
+        host: hostPaint.length,
+        branch: branchPaint.length,
+        transition: transitionPaint.length,
+        illegalRetained: illegalPaint.length,
+        suppressedAttempts: suppressedAttempts.length,
+      },
+      rails: {
+        hostSegments: hostRailSegments.length,
+        branchSegments: branchExteriorSegments.length,
+        transitionSegments: sharedRailSegments.length,
+        blocked: blockedRailSamples.length + blockedWallSegments.length,
+        unexplainedGaps: unexplainedRailGaps.length,
+        handoffGap,
+      },
+    };
+    this.group.add(group);
+    this.progressiveOwnershipDebugOverlay = group;
+  }
+
+  /**
+   * Read-only P4 capture overlay, enabled only by the explicit screenshot
+   * query option. It visualises the authoritative model records consumed by
+   * rendering/physics; it does not create an alternate geometry source.
+   */
+  _buildProgressiveCorridorDebugOverlay() {
+    const transition = this.progressiveTransitionById.get('J2:diverge:c1_0:r1_0:start');
+    if (!transition?.auxiliaryCorridor?.length) return;
+    const group = new THREE.Group();
+    group.name = 'P4 progressive corridor debug overlay';
+    group.renderOrder = 1000;
+    const material = (color, opacity = 0.96) => new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const line = (name, records, color, lift = 0.32) => {
+      const points = records.map((record) => new THREE.Vector3(
+        record.x,
+        record.y + lift,
+        record.z,
+      ));
+      const object = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material(color));
+      object.name = name;
+      object.renderOrder = 1000;
+      object.frustumCulled = false;
+      group.add(object);
+      return object;
+    };
+    const auxiliaries = transition.laneCentres.filter((path) => path.id.startsWith('aux:'));
+    const inner = transition.laneBoundaries.find((path) => path.id === 'aux-inner-boundary');
+    const divider = transition.laneBoundaries.find((path) => path.id === 'aux-divider-boundary');
+    const outer = transition.laneBoundaries.find((path) => path.id === 'aux-outer-boundary');
+    auxiliaries.forEach((auxiliary, index) => line(
+      `auxiliary lane ${index} centre path`,
+      auxiliary.points.map((entry) => entry.position),
+      index === 0 ? 0x29e6ff : 0x6e7dff,
+      0.42,
+    ));
+    line('exit carriageway inner boundary', inner.points.map((entry) => entry.position), 0xffa52f, 0.36);
+    if (divider) {
+      line('exit carriageway lane divider', divider.points.map((entry) => entry.position), 0xffffff, 0.4);
+    }
+    line('exit carriageway outer boundary', outer.points.map((entry) => entry.position), 0xff3fd2, 0.36);
+
+    // Continue both real branch-lane targets beyond the ownership marker so
+    // the overlay proves the temporary 2+2 section transfers into r1_0 2+2,
+    // rather than collapsing its exterior edge onto the branch divider.
+    const targetStart = Math.max(0, transition.exteriorHandoffBranchStart);
+    const targetEnd = Math.min(
+      transition.sourceZone.branch.length,
+      transition.transferCompleteBranch + 48,
+    );
+    const targetRows = [];
+    for (let branchS = targetStart; branchS < targetEnd; branchS += 2) {
+      targetRows.push({ branchS });
+    }
+    targetRows.push({ branchS: targetEnd });
+    const debugPoint = (value) => ({ x: value.x, y: value.y, z: value.z });
+    transition.branchExitLanes.forEach((lane, index) => {
+      const targetLateral = this._laneOffset(transition.sourceZone.branch, lane, 1);
+      line(`target branch lane ${lane} centre`, targetRows.map((entry) => {
+        const frame = this._frameAt(transition.sourceZone.branch, entry.branchS);
+        return debugPoint(this._deckPoint(frame, targetLateral, 0.04));
+      }), index === 0 ? 0x70ff55 : 0xb3ff55, 0.48);
+    });
+    const targetHalf = transition.sourceZone.branch.laneWidth * 0.5;
+    const hostwardLane = transition.branchExitLanes[0];
+    const outwardLane = transition.branchExitLanes.at(-1);
+    const hostwardLateral = this._laneOffset(transition.sourceZone.branch, hostwardLane, 1);
+    const outwardLateral = this._laneOffset(transition.sourceZone.branch, outwardLane, 1);
+    line('target exit-carriageway inner boundary', targetRows.map((entry) => {
+      const frame = this._frameAt(transition.sourceZone.branch, entry.branchS);
+      return debugPoint(this._deckPoint(
+        frame,
+        hostwardLateral + transition.sourceZone.hostwardSign * targetHalf,
+        0.04,
+      ));
+    }), 0xc4ff52, 0.4);
+    line('target branch divider', targetRows.map((entry) => {
+      const frame = this._frameAt(transition.sourceZone.branch, entry.branchS);
+      return debugPoint(this._deckPoint(frame, 0, 0.04));
+    }), 0xffffff, 0.42);
+    line('target exit-carriageway outer boundary', targetRows.map((entry) => {
+      const frame = this._frameAt(transition.sourceZone.branch, entry.branchS);
+      return debugPoint(this._deckPoint(
+        frame,
+        outwardLateral - transition.sourceZone.hostwardSign * targetHalf,
+        0.04,
+      ));
+    }), 0xc4ff52, 0.4);
+
+    const widthVertices = [];
+    for (let index = 0; index < transition.auxiliaryCorridor.length; index += 5) {
+      const section = transition.auxiliaryCorridor[index];
+      widthVertices.push(
+        new THREE.Vector3(section.inner.x, section.inner.y + 0.5, section.inner.z),
+        new THREE.Vector3(section.outer.x, section.outer.y + 0.5, section.outer.z),
+      );
+    }
+    const widths = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(widthVertices),
+      material(0xffffff, 0.8),
+    );
+    widths.name = 'full-path width samples';
+    widths.renderOrder = 1001;
+    widths.frustumCulled = false;
+    group.add(widths);
+
+    const handoff = transition.auxiliaryCorridor.at(-1).centre;
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(1.25, 12, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xffee22,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    marker.name = 'branch ownership handoff point';
+    marker.position.set(handoff.x, handoff.y + 1.6, handoff.z);
+    marker.renderOrder = 1002;
+    marker.frustumCulled = false;
+    group.add(marker);
+    const stem = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(handoff.x, handoff.y + 0.3, handoff.z),
+        new THREE.Vector3(handoff.x, handoff.y + 8, handoff.z),
+      ]),
+      material(0xffee22),
+    );
+    stem.name = 'ownership handoff stem';
+    stem.renderOrder = 1001;
+    group.add(stem);
+    group.userData = {
+      readOnly: true,
+      junctionId: transition.id,
+      minimumWidth: Math.min(...transition.auxiliaryCorridor.map((section) => section.width)),
+      minimumLaneWidth: Math.min(
+        ...transition.auxiliaryLaneCorridors.flat().map((section) => section.width),
+      ),
+      topology: transition.topology,
+      transferCompleteHostS: transition.transferComplete,
+      transferCompleteBranchS: transition.transferCompleteBranch,
+    };
+    this.group.add(group);
+    this.progressiveCorridorDebugOverlay = group;
   }
 
   build() {

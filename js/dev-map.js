@@ -17,6 +17,7 @@ const MIN_SCALE = 0.02;   // px per world metre (zoomed all the way out)
 const MAX_SCALE = 10;     // px per world metre (zoomed all the way in)
 const DRAG_THRESHOLD = 4; // px of pointer travel before a press becomes a pan
 const HIT_THRESHOLD = 9;  // px radius for route hover hit-testing
+const PIN_HIT_THRESHOLD = 12; // fixed screen-space radius for prototype markers
 const HOVER_HYSTERESIS = 3; // px band that keeps the current route hovered
 const HOVER_THROTTLE_MS = 16; // minimum gap between hover recomputes
 
@@ -39,6 +40,8 @@ export class DeveloperMap {
     this._raf = 0;
     this._lastHoverAt = 0;
     this._pointer = null;        // active canvas pointer (drag/click tracking)
+    this._touchPoints = new Map(); // active touch pointers for mobile pinch zoom
+    this._pinch = null;
     this._teleportInfo = null;   // last teleport, shown in the info panel
 
     this._buildDom();
@@ -95,6 +98,8 @@ export class DeveloperMap {
     document.body.classList.remove('dev-map-open');
     this.hovered = null;
     this._pointer = null;
+    this._touchPoints.clear();
+    this._pinch = null;
     cancelAnimationFrame(this._raf);
     this._raf = 0;
     if (this._escHandler) window.removeEventListener('keydown', this._escHandler, true);
@@ -131,9 +136,10 @@ export class DeveloperMap {
           <dt>Zoom</dt><dd data-info="zoom">—</dd>
           <dt>Noclip</dt><dd data-info="noclip">—</dd>
           <dt>On route</dt><dd data-info="route">—</dd>
+          <dt>Prototypes</dt><dd data-info="prototypes">—</dd>
           <dt>Teleport</dt><dd data-info="teleport">—</dd>
         </dl>
-        <p class="dev-map-help">M / Esc close · drag pan · wheel zoom · double-click centre · hover a road · click to teleport</p>
+        <p class="dev-map-help">M / Esc / Close · drag or touch to pan · wheel or pinch to zoom · tap/click to teleport</p>
       </div>`;
     (document.getElementById('game-shell') || document.body).appendChild(root);
 
@@ -147,6 +153,7 @@ export class DeveloperMap {
       zoom: root.querySelector('[data-info="zoom"]'),
       noclip: root.querySelector('[data-info="noclip"]'),
       route: root.querySelector('[data-info="route"]'),
+      prototypes: root.querySelector('[data-info="prototypes"]'),
       teleport: root.querySelector('[data-info="teleport"]'),
     };
     this.followBtn = root.querySelector('[data-act="follow"]');
@@ -170,7 +177,7 @@ export class DeveloperMap {
     canvas.addEventListener('pointerdown', (e) => this._onPointerDown(e));
     canvas.addEventListener('pointermove', (e) => this._onPointerMove(e));
     canvas.addEventListener('pointerup', (e) => this._onPointerUp(e));
-    canvas.addEventListener('pointercancel', () => { this._pointer = null; });
+    canvas.addEventListener('pointercancel', (e) => this._onPointerCancel(e));
     canvas.addEventListener('pointerleave', () => { if (!this._pointer) this.hovered = null; });
     canvas.addEventListener('dblclick', (e) => { e.preventDefault(); this.centerOnPosition(); });
     canvas.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
@@ -241,6 +248,7 @@ export class DeveloperMap {
       junctions: raw.junctions || [],
       serviceAreas: raw.serviceAreas || [],
       garage: raw.garage || null,
+      prototypePins: raw.prototypePins || [],
       // Draw minor roads first so mainlines sit on top.
       drawOrder: [...routes].sort((a, b) => (a.minor === b.minor ? 0 : a.minor ? -1 : 1)),
     };
@@ -341,12 +349,44 @@ export class DeveloperMap {
   _onPointerDown(event) {
     if (event.button !== 0) return;
     const p = this._localPoint(event);
-    this._pointer = { id: event.pointerId, startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, dragging: false };
+    if (event.pointerType === 'touch') {
+      this._touchPoints.set(event.pointerId, p);
+      if (this._touchPoints.size >= 2) {
+        const [a, b] = [...this._touchPoints.values()];
+        this._pinch = {
+          distance: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
+          centerX: (a.x + b.x) * 0.5,
+          centerY: (a.y + b.y) * 0.5,
+        };
+        this._pointer = null;
+        if (this.view.followPlayer) this.setFollow(false);
+      }
+    }
+    if (!this._pinch) {
+      this._pointer = { id: event.pointerId, startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, dragging: false };
+    }
     try { this.canvas.setPointerCapture(event.pointerId); } catch (_) { /* pointer already gone */ }
   }
 
   _onPointerMove(event) {
     const p = this._localPoint(event);
+    if (event.pointerType === 'touch' && this._touchPoints.has(event.pointerId)) {
+      this._touchPoints.set(event.pointerId, p);
+      if (this._pinch && this._touchPoints.size >= 2) {
+        const [a, b] = [...this._touchPoints.values()];
+        const distance = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+        const centerX = (a.x + b.x) * 0.5;
+        const centerY = (a.y + b.y) * 0.5;
+        const anchor = this.screenToWorld(this._pinch.centerX, this._pinch.centerY);
+        this.view.scale = clamp(this.view.scale * distance / this._pinch.distance, MIN_SCALE, MAX_SCALE);
+        this.view.camX = anchor.x - (centerX - this.cssWidth / 2) / this.view.scale;
+        this.view.camZ = anchor.z - (centerY - this.cssHeight / 2) / this.view.scale;
+        this._pinch = { distance, centerX, centerY };
+        this._staticDirty = true;
+        this.hovered = null;
+        return;
+      }
+    }
     if (this._pointer && this._pointer.id === event.pointerId) {
       const dx = p.x - this._pointer.startX;
       const dy = p.y - this._pointer.startY;
@@ -372,13 +412,22 @@ export class DeveloperMap {
   }
 
   _onPointerUp(event) {
+    const wasPinching = !!this._pinch || this._touchPoints.size > 1;
+    if (event.pointerType === 'touch') this._touchPoints.delete(event.pointerId);
+    if (this._touchPoints.size < 2) this._pinch = null;
     const pointer = this._pointer;
     this._pointer = null;
     try { this.canvas.releasePointerCapture(event.pointerId); } catch (_) { /* noop */ }
-    if (!pointer || pointer.dragging) return; // a drag never teleports
+    if (wasPinching || !pointer || pointer.dragging) return; // a drag/pinch never teleports
     const p = this._localPoint(event);
     const hit = this._hitTest(p.x, p.y);
-    if (hit) this._teleport(hit);
+    if (hit) { this.hovered = hit; this._teleport(hit); }
+  }
+
+  _onPointerCancel(event) {
+    if (event.pointerType === 'touch') this._touchPoints.delete(event.pointerId);
+    if (this._touchPoints.size < 2) this._pinch = null;
+    this._pointer = null;
   }
 
   _onWheel(event) {
@@ -391,6 +440,31 @@ export class DeveloperMap {
 
   // --- Hit testing ----------------------------------------------------------
 
+  /** First-class, read-only prototype marker hit-test. */
+  _hitTestPrototype(sx, sy) {
+    if (!this.network?.prototypePins?.length) return null;
+    let best = null;
+    for (const pin of this.network.prototypePins) {
+      const screen = this.worldToScreen(pin.x, pin.z);
+      const dist = Math.hypot(sx - screen.x, sy - screen.y);
+      if (dist > PIN_HIT_THRESHOLD || (best && dist >= best.dist)) continue;
+      const routeId = pin.teleportRouteId || pin.hostRouteId;
+      const route = this.network.routes.find((candidate) => candidate.id === routeId);
+      if (!route) continue;
+      best = {
+        kind: 'prototype',
+        pin,
+        route,
+        dist,
+        worldX: pin.x,
+        worldZ: pin.z,
+        elevation: pin.y,
+        chainage: pin.distance,
+      };
+    }
+    return best;
+  }
+
   /**
    * Find the nearest visible route segment to a screen point. Works purely in
    * screen space against cached polylines so it is stable at any zoom. When
@@ -399,6 +473,8 @@ export class DeveloperMap {
    */
   _hitTest(sx, sy) {
     if (!this.network) return null;
+    const prototype = this._hitTestPrototype(sx, sy);
+    if (prototype) return prototype;
     const currentY = this.cb.getCurrentPosition?.()?.y ?? 0;
     let best = null;
     const candidates = [];
@@ -469,6 +545,8 @@ export class DeveloperMap {
 
   _teleport(hit) {
     const route = hit.route;
+    if (!route) return;
+    const prototype = hit.kind === 'prototype' ? hit.pin : null;
     const payload = {
       routeId: route.id,
       routeName: route.name,
@@ -478,6 +556,7 @@ export class DeveloperMap {
       worldX: hit.worldX,
       worldZ: hit.worldZ,
       elevation: hit.elevation,
+      prototypeId: prototype?.id || null,
     };
     let result = null;
     try { result = this.cb.teleportToRoutePoint?.(payload) || null; } catch (err) { console.error('Dev-map teleport', err); }
@@ -488,8 +567,9 @@ export class DeveloperMap {
     this._teleportInfo = {
       routeName: route.name,
       code: route.code,
-      text: `${route.name}${route.code ? ` (${route.code})` : ''} @ ${(payload.distance / 1000).toFixed(2)} km · ` +
-        `${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}`,
+      text: `${prototype ? `${prototype.pinId} ${prototype.id} → ` : ''}`
+        + `${route.name}${route.code ? ` (${route.code})` : ''} @ ${(payload.distance / 1000).toFixed(2)} km · `
+        + `${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}`,
     };
     // Keep the map open so several spots can be inspected in a row.
   }
@@ -532,6 +612,7 @@ export class DeveloperMap {
       ctx.arc(s.x, s.y, 2.4, 0, Math.PI * 2);
       ctx.fill();
     }
+    this._drawPrototypePins(ctx);
     for (const area of this.network.serviceAreas) {
       const s = this.worldToScreen(area.x, area.z);
       ctx.fillStyle = 'rgba(120,220,180,0.85)';
@@ -572,6 +653,39 @@ export class DeveloperMap {
       ctx.moveTo(0, s.y); ctx.lineTo(this.cssWidth, s.y);
     }
     ctx.stroke();
+  }
+
+  _drawPrototypePins(ctx) {
+    ctx.save();
+    ctx.font = '700 10px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (const pin of this.network.prototypePins) {
+      const active = pin.category === 'progressive-prototype';
+      const markerColor = active ? '#ff4fd8' : '#d6a84f';
+      const labelColor = active ? '#ff7be5' : '#f2ca78';
+      const s = this.worldToScreen(pin.x, pin.z);
+      if (s.x < -18 || s.x > this.cssWidth + 18 || s.y < -18 || s.y > this.cssHeight + 18) continue;
+      ctx.fillStyle = 'rgba(5,8,15,0.86)';
+      ctx.fillRect(s.x - 10, s.y - 24, 20, 12);
+      ctx.fillStyle = labelColor;
+      ctx.fillText(pin.pinId, s.x, s.y - 13);
+      ctx.shadowColor = markerColor;
+      ctx.shadowBlur = active ? 8 : 3;
+      ctx.fillStyle = active ? markerColor : 'rgba(5,8,15,0.94)';
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - 8);
+      ctx.lineTo(s.x + 7, s.y);
+      ctx.lineTo(s.x, s.y + 8);
+      ctx.lineTo(s.x - 7, s.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = active ? '#ffffff' : markerColor;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   _strokeRoute(ctx, route, color, width, alpha) {
@@ -622,8 +736,22 @@ export class DeveloperMap {
     ctx.drawImage(this.staticCanvas, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Hovered route highlight.
-    if (this.hovered) {
+    // Hovered route highlight, or a distinct prototype-marker halo.
+    if (this.hovered?.kind === 'prototype') {
+      const s = this.worldToScreen(this.hovered.pin.x, this.hovered.pin.z);
+      ctx.shadowColor = '#ff4fd8';
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - 12);
+      ctx.lineTo(s.x + 11, s.y);
+      ctx.lineTo(s.x, s.y + 12);
+      ctx.lineTo(s.x - 11, s.y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    } else if (this.hovered) {
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       this._strokeRoute(ctx, this.hovered.route, '#ffffff', this.hovered.route.lineWidth + 4, 0.9);
@@ -674,6 +802,10 @@ export class DeveloperMap {
 
   _drawTooltip(ctx) {
     const h = this.hovered;
+    if (h.kind === 'prototype') {
+      this._drawPrototypeTooltip(ctx, h);
+      return;
+    }
     const route = h.route;
     const lines = [];
     lines.push(route.name + (route.code ? `  [${route.code}]` : ''));
@@ -710,6 +842,50 @@ export class DeveloperMap {
     }
   }
 
+  _drawPrototypeTooltip(ctx, hit) {
+    const pin = hit.pin;
+    const active = pin.category === 'progressive-prototype';
+    const title = active ? 'ACTIVE PROGRESSIVE PROTOTYPE' : 'DEFERRED / MANUAL REVIEW';
+    const lines = [
+      `${pin.pinId}  ${title}`,
+      `junction: ${pin.id}`,
+      `host: ${pin.hostRouteId} · ${pin.hostLaneCount} lanes`,
+      `branch: ${pin.branchRouteId} · ${pin.branchLaneCount} lanes`,
+      `${pin.type} · ${pin.side}`,
+      `status: ${pin.status}`,
+      `class: ${pin.classification}`,
+      ...(active && pin.phases ? [
+        `phases: ${pin.phases.approachStart.toFixed(0)} / ${pin.phases.openingStart.toFixed(0)} / ${pin.phases.parallelStart.toFixed(0)}`,
+        `        ${pin.phases.absorptionStart.toFixed(0)} / ${pin.phases.transitionEnd.toFixed(0)} m`,
+      ] : []),
+      ...(!active && pin.classificationReason ? [`reason: ${pin.classificationReason}`] : []),
+      `click: teleport to ${pin.teleportRouteId || pin.hostRouteId}`,
+      `world: ${pin.x.toFixed(0)}, ${pin.y.toFixed(0)}, ${pin.z.toFixed(0)}`,
+    ];
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const pad = 8;
+    const lineH = 15;
+    const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + pad * 2;
+    const height = lines.length * lineH + pad * 2;
+    const screen = this.worldToScreen(pin.x, pin.z);
+    let x = screen.x + 16;
+    let y = screen.y + 16;
+    if (x + width > this.cssWidth) x = screen.x - width - 16;
+    if (y + height > this.cssHeight) y = this.cssHeight - height - 4;
+    if (y < 4) y = 4;
+    ctx.fillStyle = active ? 'rgba(15,6,18,0.94)' : 'rgba(18,14,6,0.95)';
+    ctx.strokeStyle = active ? '#ff4fd8' : '#d6a84f';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height);
+    for (let index = 0; index < lines.length; index += 1) {
+      ctx.fillStyle = index === 0 ? (active ? '#ff7be5' : '#f2ca78') : '#f5e7f4';
+      ctx.fillText(lines[index], x + pad, y + pad + index * lineH);
+    }
+  }
+
   _updateInfo() {
     const p = this.cb.getCurrentPosition?.();
     const noclip = this.cb.isNoclipActive?.();
@@ -717,6 +893,17 @@ export class DeveloperMap {
     this.info.zoom.textContent = `${this.view.scale.toFixed(2)} px/m`;
     this.info.noclip.textContent = noclip ? 'ENABLED (drone)' : 'disabled';
     this.info.noclip.classList.toggle('is-on', !!noclip);
+    const pins = this.network?.prototypePins || [];
+    const hoveredPin = this.hovered?.kind === 'prototype' ? this.hovered.pin : null;
+    const activePinCount = pins.filter((pin) => pin.category === 'progressive-prototype').length;
+    const deferredPinCount = pins.length - activePinCount;
+    this.info.prototypes.textContent = hoveredPin
+      ? `${hoveredPin.pinId} ${hoveredPin.id} · ${hoveredPin.type}/${hoveredPin.side} · `
+        + `${hoveredPin.hostRouteId} ${hoveredPin.hostLaneCount}L + `
+        + `${hoveredPin.branchRouteId} ${hoveredPin.branchLaneCount}L · ${hoveredPin.status}`
+      : (pins.length
+        ? `${activePinCount} active · ${deferredPinCount} deferred (${pins.map((pin) => pin.pinId).join(', ')})`
+        : 'none');
     this.info.teleport.textContent = this._teleportInfo ? this._teleportInfo.text : '—';
     // The current-route lookup is a network search; refresh it a few times a
     // second rather than every frame.

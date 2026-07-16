@@ -85,7 +85,11 @@ function unionDeckY(point, host, branch, branchStation) {
   const lat = delta.dot(branchFrame.normal);
   const branchDepth = branchFrame.half - Math.abs(lat);
   if (branchDepth > 0.05) {
-    candidates.push({ y: branchFrame.position.y + Math.tan(branchFrame.bank) * lat, who: 'branch', depth: branchDepth });
+    // _deckPoint is the authoritative rendered plane. Progressive source
+    // routes use it to ease onto/off the shared host plane, so rebuilding
+    // the legacy bank equation here would report that deliberate vertical
+    // correction as a hole or step.
+    candidates.push({ y: map._deckPoint(branchFrame, lat).y, who: 'branch', depth: branchDepth });
   }
   return candidates;
 }

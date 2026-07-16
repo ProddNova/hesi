@@ -1,0 +1,84 @@
+{
+  "expectedInvariant": "P4 remains a 2+2 section until aux:0/aux:1 become real r1_0 lane 0/lane 1",
+  "metrics": {
+    "junctionId": "J2:diverge:c1_0:r1_0:start",
+    "topology": "2+2-diverge",
+    "lanes": [
+      {
+        "lane": "aux:0",
+        "target": "branch:0",
+        "minimumWidth": 3.55,
+        "maximumWidth": 3.55,
+        "minimumConsecutiveOverlap": 0.586,
+        "maximumTangentStepDeg": 1.385,
+        "endpointCentreGap": 0
+      },
+      {
+        "lane": "aux:1",
+        "target": "branch:1",
+        "minimumWidth": 3.55,
+        "maximumWidth": 3.55,
+        "minimumConsecutiveOverlap": 0.601,
+        "maximumTangentStepDeg": 1.439,
+        "endpointCentreGap": 0
+      }
+    ],
+    "envelope": {
+      "targetExtraWidth": 7.1,
+      "minimumCombinedWidth": 7.1,
+      "maximumRetreat": 0,
+      "handoffHostS": 10980.27,
+      "handoffBranchS": 146.042
+    },
+    "topologyContinuity": {
+      "maximumDividerMidpointError": 0,
+      "maximumLaneCentreFractionError": 0,
+      "markingOrderViolations": 0,
+      "minimumOuterToDividerSeparation": 4.1,
+      "endpointBoundaryGaps": [
+        0,
+        0,
+        0
+      ],
+      "endpointMarkingGaps": [
+        0,
+        0,
+        0
+      ]
+    },
+    "pavementCollision": {
+      "pavementHoleSamples": 0,
+      "collisionHits": 0,
+      "markingPavementHoles": 0,
+      "continuingBranchPavementHoles": 0,
+      "continuingBranchWallHits": 0
+    },
+    "guardrails": {
+      "hostSamples": 43,
+      "branchSamples": 8,
+      "intrusiveRails": 0,
+      "intrusiveWalls": 0,
+      "maximumHostEnvelopeError": 0,
+      "maximumBranchEnvelopeError": 0,
+      "handoffGap": 1.429
+    },
+    "markings": {
+      "pieces": {
+        "outer": 86,
+        "inner": 49,
+        "divider": 42,
+        "gore": 8
+      },
+      "maximumEmittedPathDeviation": 0,
+      "maximumOuterBoundaryOffsetError": 0,
+      "gaps": {
+        "outerToRoute": 0.476,
+        "innerDashToGore": 0.002,
+        "dividerToRoute": 8.665,
+        "goreToRoute": 1.491
+      },
+      "retainedRoutePaint": 0
+    },
+    "failures": []
+  }
+}

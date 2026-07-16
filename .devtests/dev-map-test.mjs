@@ -66,6 +66,127 @@ await page.waitForTimeout(400);
 await page.keyboard.press('m');
 await page.waitForTimeout(120);
 check('M opens the developer map', await page.evaluate(() => window.shutoko.devMap.isOpen() && !document.querySelector('.dev-map').hidden));
+const prototypePins = await page.evaluate(() => {
+  const dm = window.shutoko.devMap;
+  dm.fitNetwork();
+  dm._drawStatic();
+  const dpr = dm._dpr;
+  const expected = [
+    'J8:merge:r11_0:ramp_1:end',
+    'J0:merge:c1_0:c1_3:end',
+    'J10:merge:wangan_1:ramp_3:end',
+    'J2:diverge:c1_0:r1_0:start',
+  ];
+  const pins = dm.network.prototypePins;
+  const rendered = pins.every((pin) => {
+    const s = dm.worldToScreen(pin.x, pin.z);
+    const x = Math.max(0, Math.round((s.x - 9) * dpr));
+    const y = Math.max(0, Math.round((s.y - 9) * dpr));
+    const size = Math.max(1, Math.round(18 * dpr));
+    const data = dm.staticCtx.getImageData(x, y, size, size).data;
+    for (let i = 0; i < data.length; i += 4) {
+      const magenta = data[i] > 220 && data[i + 2] > 170 && data[i] > data[i + 1] * 1.25;
+      const amber = data[i] > 180 && data[i + 1] > 120 && data[i + 2] < 150;
+      if (magenta || amber) return true;
+    }
+    return false;
+  });
+  return {
+    count: pins.length,
+    idsMatch: pins.map((pin) => pin.id).every((id, index) => id === expected[index]),
+    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P1,P2,P3,P4',
+    finite: pins.every((pin) => Number.isFinite(pin.x + pin.y + pin.z + pin.distance)),
+    metadataComplete: pins.every((pin) => ['progressive-prototype', 'deferred-progressive-candidate'].includes(pin.category)
+      && ['merge', 'diverge'].includes(pin.type)
+      && ['left', 'right'].includes(pin.side)
+      && Number.isInteger(pin.hostLaneCount) && pin.hostLaneCount > 0
+      && Number.isInteger(pin.branchLaneCount) && pin.branchLaneCount > 0
+      && (pin.status === 'prototype-enabled' || pin.status.startsWith('deferred-'))
+      && typeof pin.classification === 'string'
+      && pin.teleportRouteId === pin.hostRouteId),
+    categoryCounts: {
+      active: pins.filter((pin) => pin.category === 'progressive-prototype').length,
+      deferred: pins.filter((pin) => pin.category === 'deferred-progressive-candidate').length,
+    },
+    p4: pins.find((pin) => pin.pinId === 'P4'),
+    rendered,
+    info: document.querySelector('[data-info="prototypes"]')?.textContent || '',
+  };
+});
+check('developer map exposes exactly four audited prototype pins', prototypePins.count === 4 && prototypePins.idsMatch && prototypePins.finite);
+check('prototype pins render as P1-P4', prototypePins.labelsMatch && prototypePins.rendered, prototypePins.info);
+check('prototype pin data exposes topology and status', prototypePins.metadataComplete
+  && prototypePins.categoryCounts.active === 1 && prototypePins.categoryCounts.deferred === 3);
+check('P4 exposes left-side active phases', prototypePins.p4?.side === 'left'
+  && prototypePins.p4?.status === 'prototype-enabled'
+  && prototypePins.p4?.classification === 'same-level-simple'
+  && prototypePins.p4?.phases
+  && Object.values(prototypePins.p4.phases).every(Number.isFinite));
+
+const prototypeInteractions = await page.evaluate(() => {
+  const g = window.shutoko;
+  const dm = g.devMap;
+  g.debug.noclip = false;
+  dm.setFollow(false);
+  const results = [];
+  for (let index = 0; index < dm.network.prototypePins.length; index += 1) {
+    const pin = dm.network.prototypePins[index];
+    dm.view.camX = pin.x;
+    dm.view.camZ = pin.z;
+    dm.view.scale = 1.5;
+    dm._staticDirty = true;
+    dm._drawStatic();
+    const screen = dm.worldToScreen(pin.x, pin.z);
+    const hit = dm._hitTest(screen.x, screen.y);
+    dm.hovered = hit;
+    dm._drawDynamic();
+    dm._updateInfo();
+    const detail = document.querySelector('[data-info="prototypes"]')?.textContent || '';
+    const expected = g.map.sampleLane(pin.teleportRouteId, pin.distance, 0, 1);
+    g.physics.setSpeed?.(20);
+    const rect = dm.canvas.getBoundingClientRect();
+    const clientX = rect.left + screen.x;
+    const clientY = rect.top + screen.y;
+    dm.canvas.dispatchEvent(new PointerEvent('pointerdown', {
+      pointerId: 40 + index, clientX, clientY, button: 0, buttons: 1, bubbles: true,
+    }));
+    dm.canvas.dispatchEvent(new PointerEvent('pointerup', {
+      pointerId: 40 + index, clientX, clientY, button: 0, buttons: 0, bubbles: true,
+    }));
+    const position = g.getVehicleState().position;
+    const speed = g.physics.velocity?.length?.() ?? g.getTelemetry().speedMS;
+    results.push({
+      expectedId: pin.id,
+      expectedRouteId: pin.teleportRouteId,
+      hitCategory: hit?.kind,
+      hitId: hit?.pin?.id,
+      routeId: hit?.route?.id,
+      metadataVisible: detail.includes(pin.id)
+        && detail.includes(pin.hostRouteId) && detail.includes(pin.branchRouteId)
+        && detail.includes(`${pin.hostLaneCount}L`) && detail.includes(`${pin.branchLaneCount}L`)
+        && detail.includes(`${pin.type}/${pin.side}`) && detail.includes(pin.status),
+      teleported: Math.hypot(position.x - expected.position.x, position.z - expected.position.z) < 0.1,
+      speedReset: speed < 0.1,
+      stayedOpen: dm.isOpen(),
+      teleportInfo: dm._teleportInfo?.text || '',
+    });
+  }
+  dm.fitNetwork();
+  dm.hovered = null;
+  dm._drawStatic();
+  dm._drawDynamic();
+  dm._updateInfo();
+  return results;
+});
+check('P1-P4 use the distinct prototype hit category', prototypeInteractions.every((result, index) => (
+  result.hitCategory === 'prototype'
+  && result.hitId === result.expectedId
+  && result.routeId === result.expectedRouteId
+)));
+check('prototype hover exposes junction, routes, topology and status', prototypeInteractions.every((result) => result.metadataVisible));
+check('clicking each prototype pin teleports safely to its host transition', prototypeInteractions.every((result) => (
+  result.teleported && result.speedReset && result.stayedOpen && result.teleportInfo.includes(result.hitId)
+)));
 await page.screenshot({ path: join(OUT, 'dev-01-fit-network.png') });
 await page.keyboard.press('m');
 await page.waitForTimeout(120);
