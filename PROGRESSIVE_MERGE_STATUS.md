@@ -215,23 +215,48 @@ adapter along each source lane at about 50 km/h. All four complete their full
 `ramp_1 → r11_0`, `c1_3 → c1_0`, `ramp_3 → wangan_1`, and inverse
 `c1_0 → r1_0`; no oscillation remains.
 
+### Emitted-rail and collision invariants
+
+The original guardrail probes classified a rail from route chainage alone: a
+host rail overlapping a former mouth interval was assumed to remain on the
+stable host edge and was therefore reported as interior. That became a false
+positive for a progressive transition, where a rail legitimately remains at
+the same chainage after moving laterally to the widened paved exterior.
+
+The corrected invariant does not waive the opening check. The map records the
+outer and base laterals of the parapet vertices actually emitted over the four
+prototype host intervals. Both guardrail probes compare those emitted values,
+including terminal squeeze, with the authoritative progressive paved envelope
+to a 0.03 m tolerance. A rail left on the old host edge still mismatches the
+envelope and fails; only a correctly relocated exterior rail passes.
+
+A final broad regression also exposed a real P4 collision-height switch of
+0.24 m. Rendering already applied the progressive branch-to-host deck offset,
+but collision corridor and barrier suppression sampled the unblended branch
+deck. The shared `_progressiveBranchDeckOffsetAt` helper now feeds rendering,
+collision corridors, and barriers. P4's measured height switch is 0.002 m and
+the finishing probe is back to exactly the six inherited baseline findings.
+
 ## Developer-map prototype pins
 
 The four modified locations are pinned in the existing developer map as bright
-magenta diamonds `P1`–`P4`. Press `M`, choose **Fit network**, then zoom to a
-pin; click the adjacent real route to teleport. The info line confirms
-`4 pinned (P1, P2, P3, P4)`. The pins are runtime data from the four transition
-records, not a second coordinate list inside the map UI.
+magenta diamonds `P1`–`P4` in the read-only `progressive-prototype` hit
+category. Press `M`, choose **Fit network**, hover a diamond to inspect its
+junction ID, host/branch routes, merge/diverge type, side, lane counts, and
+`prototype-enabled` status, then click the diamond itself to teleport safely to
+the host transition. The info line confirms `4 pinned (P1, P2, P3, P4)`.
 
-| Pin | Junction | Route pair | World X, Y, Z |
-| --- | --- | --- | --- |
-| P1 | `J8:merge:r11_0:ramp_1:end` | `ramp_1 → r11_0` | `-1128.45, 73.04, -3825.43` |
-| P2 | `J0:merge:c1_0:c1_3:end` | `c1_3 → c1_0` | `-897.45, 52.37, -2806.42` |
-| P3 | `J10:merge:wangan_1:ramp_3:end` | `ramp_3 → wangan_1` | `696.08, 29.71, -5832.86` |
-| P4 | `J2:diverge:c1_0:r1_0:start` | `c1_0 → r1_0` | `-1094.38, 57.33, -3014.18` |
+| Pin | Junction ID | Host | Branch | Type / side | H/B lanes | Status | World X, Y, Z |
+| --- | --- | --- | --- | --- | ---: | --- | --- |
+| P1 | `J8:merge:r11_0:ramp_1:end` | `r11_0` | `ramp_1` | merge / left | 2/1 | `prototype-enabled` | `-1128.45, 73.04, -3825.43` |
+| P2 | `J0:merge:c1_0:c1_3:end` | `c1_0` | `c1_3` | merge / right | 2/2 | `prototype-enabled` | `-897.45, 52.37, -2806.42` |
+| P3 | `J10:merge:wangan_1:ramp_3:end` | `wangan_1` | `ramp_3` | merge / left | 3/2 | `prototype-enabled` | `696.08, 29.71, -5832.86` |
+| P4 | `J2:diverge:c1_0:r1_0:start` | `c1_0` | `r1_0` | diverge / right | 2/2 | `prototype-enabled` | `-1094.38, 57.33, -3014.18` |
 
-The developer-map Playwright smoke passes 29/29, including exact four-pin data,
-visible P1–P4 pixels, freeze/teleport behavior, route/elevation hit-testing,
+The pins consume the same prototype selection/transition data as geometry;
+there is no per-junction map presentation logic. The developer-map Playwright
+smoke passes 33/33, including exact metadata, hover content, four direct pin
+teleports, visible P1–P4 pixels, freeze behavior, route/elevation hit-testing,
 phone minimap preservation, and no console errors.
 
 ## Mandatory visual matrix and direct review
@@ -269,13 +294,13 @@ unchanged baseline failure.
 | Merge marking | PASS; 56 zones, all counters 0 |
 | Marking orientation | PASS; 0 diagonal pieces, 0 alternating runs, 0 crossable-boundary chevrons; max lateral jump 0.15 m |
 | Merge guardrail | PASS; 52 convergence checks, 0 opening crossings/gaps |
-| Guardrail | PASS; 207 runs / 84 gaps, 0 unexplained/doubled/inside-asphalt rails; four legacy run/gap pairs replaced intentionally |
+| Guardrail | PASS; 207 runs / 84 gaps, 0 unexplained/doubled/inside-asphalt rails; emitted progressive parapet laterals match the paved exterior; four legacy run/gap pairs replaced intentionally |
 | Junction finishing | Known unchanged FAIL (6), exactly the six baseline source-curve/collision-height families |
 | Lateral junction | PASS ratchet; exact baseline totals: 56 mouths, 20,185 points, 0 holes/steps/rails, 22 duplicate samples |
 | Road surface | PASS; 40,046 surface / 17,644 render frames, worst lateral 0.060 m, vertical 0.030 m, dash phase errors 0 |
 | Traffic runtime | PASS; 23 active after 20 s, finite position, 5 meshes/vehicle |
 | OSM validation | Known FAIL improves 329 → 315: rail 0, overlap unchanged 22, ramp-drive 247 → 233, smoothness unchanged 60, hygiene 0; selected route pairs have 0 ramp-drive failures |
-| Developer map | PASS 29/29, including the exact four visible pins and phone/touch preservation |
+| Developer map | PASS 33/33, including exact four-pin metadata, hover, direct teleport, and phone/touch preservation |
 | Complete mobile e2e | PASS 34/34 at iPhone-sized touch viewport; no console errors |
 
 No non-prototype lateral, finishing, overlap, smoothness, rail, or hygiene
@@ -294,20 +319,20 @@ host made the historical 4,000 ms Node threshold fail on the base itself:
 
 | Metric | `origin/main` control | Prototype | Delta |
 | --- | ---: | ---: | ---: |
-| Node map-build median | 4,759.6 ms | 4,903.4 ms | +3.0% |
-| Browser map build | 4,141.8 ms | 4,398.9 ms | +6.2% |
+| Node map-build median | 4,759.6 ms | 4,712.9 ms | −1.0% |
+| Browser map build | 4,141.8 ms | 4,351.1 ms | +5.1% |
 | Scene triangles | 1,005,534 | 1,005,178 | −356 |
 | Stored triangles | 960,054 | 959,698 | −356 |
-| Draw calls | 169 | 171 | +2 |
-| Frame p95 | 99.9 ms | 99.9 ms | no change |
+| Draw calls | 169 | 169 | no change |
+| Frame p95 | 99.9 ms | 83.4 ms | −16.5 ms |
 
-An isolated repeat ranged to 5,062.9 ms Node / 4,741.0 ms browser, confirming
-large host timing variance. The performance script therefore reports FAIL on
-its absolute 4,000 ms map-build threshold (also failed by the base control) and
-the prototype's 171 calls against its 170-call ratchet. Geometry budgets and
-frame p95 remain inside limits, mobile e2e passes, and the measured +2 calls are
-documented rather than hidden. Rechecking on the target evaluation hardware is
-recommended before any network-wide rollout.
+An earlier isolated repeat ranged to 5,062.9 ms Node / 4,741.0 ms browser,
+confirming large host timing variance. The final performance script reports
+FAIL only on its absolute 4,000 ms map-build threshold, which also failed on the
+same-machine base control. The 169 draw calls now pass the 170-call ratchet;
+geometry budgets and frame p95 remain inside limits, and mobile e2e passes.
+Rechecking on the target evaluation hardware is recommended before any later
+rollout decision.
 
 ## Checkpoint limitations and stop condition
 
@@ -318,8 +343,10 @@ recommended before any network-wide rollout.
   geometry (`J27`, `J31`, `J36`, `J53`); they were not forced through the model.
 - The inherited six junction-finishing and 315 OSM findings remain documented;
   none is reclassified as fixed.
-- The +2 visible draw calls and timing variance above are the known performance
-  limitation for evaluation.
+- The absolute 4,000 ms map-build threshold remains base-reproducibly red on
+  this host despite the final prototype median being 1.0% faster than its
+  same-machine base control; hardware timing variance remains an evaluation
+  limitation.
 
 Rollout is intentionally and verifiably limited to exactly four records in one
 data-driven allow-list. No fifth junction is enabled, no network-wide rollout
