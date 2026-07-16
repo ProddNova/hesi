@@ -27,7 +27,17 @@ for (const transition of map.progressiveTransitions) {
     && transition.absorptionStart < transition.transitionEnd, `${transition.id}: non-monotonic phases`);
   check(transition.length >= 100, `${transition.id}: transition only ${transition.length.toFixed(1)} m`);
   check(transition.temporaryLaneCount === transition.hostLaneCount + 1, `${transition.id}: temporary lane count`);
-  check(transition.finalLaneCount === transition.hostLaneCount, `${transition.id}: final lane count`);
+  check(transition.finalLaneCount === (transition.type === 'diverge'
+    ? transition.hostLaneCount + transition.branchLaneCount
+    : transition.hostLaneCount), `${transition.id}: final lane count`);
+  if (transition.type === 'diverge') {
+    check(transition.branchFeedLane === 0, `${transition.id}: hostward branch feed lane`);
+    check(transition.branchLaneCentres.length === transition.branchLaneCount,
+      `${transition.id}: explicit branch lane-centre count`);
+    check(transition.alignmentStart < transition.physicalSplitStart
+      && transition.physicalSplitStart <= transition.goreStart,
+    `${transition.id}: source-derived diverge landmarks`);
+  }
   check(transition.laneCentres.length === transition.temporaryLaneCount, `${transition.id}: lane-centre path count`);
   check(transition.laneMappings.length >= transition.hostLaneCount + 1, `${transition.id}: incomplete lane mappings`);
   check(transition.markingOwnership.every((boundary) => boundary.owner), `${transition.id}: ownerless boundary record`);

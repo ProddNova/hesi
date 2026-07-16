@@ -31,7 +31,7 @@ function unwrappedHostDistance(zone, distance) {
   return zone.hostRef + delta;
 }
 
-function laneMappings(zone) {
+function laneMappings(zone, branchFeedLane = 0) {
   const { host, branch, kind, side } = zone;
   const outerHostLane = side > 0 ? 0 : host.lanes - 1;
   const mappings = Array.from({ length: host.lanes }, (_, lane) => ({
@@ -57,10 +57,11 @@ function laneMappings(zone) {
     mappings.push({
       source: `host:${outerHostLane}`,
       temporary: 'aux:0',
-      final: 'branch:0',
-      outcome: 'separates-to-branch',
+      final: `branch:${branchFeedLane}`,
+      outcome: 'splits-to-branch',
     });
-    for (let lane = 1; lane < branch.lanes; lane += 1) {
+    for (let lane = 0; lane < branch.lanes; lane += 1) {
+      if (lane === branchFeedLane) continue;
       mappings.push({
         source: 'aux:0',
         temporary: 'aux:0',
@@ -89,14 +90,59 @@ function buildRecord(map, zone, prototype) {
     openingStart + 28,
     transitionEnd - 48,
   );
-  const absorptionStart = clamp(
+  const hostLaneEdge = zone.host.lanes * zone.host.laneWidth * 0.5;
+  const auxiliaryWidth = zone.host.laneWidth;
+  const targetExtraWidth = auxiliaryWidth + Math.max(0.8, zone.host.shoulder || 1.0);
+  const parallelAuxLateral = zone.side * (hostLaneEdge + auxiliaryWidth * 0.5);
+  const branchFeedLane = zone.kind === 'diverge'
+    ? Array.from({ length: zone.branch.lanes }, (_, lane) => lane).sort((left, right) => (
+      zone.hostwardSign * map._laneOffset(zone.branch, right, 1)
+      - zone.hostwardSign * map._laneOffset(zone.branch, left, 1)
+    ))[0]
+    : 0;
+  const branchFeedLateral = map._laneOffset(zone.branch, branchFeedLane, 1);
+  const branchFeedOutwardAt = (row) => {
+    const target = map._deckPoint(row.frame, branchFeedLateral);
+    const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
+    return zone.side * projection.signedLateral;
+  };
+  const alignmentRow = zone.kind === 'diverge'
+    ? branchRows.find((row) => branchFeedOutwardAt(row) >= Math.abs(parallelAuxLateral) - 0.05) || branchRows.at(-1)
+    : null;
+  const physicalSplitRow = zone.kind === 'diverge'
+    ? branchRows.find((row) => row.innerEdge >= row.hostHalf - 0.3) || branchRows.at(-1)
+    : null;
+  const exteriorHandoffRow = zone.kind === 'diverge'
+    ? branchRows.find((row) => row.unionOuter >= row.hostHalf + targetExtraWidth - 0.1) || physicalSplitRow
+    : null;
+  const goreStartRow = zone.kind === 'diverge'
+    ? branchRows.find((row) => row.innerEdge >= row.hostHalf + 1.5) || branchRows.at(-1)
+    : null;
+  let absorptionStart = clamp(
     Math.min(approachStart + length * 0.68, compatibleEnd - 8),
     parallelStart + 24,
     transitionEnd - 24,
   );
-  const hostLaneEdge = zone.host.lanes * zone.host.laneWidth * 0.5;
-  const auxiliaryWidth = zone.host.laneWidth;
-  const targetExtraWidth = auxiliaryWidth + Math.max(0.8, zone.host.shoulder || 1.0);
+  if (zone.kind === 'diverge') {
+    absorptionStart = clamp(alignmentRow.hU, parallelStart + 4, transitionEnd - 4);
+  }
+  const divergeHandoffPoint = (hostS, startLateral, branchLateral, lift = 0.035) => {
+    const startS = exteriorHandoffRow.hU;
+    const endS = transitionEnd;
+    const startFrame = map._frameAt(zone.host, startS);
+    const endFrame = map._frameAt(zone.branch, branchRows.at(-1).bS);
+    const start = map._deckPoint(startFrame, startLateral, lift);
+    const end = map._deckPoint(endFrame, branchLateral, lift);
+    const controlLength = start.distanceTo(end) * 0.4;
+    const control0 = start.clone().addScaledVector(startFrame.tangent, controlLength);
+    const control1 = end.clone().addScaledVector(endFrame.tangent, -controlLength);
+    const t = clamp((hostS - startS) / Math.max(1e-6, endS - startS), 0, 1);
+    const u = 1 - t;
+    return start.clone().multiplyScalar(u * u * u)
+      .add(control0.clone().multiplyScalar(3 * u * u * t))
+      .add(control1.clone().multiplyScalar(3 * u * t * t))
+      .add(end.clone().multiplyScalar(t * t * t));
+  };
 
   const record = {
     id: zone.id,
@@ -114,24 +160,37 @@ function buildRecord(map, zone, prototype) {
     parallelStart,
     absorptionStart,
     transitionEnd,
+    alignmentStart: zone.kind === 'diverge' ? absorptionStart : null,
+    laneHandoffStart: exteriorHandoffRow?.hU ?? null,
+    physicalSplitStart: physicalSplitRow?.hU ?? null,
+    exteriorHandoffStart: exteriorHandoffRow?.hU ?? null,
+    goreStart: goreStartRow?.hU ?? null,
+    alignmentBranchStart: alignmentRow?.bS ?? null,
+    physicalSplitBranchStart: physicalSplitRow?.bS ?? null,
+    exteriorHandoffBranchStart: exteriorHandoffRow?.bS ?? null,
+    goreBranchStart: goreStartRow?.bS ?? null,
     length,
     phaseOrder: [...PROGRESSIVE_PHASES],
     hostLaneCount: zone.host.lanes,
     branchLaneCount: zone.branch.lanes,
     temporaryLaneCount: zone.host.lanes + 1,
-    finalLaneCount: zone.host.lanes,
+    finalLaneCount: zone.kind === 'diverge' ? zone.host.lanes + zone.branch.lanes : zone.host.lanes,
+    finalHostLaneCount: zone.host.lanes,
+    finalBranchLaneCount: zone.kind === 'diverge' ? zone.branch.lanes : 0,
     auxiliaryLaneCount: 1,
     auxiliaryWidth,
     targetExtraWidth,
     branchInterval: [...zone.branchSpan],
     hostInterval: [approachStart, transitionEnd],
     crossableInterval: [openingStart, transitionEnd],
-    laneMappings: laneMappings(zone),
+    laneMappings: laneMappings(zone, branchFeedLane),
+    branchFeedLane,
     survivingLanes: Array.from({ length: zone.host.lanes }, (_, lane) => `host:${lane}`),
     absorbedLanes: zone.kind === 'merge' ? ['aux:0'] : [],
     separatedLanes: zone.kind === 'diverge' ? ['aux:0'] : [],
     laneCentres: [],
     laneBoundaries: [],
+    branchLaneCentres: [],
     pavedEnvelope: [],
     crossableEnvelope: [],
     markingOwnership: [],
@@ -156,6 +215,17 @@ function buildRecord(map, zone, prototype) {
       const span = Math.max(1e-6, right.bS - left.bS);
       return left.hU + (right.hU - left.hU) * ((distance - left.bS) / span);
     },
+    branchAtHost(distance) {
+      const hostS = unwrappedHostDistance(zone, distance);
+      if (hostS < rows[0].hU - 0.01 || hostS > rows[rows.length - 1].hU + 0.01) return null;
+      let upper = 1;
+      while (upper < rows.length && rows[upper].hU < hostS) upper += 1;
+      if (upper >= rows.length) return rows[rows.length - 1].bS;
+      const left = rows[upper - 1];
+      const right = rows[upper];
+      const span = Math.max(1e-6, right.hU - left.hU);
+      return left.bS + (right.bS - left.bS) * ((hostS - left.hU) / span);
+    },
     branchDeckHostBlendAt(distance) {
       const hostS = this.hostAtBranch(distance);
       if (hostS === null) return 0;
@@ -164,14 +234,28 @@ function buildRecord(map, zone, prototype) {
         if (hostS >= parallelStart) return 1;
         return quintic((hostS - openingStart) / (parallelStart - openingStart));
       }
-      if (hostS <= parallelStart) return 1;
-      if (hostS >= absorptionStart) return 0;
-      return 1 - quintic((hostS - parallelStart) / (absorptionStart - parallelStart));
+      if (hostS <= alignmentRow.hU) return 1;
+      if (hostS >= transitionEnd) return 0;
+      return 1 - quintic((hostS - alignmentRow.hU) / (transitionEnd - alignmentRow.hU));
     },
     branchDeckOffsetAt(distance, lateral = 0) {
       const blend = this.branchDeckHostBlendAt(distance);
       if (blend <= 0) return 0;
       if (distance < branchRows[0].bS - 0.01 || distance > branchRows[branchRows.length - 1].bS + 0.01) return 0;
+      if (zone.kind === 'diverge') {
+        const branchFrame = map._frameAt(zone.branch, distance);
+        const branchPoint = branchFrame.position.clone().addScaledVector(branchFrame.normal, lateral);
+        branchPoint.y += Math.tan(branchFrame.bank) * lateral;
+        const hostS = this.hostAtBranch(distance);
+        const projection = map._projectToRoute(
+          zone.host,
+          branchPoint,
+          map._hostSeedIndex(zone.host, hostS),
+        );
+        const hostDeckY = projection.point.y
+          + Math.tan(map._bankAt(zone.host, projection.distance)) * projection.signedLateral;
+        return (hostDeckY - branchPoint.y) * blend;
+      }
       let upper = 1;
       while (upper < branchRows.length && branchRows[upper].bS < distance) upper += 1;
       const right = branchRows[Math.min(upper, branchRows.length - 1)];
@@ -218,8 +302,9 @@ function buildRecord(map, zone, prototype) {
         const factor = quintic((value - openingStart) / (parallelStart - openingStart));
         return baseEdgeLine + (laneBoundary - baseEdgeLine) * factor;
       }
-      if (value <= absorptionStart) return laneBoundary;
-      const factor = quintic((value - absorptionStart) / (transitionEnd - absorptionStart));
+      const boundaryCloseStart = zone.kind === 'diverge' ? physicalSplitRow.hU : absorptionStart;
+      if (value <= boundaryCloseStart) return laneBoundary;
+      const factor = quintic((value - boundaryCloseStart) / (transitionEnd - boundaryCloseStart));
       return laneBoundary + (baseEdgeLine - laneBoundary) * factor;
     },
     outerMarkingLateralAt(distance) {
@@ -264,9 +349,9 @@ function buildRecord(map, zone, prototype) {
     },
     ...map._laneDividerOffsets(zone.branch).map((lateral, index) => ({
       id: `${record.id}:branch-divider:${index}`,
-      role: 'superseded-branch-divider',
+      role: zone.kind === 'diverge' ? 'forming-branch-divider' : 'superseded-branch-divider',
       lateral,
-      owner: 'none',
+      owner: zone.kind === 'diverge' ? `progressive:${record.id}` : 'none',
     })),
   ];
 
@@ -293,6 +378,7 @@ function buildRecord(map, zone, prototype) {
       lateralMin: envelope.lateralMin,
       lateralMax: envelope.lateralMax,
       outerLateral: envelope.outerLateral,
+      baseHalf: envelope.baseHalf,
       extraWidth: envelope.extra,
       lower: pointRecord(map._deckPoint(frame, envelope.lateralMin)),
       upper: pointRecord(map._deckPoint(frame, envelope.lateralMax)),
@@ -313,24 +399,71 @@ function buildRecord(map, zone, prototype) {
     const factor = record.widthFactorAt(hostS);
     const outerHostLane = zone.side > 0 ? 0 : zone.host.lanes - 1;
     const outerHostLateral = map._laneOffset(zone.host, outerHostLane, 1);
-    const parallelAuxLateral = zone.side * (hostLaneEdge + auxiliaryWidth * 0.5);
     let auxLateral = outerHostLateral + (parallelAuxLateral - outerHostLateral) * factor;
+    let auxPosition = map._deckPoint(frame, auxLateral, 0.035);
     if (zone.kind === 'merge' && hostS > absorptionStart) {
       const convergence = quintic((hostS - absorptionStart) / (transitionEnd - absorptionStart));
       auxLateral += (outerHostLateral - auxLateral) * convergence;
+      auxPosition = map._deckPoint(frame, auxLateral, 0.035);
+    } else if (zone.kind === 'diverge' && hostS > exteriorHandoffRow.hU) {
+      auxPosition = divergeHandoffPoint(hostS, parallelAuxLateral, branchFeedLateral, 0.035);
+      auxLateral = auxPosition.clone().sub(frame.position).dot(frame.normal);
+      const branchS = record.branchAtHost(hostS);
+      if (branchS !== null) {
+        const branchProjection = map._projectToRoute(
+          zone.branch,
+          auxPosition,
+          map._hostSeedIndex(zone.branch, branchS),
+        );
+        const branchFrame = map._frameAt(zone.branch, branchProjection.distance);
+        const branchDeck = map._deckPoint(branchFrame, branchProjection.signedLateral, 0.035);
+        branchDeck.y += record.branchDeckOffsetAt(
+          branchProjection.distance,
+          branchProjection.signedLateral,
+        );
+        auxPosition.y = branchDeck.y;
+      }
     }
     lanePaths[lanePaths.length - 1].points.push({
       hostS,
       lateral: auxLateral,
-      position: pointRecord(map._deckPoint(frame, auxLateral, 0.035)),
+      position: pointRecord(auxPosition),
     });
     for (const boundary of boundaryPaths) {
-      const lateral = boundary.id === 'outer-edge' ? envelope.outerLateral : boundary.lateral;
-      boundary.points.push({ hostS, lateral, position: pointRecord(map._deckPoint(frame, lateral, 0.04)) });
+      let lateral = boundary.id === 'outer-edge' ? envelope.outerLateral : boundary.lateral;
+      let boundaryPosition = map._deckPoint(frame, lateral, 0.04);
+      const branchS = zone.kind === 'diverge' ? record.branchAtHost(hostS) : null;
+      if (branchS !== null && boundary.id === 'aux-boundary' && hostS > exteriorHandoffRow.hU) {
+        const branchLaneEdge = zone.branch.lanes * zone.branch.laneWidth * 0.5;
+        boundaryPosition = divergeHandoffPoint(
+          hostS,
+          zone.side * hostLaneEdge,
+          zone.hostwardSign * branchLaneEdge,
+          0.04,
+        );
+        lateral = boundaryPosition.clone().sub(frame.position).dot(frame.normal);
+      } else if (branchS !== null && boundary.id === 'outer-edge'
+        && hostS >= exteriorHandoffRow.hU) {
+        const branchFrame = map._frameAt(zone.branch, branchS);
+        const branchHalf = map._halfWidthAt(zone.branch, branchS);
+        boundaryPosition = map._deckPoint(branchFrame, -zone.hostwardSign * branchHalf, 0.04);
+        lateral = boundaryPosition.clone().sub(frame.position).dot(frame.normal);
+      }
+      boundary.points.push({ hostS, branchS, lateral, position: pointRecord(boundaryPosition) });
     }
   }
   record.laneCentres = lanePaths;
   record.laneBoundaries = boundaryPaths;
+  record.branchLaneCentres = Array.from({ length: zone.branch.lanes }, (_, lane) => ({
+    id: `branch:${lane}`,
+    outcome: lane === branchFeedLane ? 'fed-by-auxiliary' : 'forms-with-branch',
+    points: branchRows.map((row) => ({
+      branchS: row.bS,
+      hostS: row.hU,
+      lateral: map._laneOffset(zone.branch, lane, 1),
+      position: pointRecord(map._deckPoint(row.frame, map._laneOffset(zone.branch, lane, 1), 0.035)),
+    })),
+  }));
   record.worldBounds = record.pavedEnvelope.reduce((bounds, row) => ({
     minX: Math.min(bounds.minX, row.lower.x, row.upper.x),
     maxX: Math.max(bounds.maxX, row.lower.x, row.upper.x),

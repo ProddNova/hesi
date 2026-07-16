@@ -93,6 +93,47 @@ handoff and paved-envelope phase boundaries in the shared model. Rail and paint
 ownership will then be corrected against the same exterior/split landmarks.
 P5 remains disabled unless P4 passes all gates.
 
+### Phase C complete — P4 topology and paved handoff
+
+The shared diverge model now distinguishes four source-derived events:
+
+- exterior ownership handoff: host/branch s=10973.973/140;
+- branch feed lane reaches the auxiliary corridor: 10982.425/148;
+- physical paved separation: 10991.072/156;
+- safe gore-rail start: derived from at least 1.5 m clear planar separation.
+
+The final mapping is explicit: `c1_0:0` and `c1_0:1` both continue on the
+two-lane host; the outside host lane also splits into `aux:0`; `aux:0` follows a
+cubic position/tangent-continuous path into the hostward `r1_0:0`; `r1_0:1`
+forms as the second branch lane. The temporary state has three readable host
+corridors and the finalized state has two host plus two branch lanes. Branch
+lane centres and the transition boundary path are retained explicitly in the
+record rather than inferred by paint or rails.
+
+The host-only width easing is no longer treated as the final branch path. It
+holds full usable width until the source lane is available, while the auxiliary
+centre begins its tangent-continuous handoff when the real branch becomes the
+union exterior. The visible/collision branch deck uses an exact host-plane
+offset through the shared portion and eases to its source bank after lane
+alignment. This removes the old 0.75 m ownership-height disagreement.
+
+Focused results after Phase C:
+
+- model probe: PASS (temporary 3, final 2 host + 2 branch);
+- progressive shared probe: PASS; lane step 2.99 m, tangent step 2.88°,
+  source-authoritative outer step 0.86 m, height switch 0.044 m;
+- production `VehiclePhysics` branch traversal: PASS, 160.1 m, 0 collisions,
+  0 wall correction, 0.12 m maximum lane error, one `c1_0 -> r1_0` ownership
+  change;
+- A–B marking clipping: PASS with every violation counter at zero;
+- dedicated P4 gate: geometry/topology/collision assertions now pass; only the
+  intentionally unmodified rail and solid-marking assertions remain red.
+
+**Exact resume point:** Phase D will transfer outer rail ownership from the
+host to the branch at s=10973.973/140, delay the gore rails until physical
+clearance, and split transition-owned host/branch marking paths at the same
+landmarks. No geometry outside P4 is authorized.
+
 ## Checkpoint contract
 
 - Branch: `codex/progressive-merge-prototype`

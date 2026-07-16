@@ -55,14 +55,37 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     if (worstTangentDelta > 4.5) fail(id, `tangent discontinuity ${worstTangentDelta.toFixed(2)} deg`);
 
     let worstWidthStep = 0;
+    let previousAuthoritativeOuter = null;
+    let previousSourceOuter = null;
+    let worstSourceOuterStep = 0;
     let lastOpening = -Infinity;
     let lastAbsorption = Infinity;
+    const sourceRows = [...transition.sourceZone.samples].sort((left, right) => left.hU - right.hU);
+    const sourceOuterAt = (hostS) => {
+      let upper = 1;
+      while (upper < sourceRows.length && sourceRows[upper].hU < hostS) upper += 1;
+      if (upper >= sourceRows.length) return sourceRows.at(-1).unionOuter;
+      const left = sourceRows[upper - 1];
+      const right = sourceRows[upper];
+      const t = (hostS - left.hU) / Math.max(1e-6, right.hU - left.hU);
+      return left.unionOuter + (right.unionOuter - left.unionOuter) * t;
+    };
     for (let index = 0; index < transition.pavedEnvelope.length; index += 1) {
       const row = transition.pavedEnvelope[index];
-      if (index) worstWidthStep = Math.max(
-        worstWidthStep,
-        Math.abs(row.extraWidth - transition.pavedEnvelope[index - 1].extraWidth),
-      );
+      const authoritativeOuter = transition.type === 'diverge'
+        ? Math.max(row.extraWidth + row.baseHalf, sourceOuterAt(row.hostS))
+        : row.extraWidth;
+      if (previousAuthoritativeOuter !== null) {
+        worstWidthStep = Math.max(worstWidthStep, Math.abs(authoritativeOuter - previousAuthoritativeOuter));
+      }
+      if (transition.type === 'diverge') {
+        const sourceOuter = sourceOuterAt(row.hostS);
+        if (previousSourceOuter !== null) {
+          worstSourceOuterStep = Math.max(worstSourceOuterStep, Math.abs(sourceOuter - previousSourceOuter));
+        }
+        previousSourceOuter = sourceOuter;
+      }
+      previousAuthoritativeOuter = authoritativeOuter;
       if (row.hostS >= transition.openingStart - 0.01 && row.hostS <= transition.parallelStart + 0.01) {
         if (row.extraWidth + 0.002 < lastOpening) fail(id, 'non-monotonic opening width');
         lastOpening = row.extraWidth;
@@ -73,14 +96,20 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       }
       if (!(row.lateralMin < row.lateralMax)) fail(id, `inverted pavement at ${row.hostS.toFixed(1)}`);
     }
-    if (worstWidthStep > 0.7) fail(id, `width step ${worstWidthStep.toFixed(2)} m`);
+    const allowedWidthStep = transition.type === 'diverge' ? Math.max(0.7, worstSourceOuterStep + 0.05) : 0.7;
+    if (worstWidthStep > allowedWidthStep) {
+      fail(id, `width step ${worstWidthStep.toFixed(2)} m (source ${worstSourceOuterStep.toFixed(2)} m)`);
+    }
     const first = transition.pavedEnvelope[0];
     const last = transition.pavedEnvelope.at(-1);
     if (first.extraWidth > 0.002 || last.extraWidth > 0.002) fail(id, 'final width does not match stable host');
 
     // Lane topology and pavement/physics agreement.
     if (transition.temporaryLaneCount !== transition.hostLaneCount + 1) fail(id, 'temporary lane count');
-    if (transition.finalLaneCount !== transition.hostLaneCount) fail(id, 'final lane count');
+    const expectedFinalLanes = transition.type === 'diverge'
+      ? transition.hostLaneCount + transition.branchLaneCount
+      : transition.hostLaneCount;
+    if (transition.finalLaneCount !== expectedFinalLanes) fail(id, 'final lane count');
     if (!transition.laneMappings.some((mapping) => mapping.outcome.includes('absorbed')
       || mapping.outcome.includes('separates') || mapping.outcome.includes('opens'))) fail(id, 'no explicit absorbed/separated mapping');
     const ownershipIds = new Set();
@@ -104,18 +133,30 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       if (row.hostS < transition.openingStart || row.hostS > transition.transitionEnd) continue;
       const aux = transition.laneCentres.at(-1).points[index];
       if (!aux) continue;
-      if (aux.lateral < row.lateralMin + 0.3 || aux.lateral > row.lateralMax - 0.3) {
+      if (row.hostS < (transition.laneHandoffStart ?? Infinity)
+        && (aux.lateral < row.lateralMin + 0.3 || aux.lateral > row.lateralMax - 0.3)) {
         fail(id, `aux lane outside pavement at ${row.hostS.toFixed(1)}`);
       }
       const point = worldPoint(aux.position, 0.05);
+      if (!map.isPointDrivable(point, 0.05)) fail(id, `aux lane has no drivable surface at ${row.hostS.toFixed(1)}`);
       const info = map.getRoadInfo(point, transition.hostRouteId);
-      routeSequence.push(info?.routeId || 'none');
-      if (!info || info.routeId !== transition.hostRouteId) fail(id, `route ownership ${info?.routeId || 'none'} at ${row.hostS.toFixed(1)}`);
+      if (routeSequence.at(-1) !== (info?.routeId || 'none')) routeSequence.push(info?.routeId || 'none');
+      const allowedRouteIds = transition.type === 'diverge'
+        ? [transition.hostRouteId, transition.branchRouteId]
+        : [transition.hostRouteId];
+      if (!info || !allowedRouteIds.includes(info.routeId)) {
+        fail(id, `route ownership ${info?.routeId || 'none'} at ${row.hostS.toFixed(1)}`);
+      }
       if (info) worstHeightError = Math.max(worstHeightError, Math.abs(info.height - aux.position.y + 0.035));
       const collision = map.resolveWallCollision(point, 1.1);
       if (collision.hit) fail(id, `wall in auxiliary lane at ${row.hostS.toFixed(1)}`);
     }
-    if (new Set(routeSequence).size > 1) fail(id, `route ownership oscillation ${[...new Set(routeSequence)].join(',')}`);
+    const expectedOwnership = transition.type === 'diverge'
+      ? [transition.hostRouteId, transition.branchRouteId]
+      : [transition.hostRouteId];
+    if (routeSequence.join(',') !== expectedOwnership.join(',')) {
+      fail(id, `route ownership sequence ${routeSequence.join(',')}`);
+    }
     if (worstHeightError > 0.08) fail(id, `height switch ${worstHeightError.toFixed(3)} m`);
 
     // Branch surface must hand its covered progressive section to the host.

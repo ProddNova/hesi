@@ -22,10 +22,6 @@ const aux = transition.laneCentres.find((lane) => lane.id === 'aux:0');
 const laneEdge = zone.host.lanes * zone.host.laneWidth * 0.5;
 const parallelAuxLateral = zone.side * (laneEdge + transition.auxiliaryWidth * 0.5);
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
-const quintic = (value) => {
-  const t = clamp(value, 0, 1);
-  return t * t * t * (t * (t * 6 - 15) + 10);
-};
 const point = (value) => new THREE.Vector3(value.x, value.y, value.z);
 const distanceXZ = (left, right) => Math.hypot(left.x - right.x, left.z - right.z);
 const degrees = (radians) => radians * 180 / Math.PI;
@@ -43,6 +39,15 @@ const splitRow = rows.find((row) => row.innerEdge >= row.hostHalf - 0.3) || rows
 const exteriorHandoffRow = rows.find((row) => (
   row.unionOuter >= row.hostHalf + transition.targetExtraWidth - 0.1)) || splitRow;
 const lastRow = rows.at(-1);
+const handoffStartPoint = hostAuxPoint(exteriorHandoffRow);
+const handoffEndPoint = point(branchLane(lastRow, 0).position);
+handoffStartPoint.y += 0.035;
+handoffEndPoint.y += 0.035;
+const handoffControlLength = handoffStartPoint.distanceTo(handoffEndPoint) * 0.4;
+const handoffStartTangent = map._frameAt(zone.host, exteriorHandoffRow.hU).tangent;
+const handoffEndTangent = map._frameAt(zone.branch, lastRow.bS).tangent;
+const handoffControl0 = handoffStartPoint.clone().addScaledVector(handoffStartTangent, handoffControlLength);
+const handoffControl1 = handoffEndPoint.clone().addScaledVector(handoffEndTangent, -handoffControlLength);
 
 const interpolateAux = (hostS) => {
   const points = aux.points;
@@ -54,13 +59,20 @@ const interpolateAux = (hostS) => {
   const t = clamp((hostS - left.hostS) / Math.max(1e-6, right.hostS - left.hostS), 0, 1);
   return point(left.position).lerp(point(right.position), t);
 };
-const intendedPoint = (row) => {
-  const hostPoint = hostAuxPoint(row);
-  if (row.hU <= alignmentRow.hU) return hostPoint;
-  const branchPoint = point(branchLane(row, 0).position);
-  const blend = quintic((row.hU - alignmentRow.hU) / Math.max(1e-6, lastRow.hU - alignmentRow.hU));
-  return hostPoint.lerp(branchPoint, blend);
+const intendedPointAtHost = (hostS) => {
+  if (hostS <= exteriorHandoffRow.hU) {
+    const frame = map._frameAt(zone.host, hostS);
+    return map._deckPoint(frame, parallelAuxLateral, 0.035);
+  }
+  const t = clamp((hostS - exteriorHandoffRow.hU)
+    / Math.max(1e-6, lastRow.hU - exteriorHandoffRow.hU), 0, 1);
+  const u = 1 - t;
+  return handoffStartPoint.clone().multiplyScalar(u * u * u)
+    .add(handoffControl0.clone().multiplyScalar(3 * u * u * t))
+    .add(handoffControl1.clone().multiplyScalar(3 * u * t * t))
+    .add(handoffEndPoint.clone().multiplyScalar(t * t * t));
 };
+const intendedPoint = (row) => intendedPointAtHost(row.hU);
 const nearestRowAtHost = (hostS) => rows.reduce((best, row) => (
   Math.abs(row.hU - hostS) < Math.abs(best.hU - hostS) ? row : best));
 
@@ -68,6 +80,31 @@ const usableRows = transition.pavedEnvelope.filter((row) => (
   row.hostS >= transition.parallelStart - 0.01 && row.hostS <= alignmentRow.hU + 0.01));
 const minimumUsableExtraWidth = Math.min(...usableRows.map((row) => row.extraWidth));
 const prematureClosure = usableRows.find((row) => row.extraWidth < transition.auxiliaryWidth - 0.15) || null;
+const sourceOuterAt = (hostS) => {
+  let upper = 1;
+  while (upper < rows.length && rows[upper].hU < hostS) upper += 1;
+  if (upper >= rows.length) return rows.at(-1).unionOuter;
+  const left = rows[upper - 1];
+  const right = rows[upper];
+  const t = (hostS - left.hU) / Math.max(1e-6, right.hU - left.hU);
+  return left.unionOuter + (right.unionOuter - left.unionOuter) * t;
+};
+let maximumAuthoritativeOuterStep = 0;
+let maximumSourceOuterStep = 0;
+let previousAuthoritativeOuter = null;
+let previousSourceOuter = null;
+for (const row of transition.pavedEnvelope) {
+  const sourceOuter = sourceOuterAt(row.hostS);
+  const authoritativeOuter = Math.max(row.baseHalf + row.extraWidth, sourceOuter);
+  if (previousAuthoritativeOuter !== null) {
+    maximumAuthoritativeOuterStep = Math.max(maximumAuthoritativeOuterStep,
+      Math.abs(authoritativeOuter - previousAuthoritativeOuter));
+    maximumSourceOuterStep = Math.max(maximumSourceOuterStep,
+      Math.abs(sourceOuter - previousSourceOuter));
+  }
+  previousAuthoritativeOuter = authoritativeOuter;
+  previousSourceOuter = sourceOuter;
+}
 const endpointGapToBranchLane0 = distanceXZ(
   point(aux.points.at(-1).position),
   branchLane(lastRow, 0).position,
@@ -86,9 +123,9 @@ for (let index = 1; index < aux.points.length; index += 1) {
   }
   previousDirection = direction;
   const row = nearestRowAtHost(aux.points[index].hostS);
-  if (row.hU >= alignmentRow.hU) {
+  if (row.hU >= exteriorHandoffRow.hU) {
     maximumReferencePathGap = Math.max(maximumReferencePathGap,
-      distanceXZ(b, intendedPoint(row)));
+      distanceXZ(b, intendedPointAtHost(aux.points[index].hostS)));
   }
 }
 
@@ -133,12 +170,11 @@ const branchBoundaryAtEnd = map._deckPoint(
   zone.hostwardSign * laneEdge,
   0.04,
 );
-const hostBoundaryAtEnd = map._deckPoint(
-  map._frameAt(zone.host, transition.transitionEnd),
-  transition.boundaryLateralAt(transition.transitionEnd),
-  0.04,
-);
-const markingHandoffGap = distanceXZ(hostBoundaryAtEnd, branchBoundaryAtEnd);
+const transitionBoundaryAtEnd = transition.laneBoundaries
+  .find((boundary) => boundary.id === 'aux-boundary')?.points.at(-1)?.position;
+const markingHandoffGap = transitionBoundaryAtEnd
+  ? distanceXZ(transitionBoundaryAtEnd, branchBoundaryAtEnd)
+  : Infinity;
 
 const metrics = {
   junctionId: transition.id,
@@ -157,6 +193,8 @@ const metrics = {
     endpointGapToBranchLane0: round(endpointGapToBranchLane0),
     maximumReferencePathGap: round(maximumReferencePathGap),
     maximumTangentStepDeg: round(maximumAuxTangentStep),
+    maximumAuthoritativeOuterStep: round(maximumAuthoritativeOuterStep),
+    maximumSourceOuterStep: round(maximumSourceOuterStep),
   },
   pavementCollision: {
     sampledStations: rows.filter((candidate) => candidate.hU >= transition.parallelStart).length,
@@ -186,6 +224,8 @@ check(endpointGapToBranchLane0 <= 0.5,
 check(maximumReferencePathGap <= 0.75,
   `auxiliary path departs the source-derived handoff by ${maximumReferencePathGap.toFixed(2)} m`);
 check(maximumAuxTangentStep <= 5, `auxiliary tangent step ${maximumAuxTangentStep.toFixed(2)} deg`);
+check(maximumAuthoritativeOuterStep <= Math.max(0.7, maximumSourceOuterStep + 0.05),
+  `paved-union lateral step ${maximumAuthoritativeOuterStep.toFixed(2)} m exceeds source trajectory`);
 check(pavementHoleSamples === 0, `${pavementHoleSamples} intended-corridor pavement holes`);
 check(collisionCorrectionSamples === 0,
   `${collisionCorrectionSamples} intended-corridor collision corrections (max ${maximumCollisionCorrection.toFixed(2)} m)`);
