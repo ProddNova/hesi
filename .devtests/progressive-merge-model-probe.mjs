@@ -54,6 +54,17 @@ for (const transition of map.progressiveTransitions) {
       `${transition.id}: gore begins before lane transfer`);
     check(transition.auxiliaryCorridor.length > 20,
       `${transition.id}: missing explicit auxiliary corridor sections`);
+    const expectedMarkedWidth = Math.min(
+      transition.sourceZone.host.laneWidth
+        + Math.max(0, transition.sourceZone.host.shoulder - 0.75),
+      transition.sourceZone.branch.laneWidth
+        + Math.max(0, transition.sourceZone.branch.shoulder - 0.75),
+    );
+    check(Math.abs(transition.auxiliaryMarkedWidth - expectedMarkedWidth) <= 0.01,
+      `${transition.id}: auxiliary marked width ${transition.auxiliaryMarkedWidth.toFixed(2)} m`
+        + ` != normal outer-lane width ${expectedMarkedWidth.toFixed(2)} m`);
+    check(Math.abs(transition.targetExtraWidth - transition.auxiliaryWidth) <= 0.01,
+      `${transition.id}: widened envelope adds a duplicate shoulder`);
     check(transition.laneBoundaries.some((path) => path.id === 'aux-inner-boundary')
       && transition.laneBoundaries.some((path) => path.id === 'aux-outer-boundary'),
     `${transition.id}: missing explicit auxiliary boundaries`);

@@ -228,13 +228,16 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       const feedLaneBoundary = map._deckPoint(
         branchFrame,
         map._laneOffset(transition.sourceZone.branch, transition.branchFeedLane, 1)
-          + transition.sourceZone.hostwardSign * transition.sourceZone.branch.laneWidth * 0.5,
+          + transition.sourceZone.hostwardSign * (
+            transition.sourceZone.branch.laneWidth * 0.5
+            + transition.auxiliaryMarkingShoulder
+          ),
         0.055,
       );
       const innerMarkingEnd = transition.markingPaths
         .find((path) => path.id === 'aux-inner-marking')?.points.at(-1)?.position;
       if (!innerMarkingEnd || worldPoint(innerMarkingEnd).distanceTo(feedLaneBoundary) > 0.1) {
-        fail(id, 'inner marking misses the real branch lane boundary');
+        fail(id, 'inner marking misses the real branch edge-line target');
       }
       const standardSettledEdge = transition.sourceZone.hostwardSign
         * (map._halfWidthAt(transition.sourceZone.branch, transition.markingSettleEnd) - 0.75);

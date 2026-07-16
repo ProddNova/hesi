@@ -5216,7 +5216,12 @@ export class HighwayMap {
       this._markingTag = 'progressiveOuterEdge';
       this._markingBoundary = `progressive-outer-edge:${transition.id}`;
       const hostOuterIntervals = transition.type === 'diverge'
-        ? [[transition.approachStart, transition.physicalSplitStart]]
+        // The exterior line changes owner where the branch can render the
+        // same authoritative path. Keeping host ownership until the later
+        // source-deck split extrapolates the curve beyond the widened host
+        // envelope, so the painter clips it and leaves a real longitudinal
+        // gap. Branch ownership begins at the measured exterior handoff.
+        ? [[transition.approachStart, transition.exteriorHandoffStart]]
         : [transition.hostInterval];
       for (const interval of hostOuterIntervals) {
         for (const [from, to] of this._zoneIntervalPieces(route, interval)) {
@@ -5301,15 +5306,18 @@ export class HighwayMap {
       }
       this._markingTag = 'progressiveBranchDivider';
       this._markingBoundary = `progressive-branch-divider:${transition.id}`;
+      const branchDividerDashLength = 6.2;
+      const branchDividerDashPhase = transition.exteriorHandoffBranchStart
+        + branchDividerDashLength * 0.5;
       this._paintDashedStrip(
         route,
         'marking',
         (frame) => transition.auxOuterMarkingBranchLateralAt(frame.distance),
         0.14,
         15,
-        6.2,
-        6,
-        transition.physicalSplitBranchStart,
+        branchDividerDashLength,
+        branchDividerDashPhase,
+        transition.exteriorHandoffBranchStart,
         branchEnd,
       );
       this._markingTag = 'progressiveBranchGoreEdge';

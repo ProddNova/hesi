@@ -92,7 +92,18 @@ function buildRecord(map, zone, prototype) {
   );
   const hostLaneEdge = zone.host.lanes * zone.host.laneWidth * 0.5;
   const auxiliaryWidth = zone.host.laneWidth;
-  const targetExtraWidth = auxiliaryWidth + Math.max(0.8, zone.host.shoulder || 1.0);
+  // The base host half-width already includes its shoulder. Adding another
+  // lane therefore requires one laneWidth of extra pavement, not laneWidth +
+  // a second shoulder. The latter left a 2.6 m dead strip outside P4's solid
+  // edge while its two transition lines remained only 3.55 m apart.
+  const targetExtraWidth = auxiliaryWidth;
+  const hostEdgeMarkingShoulder = Math.max(0, (zone.host.shoulder || 0) - 0.75);
+  const branchEdgeMarkingShoulder = Math.max(0, (zone.branch.shoulder || 0) - 0.75);
+  const auxiliaryMarkingShoulder = Math.min(
+    hostEdgeMarkingShoulder,
+    branchEdgeMarkingShoulder,
+  );
+  const auxiliaryMarkedWidth = auxiliaryWidth + auxiliaryMarkingShoulder;
   const parallelAuxLateral = zone.side * (hostLaneEdge + auxiliaryWidth * 0.5);
   const branchFeedLane = zone.kind === 'diverge'
     ? Array.from({ length: zone.branch.lanes }, (_, lane) => lane).sort((left, right) => (
@@ -106,6 +117,8 @@ function buildRecord(map, zone, prototype) {
     + zone.hostwardSign * branchFeedHalfWidth;
   const branchFeedOuterLateral = branchFeedLateral
     - zone.hostwardSign * branchFeedHalfWidth;
+  const branchFeedInnerMarkingLateral = branchFeedInnerLateral
+    + zone.hostwardSign * auxiliaryMarkingShoulder;
   const branchFeedOutwardAt = (row) => {
     const target = map._deckPoint(row.frame, branchFeedLateral);
     const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
@@ -137,6 +150,28 @@ function buildRecord(map, zone, prototype) {
   const exteriorHandoffRow = zone.kind === 'diverge'
     ? firstCrossing((row) => row.unionOuter - row.hostHalf, targetExtraWidth)
     : null;
+  // Rail quads are emitted only when both neighbouring surface frames are
+  // visible. Releasing at an in-between analytic station would therefore end
+  // the host terminal at the preceding frame and create a several-metre hole.
+  // Keep the exterior rail through the first real host frame after handoff;
+  // the branch rail begins at its first real frame after the same ownership
+  // station. Both remain on their authoritative paved exteriors.
+  let resolvedHostRailRelease = null;
+  const resolveHostRailRelease = () => {
+    if (zone.kind !== 'diverge') return null;
+    if (resolvedHostRailRelease !== null) return resolvedHostRailRelease;
+    // Surface frames are populated after the progressive record itself, so
+    // resolve lazily on the first rail-visibility query.
+    const candidates = (zone.host.surfaceFrames || [])
+      .map((frame) => unwrappedHostDistance(zone, frame.distance))
+      .filter((hostS) => (
+        hostS >= exteriorHandoffRow.hU - 1e-4 && hostS <= transitionEnd + 1e-4
+      ));
+    resolvedHostRailRelease = candidates.length
+      ? Math.min(...candidates)
+      : exteriorHandoffRow.hU;
+    return resolvedHostRailRelease;
+  };
   const sourceGoreClearanceRow = zone.kind === 'diverge'
     ? firstCrossing((row) => row.innerEdge - row.hostHalf, 1.5)
     : null;
@@ -193,6 +228,7 @@ function buildRecord(map, zone, prototype) {
     laneHandoffStart: exteriorHandoffRow?.hU ?? null,
     physicalSplitStart: physicalSplitRow?.hU ?? null,
     exteriorHandoffStart: exteriorHandoffRow?.hU ?? null,
+    get hostRailRelease() { return resolveHostRailRelease(); },
     // A diverge gore is not allowed to begin merely because the source decks
     // have opened a narrow gap.  It begins only after the auxiliary centre and
     // both of its boundaries have landed on the real branch lane geometry.
@@ -221,6 +257,8 @@ function buildRecord(map, zone, prototype) {
     finalBranchLaneCount: zone.kind === 'diverge' ? zone.branch.lanes : 0,
     auxiliaryLaneCount: 1,
     auxiliaryWidth,
+    auxiliaryMarkedWidth,
+    auxiliaryMarkingShoulder,
     targetExtraWidth,
     branchInterval: [...zone.branchSpan],
     hostInterval: [approachStart, transitionEnd],
@@ -253,7 +291,7 @@ function buildRecord(map, zone, prototype) {
     hostRailModeAt(distance) {
       if (zone.kind !== 'diverge') return 'on';
       const hostS = unwrappedHostDistance(zone, distance);
-      if (hostS < exteriorHandoffRow.hU) return 'on';
+      if (hostS <= resolveHostRailRelease() + 1e-4) return 'on';
       if (hostS < transitionEnd) return 'off';
       return 'on';
     },
@@ -608,18 +646,44 @@ function buildRecord(map, zone, prototype) {
       const outerMarking = markingPaths[1];
       const innerBoundary = boundaryPaths.find((path) => path.id === 'aux-inner-boundary').points.at(-1);
       const outerBoundary = boundaryPaths.find((path) => path.id === 'aux-outer-boundary').points.at(-1);
-      const innerLateral = innerBoundary.lateral;
-      const outerLateral = outerBoundary.lateral;
+      const boundaryDx = outerBoundary.position.x - innerBoundary.position.x;
+      const boundaryDz = outerBoundary.position.z - innerBoundary.position.z;
+      const boundaryLength = Math.hypot(boundaryDx, boundaryDz);
+      const outwardX = boundaryLength > 1e-5
+        ? boundaryDx / boundaryLength
+        : frame.normal.x * zone.side;
+      const outwardZ = boundaryLength > 1e-5
+        ? boundaryDz / boundaryLength
+        : frame.normal.z * zone.side;
+      const handoffFactor = quintic((hostS - exteriorHandoffRow.hU)
+        / Math.max(1e-6, transitionEnd - exteriorHandoffRow.hU));
+      const markingShoulder = auxiliaryMarkingShoulder * factor;
+      // A normal outer road lane is read from its divider to an edge line
+      // inset 0.75 m from the paved edge. Keep that same 4.10 m marked width
+      // through P4: the 0.55 m edge shoulder begins outside the auxiliary
+      // outer boundary, then transfers continuously to the branch-hostward
+      // side as branch lane 0 takes ownership. The physical lane boundaries
+      // remain exactly one authoritative 3.55 m lane apart.
+      const innerOffset = markingShoulder * handoffFactor;
+      const outerOffset = markingShoulder * (1 - handoffFactor);
       const innerPosition = pointRecord({
-        x: innerBoundary.position.x,
+        x: innerBoundary.position.x - outwardX * innerOffset,
         y: innerBoundary.position.y + 0.015,
-        z: innerBoundary.position.z,
+        z: innerBoundary.position.z - outwardZ * innerOffset,
       });
       const outerPosition = pointRecord({
-        x: outerBoundary.position.x,
+        x: outerBoundary.position.x + outwardX * outerOffset,
         y: outerBoundary.position.y + 0.015,
-        z: outerBoundary.position.z,
+        z: outerBoundary.position.z + outwardZ * outerOffset,
       });
+      const innerLateral = innerPosition.x * frame.normal.x
+        + innerPosition.z * frame.normal.z
+        - frame.position.x * frame.normal.x
+        - frame.position.z * frame.normal.z;
+      const outerLateral = outerPosition.x * frame.normal.x
+        + outerPosition.z * frame.normal.z
+        - frame.position.x * frame.normal.x
+        - frame.position.z * frame.normal.z;
       innerMarking.points.push({
         hostS,
         branchS,
@@ -718,7 +782,7 @@ function buildRecord(map, zone, prototype) {
       distance,
     );
     record.settledBranchInnerMarkingLateralAt = (distance) => {
-      const start = branchFeedInnerLateral;
+      const start = branchFeedInnerMarkingLateral;
       const standard = zone.hostwardSign * (map._halfWidthAt(zone.branch, distance) - 0.75);
       if (distance <= record.transferCompleteBranch) return start;
       if (distance >= record.markingSettleEnd) return standard;

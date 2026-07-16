@@ -202,19 +202,56 @@ const prematureGorePaint = progressivePaint.filter((piece) => (
 ));
 const innerMarkingPath = transition.markingPaths.find((path) => path.id === 'aux-inner-marking');
 const outerMarkingPath = transition.markingPaths.find((path) => path.id === 'aux-outer-marking');
-const modelBoundaryPairs = [
-  [innerMarkingPath, innerBoundary],
-  [outerMarkingPath, outerBoundary],
-];
-let maximumModelMarkingBoundaryGap = 0;
-for (const [marking, boundary] of modelBoundaryPairs) {
-  for (let index = 0; index < marking.points.length; index += 1) {
-    maximumModelMarkingBoundaryGap = Math.max(
-      maximumModelMarkingBoundaryGap,
-      distanceXZ(marking.points[index].position, boundary.points[index].position),
-    );
-  }
-}
+const expectedHostMarkedWidth = zone.host.laneWidth
+  + Math.max(0, (zone.host.shoulder || 0) - 0.75);
+const expectedBranchMarkedWidth = zone.branch.laneWidth
+  + Math.max(0, (zone.branch.shoulder || 0) - 0.75);
+const expectedMarkedWidth = Math.min(expectedHostMarkedWidth, expectedBranchMarkedWidth);
+const markingSections = innerMarkingPath.points.map((inner, index) => {
+  const outer = outerMarkingPath.points[index];
+  const innerLaneBoundary = innerBoundary.points[index];
+  const outerLaneBoundary = outerBoundary.points[index];
+  return {
+    hostS: inner.hostS,
+    width: distanceXZ(inner.position, outer.position),
+    innerBoundaryOffset: distanceXZ(inner.position, innerLaneBoundary.position),
+    outerBoundaryOffset: distanceXZ(outer.position, outerLaneBoundary.position),
+  };
+});
+const usableMarkingSections = markingSections.filter((section) => (
+  section.hostS >= transition.parallelStart - 1e-4
+  && section.hostS <= transition.transferComplete + 1e-4
+));
+const minimumUsableMarkedWidth = Math.min(...usableMarkingSections.map((section) => section.width));
+const maximumUsableMarkedWidthError = Math.max(...usableMarkingSections.map((section) => (
+  Math.abs(section.width - expectedMarkedWidth)
+)));
+const maximumMarkingShoulderBudgetError = Math.max(...usableMarkingSections.map((section) => (
+  Math.abs(
+    section.innerBoundaryOffset + section.outerBoundaryOffset
+    - transition.auxiliaryMarkingShoulder,
+  )
+)));
+const preHandoffOuterMarkingSections = outerMarkingPath.points.filter((entry) => (
+  entry.hostS <= transition.exteriorHandoffStart + 1e-4
+));
+const maximumOuterEnvelopeInsetError = Math.max(...preHandoffOuterMarkingSections.map((entry) => {
+  const frame = map._frameAt(zone.host, map._normalizeDistance(zone.host, entry.hostS));
+  const envelopeEdge = map._deckPoint(frame, transition.envelopeAt(entry.hostS).outerLateral, 0.04);
+  return Math.abs(distanceXZ(entry.position, envelopeEdge) - 0.75);
+}));
+const targetInnerMarking = map._deckPoint(
+  branchFrame,
+  feedCentreLateral + zone.hostwardSign * (feedHalfWidth + transition.auxiliaryMarkingShoulder),
+  0.055,
+);
+const targetOuterMarking = map._deckPoint(
+  branchFrame,
+  feedCentreLateral - zone.hostwardSign * feedHalfWidth,
+  0.055,
+);
+const endpointInnerMarkingGap = distanceXZ(innerMarkingPath.points.at(-1).position, targetInnerMarking);
+const endpointOuterMarkingGap = distanceXZ(outerMarkingPath.points.at(-1).position, targetOuterMarking);
 
 const markingPathByTag = new Map([
   ['progressiveOuterEdge', outerMarkingPath],
@@ -329,7 +366,14 @@ const metrics = {
     branchInnerPieces: branchInnerPaint.length,
     branchDividerPieces: branchDividerPaint.length,
     branchGorePieces: branchGorePaint.length,
-    maximumModelBoundaryGap: round(maximumModelMarkingBoundaryGap),
+    expectedMarkedWidth: round(expectedMarkedWidth),
+    modelMarkedWidth: round(transition.auxiliaryMarkedWidth),
+    minimumUsableMarkedWidth: round(minimumUsableMarkedWidth),
+    maximumUsableMarkedWidthError: round(maximumUsableMarkedWidthError),
+    maximumMarkingShoulderBudgetError: round(maximumMarkingShoulderBudgetError),
+    maximumOuterEnvelopeInsetError: round(maximumOuterEnvelopeInsetError),
+    endpointInnerMarkingGap: round(endpointInnerMarkingGap),
+    endpointOuterMarkingGap: round(endpointOuterMarkingGap),
     maximumEmittedBoundaryDeviation: round(maximumEmittedMarkingBoundaryDeviation),
     outerSolidToDividerGap: outerSolidToDividerGap === null ? null : round(outerSolidToDividerGap),
     innerDashRouteHandoffGap: innerDashRouteHandoffGap === null
@@ -379,8 +423,20 @@ check(continuingBranchWallHits === 0,
 check(intrusiveRails.length === 0, `${intrusiveRails.length} emitted rail samples enter the corridor`);
 check(intrusiveWalls.length === 0, `${intrusiveWalls.length} collision wall segments enter the corridor`);
 check(prematureGorePaint.length === 0, `${prematureGorePaint.length} gore pieces precede transfer completion`);
-check(maximumModelMarkingBoundaryGap <= 0.01,
-  `marking model departs the authoritative lane boundaries by ${maximumModelMarkingBoundaryGap.toFixed(2)} m`);
+check(Math.abs(transition.auxiliaryMarkedWidth - expectedMarkedWidth) <= 0.01,
+  `marked width model is ${transition.auxiliaryMarkedWidth.toFixed(2)} m, expected ${expectedMarkedWidth.toFixed(2)} m`);
+check(minimumUsableMarkedWidth >= expectedMarkedWidth - 0.05,
+  `usable auxiliary markings pinch to ${minimumUsableMarkedWidth.toFixed(2)} m`);
+check(maximumUsableMarkedWidthError <= 0.05,
+  `auxiliary marked width varies by ${maximumUsableMarkedWidthError.toFixed(2)} m after becoming usable`);
+check(maximumMarkingShoulderBudgetError <= 0.02,
+  `marking shoulder transfer loses or gains ${maximumMarkingShoulderBudgetError.toFixed(2)} m`);
+check(maximumOuterEnvelopeInsetError <= 0.02,
+  `outer edge marking departs from the authoritative 0.75 m paved-edge inset by ${maximumOuterEnvelopeInsetError.toFixed(2)} m`);
+check(endpointInnerMarkingGap <= 0.15,
+  `inner marking ends ${endpointInnerMarkingGap.toFixed(2)} m from the real branch edge-line target`);
+check(endpointOuterMarkingGap <= 0.15,
+  `outer marking ends ${endpointOuterMarkingGap.toFixed(2)} m from the real branch-divider target`);
 check(hostOuterPaint.length > 0 && hostInnerPaint.length > 0
   && branchInnerPaint.length > 0 && branchDividerPaint.length > 0
   && branchGorePaint.length > 0,

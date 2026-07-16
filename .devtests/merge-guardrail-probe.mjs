@@ -119,7 +119,10 @@ for (const zone of zones) {
     ) : Infinity;
     summary.worstConvergence = Math.max(summary.worstConvergence, handoffGap);
     valid &&= handoffGap <= 6;
-    valid &&= Math.abs(last.lateral - lastBase) >= zone.progressive.auxiliaryWidth;
+    // Machine rounding can place an exact 3.55 m envelope one ulp below the
+    // source lane-width literal. This epsilon is numerical only; the emitted
+    // vertex/envelope checks above retain their 0.03 m physical tolerance.
+    valid &&= Math.abs(last.lateral - lastBase) + 1e-6 >= zone.progressive.auxiliaryWidth;
     if (!valid) {
       fail('outer-rail-convergence', `${zone.id}: invalid host-to-branch exterior ownership handoff (${handoffGap.toFixed(2)} m)`);
     } else {
