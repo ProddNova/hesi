@@ -104,13 +104,21 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     const last = transition.pavedEnvelope.at(-1);
     if (first.extraWidth > 0.002) fail(id, 'transition does not begin at stable host width');
     if (transition.type === 'diverge') {
-      if (last.extraWidth < transition.auxiliaryWidth) {
+      if (last.extraWidth < transition.auxiliaryTotalWidth) {
         fail(id, 'host envelope closes before branch ownership');
       }
     } else if (last.extraWidth > 0.002) fail(id, 'merge does not finalize at stable host width');
 
     // Lane topology and pavement/physics agreement.
-    if (transition.temporaryLaneCount !== transition.hostLaneCount + 1) fail(id, 'temporary lane count');
+    if (transition.temporaryLaneCount !== transition.hostLaneCount + transition.auxiliaryLaneCount) {
+      fail(id, 'temporary lane count');
+    }
+    if (id === 'J2:diverge:c1_0:r1_0:start'
+      && (transition.topology !== '2+2-diverge'
+        || transition.temporaryLaneCount !== 4
+        || transition.auxiliaryLaneCount !== 2)) {
+      fail(id, 'P4 is not an explicit temporary 2+2 diverge');
+    }
     const expectedFinalLanes = transition.type === 'diverge'
       ? transition.hostLaneCount + transition.branchLaneCount
       : transition.hostLaneCount;
@@ -246,10 +254,20 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         fail(id, 'dash-to-solid branch-edge settle step');
       }
       const branchDivider = map._deckPoint(branchFrame, 0, 0.055);
+      const dividerMarkingEnd = transition.markingPaths
+        .find((path) => path.id === 'aux-divider-marking')?.points.at(-1)?.position;
+      if (!dividerMarkingEnd || worldPoint(dividerMarkingEnd).distanceTo(branchDivider) > 0.1) {
+        fail(id, 'transition divider misses the real branch divider target');
+      }
+      const branchOuterEdge = map._deckPoint(
+        branchFrame,
+        -transition.sourceZone.hostwardSign * (branchFrame.half - 0.75),
+        0.055,
+      );
       const outerMarkingEnd = transition.markingPaths
         .find((path) => path.id === 'aux-outer-marking')?.points.at(-1)?.position;
-      if (!outerMarkingEnd || worldPoint(outerMarkingEnd).distanceTo(branchDivider) > 0.1) {
-        fail(id, 'solid-to-dashed branch-divider step');
+      if (!outerMarkingEnd || worldPoint(outerMarkingEnd).distanceTo(branchOuterEdge) > 0.1) {
+        fail(id, 'outer solid does not remain on the branch outer edge');
       }
     } else {
       if (Math.abs(transition.boundaryLateralAt(transition.openingStart)

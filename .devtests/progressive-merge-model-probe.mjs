@@ -26,11 +26,17 @@ for (const transition of map.progressiveTransitions) {
     && transition.parallelStart < transition.absorptionStart
     && transition.absorptionStart < transition.transitionEnd, `${transition.id}: non-monotonic phases`);
   check(transition.length >= 100, `${transition.id}: transition only ${transition.length.toFixed(1)} m`);
-  check(transition.temporaryLaneCount === transition.hostLaneCount + 1, `${transition.id}: temporary lane count`);
+  check(transition.temporaryLaneCount === transition.hostLaneCount + transition.auxiliaryLaneCount,
+    `${transition.id}: temporary lane count`);
   check(transition.finalLaneCount === (transition.type === 'diverge'
     ? transition.hostLaneCount + transition.branchLaneCount
     : transition.hostLaneCount), `${transition.id}: final lane count`);
   if (transition.type === 'diverge') {
+    check(transition.id !== 'J2:diverge:c1_0:r1_0:start'
+      || (transition.topology === '2+2-diverge'
+        && transition.auxiliaryLaneCount === 2
+        && transition.temporaryLaneCount === 4),
+    `${transition.id}: P4 is not an explicit temporary 2+2 diverge`);
     check(transition.branchFeedLane === 0, `${transition.id}: hostward branch feed lane`);
     check(transition.branchLaneCentres.length === transition.branchLaneCount,
       `${transition.id}: explicit branch lane-centre count`);
@@ -48,7 +54,7 @@ for (const transition of map.progressiveTransitions) {
   const last = transition.pavedEnvelope.at(-1);
   check(first.extraWidth < 1e-6, `${transition.id}: transition does not begin at base width`);
   if (transition.type === 'diverge') {
-    check(last.extraWidth >= transition.auxiliaryWidth,
+    check(last.extraWidth >= transition.auxiliaryTotalWidth,
       `${transition.id}: host envelope closes before branch ownership`);
     check(transition.goreStart >= transition.transferComplete - 0.01,
       `${transition.id}: gore begins before lane transfer`);
@@ -63,11 +69,16 @@ for (const transition of map.progressiveTransitions) {
     check(Math.abs(transition.auxiliaryMarkedWidth - expectedMarkedWidth) <= 0.01,
       `${transition.id}: auxiliary marked width ${transition.auxiliaryMarkedWidth.toFixed(2)} m`
         + ` != normal outer-lane width ${expectedMarkedWidth.toFixed(2)} m`);
-    check(Math.abs(transition.targetExtraWidth - transition.auxiliaryWidth) <= 0.01,
-      `${transition.id}: widened envelope adds a duplicate shoulder`);
+    check(Math.abs(transition.targetExtraWidth - transition.auxiliaryTotalWidth) <= 0.01,
+      `${transition.id}: widened envelope does not match explicit auxiliary topology`);
     check(transition.laneBoundaries.some((path) => path.id === 'aux-inner-boundary')
+      && transition.laneBoundaries.some((path) => path.id === 'aux-divider-boundary')
       && transition.laneBoundaries.some((path) => path.id === 'aux-outer-boundary'),
-    `${transition.id}: missing explicit auxiliary boundaries`);
+    `${transition.id}: missing explicit 2-lane exit boundaries`);
+    check(transition.markingPaths.some((path) => path.id === 'aux-divider-marking'),
+      `${transition.id}: missing transition-owned exit divider`);
+    check(transition.auxiliaryLaneCorridors.length === transition.auxiliaryLaneCount,
+      `${transition.id}: missing per-lane exit corridors`);
   } else {
     check(last.extraWidth < 1e-6, `${transition.id}: merge width does not finalize at base`);
   }
