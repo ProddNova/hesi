@@ -17,6 +17,7 @@ const MIN_SCALE = 0.02;   // px per world metre (zoomed all the way out)
 const MAX_SCALE = 10;     // px per world metre (zoomed all the way in)
 const DRAG_THRESHOLD = 4; // px of pointer travel before a press becomes a pan
 const HIT_THRESHOLD = 9;  // px radius for route hover hit-testing
+const PIN_HIT_THRESHOLD = 12; // fixed screen-space radius for prototype markers
 const HOVER_HYSTERESIS = 3; // px band that keeps the current route hovered
 const HOVER_THROTTLE_MS = 16; // minimum gap between hover recomputes
 
@@ -394,6 +395,31 @@ export class DeveloperMap {
 
   // --- Hit testing ----------------------------------------------------------
 
+  /** First-class, read-only prototype marker hit-test. */
+  _hitTestPrototype(sx, sy) {
+    if (!this.network?.prototypePins?.length) return null;
+    let best = null;
+    for (const pin of this.network.prototypePins) {
+      const screen = this.worldToScreen(pin.x, pin.z);
+      const dist = Math.hypot(sx - screen.x, sy - screen.y);
+      if (dist > PIN_HIT_THRESHOLD || (best && dist >= best.dist)) continue;
+      const routeId = pin.teleportRouteId || pin.hostRouteId;
+      const route = this.network.routes.find((candidate) => candidate.id === routeId);
+      if (!route) continue;
+      best = {
+        kind: 'prototype',
+        pin,
+        route,
+        dist,
+        worldX: pin.x,
+        worldZ: pin.z,
+        elevation: pin.y,
+        chainage: pin.distance,
+      };
+    }
+    return best;
+  }
+
   /**
    * Find the nearest visible route segment to a screen point. Works purely in
    * screen space against cached polylines so it is stable at any zoom. When
@@ -402,6 +428,8 @@ export class DeveloperMap {
    */
   _hitTest(sx, sy) {
     if (!this.network) return null;
+    const prototype = this._hitTestPrototype(sx, sy);
+    if (prototype) return prototype;
     const currentY = this.cb.getCurrentPosition?.()?.y ?? 0;
     let best = null;
     const candidates = [];
@@ -472,6 +500,8 @@ export class DeveloperMap {
 
   _teleport(hit) {
     const route = hit.route;
+    if (!route) return;
+    const prototype = hit.kind === 'prototype' ? hit.pin : null;
     const payload = {
       routeId: route.id,
       routeName: route.name,
@@ -481,6 +511,7 @@ export class DeveloperMap {
       worldX: hit.worldX,
       worldZ: hit.worldZ,
       elevation: hit.elevation,
+      prototypeId: prototype?.id || null,
     };
     let result = null;
     try { result = this.cb.teleportToRoutePoint?.(payload) || null; } catch (err) { console.error('Dev-map teleport', err); }
@@ -491,8 +522,9 @@ export class DeveloperMap {
     this._teleportInfo = {
       routeName: route.name,
       code: route.code,
-      text: `${route.name}${route.code ? ` (${route.code})` : ''} @ ${(payload.distance / 1000).toFixed(2)} km · ` +
-        `${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}`,
+      text: `${prototype ? `${prototype.pinId} ${prototype.id} → ` : ''}`
+        + `${route.name}${route.code ? ` (${route.code})` : ''} @ ${(payload.distance / 1000).toFixed(2)} km · `
+        + `${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}`,
     };
     // Keep the map open so several spots can be inspected in a row.
   }
@@ -656,8 +688,22 @@ export class DeveloperMap {
     ctx.drawImage(this.staticCanvas, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Hovered route highlight.
-    if (this.hovered) {
+    // Hovered route highlight, or a distinct prototype-marker halo.
+    if (this.hovered?.kind === 'prototype') {
+      const s = this.worldToScreen(this.hovered.pin.x, this.hovered.pin.z);
+      ctx.shadowColor = '#ff4fd8';
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - 12);
+      ctx.lineTo(s.x + 11, s.y);
+      ctx.lineTo(s.x, s.y + 12);
+      ctx.lineTo(s.x - 11, s.y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    } else if (this.hovered) {
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       this._strokeRoute(ctx, this.hovered.route, '#ffffff', this.hovered.route.lineWidth + 4, 0.9);
@@ -708,6 +754,10 @@ export class DeveloperMap {
 
   _drawTooltip(ctx) {
     const h = this.hovered;
+    if (h.kind === 'prototype') {
+      this._drawPrototypeTooltip(ctx, h);
+      return;
+    }
     const route = h.route;
     const lines = [];
     lines.push(route.name + (route.code ? `  [${route.code}]` : ''));
@@ -744,6 +794,42 @@ export class DeveloperMap {
     }
   }
 
+  _drawPrototypeTooltip(ctx, hit) {
+    const pin = hit.pin;
+    const lines = [
+      `${pin.pinId}  PROGRESSIVE PROTOTYPE`,
+      `junction: ${pin.id}`,
+      `host: ${pin.hostRouteId} · ${pin.hostLaneCount} lanes`,
+      `branch: ${pin.branchRouteId} · ${pin.branchLaneCount} lanes`,
+      `${pin.type} · ${pin.side}`,
+      `status: ${pin.status}`,
+      `click: teleport to ${pin.teleportRouteId || pin.hostRouteId}`,
+      `world: ${pin.x.toFixed(0)}, ${pin.y.toFixed(0)}, ${pin.z.toFixed(0)}`,
+    ];
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const pad = 8;
+    const lineH = 15;
+    const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + pad * 2;
+    const height = lines.length * lineH + pad * 2;
+    const screen = this.worldToScreen(pin.x, pin.z);
+    let x = screen.x + 16;
+    let y = screen.y + 16;
+    if (x + width > this.cssWidth) x = screen.x - width - 16;
+    if (y + height > this.cssHeight) y = this.cssHeight - height - 4;
+    if (y < 4) y = 4;
+    ctx.fillStyle = 'rgba(15,6,18,0.94)';
+    ctx.strokeStyle = '#ff4fd8';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height);
+    for (let index = 0; index < lines.length; index += 1) {
+      ctx.fillStyle = index === 0 ? '#ff7be5' : '#f5e7f4';
+      ctx.fillText(lines[index], x + pad, y + pad + index * lineH);
+    }
+  }
+
   _updateInfo() {
     const p = this.cb.getCurrentPosition?.();
     const noclip = this.cb.isNoclipActive?.();
@@ -752,9 +838,12 @@ export class DeveloperMap {
     this.info.noclip.textContent = noclip ? 'ENABLED (drone)' : 'disabled';
     this.info.noclip.classList.toggle('is-on', !!noclip);
     const pins = this.network?.prototypePins || [];
-    this.info.prototypes.textContent = pins.length
-      ? `${pins.length} pinned (${pins.map((pin) => pin.pinId).join(', ')})`
-      : 'none';
+    const hoveredPin = this.hovered?.kind === 'prototype' ? this.hovered.pin : null;
+    this.info.prototypes.textContent = hoveredPin
+      ? `${hoveredPin.pinId} ${hoveredPin.id} · ${hoveredPin.type}/${hoveredPin.side} · `
+        + `${hoveredPin.hostRouteId} ${hoveredPin.hostLaneCount}L + `
+        + `${hoveredPin.branchRouteId} ${hoveredPin.branchLaneCount}L · ${hoveredPin.status}`
+      : (pins.length ? `${pins.length} pinned (${pins.map((pin) => pin.pinId).join(', ')})` : 'none');
     this.info.teleport.textContent = this._teleportInfo ? this._teleportInfo.text : '—';
     // The current-route lookup is a network search; refresh it a few times a
     // second rather than every frame.
