@@ -88,7 +88,7 @@ class ShutokoNights {
     // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?legacyProgressiveMerges=1
     // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
-    try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
@@ -317,6 +317,11 @@ class ShutokoNights {
     const views={
       'high-plan':{routeId:'c1_0',distance:10928,lane:null,up:150,back:0,lateral:0,plan:true},
       'corridor-debug':{routeId:'c1_0',distance:10945,lane:null,up:125,back:0,lateral:-4,plan:true},
+      'host-approach':{routeId:'c1_0',distance:10882,lane:1,up:7,back:58,lateral:0},
+      'auxiliary-lane':{routeId:'c1_0',distance:10928,lane:null,targetLateral:-5.325,up:6,back:42,lateral:0},
+      'branch-handoff':{routeId:'r1_0',distance:148,lane:0,up:8,back:48,lateral:0},
+      'guardrail-opening':{routeId:'r1_0',distance:140,lane:null,targetLateral:-4.1,up:13,back:30,lateral:-15},
+      'collision-hitbox':{routeId:'c1_0',distance:10982.425,lane:null,up:72,back:0,lateral:0,plan:true,hitboxes:true},
       'normal-chase':{position:{x:-1052.7282169,y:64.8843403,z:-3016.0130739},target:{x:-1012.7993393,y:60.0715092,z:-3026.8561882}},
       'close-marking':{routeId:'r1_0',distance:154,lane:0,up:7,back:28,lateral:0},
       'guardrail-side':{routeId:'r1_0',distance:145,lane:null,targetLateral:-4.1,up:11,back:26,lateral:-16},
@@ -326,6 +331,8 @@ class ShutokoNights {
     const view=views[name];if(!view||!this.map)return false;
     this.traffic?.setDensity?.(0);this.traffic?.vehicles?.forEach?.(vehicle=>{if(vehicle.mesh)vehicle.mesh.visible=false;});
     this.debug.noclip=true;this.debug.trafficDisabled=true;if(this.playerMesh)this.playerMesh.visible=false;
+    this.setDebugHitbox?.('roads',!!view.hitboxes);this.setDebugHitbox?.('walls',!!view.hitboxes);
+    const clutter=new Set([this.map.materials.facadeOffice,this.map.materials.facadeDark,this.map.materials.facadeHotel,this.map.materials.facadeIndustrial,this.map.materials.building]);this.map.group.traverse(object=>{if(object.isMesh&&clutter.has(object.material))object.visible=false;});
     document.querySelector('#hud')?.setAttribute('style','display:none!important');document.querySelector('#debug-drone-hud')?.setAttribute('style','display:none!important');
     let target,tangent,normal;
     if(view.position&&view.target){
@@ -342,7 +349,7 @@ class ShutokoNights {
     const x=this.debug.position.x,y=this.debug.position.y,z=this.debug.position.z;
     this.debug.position.set(x,y,z);this.debug.yaw=Math.atan2(target.x-x,target.z-z);const horizontal=Math.hypot(target.x-x,target.z-z);this.debug.pitch=Math.atan2(target.y-y,Math.max(.001,horizontal));
     this._snapNoclipCamera();this.map._visibleKey=null;this.map.update(this.debug.position,performance.now()/1000);
-    if(name==='corridor-debug')this.installP4CorridorLegend();
+    if(name==='corridor-debug')this.installP4CorridorLegend();if(this.p4OwnershipDebug)this.installP4OwnershipLegend();
     return true;
   }
   installP4CorridorLegend(){
@@ -351,6 +358,14 @@ class ShutokoNights {
     const legend=document.createElement('div');legend.id='p4-corridor-legend';legend.style.cssText='position:fixed;left:18px;top:18px;z-index:9999;padding:12px 14px;background:rgba(2,5,12,.88);border:1px solid #78e8ff;color:#f4f7ff;font:600 14px/1.45 ui-monospace,monospace;pointer-events:none;text-shadow:0 1px 2px #000';
     const minimum=Math.min(...transition.auxiliaryCorridor.map(section=>section.width));
     legend.innerHTML=`<div style="color:#fff;font-size:15px">P4 ${transition.id}</div><div><span style="color:#29e6ff">━━</span> auxiliary centre</div><div><span style="color:#ffa52f">━━</span> inner boundary</div><div><span style="color:#ff3fd2">━━</span> outer boundary</div><div><span style="color:#70ff55">━━</span> target r1_0:${transition.branchFeedLane} geometry</div><div><span style="color:#fff">┃</span> width samples · min ${minimum.toFixed(2)} m</div><div><span style="color:#ffee22">●</span> ownership @ host ${transition.transferComplete.toFixed(2)} / branch ${transition.transferCompleteBranch.toFixed(2)}</div>`;
+    document.body.append(legend);
+  }
+  installP4OwnershipLegend(){
+    if(document.querySelector('#p4-ownership-legend'))return;
+    const data=this.map?.progressiveOwnershipDebugOverlay?.userData;if(!data)return;
+    const markings=data.markings,rails=data.rails;
+    const legend=document.createElement('div');legend.id='p4-ownership-legend';legend.style.cssText='position:fixed;right:18px;top:18px;z-index:9999;padding:12px 14px;background:rgba(2,5,12,.9);border:1px solid #fff;color:#f4f7ff;font:600 13px/1.42 ui-monospace,monospace;pointer-events:none;text-shadow:0 1px 2px #000;max-width:360px';
+    legend.innerHTML=`<div style="color:#fff;font-size:15px">P4 emitted ownership</div><div style="color:#ff2a2a">RED host markings · ${markings.host}</div><div style="color:#38ff68">GREEN branch markings · ${markings.branch}</div><div style="color:#ffe52a">YELLOW transition markings · ${markings.transition}</div><div style="color:#ff29e6">MAGENTA illegal retained · ${markings.illegalRetained}</div><div style="color:#9d9d9d">suppressed attempts · ${markings.suppressedAttempts}</div><div style="margin-top:5px;color:#2485ff">BLUE host rail · ${rails.hostSegments}</div><div style="color:#ff8b24">ORANGE branch rail · ${rails.branchSegments}</div><div style="color:#fff">WHITE transition rail · ${rails.transitionSegments}</div><div style="color:#ff0022">BRIGHT RED blocked opening · ${rails.blocked}</div><div style="color:#24f5ff">CYAN unexplained gap · ${rails.unexplainedGaps}</div><div style="color:#d7d7d7">owner handoff gap · ${rails.handoffGap.toFixed(2)} m</div>`;
     document.body.append(legend);
   }
   teleportToRoutePoint({routeId,distance,lane=0,direction=1}){

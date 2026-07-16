@@ -183,6 +183,7 @@ export class HighwayMap {
     this._finalizeNetwork();
     this._buildWorld();
     if (this.options.progressiveCorridorDebug) this._buildProgressiveCorridorDebugOverlay();
+    if (this.options.progressiveOwnershipDebug) this._buildP4OwnershipDebugOverlay();
     this._buildMinimapData();
 
     // Group aliases resolve to that group's longest carriageway.
@@ -6807,6 +6808,238 @@ export class HighwayMap {
       edgeCount: this.edges.length,
       chunkCount: this._chunks.size,
     };
+  }
+
+  /**
+   * Query-only P4 ownership overlay. Every coloured segment comes from paint
+   * quads, parapet vertices, or collision walls that were actually emitted by
+   * the production builders; the overlay never reconstructs nominal geometry
+   * from presentation constants. This makes a missing owner just as visible as
+   * a duplicate one.
+   */
+  _buildP4OwnershipDebugOverlay() {
+    const transition = this.progressiveTransitionById.get('J2:diverge:c1_0:r1_0:start');
+    if (!transition) return;
+    const host = transition.sourceZone.host;
+    const branch = transition.sourceZone.branch;
+    const group = new THREE.Group();
+    group.name = 'P4 emitted ownership debug overlay';
+    group.renderOrder = 1100;
+    const addRibbon = (name, segments, color, width = 0.3, lift = 0.62) => {
+      if (!segments.length) return null;
+      const positions = [];
+      const indices = [];
+      for (const segment of segments) {
+        const start = segment.start;
+        const end = segment.end;
+        const dx = end.x - start.x;
+        const dz = end.z - start.z;
+        const length = Math.hypot(dx, dz);
+        if (length < 1e-4) continue;
+        const nx = -dz / length * width * 0.5;
+        const nz = dx / length * width * 0.5;
+        const base = positions.length / 3;
+        positions.push(
+          start.x + nx, start.y + lift, start.z + nz,
+          start.x - nx, start.y + lift, start.z - nz,
+          end.x + nx, end.y + lift, end.z + nz,
+          end.x - nx, end.y + lift, end.z - nz,
+        );
+        indices.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+      }
+      if (!positions.length) return null;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+        color,
+        side: THREE.DoubleSide,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      }));
+      mesh.name = name;
+      mesh.renderOrder = 1100;
+      mesh.frustumCulled = false;
+      group.add(mesh);
+      return mesh;
+    };
+    const addMarkers = (name, records, color) => {
+      if (!records.length) return;
+      const material = new THREE.MeshBasicMaterial({
+        color, depthTest: false, depthWrite: false, toneMapped: false,
+      });
+      for (const [index, record] of records.entries()) {
+        const marker = new THREE.Mesh(new THREE.SphereGeometry(0.48, 10, 7), material);
+        marker.name = `${name} ${index + 1}`;
+        marker.position.set(record.x, record.y + 0.9, record.z);
+        marker.renderOrder = 1102;
+        marker.frustumCulled = false;
+        group.add(marker);
+      }
+    };
+    const overlaps = (from, to, interval) => to > interval[0] + 0.01
+      && from < interval[1] - 0.01;
+    const inP4Vicinity = (piece) => {
+      if (piece.routeId === host.id) {
+        return overlaps(piece.sFrom, piece.sTo, [transition.approachStart - 8, transition.transferComplete + 8]);
+      }
+      if (piece.routeId === branch.id) {
+        return overlaps(piece.sFrom, piece.sTo, [0, transition.markingSettleEnd + 20]);
+      }
+      return false;
+    };
+    const retainedPaint = this._markingLog.filter((piece) => (
+      piece.kind === 'strip' && inP4Vicinity(piece)));
+    const isTransitionPaint = (piece) => piece.owner === `progressive:${transition.id}`;
+    const isIllegalRetained = (piece) => {
+      if (isTransitionPaint(piece)) return false;
+      if (piece.routeId === host.id) {
+        return piece.owner === `route:${host.id}`
+          && piece.boundary === `edge:${transition.sideSign}`
+          && overlaps(piece.sFrom, piece.sTo, transition.hostInterval);
+      }
+      if (piece.routeId !== branch.id || piece.owner !== `route:${branch.id}`) return false;
+      if (overlaps(piece.sFrom, piece.sTo, transition.branchInterval)) return true;
+      return piece.boundary === `edge:${transition.sourceZone.hostwardSign}`
+        && overlaps(
+          piece.sFrom,
+          piece.sTo,
+          [transition.transferCompleteBranch, transition.markingSettleEnd],
+        );
+    };
+    const illegalPaint = retainedPaint.filter(isIllegalRetained);
+    const legalPaint = retainedPaint.filter((piece) => !isIllegalRetained(piece));
+    const hostPaint = legalPaint.filter((piece) => (
+      piece.routeId === host.id && !isTransitionPaint(piece)));
+    const branchPaint = legalPaint.filter((piece) => (
+      piece.routeId === branch.id && !isTransitionPaint(piece)));
+    const transitionPaint = legalPaint.filter(isTransitionPaint);
+    addRibbon('host-emitted markings (red)', hostPaint, 0xff2a2a, 0.3, 0.7);
+    addRibbon('branch-emitted markings (green)', branchPaint, 0x38ff68, 0.3, 0.72);
+    addRibbon('transition-emitted markings (yellow)', transitionPaint, 0xffe52a, 0.36, 0.78);
+    addRibbon('illegal retained markings (magenta)', illegalPaint, 0xff29e6, 0.52, 0.9);
+    const suppressedAttempts = this._markingLog.filter((piece) => (
+      piece.kind === 'suppressedStrip' && inP4Vicinity(piece)));
+
+    const hostRailSamples = (host._progressiveRailSamples || [])
+      .filter((sample) => sample.transitionId === transition.id)
+      .sort((left, right) => left.distance - right.distance);
+    const branchRailSamples = (branch._progressiveRailSamples || [])
+      .filter((sample) => sample.transitionId === transition.id)
+      .sort((left, right) => left.distance - right.distance);
+    const railSegments = (samples) => samples.slice(1).map((sample, index) => ({
+      start: samples[index].actualBasePosition,
+      end: sample.actualBasePosition,
+      from: samples[index],
+      to: sample,
+    }));
+    const hostRailSegments = railSegments(hostRailSamples);
+    const branchRailSegments = railSegments(branchRailSamples);
+    addRibbon(
+      'host guardrail (blue)',
+      hostRailSegments.filter((segment) => (
+        (segment.from.distance + segment.to.distance) * 0.5 < transition.openingStart)),
+      0x2485ff,
+      0.42,
+      0.95,
+    );
+    const sharedRailSegments = [
+      ...hostRailSegments.filter((segment) => (
+        (segment.from.distance + segment.to.distance) * 0.5 >= transition.openingStart)),
+      ...branchRailSegments.filter((segment) => (
+        segment.from.role === 'branch-gore' && segment.to.role === 'branch-gore')),
+    ];
+    addRibbon('transition-owned guardrail (white)', sharedRailSegments, 0xffffff, 0.46, 1.0);
+    const branchExteriorSegments = branchRailSegments.filter((segment) => (
+      segment.from.role === 'branch-exterior' && segment.to.role === 'branch-exterior'));
+    addRibbon('branch guardrail (orange)', branchExteriorSegments, 0xff8b24, 0.42, 0.98);
+
+    const handoffHost = hostRailSamples.at(-1)?.actualBasePosition;
+    const exteriorBranchSamples = branchRailSamples.filter((sample) => sample.role === 'branch-exterior');
+    const handoffBranch = exteriorBranchSamples[0]?.actualBasePosition;
+    const handoffGap = handoffHost && handoffBranch ? Math.hypot(
+      handoffHost.x - handoffBranch.x,
+      handoffHost.y - handoffBranch.y,
+      handoffHost.z - handoffBranch.z,
+    ) : Infinity;
+    if (Number.isFinite(handoffGap) && handoffGap <= 6) {
+      addRibbon(
+        'bounded transition rail handoff (white)',
+        [{ start: handoffHost, end: handoffBranch }],
+        0xffffff,
+        0.2,
+        1.04,
+      );
+    }
+    const unexplainedRailGaps = [];
+    if (!Number.isFinite(handoffGap) || handoffGap > 6) {
+      if (handoffHost && handoffBranch) unexplainedRailGaps.push({ start: handoffHost, end: handoffBranch });
+    }
+    addRibbon('unexplained guardrail gaps (cyan)', unexplainedRailGaps, 0x24f5ff, 0.58, 1.14);
+
+    const corridor = transition.auxiliaryCorridor;
+    const proximityToCorridor = (value) => {
+      const section = corridor.reduce((best, candidate) => (
+        xzDistanceSq(value, candidate.centre) < xzDistanceSq(value, best.centre)
+          ? candidate : best
+      ));
+      const dx = section.outer.x - section.inner.x;
+      const dz = section.outer.z - section.inner.z;
+      const denominator = dx * dx + dz * dz;
+      const t = denominator > 1e-9
+        ? clamp(((value.x - section.inner.x) * dx + (value.z - section.inner.z) * dz) / denominator, 0, 1)
+        : 0;
+      return {
+        t,
+        distance: Math.hypot(
+          value.x - (section.inner.x + dx * t),
+          value.z - (section.inner.z + dz * t),
+        ),
+      };
+    };
+    const blockedRailSamples = [...hostRailSamples, ...branchRailSamples]
+      .filter((sample) => {
+        const proximity = proximityToCorridor(sample.actualBasePosition);
+        return proximity.t > 0.03 && proximity.t < 0.97 && proximity.distance < 0.45;
+      });
+    const blockedWallSegments = this.wallSegments.filter((segment) => {
+      if (segment.progressiveTransitionId !== transition.id) return false;
+      const middle = segment.start.clone().lerp(segment.end, 0.5);
+      return [segment.start, middle, segment.end].some((value) => {
+        const proximity = proximityToCorridor(value);
+        return proximity.t > 0.03 && proximity.t < 0.97 && proximity.distance < 0.45;
+      });
+    });
+    addMarkers(
+      'blocked drivable opening (bright red)',
+      [
+        ...blockedRailSamples.map((sample) => sample.actualBasePosition),
+        ...blockedWallSegments.flatMap((segment) => [segment.start, segment.end]),
+      ],
+      0xff0022,
+    );
+    group.userData = {
+      readOnly: true,
+      junctionId: transition.id,
+      markings: {
+        host: hostPaint.length,
+        branch: branchPaint.length,
+        transition: transitionPaint.length,
+        illegalRetained: illegalPaint.length,
+        suppressedAttempts: suppressedAttempts.length,
+      },
+      rails: {
+        hostSegments: hostRailSegments.length,
+        branchSegments: branchExteriorSegments.length,
+        transitionSegments: sharedRailSegments.length,
+        blocked: blockedRailSamples.length + blockedWallSegments.length,
+        unexplainedGaps: unexplainedRailGaps.length,
+        handoffGap,
+      },
+    };
+    this.group.add(group);
+    this.progressiveOwnershipDebugOverlay = group;
   }
 
   /**
