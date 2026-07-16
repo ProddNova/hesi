@@ -279,6 +279,8 @@ const tunnelConnectedRamps = ['ramp_5', 'ramp_29'].filter((routeId) => (
 const sourceAreaById = new Map((ROUTE_DATA.serviceAreas || []).map((area) => [area.id, area]));
 let nonGroundedAreasAligned = 0;
 let groundedAreasPreserved = 0;
+let deckAreasElevated = 0;
+let deckAreas = 0;
 for (const area of map.serviceAreas) {
   const sourceArea = sourceAreaById.get(area.id);
   if (sourceArea?.grounded) {
@@ -287,6 +289,15 @@ for (const area of map.serviceAreas) {
   }
   const host = map.routes.get(area.routeId);
   const hostY = map._sampleCenter(host, area.mainDistance, 1).position.y;
+  if (area.placement === 'tatsumi-elevated-deck') {
+    // Intentional exception: the Tatsumi deck derives its elevation from the
+    // surrounding ramp geometry and floats WELL above its spine host (the
+    // Wangan runs underneath). tatsumi-pa-placement-probe.mjs owns the full
+    // deck contract; here we only guard the grade separation.
+    deckAreas += 1;
+    if (area.elevation - hostY >= 7) deckAreasElevated += 1;
+    continue;
+  }
   if (near(area.elevation, hostY + 0.15, 1e-6)) nonGroundedAreasAligned += 1;
 }
 const garageArea = map.serviceAreas.find((area) => area.hasGarage);
@@ -305,7 +316,7 @@ console.log(`Representative pre-offset intersections: ${beforeIntersections
 console.log(`Intentional tunnel context: ${tunnelContextSpans.length} spans; connected ramps ${tunnelConnectedRamps.join(', ')}`);
 console.log(`Route-to-route vertical-difference preservation: max error ${maxRelativeDeltaError.toExponential(2)} m across ${relativePairs} nearby control pairs`);
 console.log(`Authoritative control-point offset: max error ${maxControlOffsetError.toExponential(2)} m across ${matchedControls} matched X/Z controls`);
-console.log(`Service areas: ${nonGroundedAreasAligned} non-grounded aligned; ${groundedAreasPreserved} grounded preserved; garage connector ${garageArea?.accessRouteId ? 'present' : 'disabled (temporary PA pass)'}`);
+console.log(`Service areas: ${nonGroundedAreasAligned} non-grounded aligned; ${deckAreasElevated} elevated deck; ${groundedAreasPreserved} grounded preserved; garage connector ${garageArea?.accessRouteId ? 'present' : 'disabled (temporary PA pass)'}`);
 
 check(ROAD_NETWORK_Y_OFFSET >= measuredMinimumOffset,
   `configured offset ${ROAD_NETWORK_Y_OFFSET} is below measured minimum ${measuredMinimumOffset}`);
@@ -317,8 +328,11 @@ check(relativePairs > 0 && maxRelativeDeltaError < 1e-12, 'route-to-route height
 check(matchedControls > 1000 && maxControlOffsetError < 1e-9,
   `authoritative control points do not share one exact offset (${matchedControls} matches, ${maxControlOffsetError} error)`);
 check(tunnelConnectedRamps.length === 2, 'tunnel-connected Ginza ramps were not classified as intentional tunnel context');
-check(nonGroundedAreasAligned === map.serviceAreas.filter((area) => !sourceAreaById.get(area.id)?.grounded).length,
-  'a non-grounded service area no longer follows its host route');
+check(nonGroundedAreasAligned + deckAreas
+  === map.serviceAreas.filter((area) => !sourceAreaById.get(area.id)?.grounded).length,
+'a non-grounded service area no longer follows its host route');
+check(deckAreasElevated === deckAreas,
+  'an elevated-deck service area lost its grade separation over its host');
 check(groundedAreasPreserved === map.serviceAreas.filter((area) => sourceAreaById.get(area.id)?.grounded).length,
   'a deliberately grounded service area moved off ground level');
 // The garage connector is temporarily disabled with every other PA access

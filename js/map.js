@@ -947,6 +947,14 @@ export class HighwayMap {
         console.warn('Shutoko map: PA anchor route missing:', def.routeId);
         continue;
       }
+      // Tatsumi prototype: while access lanes are disabled, the lot is an
+      // elevated deck fitted between ramp_8/ramp_9 over the Wangan pair
+      // instead of the generic beside-the-host placement (which drops it
+      // off ramp_9's outside, beside the junction). The paAccessLanes:true
+      // twin keeps the legacy placement so the restored access lane still
+      // matches its lot.
+      const tatsumiLanesDisabled = this.options.paAccessLanes === true ? false : PA_ACCESS_LANES_DISABLED;
+      if (def.id === 'tatsumi_pa' && tatsumiLanesDisabled && this._defineTatsumiDeck(def)) continue;
       const projection = this._projectToRoute(route, vec(def.x, 0, def.z));
       const distance = projection.distance;
       const sample = this._sampleCenter(route, distance, 1);
@@ -1192,6 +1200,252 @@ export class HighwayMap {
       : null;
     area.garageEntrance = area.garageLotAnchor ? area.garageLotAnchor.clone() : null;
     this.serviceAreas.push(area);
+    return area;
+  }
+
+  /**
+   * Tatsumi No.1 PA prototype: an elevated deck wedged between ramp_8 and
+   * ramp_9, straddling the two Wangan carriageways that run ~9 m below the
+   * ramps through the Tatsumi corridor (plan-view ordering NW->SE is
+   * ramp_8 | wangan_0 | wangan_1 | ramp_9). Everything is measured from the
+   * fitted runtime centrelines at build time — no coordinate here is a
+   * hand-typed world position, and the generated route data is untouched.
+   *
+   * The deck stays a single flat rectangle because that is the lot model the
+   * whole runtime shares (_lotAt/_lotRoadInfo collision, proximity queries,
+   * dressing). Its extent is clipped so it never enters either ramp corridor
+   * (the ±6 m _lotAt gate would otherwise capture ramp traffic — the ramps
+   * are within a couple of metres of deck level) and so it keeps enough
+   * height over the Wangan pair that cars below never pass the same gate.
+   *
+   * Returns the area (and registers it) or null when the surrounding
+   * geometry cannot host the deck — the caller then falls back to the
+   * generic beside-the-host placement. No access route, edge or traffic
+   * lane is created; the future wangan_0 exit only gets a documented anchor.
+   */
+  _defineTatsumiDeck(def) {
+    const spine = this.routes.get('wangan_0');
+    const sibling = this.routes.get('wangan_1');
+    const ramp8 = this.routes.get('ramp_8');
+    const ramp9 = this.routes.get('ramp_9');
+    if (!spine || !sibling || !ramp8 || !ramp9) {
+      console.warn('Shutoko map: Tatsumi deck routes missing; using generic PA placement');
+      return null;
+    }
+    const MIN_RAMP_CLEARANCE = 7;  // ramp decks this far above the Wangan decks
+    const MAX_RAMP_LATERAL = 70;   // corridor sanity bound around the spine
+    const MIN_CORRIDOR_GAP = 34;   // ramp-to-ramp pinch cutoff
+    const EDGE_GAP = 1.6;          // deck edge to ramp surface edge
+    const END_INSET = 8;           // rectangle inset from the eligible run ends
+    const MIN_LENGTH = 140;
+    const MIN_HALF_WIDTH = 9;
+    const MIN_WANGAN_SEPARATION = 7.2; // deck above Wangan decks (> the 6 m lot gate)
+
+    // 1. Eligible spine window: stations where the point sits BETWEEN the two
+    //    ramps and both ramps are properly elevated above the Wangan pair.
+    const centreProjection = this._projectToRoute(spine, vec(def.x, 0, def.z));
+    const stations = [];
+    for (let d = centreProjection.distance - 900; d <= centreProjection.distance + 900; d += 10) {
+      if (d < 0 || d > spine.length) continue;
+      const sample = this._sampleCenter(spine, d, 1);
+      const p8 = this._projectToRoute(ramp8, sample.position);
+      const p9 = this._projectToRoute(ramp9, sample.position);
+      const p1 = this._projectToRoute(sibling, sample.position);
+      const gap = Math.hypot(p8.point.x - p9.point.x, p8.point.z - p9.point.z);
+      const between = Math.abs(Math.abs(p8.signedLateral) + Math.abs(p9.signedLateral) - gap) < 3;
+      const clearance = Math.min(p8.point.y, p9.point.y) - Math.max(sample.position.y, p1.point.y);
+      const ok = between
+        && Math.abs(p8.signedLateral) < MAX_RAMP_LATERAL
+        && Math.abs(p9.signedLateral) < MAX_RAMP_LATERAL
+        && clearance >= MIN_RAMP_CLEARANCE
+        && gap >= MIN_CORRIDOR_GAP;
+      stations.push({ d, position: sample.position.clone(), tangent: sample.tangent.clone(), p8, p9, ok });
+    }
+    let run = null;
+    let current = null;
+    for (const station of stations) {
+      if (station.ok) {
+        if (!current) current = [station, station];
+        else current[1] = station;
+      } else if (current) {
+        if (!run || current[1].d - current[0].d > run[1].d - run[0].d) run = current;
+        current = null;
+      }
+    }
+    if (current && (!run || current[1].d - current[0].d > run[1].d - run[0].d)) run = current;
+    if (!run || run[1].d - run[0].d < MIN_LENGTH + END_INSET * 2) {
+      console.warn('Shutoko map: Tatsumi corridor too short for the deck; using generic PA placement');
+      return null;
+    }
+
+    // 2. Deck axis: least-squares line through the ramp-to-ramp midpoints
+    //    (the corridor is straight through Tatsumi; residuals stay ~3 m).
+    const windowStations = stations.filter((s) => s.ok && s.d >= run[0].d && s.d <= run[1].d);
+    const mids = windowStations.map((s) => ({
+      x: (s.p8.point.x + s.p9.point.x) / 2,
+      z: (s.p8.point.z + s.p9.point.z) / 2,
+    }));
+    const mean = { x: 0, z: 0 };
+    for (const mid of mids) { mean.x += mid.x / mids.length; mean.z += mid.z / mids.length; }
+    let sxx = 0; let sxz = 0; let szz = 0;
+    for (const mid of mids) {
+      sxx += (mid.x - mean.x) ** 2;
+      szz += (mid.z - mean.z) ** 2;
+      sxz += (mid.x - mean.x) * (mid.z - mean.z);
+    }
+    const theta = 0.5 * Math.atan2(2 * sxz, sxx - szz);
+    const tangent = vec(Math.cos(theta), 0, Math.sin(theta));
+    const middle = windowStations[Math.floor(windowStations.length / 2)].tangent;
+    if (tangent.x * middle.x + tangent.z * middle.z < 0) tangent.multiplyScalar(-1);
+    const outward = horizontalNormal(tangent); // +v side carries ramp_8/wangan_0
+    const local = (p) => ({
+      u: (p.x - mean.x) * tangent.x + (p.z - mean.z) * tangent.z,
+      v: (p.x - mean.x) * outward.x + (p.z - mean.z) * outward.z,
+    });
+
+    // 3. Corridor walls in deck frame: dense ramp centreline samples near the
+    //    window, split by side of the axis.
+    const uSpan = mids.map((mid) => local(mid).u);
+    const uLo = Math.min(...uSpan) + END_INSET;
+    const uHi = Math.max(...uSpan) - END_INSET;
+    const rampSamples = [];
+    for (const ramp of [ramp8, ramp9]) {
+      for (let d = 0; d < ramp.length; d += 4) {
+        const p = this._sampleCenter(ramp, d, 1).position;
+        const l = local(p);
+        if (l.u < uLo - 60 || l.u > uHi + 60) continue;
+        rampSamples.push({ u: l.u, v: l.v, y: p.y });
+      }
+    }
+
+    // 4. Rectangle search: trim the window ends so the ramp pinches (ramp_9's
+    //    flyover re-crossing east of the corridor, ramp_8 bowing inward) cost
+    //    length instead of killing the whole deck's width. Deterministic grid
+    //    scan, largest area wins.
+    const fit = (uA, uB) => {
+      let clearPos = Infinity;
+      let clearNeg = Infinity;
+      for (const s of rampSamples) {
+        if (s.u < uA - 6 || s.u > uB + 6) continue;
+        if (s.v >= 0) clearPos = Math.min(clearPos, s.v - 4.5);
+        else clearNeg = Math.min(clearNeg, -s.v - 4.5);
+      }
+      if (!Number.isFinite(clearPos) || !Number.isFinite(clearNeg)) return null;
+      const vHi = clearPos - EDGE_GAP;
+      const vLo = -(clearNeg - EDGE_GAP);
+      const halfWidth = (vHi - vLo) / 2;
+      if (halfWidth < MIN_HALF_WIDTH) return null;
+      // Superlinear width term: width is the scarce resource (the future
+      // garage, stall rows and manoeuvring all need it), so prefer a
+      // slightly shorter-but-wider deck over a long sliver of equal area.
+      return { uA, uB, halfWidth, centerV: (vHi + vLo) / 2, score: (uB - uA) * halfWidth ** 1.3 };
+    };
+    let best = null;
+    for (let uA = uLo; uA <= uHi - MIN_LENGTH; uA += 10) {
+      for (let uB = uHi; uB >= uA + MIN_LENGTH; uB -= 10) {
+        const candidate = fit(uA, uB);
+        if (candidate && (!best || candidate.score > best.score)) best = candidate;
+      }
+    }
+    if (!best) {
+      console.warn('Shutoko map: Tatsumi deck cannot clear the ramps; using generic PA placement');
+      return null;
+    }
+
+    // 5. Elevation from the surrounding ramp decks (mean of both ramps across
+    //    the deck window), then verify the Wangan pair keeps enough headroom
+    //    for the ±6 m lot gate under every covered station.
+    let ySum = 0;
+    let yCount = 0;
+    for (const s of rampSamples) {
+      if (s.u < best.uA || s.u > best.uB) continue;
+      ySum += s.y; yCount += 1;
+    }
+    const elevation = ySum / Math.max(1, yCount);
+    let wanganMaxY = -Infinity;
+    const coverage = { wangan_0: 0, wangan_1: 0 };
+    for (const [id, route] of [['wangan_0', spine], ['wangan_1', sibling]]) {
+      for (let d = 0; d < route.length; d += 8) {
+        const p = this._sampleCenter(route, d, 1).position;
+        const l = local(p);
+        if (l.u < best.uA || l.u > best.uB) continue;
+        if (Math.abs(l.v - best.centerV) > best.halfWidth) continue;
+        wanganMaxY = Math.max(wanganMaxY, p.y);
+        coverage[id] += 8;
+      }
+    }
+    if (elevation - wanganMaxY < MIN_WANGAN_SEPARATION) {
+      console.warn('Shutoko map: Tatsumi deck too close to the Wangan decks; using generic PA placement');
+      return null;
+    }
+
+    // 6. Register the lot through the shared model so collision, proximity,
+    //    dressing, minimap and dev tools all follow the deck for free.
+    const length = best.uB - best.uA;
+    const width = best.halfWidth * 2;
+    const centerU = (best.uA + best.uB) / 2;
+    const center = vec(
+      mean.x + tangent.x * centerU + outward.x * best.centerV,
+      elevation,
+      mean.z + tangent.z * centerU + outward.z * best.centerV,
+    );
+    const spineDistance = this._projectToRoute(spine, center).distance;
+    const deckDef = { ...def, routeId: spine.id, width, length };
+    const area = this._pushServiceArea(deckDef, spine, spineDistance, center, tangent.clone(), outward.clone(), elevation, null);
+    area.sideSign = 0; // straddles the corridor — there is no host side
+    area.accessDisabled = true;
+    area.placement = 'tatsumi-elevated-deck';
+    area.rampRefs = { north: ramp8.id, south: ramp9.id };
+    area.deckClearance = {
+      aboveWangan: elevation - wanganMaxY,
+      wanganCoverage: coverage,
+    };
+    // Support columns must land in the median gap between the two Wangan
+    // carriageways below — the generic ±width*0.32 rows would stand in the
+    // middle of the live lanes. wangan_0 runs on the +v side of the axis,
+    // wangan_1 on the -v side, so the free band spans from wangan_1's upper
+    // edge up to wangan_0's lower edge.
+    let bandLo = -Infinity;
+    let bandHi = Infinity;
+    for (let d = 0; d < spine.length; d += 8) {
+      const l = local(this._sampleCenter(spine, d, 1).position);
+      if (l.u < best.uA || l.u > best.uB) continue;
+      bandHi = Math.min(bandHi, l.v - spine.halfWidth);
+    }
+    for (let d = 0; d < sibling.length; d += 8) {
+      const l = local(this._sampleCenter(sibling, d, 1).position);
+      if (l.u < best.uA || l.u > best.uB) continue;
+      bandLo = Math.max(bandLo, l.v + sibling.halfWidth);
+    }
+    const pillarV = Number.isFinite(bandLo) && Number.isFinite(bandHi) && bandHi - bandLo > 2.4
+      ? (bandLo + bandHi) / 2
+      : 0;
+    area.pillarLateralOffsets = [pillarV - best.centerV];
+
+    // 7. Anchors for the NEXT checkpoints — nothing consumes these yet.
+    //    They document where the garage, the player spawn and the player-only
+    //    wangan_0 exit will attach, all expressed on the deck surface.
+    const heading = Math.atan2(tangent.x, tangent.z);
+    const deckPoint = (u, v) => center.clone()
+      .addScaledVector(tangent, u)
+      .addScaledVector(outward, v);
+    const exitEdge = deckPoint(length * 0.5 - 4, width * 0.5 - 2.5);
+    const exitTargetDistance = clamp(spineDistance + length * 0.5 + 240, 0, spine.length - 1);
+    const exitTarget = this._sampleCenter(spine, exitTargetDistance, 1);
+    area.futureAnchors = {
+      garage: { position: deckPoint(-length * 0.3, 0), heading },
+      spawn: { position: deckPoint(length * 0.15, 0), heading },
+      wanganExit: {
+        deckEdge: exitEdge,
+        heading,
+        targetRouteId: spine.id,
+        targetDistance: exitTargetDistance,
+        targetPoint: exitTarget.position.clone(),
+        drop: elevation - exitTarget.position.y,
+        run: exitEdge.distanceTo(exitTarget.position),
+        grade: (elevation - exitTarget.position.y) / Math.max(1, exitEdge.distanceTo(exitTarget.position)),
+      },
+    };
     return area;
   }
 
@@ -6131,10 +6385,13 @@ export class HighwayMap {
       slab.name = `${area.name} deck`;
       this._addChunkMesh(slab, slabCenter);
 
-      // support pillars when elevated
+      // support pillars when elevated; a lot straddling live carriageways
+      // (the Tatsumi deck) supplies its own offsets so no column stands in
+      // the lanes running underneath
       if (area.elevation > 4) {
+        const pillarRows = area.pillarLateralOffsets || [-area.width * 0.32, area.width * 0.32];
         for (const along of [-area.length * 0.36, 0, area.length * 0.36]) {
-          for (const across of [-area.width * 0.32, area.width * 0.32]) {
+          for (const across of pillarRows) {
             const position = area.center.clone()
               .addScaledVector(area.tangent, along)
               .addScaledVector(area.normal, across);
