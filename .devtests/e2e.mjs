@@ -1,6 +1,6 @@
 /**
  * End-to-end regression: boots the game in headless Chromium with an
- * iPhone-like touch viewport, drives the core loop through both real touch
+ * generic mobile touch viewport, drives the core loop through both real touch
  * events and the exposed window.shutoko handle, and screenshots key states.
  *
  * Run from repo root:  node .devtests/e2e.mjs
@@ -37,7 +37,6 @@ const context = await browser.newContext({
   deviceScaleFactor: 3,
   isMobile: true,
   hasTouch: true,
-  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1',
 });
 // Serve the three.js CDN request from the local node_modules copy.
 await context.route('https://cdn.jsdelivr.net/**', async (route) => {
@@ -110,6 +109,71 @@ await page.waitForTimeout(600);
 check('driving mode reached', true);
 const resInfo = await page.evaluate(() => { const c = document.getElementById('game-canvas'); return `${c.width}x${c.height}`; });
 console.log('   internal render resolution (medium):', resInfo);
+
+// --- Mobile developer map entry + touch navigation ---
+const devMapButtonState = await page.evaluate(() => {
+  const button = document.querySelector('.touch-utility button[data-action="dev-map"]');
+  return { exists: !!button, visible: !!button && getComputedStyle(button).display !== 'none' };
+});
+check('mobile DEV MAP button is visible', devMapButtonState.exists && devMapButtonState.visible);
+await page.tap('.touch-utility button[data-action="dev-map"]');
+await page.waitForFunction(() => window.shutoko.devMap.isOpen());
+const mobileDevMapLayout = await page.evaluate(() => {
+  const map = document.querySelector('.dev-map').getBoundingClientRect();
+  const close = document.querySelector('.dev-map-close').getBoundingClientRect();
+  return {
+    open: window.shutoko.devMap.isOpen(),
+    fillsViewport: map.left <= 0 && map.top <= 0 && map.right >= innerWidth && map.bottom >= innerHeight,
+    closeVisible: close.left >= 0 && close.top >= 0 && close.right <= innerWidth && close.bottom <= innerHeight,
+  };
+});
+check('mobile DEV MAP button opens the shared map', mobileDevMapLayout.open);
+check('mobile developer map and close control fit the viewport', mobileDevMapLayout.fillsViewport && mobileDevMapLayout.closeVisible);
+await page.tap('.dev-map-toolbar button[data-act="fit"]');
+const scaleBeforePinch = await page.evaluate(() => window.shutoko.devMap.view.scale);
+await page.dispatchEvent('.dev-map-canvas', 'pointerdown', { pointerId: 51, pointerType: 'touch', clientX: 382, clientY: 195, button: 0, buttons: 1, isPrimary: true });
+await page.dispatchEvent('.dev-map-canvas', 'pointerdown', { pointerId: 52, pointerType: 'touch', clientX: 462, clientY: 195, button: 0, buttons: 1, isPrimary: false });
+await page.dispatchEvent('.dev-map-canvas', 'pointermove', { pointerId: 51, pointerType: 'touch', clientX: 342, clientY: 195, button: 0, buttons: 1, isPrimary: true });
+await page.dispatchEvent('.dev-map-canvas', 'pointermove', { pointerId: 52, pointerType: 'touch', clientX: 502, clientY: 195, button: 0, buttons: 1, isPrimary: false });
+await page.dispatchEvent('.dev-map-canvas', 'pointerup', { pointerId: 51, pointerType: 'touch', clientX: 342, clientY: 195, button: 0, buttons: 0, isPrimary: true });
+await page.dispatchEvent('.dev-map-canvas', 'pointerup', { pointerId: 52, pointerType: 'touch', clientX: 502, clientY: 195, button: 0, buttons: 0, isPrimary: false });
+const pinchState = await page.evaluate(() => ({
+  scale: window.shutoko.devMap.view.scale,
+  touchCount: window.shutoko.devMap._touchPoints.size,
+  pinching: !!window.shutoko.devMap._pinch,
+}));
+check('mobile developer map supports two-finger pinch zoom', pinchState.scale > scaleBeforePinch * 1.5 && pinchState.touchCount === 0 && !pinchState.pinching, `${scaleBeforePinch.toFixed(3)} -> ${pinchState.scale.toFixed(3)}`);
+const panBefore = await page.evaluate(() => ({ x: window.shutoko.devMap.view.camX, z: window.shutoko.devMap.view.camZ, position: { ...window.shutoko.getVehicleState().position } }));
+await page.dispatchEvent('.dev-map-canvas', 'pointerdown', { pointerId: 53, pointerType: 'touch', clientX: 420, clientY: 200, button: 0, buttons: 1, isPrimary: true });
+await page.dispatchEvent('.dev-map-canvas', 'pointermove', { pointerId: 53, pointerType: 'touch', clientX: 480, clientY: 230, button: 0, buttons: 1, isPrimary: true });
+await page.dispatchEvent('.dev-map-canvas', 'pointerup', { pointerId: 53, pointerType: 'touch', clientX: 480, clientY: 230, button: 0, buttons: 0, isPrimary: true });
+const panState = await page.evaluate((before) => {
+  const dm = window.shutoko.devMap;
+  const position = window.shutoko.getVehicleState().position;
+  return {
+    movedView: Math.hypot(dm.view.camX - before.x, dm.view.camZ - before.z),
+    movedCar: Math.hypot(position.x - before.position.x, position.z - before.position.z),
+  };
+}, panBefore);
+check('mobile developer map supports one-finger pan without teleporting', panState.movedView > 10 && panState.movedCar < 0.05, `view ${panState.movedView.toFixed(1)}m, car ${panState.movedCar.toFixed(3)}m`);
+await page.screenshot({ path: join(OUT, '04b-dev-map-mobile.png') });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(250);
+const portraitDevMapLayout = await page.evaluate(() => {
+  const controls = [...document.querySelectorAll('.dev-map-toolbar button')].map((button) => button.getBoundingClientRect());
+  const info = document.querySelector('.dev-map-info').getBoundingClientRect();
+  return {
+    controlsInside: controls.every((rect) => rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight),
+    infoInside: info.left >= 0 && info.top >= 0 && info.right <= innerWidth && info.bottom <= innerHeight,
+  };
+});
+check('mobile developer map fits portrait devices', portraitDevMapLayout.controlsInside && portraitDevMapLayout.infoInside);
+await page.screenshot({ path: join(OUT, '04c-dev-map-mobile-portrait.png') });
+await page.setViewportSize({ width: 844, height: 390 });
+await page.waitForTimeout(250);
+await page.tap('.dev-map-close');
+await page.waitForFunction(() => !window.shutoko.devMap.isOpen());
+check('mobile developer map closes back to touch controls', await page.evaluate(() => !document.getElementById('touch-controls').classList.contains('hidden') && !document.body.classList.contains('dev-map-open')));
 
 // --- Mobile debug menu + complete noclip controls ---
 await page.tap('.touch-utility button[data-action="debug"]');

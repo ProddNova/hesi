@@ -1,7 +1,8 @@
 # Developer network map (`M`)
 
 A full-screen, interactive top-down map of the entire runtime highway network,
-opened with the **M** key. It is a development / debugging tool, separate from
+opened with the **M** key or the **DEV MAP** touch button. It is a development /
+debugging tool, separate from
 the in-fiction phone minimap, for inspecting routes and teleporting the car (or
 the noclip drone) anywhere on the network.
 
@@ -11,6 +12,8 @@ Files:
   renderer, transforms, hit-testing, teleport selection). Owns no game state.
 - `styles/dev-map.css` — the overlay styling (isolated from `styles.css`).
 - `.devtests/dev-map-test.mjs` — focused Playwright regression (33 checks).
+- `.devtests/e2e.mjs` — generic mobile touch entry, responsive layout, pinch,
+  pan, close, and control-overlap regression.
 - Integration lives in `js/game.js` (`setupDevMap`, `getDevNetwork`,
   `teleportToRoutePoint`) and one `<link>` in `index.html`.
 
@@ -19,10 +22,11 @@ Files:
 | Input | Action |
 |-------|--------|
 | `M` | Toggle the developer map (ignored while typing in an input/textarea/select) |
+| `DEV MAP` touch button | Open the same developer map on any coarse-pointer/mobile layout |
 | `Escape` | Close the map |
 | Close button | Close the map |
-| Drag empty map (left button) | Pan (disables follow) |
-| Mouse wheel | Zoom around the cursor |
+| Drag empty map / one-finger drag | Pan (disables follow) |
+| Mouse wheel / two-finger pinch | Zoom around the cursor or gesture centre |
 | Double-click | Centre on the current position |
 | Hover a road | Highlight it + show a tooltip of real metadata |
 | Click a road | Teleport to the closest point on it |
@@ -56,6 +60,14 @@ While the map is open, gameplay is **frozen** — the vehicle and noclip drone
 stay put and all gameplay keys are swallowed. Freezing is intentional and
 preferable to letting the car or drone drift on a stuck key. Closing restores
 normal controls and, deliberately, does **not** re-acquire pointer lock.
+
+The touch entry point is part of the shared utility-control group and is shown
+in driving, garage, and noclip modes on coarse-pointer/mobile layouts. It calls
+the same `toggleDevMap()` path as the keyboard shortcut; there is no separate
+mobile map state or renderer. Safe-area insets, a responsive toolbar,
+one-finger pan, two-finger pinch zoom, tap-to-teleport, and the in-map Close
+button cover both portrait and landscape devices rather than targeting a
+specific phone model.
 
 ## Architecture
 

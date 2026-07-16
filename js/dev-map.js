@@ -40,6 +40,8 @@ export class DeveloperMap {
     this._raf = 0;
     this._lastHoverAt = 0;
     this._pointer = null;        // active canvas pointer (drag/click tracking)
+    this._touchPoints = new Map(); // active touch pointers for mobile pinch zoom
+    this._pinch = null;
     this._teleportInfo = null;   // last teleport, shown in the info panel
 
     this._buildDom();
@@ -96,6 +98,8 @@ export class DeveloperMap {
     document.body.classList.remove('dev-map-open');
     this.hovered = null;
     this._pointer = null;
+    this._touchPoints.clear();
+    this._pinch = null;
     cancelAnimationFrame(this._raf);
     this._raf = 0;
     if (this._escHandler) window.removeEventListener('keydown', this._escHandler, true);
@@ -135,7 +139,7 @@ export class DeveloperMap {
           <dt>Prototypes</dt><dd data-info="prototypes">—</dd>
           <dt>Teleport</dt><dd data-info="teleport">—</dd>
         </dl>
-        <p class="dev-map-help">M / Esc close · drag pan · wheel zoom · double-click centre · hover a road · click to teleport</p>
+        <p class="dev-map-help">M / Esc / Close · drag or touch to pan · wheel or pinch to zoom · tap/click to teleport</p>
       </div>`;
     (document.getElementById('game-shell') || document.body).appendChild(root);
 
@@ -173,7 +177,7 @@ export class DeveloperMap {
     canvas.addEventListener('pointerdown', (e) => this._onPointerDown(e));
     canvas.addEventListener('pointermove', (e) => this._onPointerMove(e));
     canvas.addEventListener('pointerup', (e) => this._onPointerUp(e));
-    canvas.addEventListener('pointercancel', () => { this._pointer = null; });
+    canvas.addEventListener('pointercancel', (e) => this._onPointerCancel(e));
     canvas.addEventListener('pointerleave', () => { if (!this._pointer) this.hovered = null; });
     canvas.addEventListener('dblclick', (e) => { e.preventDefault(); this.centerOnPosition(); });
     canvas.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
@@ -345,12 +349,44 @@ export class DeveloperMap {
   _onPointerDown(event) {
     if (event.button !== 0) return;
     const p = this._localPoint(event);
-    this._pointer = { id: event.pointerId, startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, dragging: false };
+    if (event.pointerType === 'touch') {
+      this._touchPoints.set(event.pointerId, p);
+      if (this._touchPoints.size >= 2) {
+        const [a, b] = [...this._touchPoints.values()];
+        this._pinch = {
+          distance: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
+          centerX: (a.x + b.x) * 0.5,
+          centerY: (a.y + b.y) * 0.5,
+        };
+        this._pointer = null;
+        if (this.view.followPlayer) this.setFollow(false);
+      }
+    }
+    if (!this._pinch) {
+      this._pointer = { id: event.pointerId, startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, dragging: false };
+    }
     try { this.canvas.setPointerCapture(event.pointerId); } catch (_) { /* pointer already gone */ }
   }
 
   _onPointerMove(event) {
     const p = this._localPoint(event);
+    if (event.pointerType === 'touch' && this._touchPoints.has(event.pointerId)) {
+      this._touchPoints.set(event.pointerId, p);
+      if (this._pinch && this._touchPoints.size >= 2) {
+        const [a, b] = [...this._touchPoints.values()];
+        const distance = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+        const centerX = (a.x + b.x) * 0.5;
+        const centerY = (a.y + b.y) * 0.5;
+        const anchor = this.screenToWorld(this._pinch.centerX, this._pinch.centerY);
+        this.view.scale = clamp(this.view.scale * distance / this._pinch.distance, MIN_SCALE, MAX_SCALE);
+        this.view.camX = anchor.x - (centerX - this.cssWidth / 2) / this.view.scale;
+        this.view.camZ = anchor.z - (centerY - this.cssHeight / 2) / this.view.scale;
+        this._pinch = { distance, centerX, centerY };
+        this._staticDirty = true;
+        this.hovered = null;
+        return;
+      }
+    }
     if (this._pointer && this._pointer.id === event.pointerId) {
       const dx = p.x - this._pointer.startX;
       const dy = p.y - this._pointer.startY;
@@ -376,13 +412,22 @@ export class DeveloperMap {
   }
 
   _onPointerUp(event) {
+    const wasPinching = !!this._pinch || this._touchPoints.size > 1;
+    if (event.pointerType === 'touch') this._touchPoints.delete(event.pointerId);
+    if (this._touchPoints.size < 2) this._pinch = null;
     const pointer = this._pointer;
     this._pointer = null;
     try { this.canvas.releasePointerCapture(event.pointerId); } catch (_) { /* noop */ }
-    if (!pointer || pointer.dragging) return; // a drag never teleports
+    if (wasPinching || !pointer || pointer.dragging) return; // a drag/pinch never teleports
     const p = this._localPoint(event);
     const hit = this._hitTest(p.x, p.y);
-    if (hit) this._teleport(hit);
+    if (hit) { this.hovered = hit; this._teleport(hit); }
+  }
+
+  _onPointerCancel(event) {
+    if (event.pointerType === 'touch') this._touchPoints.delete(event.pointerId);
+    if (this._touchPoints.size < 2) this._pinch = null;
+    this._pointer = null;
   }
 
   _onWheel(event) {

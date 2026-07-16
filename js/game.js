@@ -163,6 +163,7 @@ class ShutokoNights {
       else if(action==='camera'&&this.mode==='driving')this.cycleCamera();
       else if(action==='recover'&&this.mode==='driving')this.recover();
       else if(action==='debug')this.toggleDebugMenu();
+      else if(action==='dev-map'&&this.started&&!this.ui.phoneOpen&&!this.ui.pcOpen&&!this.debug.menuOpen)this.toggleDevMap();
       else if(action==='drone-faster'&&this.debug.noclip){this.debug.moveSpeed=clamp(this.debug.moveSpeed*1.25,5,400);this.updateDroneSpeedHUD();}
       else if(action==='drone-slower'&&this.debug.noclip){this.debug.moveSpeed=clamp(this.debug.moveSpeed/1.25,5,400);this.updateDroneSpeedHUD();}
       navigator.vibrate?.(10);

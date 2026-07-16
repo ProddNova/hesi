@@ -259,6 +259,11 @@ smoke passes 33/33, including exact metadata, hover content, four direct pin
 teleports, visible P1–P4 pixels, freeze behavior, route/elevation hit-testing,
 phone minimap preservation, and no console errors.
 
+The shared map is also reachable from the generic mobile utility controls via
+the `DEV MAP` button. The same overlay supports safe-area-aware portrait and
+landscape layouts, one-finger pan, two-finger pinch zoom, tap teleport, and its
+existing Close control without a device-specific renderer or state path.
+
 ## Mandatory visual matrix and direct review
 
 The final matrix contains 32 committed images: four cases × four camera types ×
@@ -300,8 +305,8 @@ unchanged baseline failure.
 | Road surface | PASS; 40,046 surface / 17,644 render frames, worst lateral 0.060 m, vertical 0.030 m, dash phase errors 0 |
 | Traffic runtime | PASS; 23 active after 20 s, finite position, 5 meshes/vehicle |
 | OSM validation | Known FAIL improves 329 → 315: rail 0, overlap unchanged 22, ramp-drive 247 → 233, smoothness unchanged 60, hygiene 0; selected route pairs have 0 ramp-drive failures |
-| Developer map | PASS 33/33, including exact four-pin metadata, hover, direct teleport, and phone/touch preservation |
-| Complete mobile e2e | PASS 34/34 at iPhone-sized touch viewport; no console errors |
+| Developer map | PASS 33/33 focused, including exact four-pin metadata, hover, direct teleport, and phone/touch preservation |
+| Complete mobile e2e | PASS 41/41 at generic landscape and portrait touch viewports, including DEV MAP entry/pinch/pan/close; no console errors |
 
 No non-prototype lateral, finishing, overlap, smoothness, rail, or hygiene
 ratchet moved. The global OSM improvement is entirely the removal of selected

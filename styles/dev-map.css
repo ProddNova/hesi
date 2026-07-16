@@ -114,7 +114,9 @@
 /* Freeze scrolling of the page underneath while the map is open. */
 body.dev-map-open { overflow: hidden; }
 
-@media (max-width: 600px) {
-  .dev-map-toolbar button { padding: 8px 10px; }
-  .dev-map-info { font-size: 11px; }
+@media (pointer: coarse), (max-width: 700px) {
+  .dev-map-toolbar { gap: 6px; padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)); }
+  .dev-map-toolbar button { min-height: 40px; padding: 7px 9px; font-size: 10px; }
+  .dev-map-info { left: max(8px, env(safe-area-inset-left)); bottom: max(8px, env(safe-area-inset-bottom)); max-width: min(340px, calc(100vw - 16px)); font-size: 10px; line-height: 1.35; }
+  .dev-map-help { font-size: 9px; }
 }
