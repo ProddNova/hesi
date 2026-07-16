@@ -8,6 +8,12 @@ At the nearest authoritative overlap sample, the rendered surfaces are
 and 75.974 m. At the crossable opening they are 76.229/76.317 m, after which
 the ramp collision corridor defers to the single Wangan deck.
 
+The corrected implementation uses the exact rendered opening at host station
+`30965.993` and the real ramp ownership terminal at `31113.061`. Both ramp
+lanes transfer as one rigid-width carriageway between those landmarks; neither
+lane begins absorption during that handoff. The minimum sampled pre-handoff
+lane-boundary width is 3.540 m.
+
 The implemented sequence is:
 
 `2-lane ramp + 3-lane host → 5 lanes → 4 lanes → 3 stable host lanes`
@@ -23,7 +29,11 @@ The implemented sequence is:
 7. [Second absorption, 4→3](p2-06-four-to-three.png)
 8. [Stable final three-lane Wangan](p2-07-final-three.png)
 9. [Connected road-collision hitbox](p2-08-road-hitbox.png)
+10. [Annotated true-handoff plan](p2-09-handoff-debug-plan.png)
 
-The focused model, geometry/paint/collision, both-lane vehicle traversal, and
-guardrail probes all pass. Both `ramp_41` lanes traverse into `wangan_1` with
-zero collision events and zero wall correction.
+The annotated plan shows `OPENING -> HANDOFF / FULL 5 START -> FULL 5 END /
+FIRST ABSORPTION -> SECOND ABSORPTION -> STABLE 3-LANE`, all five centre paths,
+and sampled widths for both ramp-origin lanes. The focused handoff, model,
+geometry/paint/collision, both-lane vehicle traversal, and guardrail probes all
+pass. Both `ramp_41` lanes traverse into `wangan_1` with zero collision events
+and zero wall correction.

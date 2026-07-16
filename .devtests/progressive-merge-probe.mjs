@@ -166,7 +166,9 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       if (routeSequence.at(-1) !== (info?.routeId || 'none')) routeSequence.push(info?.routeId || 'none');
       const allowedRouteIds = transition.type === 'diverge'
         ? [transition.hostRouteId, transition.branchRouteId]
-        : [transition.hostRouteId];
+        : (transition.id === P2_ID
+          ? [transition.branchRouteId, transition.hostRouteId]
+          : [transition.hostRouteId]);
       if (!info || !allowedRouteIds.includes(info.routeId)) {
         fail(id, `route ownership ${info?.routeId || 'none'} at ${row.hostS.toFixed(1)}`);
       }
@@ -187,7 +189,9 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     }
     const expectedOwnership = transition.type === 'diverge'
       ? [transition.hostRouteId, transition.branchRouteId]
-      : [transition.hostRouteId];
+      : (transition.id === P2_ID
+        ? [transition.branchRouteId, transition.hostRouteId]
+        : [transition.hostRouteId]);
     if (routeSequence.join(',') !== expectedOwnership.join(',')) {
       fail(id, `route ownership sequence ${routeSequence.join(',')}`);
     }
@@ -282,8 +286,15 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         fail(id, 'outer solid does not remain on the branch outer edge');
       }
     } else {
-      if (Math.abs(transition.boundaryLateralAt(transition.openingStart)
-        - transition.outerMarkingLateralAt(transition.openingStart)) > 0.01) fail(id, 'solid-to-dash lateral step');
+      const openingMarkingWidth = Math.abs(
+        transition.boundaryLateralAt(transition.openingStart)
+          - transition.outerMarkingLateralAt(transition.openingStart),
+      );
+      if (transition.auxiliaryLaneCount > 1) {
+        if (openingMarkingWidth < transition.auxiliaryTotalWidth - 0.05) {
+          fail(id, 'ramp-origin marking boundaries collapse at the true opening');
+        }
+      } else if (openingMarkingWidth > 0.01) fail(id, 'solid-to-dash lateral step');
       if (Math.abs(transition.boundaryLateralAt(transition.transitionEnd)
         - transition.outerMarkingLateralAt(transition.transitionEnd)) > 0.01) fail(id, 'dash-to-solid lateral step');
       if (transition.auxiliaryLaneCount > 1) {

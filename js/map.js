@@ -183,6 +183,7 @@ export class HighwayMap {
     this._finalizeNetwork();
     this._buildWorld();
     if (this.options.progressiveCorridorDebug) this._buildProgressiveCorridorDebugOverlay();
+    if (this.options.progressiveMergeHandoffDebug) this._buildP2HandoffDebugOverlay();
     if (this.options.progressiveOwnershipDebug) this._buildP4OwnershipDebugOverlay();
     this._buildMinimapData();
 
@@ -7333,6 +7334,138 @@ export class HighwayMap {
     };
     this.group.add(group);
     this.progressiveCorridorDebugOverlay = group;
+  }
+
+  /** Read-only J48 plan overlay for the branch-to-five-lane handoff audit. */
+  _buildP2HandoffDebugOverlay() {
+    const transition = this.progressiveTransitionById.get('J48:merge:wangan_1:ramp_41:end');
+    if (!transition?.auxiliaryLaneCorridors?.length) return;
+    const group = new THREE.Group();
+    group.name = 'P2 merge handoff debug overlay';
+    group.renderOrder = 1100;
+    const material = (color, opacity = 0.96) => new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const line = (name, records, color, lift = 0.42) => {
+      const points = records.map((record) => new THREE.Vector3(
+        record.x,
+        record.y + lift,
+        record.z,
+      ));
+      const object = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material(color));
+      object.name = name;
+      object.renderOrder = 1100;
+      object.frustumCulled = false;
+      group.add(object);
+      return object;
+    };
+    const laneColors = [0x35d6ff, 0x45ff89, 0xffdf45, 0xff5cdb, 0xa56cff];
+    transition.laneCentres.forEach((path, index) => line(
+      `${path.id} centre path`,
+      path.points.map((entry) => entry.position),
+      laneColors[index],
+      0.55,
+    ));
+
+    const widthVertices = [];
+    const handoffCorridors = transition.auxiliaryLaneCorridors.map((corridor) => (
+      corridor.filter((section) => section.hostS <= transition.fiveLaneStart + 0.01)
+    ));
+    const sampleStride = Math.max(1, Math.floor(handoffCorridors[0].length / 10));
+    for (let index = 0; index < handoffCorridors[0].length; index += sampleStride) {
+      for (const corridor of handoffCorridors) {
+        const section = corridor[index];
+        if (!section) continue;
+        widthVertices.push(
+          new THREE.Vector3(section.inner.x, section.inner.y + 0.7, section.inner.z),
+          new THREE.Vector3(section.outer.x, section.outer.y + 0.7, section.outer.z),
+        );
+      }
+    }
+    const widths = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(widthVertices),
+      material(0xffffff, 0.86),
+    );
+    widths.name = 'sampled ramp lane widths';
+    widths.renderOrder = 1101;
+    widths.frustumCulled = false;
+    group.add(widths);
+
+    const makeLabel = (text, color) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 128;
+      const context = canvas.getContext('2d');
+      context.fillStyle = 'rgba(2, 5, 12, 0.90)';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.strokeStyle = color;
+      context.lineWidth = 8;
+      context.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+      context.fillStyle = '#ffffff';
+      context.font = '700 43px ui-monospace, monospace';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(text, canvas.width * 0.5, canvas.height * 0.52);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      }));
+      sprite.scale.set(76, 9.5, 1);
+      sprite.renderOrder = 1103;
+      sprite.frustumCulled = false;
+      return sprite;
+    };
+    const phaseMarkers = [
+      ['OPENING', transition.mergeOpeningStart, '#ff8f3f', 0xff8f3f],
+      ['HANDOFF / FULL 5 START', transition.fiveLaneStart, '#fff04a', 0xfff04a],
+      ['FULL 5 END / FIRST ABS', transition.fiveLaneEnd, '#55ff88', 0x55ff88],
+      ['SECOND ABS 4->3', transition.secondAbsorptionStart, '#d279ff', 0xd279ff],
+      ['STABLE 3-LANE', transition.transitionEnd, '#45dfff', 0x45dfff],
+    ];
+    for (const [label, hostS, cssColor, color] of phaseMarkers) {
+      const frame = this._frameAt(
+        transition.sourceZone.host,
+        this._normalizeDistance(transition.sourceZone.host, hostS),
+      );
+      const envelope = transition.envelopeAt(hostS);
+      const lower = this._deckPoint(frame, envelope.lateralMin, 0.75);
+      const upper = this._deckPoint(frame, envelope.lateralMax, 0.75);
+      line(`${label} station`, [lower, upper], color, 0);
+      const sprite = makeLabel(`${label}  ${hostS.toFixed(2)}`, cssColor);
+      const anchor = this._deckPoint(
+        frame,
+        envelope.lateralMin - transition.sideSign * 30,
+        2.2,
+      );
+      sprite.position.copy(anchor);
+      group.add(sprite);
+    }
+    const preHandoffWidths = handoffCorridors.flat().map((section) => section.width);
+    group.userData = {
+      readOnly: true,
+      junctionId: transition.id,
+      opening: transition.mergeOpeningStart,
+      handoffComplete: transition.mergeHandoffComplete,
+      fiveLaneStart: transition.fiveLaneStart,
+      fiveLaneEnd: transition.fiveLaneEnd,
+      firstAbsorptionStart: transition.absorptionStart,
+      secondAbsorptionStart: transition.secondAbsorptionStart,
+      stableThreeLaneStart: transition.transitionEnd,
+      minimumPreHandoffLaneWidth: Math.min(...preHandoffWidths),
+      sampledPreHandoffLaneWidths: preHandoffWidths,
+    };
+    this.group.add(group);
+    this.progressiveMergeHandoffDebugOverlay = group;
   }
 
   build() {
