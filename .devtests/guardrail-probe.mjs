@@ -47,6 +47,28 @@ const exactSuppressed = (route, frame, side) => {
   return map._barrierSuppressed(point, route);
 };
 
+// The legacy check treated any host run whose CHAINAGE overlapped a mouth
+// opening as an interior rail. That is correct only while the run stays on the
+// stable host edge. A progressive run deliberately remains visible at those
+// stations after moving to the widened union's exterior. Grade the parapet
+// vertices actually emitted by _buildRouteGeometry against the authoritative
+// envelope; an old-edge/interior rail therefore still fails, while a genuinely
+// relocated exterior rail passes.
+const progressiveRailFollowsExterior = (zone, from, to) => {
+  const samples = (zone.host._progressiveRailSamples || []).filter((sample) => (
+    sample.transitionId === zone.progressive.id
+    && sample.side === zone.side
+    && sample.distance >= from - 0.01
+    && sample.distance <= to + 0.01));
+  return samples.length > 0 && samples.every((sample) => {
+    const envelope = zone.progressive.envelopeAt(sample.distance);
+    const squeeze = 0.36 * (1 - sample.terminalFactor);
+    const expectedBase = envelope.outerLateral - zone.side * (0.42 - squeeze);
+    return Math.abs(sample.actualOuterLateral - envelope.outerLateral) < 0.03
+      && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+  });
+};
+
 for (const route of map.routes.values()) {
   if (!route._railRuns) continue;
   const frames = route.surfaceFrames;
@@ -129,14 +151,9 @@ for (const zone of map.junctionZones) {
       const overlap = Math.min(run.to, to) - Math.max(run.from, from);
       if (overlap > 4) {
         if (zone.progressive) {
-          const frames = zone.host.surfaceFrames.filter((frame) => frame.distance >= Math.max(run.from, from)
-            && frame.distance <= Math.min(run.to, to));
-          const followsExterior = frames.length > 0 && frames.every((frame) => {
-            const actual = map._surfaceEdgeLateral(frame, zone.side, 0.42);
-            const expected = zone.progressive.envelopeAt(frame.distance).outerLateral - zone.side * 0.42;
-            return Math.abs(actual - expected) < 0.03;
-          });
-          if (followsExterior) continue;
+          const overlapFrom = Math.max(run.from, from);
+          const overlapTo = Math.min(run.to, to);
+          if (progressiveRailFollowsExterior(zone, overlapFrom, overlapTo)) continue;
         }
         fail('rail-across-opening', `${zone.kind} ${zone.branch.id} on ${zone.host.id} side ${zone.side}: run ${run.from.toFixed(0)}..${run.to.toFixed(0)} covers opening ${lo.toFixed(0)}..${hi.toFixed(0)} by ${overlap.toFixed(0)} m`);
       }

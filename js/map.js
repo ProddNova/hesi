@@ -4625,6 +4625,33 @@ export class HighwayMap {
     // Parapet runs end/restart at junction-mouth openings; track the runs so
     // each terminal gets a closing face instead of an open hollow profile.
     const barrierRun = { 1: false, [-1]: false };
+    // Focused geometry diagnostics for progressive host rails. These samples
+    // are taken from the parapet vertices that are actually emitted below,
+    // rather than re-deriving a nominal lateral in the guardrail probes. Only
+    // the four short prototype intervals are retained (hundreds of records,
+    // not a network-wide per-frame log).
+    const progressiveHostTransitions = route._progressiveTransitionsAsHost;
+    const progressiveRailSampleKeys = progressiveHostTransitions ? new Set() : null;
+    if (progressiveHostTransitions) route._progressiveRailSamples = [];
+    const recordProgressiveRailSample = (frame, side, profile, factor) => {
+      if (!progressiveHostTransitions) return;
+      const transition = progressiveHostTransitions.find((candidate) => (
+        candidate.sideSign === side && candidate.containsHost(frame.distance, 0.01)));
+      if (!transition) return;
+      const key = `${transition.id}:${side}:${frame.distance.toFixed(5)}`;
+      if (progressiveRailSampleKeys.has(key)) return;
+      progressiveRailSampleKeys.add(key);
+      const lateralOf = (point) => (point.x - frame.position.x) * frame.normal.x
+        + (point.z - frame.position.z) * frame.normal.z;
+      route._progressiveRailSamples.push({
+        transitionId: transition.id,
+        side,
+        distance: frame.distance,
+        terminalFactor: factor,
+        actualOuterLateral: lateralOf(profile.out),
+        actualBaseLateral: lateralOf(profile.base),
+      });
+    };
 
     this._forEachSurfaceFrameSegment(route, (a, b, segmentIndex) => {
       // fresh vector: _barrierSuppressed re-uses the TMP registers mid-loop
@@ -4682,6 +4709,8 @@ export class HighwayMap {
         }
         const pA = this._parapetProfile(a, side, fA);
         const pB = this._parapetProfile(b, side, fB);
+        recordProgressiveRailSample(a, side, pA, fA);
+        recordProgressiveRailSample(b, side, pB, fB);
         // `barrier` is DoubleSide: cap + outer wall preserve the same deck-edge
         // silhouette from chase and exterior views without storing a third,
         // hidden inner-profile sheet at every dense surface station.

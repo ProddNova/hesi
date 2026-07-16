@@ -181,6 +181,23 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
 
     // Guardrail: host rail follows the true progressive exterior; branch rail
     // is suppressed while combined, and no coincident double rail survives.
+    const emittedRailSamples = (transition.sourceZone.host._progressiveRailSamples || [])
+      .filter((sample) => sample.transitionId === id && sample.side === transition.sideSign);
+    if (!emittedRailSamples.length) fail(id, 'missing emitted progressive rail geometry samples');
+    let visiblyRelocated = false;
+    for (const sample of emittedRailSamples) {
+      const envelope = transition.envelopeAt(sample.distance);
+      const squeeze = 0.36 * (1 - sample.terminalFactor);
+      const expectedBase = envelope.outerLateral - transition.sideSign * (0.42 - squeeze);
+      if (Math.abs(sample.actualOuterLateral - envelope.outerLateral) > 0.03
+        || Math.abs(sample.actualBaseLateral - expectedBase) > 0.03) {
+        fail(id, `emitted rail is interior at ${sample.distance.toFixed(1)}`);
+        break;
+      }
+      const exteriorAdvance = transition.sideSign * sample.actualOuterLateral - envelope.baseHalf;
+      if (exteriorAdvance > transition.auxiliaryWidth * 0.75) visiblyRelocated = true;
+    }
+    if (!visiblyRelocated) fail(id, 'progressive rail never relocates beyond the stable host edge');
     for (let index = 0; index < transition.guardrailEnvelope.length; index += sampleStride) {
       const row = transition.guardrailEnvelope[index];
       if (map._railZoneMode(transition.sourceZone.host, transition.sideSign, row.hostS) !== 'on') {
