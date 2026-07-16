@@ -1245,7 +1245,9 @@ export class HighwayMap {
 
   /** Active one-sided progressive envelope for a host route station. */
   _progressiveEnvelopeAt(route, distance) {
-    for (const transition of route._progressiveTransitionsAsHost || []) {
+    const transitions = route._progressiveTransitionsAsHost;
+    if (!transitions) return null;
+    for (const transition of transitions) {
       if (!transition.containsHost(distance, 0.01)) continue;
       return { transition, envelope: transition.envelopeAt(distance) };
     }
@@ -2043,14 +2045,20 @@ export class HighwayMap {
 
   /** Zone-forced rail mode at a chainage ('off' | 'on' | null = probe). */
   _railZoneMode(route, sideSign, distance) {
-    for (const transition of route._progressiveTransitionsAsHost || []) {
-      if (transition.sideSign === sideSign && transition.containsHost(distance, 0.01)) return 'on';
+    const hostTransitions = route._progressiveTransitionsAsHost;
+    if (hostTransitions) {
+      for (const transition of hostTransitions) {
+        if (transition.sideSign === sideSign && transition.containsHost(distance, 0.01)) return 'on';
+      }
     }
-    for (const transition of route._progressiveTransitionsAsBranch || []) {
-      const phase = transition.phaseAtBranch(distance);
-      if (!phase) continue;
-      if (transition.type === 'merge' && phase !== 'approach') return 'off';
-      if (transition.type === 'diverge' && (phase === 'approach' || phase === 'opening' || phase === 'parallel')) return 'off';
+    const branchTransitions = route._progressiveTransitionsAsBranch;
+    if (branchTransitions) {
+      for (const transition of branchTransitions) {
+        const phase = transition.phaseAtBranch(distance);
+        if (!phase) continue;
+        if (transition.type === 'merge' && phase !== 'approach') return 'off';
+        if (transition.type === 'diverge' && (phase === 'approach' || phase === 'opening' || phase === 'parallel')) return 'off';
+      }
     }
     const zones = route._railZones?.[sideSign];
     if (!zones) return null;
@@ -2659,7 +2667,7 @@ export class HighwayMap {
         // renderer keeps the branch's outside wing wherever that is not yet
         // true, so collision follows the same visible surface union instead
         // of putting an invisible wall through the source lane centre.
-        if (hostS !== null && phase === 'approach') return false;
+        if (hostS !== null && phase === 'approach' && zone.progressive.type === 'merge') return false;
         if (hostS !== null) {
           const frame = this._frameAt(route, distance);
           const point = this._deckPoint(frame, lateral);
@@ -3963,8 +3971,11 @@ export class HighwayMap {
     // shared transition phases. This removes the sub-metre shelf that would
     // otherwise remain when two audited centrelines meet at slightly
     // different bank/elevation samples.
-    for (const transition of frame.route?._progressiveTransitionsAsBranch || []) {
-      point.y += transition.branchDeckOffsetAt(frame.distance, lateral);
+    const branchTransitions = frame.route?._progressiveTransitionsAsBranch;
+    if (branchTransitions) {
+      for (const transition of branchTransitions) {
+        point.y += transition.branchDeckOffsetAt(frame.distance, lateral);
+      }
     }
     point.y += lift;
     return point;
