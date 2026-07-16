@@ -40,7 +40,18 @@ const fail = (label, detail) => {
   console.log(`FAIL  ${label}: ${detail}`);
 };
 const deg = (rad) => (rad * 180) / Math.PI;
-const summary = { runs: 0, gaps: 0, openings: 0, worstLateralStep: 0, worstTangent: 0, doubled: 0, insideAsphalt: 0, unexplained: 0 };
+const summary = {
+  runs: 0,
+  gaps: 0,
+  openings: 0,
+  worstLateralStep: 0,
+  worstTangent: 0,
+  doubled: 0,
+  insideAsphalt: 0,
+  unexplained: 0,
+  progressiveOwnershipTransfers: 0,
+  worstProgressiveHandoffGap: 0,
+};
 
 const exactSuppressed = (route, frame, side) => {
   const point = map._deckPoint(frame, map._surfaceEdgeLateral(frame, side, 0.42), 0.02);
@@ -67,6 +78,55 @@ const progressiveRailFollowsExterior = (zone, from, to) => {
     return Math.abs(sample.actualOuterLateral - envelope.outerLateral) < 0.03
       && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
   });
+};
+
+// A route-local restart check cannot grade a progressive diverge ownership
+// transfer: the pre-gap host rail and the post-gap host rail protect different
+// carriageways, so their lateral offsets are expected to differ by the full
+// added width. The authoritative invariant is host exterior -> branch exterior
+// continuity. Both emitted profiles must lie on their own paved exterior and
+// the two terminal vertices must meet within one render-frame span. This is not
+// an exemption: a stable-edge/interior host rail, an interior branch rail, or a
+// large unexplained owner-handoff gap still returns false and fails below.
+const progressiveExteriorOwnershipTransfer = (route, side, previous, next) => {
+  const transition = (route._progressiveTransitionsAsHost || []).find((candidate) => (
+    candidate.type === 'diverge'
+    && candidate.sideSign === side
+    && previous.to <= candidate.transferComplete + 1
+    && next.from >= candidate.exteriorHandoffStart - 1
+  ));
+  if (!transition) return false;
+  const hostSamples = (route._progressiveRailSamples || []).filter((sample) => (
+    sample.transitionId === transition.id && sample.role === 'host-exterior'));
+  const branchSamples = (transition.sourceZone.branch._progressiveRailSamples || []).filter((sample) => (
+    sample.transitionId === transition.id && sample.role === 'branch-exterior'));
+  if (!hostSamples.length || !branchSamples.length) return false;
+  const hostExterior = hostSamples.every((sample) => {
+    const envelope = transition.envelopeAt(sample.distance);
+    const squeeze = 0.36 * (1 - sample.terminalFactor);
+    const expectedBase = envelope.outerLateral - side * (0.42 - squeeze);
+    return Math.abs(sample.actualOuterLateral - envelope.outerLateral) < 0.03
+      && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+  });
+  const branchExterior = branchSamples.every((sample) => {
+    const frame = map._frameAt(transition.sourceZone.branch, sample.distance);
+    const expectedOuter = sample.side * frame.half;
+    const squeeze = 0.36 * (1 - sample.terminalFactor);
+    const expectedBase = expectedOuter - sample.side * (0.42 - squeeze);
+    return Math.abs(sample.actualOuterLateral - expectedOuter) < 0.03
+      && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+  });
+  const hostEnd = hostSamples.at(-1).actualBasePosition;
+  const branchStart = branchSamples[0].actualBasePosition;
+  const handoffGap = Math.hypot(
+    hostEnd.x - branchStart.x,
+    hostEnd.y - branchStart.y,
+    hostEnd.z - branchStart.z,
+  );
+  summary.worstProgressiveHandoffGap = Math.max(summary.worstProgressiveHandoffGap, handoffGap);
+  if (!hostExterior || !branchExterior || handoffGap > 6) return false;
+  summary.progressiveOwnershipTransfers += 1;
+  return true;
 };
 
 for (const route of map.routes.values()) {
@@ -110,7 +170,7 @@ for (const route of map.routes.values()) {
         const startFrame = frames[next.fromIndex];
         const lateralStep = Math.abs((prev.toHalf ?? endFrame.half) - (next.fromHalf ?? startFrame.half));
         summary.worstLateralStep = Math.max(summary.worstLateralStep, lateralStep);
-        if (lateralStep > 1.2) {
+        if (lateralStep > 1.2 && !progressiveExteriorOwnershipTransfer(route, side, prev, next)) {
           fail('lateral-step', `${route.id} side ${side} rail restarts ${lateralStep.toFixed(2)} m off its edge lateral across ${gapLen.toFixed(0)} m gap at s=${prev.to.toFixed(0)}`);
         }
         const tangentMismatch = deg(Math.acos(Math.min(1, Math.abs(endFrame.tangent.dot(startFrame.tangent)))));
@@ -221,6 +281,7 @@ if (summary.doubled > 8) fail('doubled-rail', `${summary.doubled} total`);
 
 console.log(`\nruns=${summary.runs} gaps=${summary.gaps} zoneOpenings=${summary.openings} railSamples=${samples.length}`);
 console.log(`worst: lateral restart step ${summary.worstLateralStep.toFixed(2)} m | terminal tangent ${summary.worstTangent.toFixed(0)} deg`);
+console.log(`progressive exterior transfers=${summary.progressiveOwnershipTransfers} | worst owner-handoff gap=${summary.worstProgressiveHandoffGap.toFixed(2)} m`);
 console.log(`unexplained gaps=${summary.unexplained} doubled=${summary.doubled} insideAsphalt=${summary.insideAsphalt}`);
 if (failures) { console.log(`GUARDRAIL PROBE: FAIL (${failures})`); process.exit(1); }
 console.log('GUARDRAIL PROBE: PASS');

@@ -1,10 +1,11 @@
 /**
- * P4 diverge topology/continuity acceptance gate.
+ * P4 diverge hard acceptance gate.
  *
- * The reference corridor is derived from source geometry: hold the fully
- * opened host auxiliary centre until branch lane 0 reaches it, then blend to
- * that real branch lane. The current Checkpoint-1 implementation is expected
- * to fail because it instead returns the auxiliary path to the host.
+ * This probe intentionally does not infer success from a width animation or
+ * from the auxiliary centre alone. It samples the complete transition-owned
+ * corridor (inner boundary, centre and outer boundary), checks it against the
+ * real branch feed lane, then tests the rendered collision/rail geometry that
+ * could physically close the exit.
  */
 import * as THREE from 'three';
 import { writeFile } from 'node:fs/promises';
@@ -16,227 +17,395 @@ const map = new HighwayMap(null, { addLighting: false, markingDebug: true });
 const transition = map.progressiveTransitions.find((candidate) => (
   candidate.id === 'J2:diverge:c1_0:r1_0:start'));
 if (!transition) throw new Error('P4 active transition is missing');
+
 const zone = transition.sourceZone;
-const rows = [...zone.samples].sort((left, right) => left.hU - right.hU);
+const corridor = transition.auxiliaryCorridor;
 const aux = transition.laneCentres.find((lane) => lane.id === 'aux:0');
-const laneEdge = zone.host.lanes * zone.host.laneWidth * 0.5;
-const parallelAuxLateral = zone.side * (laneEdge + transition.auxiliaryWidth * 0.5);
+const innerBoundary = transition.laneBoundaries.find((path) => path.id === 'aux-inner-boundary');
+const outerBoundary = transition.laneBoundaries.find((path) => path.id === 'aux-outer-boundary');
+if (!corridor?.length || !aux || !innerBoundary || !outerBoundary) {
+  throw new Error('P4 explicit auxiliary corridor topology is incomplete');
+}
+
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const point = (value) => new THREE.Vector3(value.x, value.y, value.z);
 const distanceXZ = (left, right) => Math.hypot(left.x - right.x, left.z - right.z);
 const degrees = (radians) => radians * 180 / Math.PI;
 const round = (value, digits = 3) => +value.toFixed(digits);
-
-const branchLane = (row, lane = 0) => map.sampleLane(zone.branch.id, row.bS, lane, 1);
-const hostAuxPoint = (row) => map._deckPoint(map._frameAt(zone.host, row.hU), parallelAuxLateral, 0.035);
-const outwardBranchLane0 = (row) => {
-  const target = branchLane(row, 0).position;
-  const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
-  return zone.side * projection.signedLateral;
-};
-const alignmentRow = rows.find((row) => outwardBranchLane0(row) >= Math.abs(parallelAuxLateral)) || rows.at(-1);
-const splitRow = rows.find((row) => row.innerEdge >= row.hostHalf - 0.3) || rows.at(-1);
-const exteriorHandoffRow = rows.find((row) => (
-  row.unionOuter >= row.hostHalf + transition.targetExtraWidth - 0.1)) || splitRow;
-const lastRow = rows.at(-1);
-const handoffStartPoint = hostAuxPoint(exteriorHandoffRow);
-const handoffEndPoint = point(branchLane(lastRow, 0).position);
-handoffStartPoint.y += 0.035;
-handoffEndPoint.y += 0.035;
-const handoffControlLength = handoffStartPoint.distanceTo(handoffEndPoint) * 0.4;
-const handoffStartTangent = map._frameAt(zone.host, exteriorHandoffRow.hU).tangent;
-const handoffEndTangent = map._frameAt(zone.branch, lastRow.bS).tangent;
-const handoffControl0 = handoffStartPoint.clone().addScaledVector(handoffStartTangent, handoffControlLength);
-const handoffControl1 = handoffEndPoint.clone().addScaledVector(handoffEndTangent, -handoffControlLength);
-
-const interpolateAux = (hostS) => {
-  const points = aux.points;
+const interpolatePath = (path, hostS) => {
   let upper = 1;
-  while (upper < points.length && points[upper].hostS < hostS) upper += 1;
-  if (upper >= points.length) return point(points.at(-1).position);
-  const left = points[upper - 1];
-  const right = points[upper];
+  while (upper < path.points.length && path.points[upper].hostS < hostS) upper += 1;
+  const right = path.points[Math.min(upper, path.points.length - 1)];
+  const left = path.points[Math.max(0, upper - 1)];
   const t = clamp((hostS - left.hostS) / Math.max(1e-6, right.hostS - left.hostS), 0, 1);
   return point(left.position).lerp(point(right.position), t);
 };
-const intendedPointAtHost = (hostS) => {
-  if (hostS <= exteriorHandoffRow.hU) {
-    const frame = map._frameAt(zone.host, hostS);
-    return map._deckPoint(frame, parallelAuxLateral, 0.035);
-  }
-  const t = clamp((hostS - exteriorHandoffRow.hU)
-    / Math.max(1e-6, lastRow.hU - exteriorHandoffRow.hU), 0, 1);
-  const u = 1 - t;
-  return handoffStartPoint.clone().multiplyScalar(u * u * u)
-    .add(handoffControl0.clone().multiplyScalar(3 * u * u * t))
-    .add(handoffControl1.clone().multiplyScalar(3 * u * t * t))
-    .add(handoffEndPoint.clone().multiplyScalar(t * t * t));
+const pointToSegmentXZ = (value, start, end) => {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  const denominator = dx * dx + dz * dz;
+  const t = denominator > 1e-9
+    ? clamp(((value.x - start.x) * dx + (value.z - start.z) * dz) / denominator, 0, 1)
+    : 0;
+  return {
+    t,
+    distance: Math.hypot(value.x - (start.x + dx * t), value.z - (start.z + dz * t)),
+  };
 };
-const intendedPoint = (row) => intendedPointAtHost(row.hU);
-const nearestRowAtHost = (hostS) => rows.reduce((best, row) => (
-  Math.abs(row.hU - hostS) < Math.abs(best.hU - hostS) ? row : best));
+const pointToPathXZ = (value, path) => Math.min(...path.points.slice(1).map((entry, index) => (
+  pointToSegmentXZ(value, path.points[index].position, entry.position).distance
+)));
+const nearestSection = (value) => corridor.reduce((best, section) => (
+  distanceXZ(value, section.centre) < distanceXZ(value, best.centre) ? section : best
+));
 
-const usableRows = transition.pavedEnvelope.filter((row) => (
-  row.hostS >= transition.parallelStart - 0.01 && row.hostS <= alignmentRow.hU + 0.01));
-const minimumUsableExtraWidth = Math.min(...usableRows.map((row) => row.extraWidth));
-const prematureClosure = usableRows.find((row) => row.extraWidth < transition.auxiliaryWidth - 0.15) || null;
-const sourceOuterAt = (hostS) => {
-  let upper = 1;
-  while (upper < rows.length && rows[upper].hU < hostS) upper += 1;
-  if (upper >= rows.length) return rows.at(-1).unionOuter;
-  const left = rows[upper - 1];
-  const right = rows[upper];
-  const t = (hostS - left.hU) / Math.max(1e-6, right.hU - left.hU);
-  return left.unionOuter + (right.unionOuter - left.unionOuter) * t;
-};
-let maximumAuthoritativeOuterStep = 0;
-let maximumSourceOuterStep = 0;
-let previousAuthoritativeOuter = null;
-let previousSourceOuter = null;
-for (const row of transition.pavedEnvelope) {
-  const sourceOuter = sourceOuterAt(row.hostS);
-  const authoritativeOuter = Math.max(row.baseHalf + row.extraWidth, sourceOuter);
-  if (previousAuthoritativeOuter !== null) {
-    maximumAuthoritativeOuterStep = Math.max(maximumAuthoritativeOuterStep,
-      Math.abs(authoritativeOuter - previousAuthoritativeOuter));
-    maximumSourceOuterStep = Math.max(maximumSourceOuterStep,
-      Math.abs(sourceOuter - previousSourceOuter));
-  }
-  previousAuthoritativeOuter = authoritativeOuter;
-  previousSourceOuter = sourceOuter;
-}
-const endpointGapToBranchLane0 = distanceXZ(
-  point(aux.points.at(-1).position),
-  branchLane(lastRow, 0).position,
-);
+const acceptedLaneWidth = Math.min(zone.host.laneWidth, zone.branch.laneWidth) - 0.15;
+const minimumCorridorWidth = Math.min(...corridor.map((section) => section.width));
+const prematureClosure = corridor.find((section) => (
+  section.hostS < transition.transferComplete - 1e-4 && section.width < acceptedLaneWidth
+)) || null;
 
-let maximumReferencePathGap = 0;
-let maximumAuxTangentStep = 0;
+let minimumConsecutiveOverlap = Infinity;
+let maximumCentreTangentStep = 0;
 let previousDirection = null;
-for (let index = 1; index < aux.points.length; index += 1) {
-  const a = point(aux.points[index - 1].position);
-  const b = point(aux.points[index].position);
-  const direction = b.clone().sub(a).normalize();
+for (let index = 1; index < corridor.length; index += 1) {
+  const previous = corridor[index - 1];
+  const current = corridor[index];
+  const centreDistance = distanceXZ(previous.centre, current.centre);
+  minimumConsecutiveOverlap = Math.min(
+    minimumConsecutiveOverlap,
+    (previous.width + current.width) * 0.5 - centreDistance,
+  );
+  const direction = point(current.centre).sub(point(previous.centre)).normalize();
   if (previousDirection) {
-    maximumAuxTangentStep = Math.max(maximumAuxTangentStep,
-      degrees(Math.acos(clamp(previousDirection.dot(direction), -1, 1))));
+    maximumCentreTangentStep = Math.max(
+      maximumCentreTangentStep,
+      degrees(Math.acos(clamp(previousDirection.dot(direction), -1, 1))),
+    );
   }
   previousDirection = direction;
-  const row = nearestRowAtHost(aux.points[index].hostS);
-  if (row.hU >= exteriorHandoffRow.hU) {
-    maximumReferencePathGap = Math.max(maximumReferencePathGap,
-      distanceXZ(b, intendedPointAtHost(aux.points[index].hostS)));
-  }
+}
+
+const pavedAfterOpening = transition.pavedEnvelope.filter((row) => (
+  row.hostS >= transition.parallelStart - 1e-4
+  && row.hostS <= transition.transferComplete + 1e-4
+));
+let maximumEnvelopeRetreat = 0;
+for (let index = 1; index < pavedAfterOpening.length; index += 1) {
+  maximumEnvelopeRetreat = Math.max(
+    maximumEnvelopeRetreat,
+    pavedAfterOpening[index - 1].extraWidth - pavedAfterOpening[index].extraWidth,
+  );
+}
+
+const last = corridor.at(-1);
+const branchFrame = map._frameAt(zone.branch, transition.transferCompleteBranch);
+const feedCentreLateral = map._laneOffset(zone.branch, transition.branchFeedLane, 1);
+const feedHalfWidth = zone.branch.laneWidth * 0.5;
+const targetCentre = map._deckPoint(branchFrame, feedCentreLateral, 0.035);
+const targetInner = map._deckPoint(
+  branchFrame,
+  feedCentreLateral + zone.hostwardSign * feedHalfWidth,
+  0.04,
+);
+const targetOuter = map._deckPoint(
+  branchFrame,
+  feedCentreLateral - zone.hostwardSign * feedHalfWidth,
+  0.04,
+);
+const endpointCentreGap = distanceXZ(last.centre, targetCentre);
+const endpointInnerGap = distanceXZ(last.inner, targetInner);
+const endpointOuterGap = distanceXZ(last.outer, targetOuter);
+const branchOwnershipSections = corridor.filter((section) => section.ownership === 'branch');
+const firstBranchOwnership = branchOwnershipSections[0] || null;
+const finalCorridorDirection = point(last.centre).sub(point(corridor.at(-2).centre));
+finalCorridorDirection.y = 0;
+finalCorridorDirection.normalize();
+const branchDirection = branchFrame.tangent.clone();
+branchDirection.y = 0;
+branchDirection.normalize();
+const branchTangentHandoffDeg = degrees(Math.acos(clamp(
+  finalCorridorDirection.dot(branchDirection),
+  -1,
+  1,
+)));
+
+let continuingBranchSamples = 0;
+let continuingBranchPavementHoles = 0;
+let continuingBranchWallHits = 0;
+const continuationEnd = Math.min(zone.branch.length, transition.transferCompleteBranch + 48);
+for (let branchS = transition.transferCompleteBranch; branchS <= continuationEnd; branchS += 2) {
+  const frame = map._frameAt(zone.branch, branchS);
+  const sample = map._deckPoint(frame, feedCentreLateral, 0.035);
+  continuingBranchSamples += 1;
+  if (!map.getRoadInfo(sample, zone.branch.id)?.drivable) continuingBranchPavementHoles += 1;
+  if (map.resolveWallCollision(sample, 0.4).hit) continuingBranchWallHits += 1;
+}
+
+let maximumCentreMidpointError = 0;
+for (const section of corridor) {
+  const modelCentre = interpolatePath(aux, section.hostS);
+  maximumCentreMidpointError = Math.max(
+    maximumCentreMidpointError,
+    distanceXZ(modelCentre, section.centre),
+  );
 }
 
 let pavementHoleSamples = 0;
 let collisionCorrectionSamples = 0;
 let maximumCollisionCorrection = 0;
-for (const row of rows.filter((candidate) => candidate.hU >= transition.parallelStart)) {
-  const probe = intendedPoint(row);
-  const road = map.getRoadInfo(probe, zone.host.id);
-  if (!road?.drivable) pavementHoleSamples += 1;
-  const collision = map.resolveWallCollision(probe, 0.9);
-  if (collision.hit) {
-    collisionCorrectionSamples += 1;
-    maximumCollisionCorrection = Math.max(maximumCollisionCorrection, collision.correctionDistance || 0);
+const interiorFractions = [0.12, 0.3, 0.5, 0.7, 0.88];
+for (const section of corridor) {
+  for (const fraction of interiorFractions) {
+    const sample = point(section.inner).lerp(point(section.outer), fraction);
+    const road = map.getRoadInfo(sample, zone.host.id);
+    if (!road?.drivable) pavementHoleSamples += 1;
+    const collision = map.resolveWallCollision(sample, 0.4);
+    if (collision.hit) {
+      collisionCorrectionSamples += 1;
+      maximumCollisionCorrection = Math.max(
+        maximumCollisionCorrection,
+        collision.correctionDistance || 0,
+      );
+    }
   }
 }
 
-const interiorRailSamples = (zone.host._progressiveRailSamples || []).filter((sample) => {
-  if (sample.transitionId !== transition.id || sample.side !== zone.side) return false;
-  if (sample.distance < exteriorHandoffRow.hU || sample.distance > splitRow.hU) return false;
-  const row = nearestRowAtHost(sample.distance);
-  const emittedOutward = zone.side * sample.actualOuterLateral;
-  return emittedOutward < row.unionOuter - 0.25;
+const emittedRails = [
+  ...(zone.host._progressiveRailSamples || []),
+  ...(zone.branch._progressiveRailSamples || []),
+].filter((sample) => sample.transitionId === transition.id);
+const intrusiveRails = emittedRails.filter((sample) => {
+  const value = point(sample.actualBasePosition);
+  const section = nearestSection(value);
+  const proximity = pointToSegmentXZ(value, section.inner, section.outer);
+  return proximity.t > 0.03 && proximity.t < 0.97 && proximity.distance < 0.45;
+});
+
+const transitionWalls = map.wallSegments.filter((segment) => (
+  segment.progressiveTransitionId === transition.id));
+const intrusiveWalls = transitionWalls.filter((segment) => {
+  const start = point(segment.start);
+  const end = point(segment.end);
+  return [start, start.clone().lerp(end, 0.5), end].some((value) => {
+    const section = nearestSection(value);
+    const proximity = pointToSegmentXZ(value, section.inner, section.outer);
+    return proximity.t > 0.03 && proximity.t < 0.97 && proximity.distance < 0.45;
+  });
 });
 
 const progressivePaint = map._markingLog.filter((piece) => (
   piece.kind === 'strip' && piece.owner === `progressive:${transition.id}`));
-const illegalSolidPieces = progressivePaint.filter((piece) => (
-  piece.tag === 'progressiveOuterEdge'
-  && piece.sTo > exteriorHandoffRow.hU + 0.01
-  && piece.sFrom < splitRow.hU - 0.01));
-const illegalSolidLength = illegalSolidPieces.reduce((sum, piece) => sum
-  + Math.max(0, Math.min(piece.sTo, splitRow.hU) - Math.max(piece.sFrom, exteriorHandoffRow.hU)), 0);
-const dashPieces = progressivePaint.filter((piece) => piece.tag === 'progressiveAuxBoundary')
-  .sort((left, right) => left.sFrom - right.sFrom);
-let maximumDashGap = 0;
-for (let index = 1; index < dashPieces.length; index += 1) {
-  maximumDashGap = Math.max(maximumDashGap, dashPieces[index].sFrom - dashPieces[index - 1].sTo);
+const prematureGorePaint = progressivePaint.filter((piece) => (
+  piece.tag === 'progressiveBranchGoreEdge'
+  && piece.sFrom < transition.transferCompleteBranch - 0.01
+));
+const innerMarkingPath = transition.markingPaths.find((path) => path.id === 'aux-inner-marking');
+const outerMarkingPath = transition.markingPaths.find((path) => path.id === 'aux-outer-marking');
+const modelBoundaryPairs = [
+  [innerMarkingPath, innerBoundary],
+  [outerMarkingPath, outerBoundary],
+];
+let maximumModelMarkingBoundaryGap = 0;
+for (const [marking, boundary] of modelBoundaryPairs) {
+  for (let index = 0; index < marking.points.length; index += 1) {
+    maximumModelMarkingBoundaryGap = Math.max(
+      maximumModelMarkingBoundaryGap,
+      distanceXZ(marking.points[index].position, boundary.points[index].position),
+    );
+  }
 }
-const branchBoundaryAtEnd = map._deckPoint(
-  map._frameAt(zone.branch, lastRow.bS),
-  zone.hostwardSign * laneEdge,
-  0.04,
+
+const markingPathByTag = new Map([
+  ['progressiveOuterEdge', outerMarkingPath],
+  ['progressiveAuxBoundary', innerMarkingPath],
+  ['progressiveBranchAuxBoundary', innerMarkingPath],
+  ['progressiveBranchDivider', outerMarkingPath],
+]);
+const boundaryPaint = progressivePaint.filter((piece) => markingPathByTag.has(piece.tag));
+let maximumEmittedMarkingBoundaryDeviation = 0;
+for (const piece of boundaryPaint) {
+  const path = markingPathByTag.get(piece.tag);
+  maximumEmittedMarkingBoundaryDeviation = Math.max(
+    maximumEmittedMarkingBoundaryDeviation,
+    pointToPathXZ(piece.start, path),
+    pointToPathXZ(piece.end, path),
+  );
+}
+const paintByTag = (tag) => progressivePaint
+  .filter((piece) => piece.tag === tag)
+  .sort((left, right) => left.sFrom - right.sFrom);
+const hostOuterPaint = paintByTag('progressiveOuterEdge');
+const hostInnerPaint = paintByTag('progressiveAuxBoundary');
+const branchInnerPaint = paintByTag('progressiveBranchAuxBoundary');
+const branchDividerPaint = paintByTag('progressiveBranchDivider');
+const branchGorePaint = paintByTag('progressiveBranchGoreEdge');
+const routeBranchDividerPaint = map._markingLog
+  .filter((piece) => (
+    piece.kind === 'strip'
+    && piece.routeId === zone.branch.id
+    && piece.owner === `route:${zone.branch.id}`
+    && piece.tag === 'laneDivider'
+    && piece.sFrom >= transition.transferCompleteBranch - 0.01
+  ))
+  .sort((left, right) => left.sFrom - right.sFrom);
+const routeBranchHostwardEdgePaint = map._markingLog
+  .filter((piece) => (
+    piece.kind === 'strip'
+    && piece.routeId === zone.branch.id
+    && piece.owner === `route:${zone.branch.id}`
+    && piece.tag === 'edgeLine'
+    && piece.boundary === `edge:${zone.hostwardSign}`
+    && piece.sFrom >= transition.markingSettleEnd - 0.01
+  ))
+  .sort((left, right) => left.sFrom - right.sFrom);
+const handoffGap = (from, to) => (
+  from && to ? distanceXZ(from.end, to.start) : null
 );
-const transitionBoundaryAtEnd = transition.laneBoundaries
-  .find((boundary) => boundary.id === 'aux-boundary')?.points.at(-1)?.position;
-const markingHandoffGap = transitionBoundaryAtEnd
-  ? distanceXZ(transitionBoundaryAtEnd, branchBoundaryAtEnd)
-  : Infinity;
+const outerSolidToDividerGap = handoffGap(hostOuterPaint.at(-1), branchDividerPaint[0]);
+const innerDashRouteHandoffGap = handoffGap(hostInnerPaint.at(-1), branchInnerPaint[0]);
+const innerDashToGoreGap = handoffGap(branchInnerPaint.at(-1), branchGorePaint[0]);
+const dividerDashRouteHandoffGap = handoffGap(
+  branchDividerPaint.at(-1),
+  routeBranchDividerPaint[0],
+);
+const goreSolidRouteEdgeGap = handoffGap(
+  branchGorePaint.at(-1),
+  routeBranchHostwardEdgePaint[0],
+);
 
 const metrics = {
   junctionId: transition.id,
   side: transition.side,
-  hostRouteId: transition.hostRouteId,
-  branchRouteId: transition.branchRouteId,
-  hostLaneCount: transition.hostLaneCount,
-  branchLaneCount: transition.branchLaneCount,
-  alignment: { hostS: round(alignmentRow.hU), branchS: round(alignmentRow.bS) },
-  physicalSplit: { hostS: round(splitRow.hU), branchS: round(splitRow.bS) },
-  exteriorHandoff: { hostS: round(exteriorHandoffRow.hU), branchS: round(exteriorHandoffRow.bS) },
-  auxiliary: {
-    width: round(transition.auxiliaryWidth),
-    minimumUsableExtraWidth: round(minimumUsableExtraWidth),
+  feed: {
+    branchRouteId: transition.branchRouteId,
+    branchLane: transition.branchFeedLane,
+    centreLateral: round(feedCentreLateral),
+    innerBoundaryLateral: round(feedCentreLateral + zone.hostwardSign * feedHalfWidth),
+    outerBoundaryLateral: round(feedCentreLateral - zone.hostwardSign * feedHalfWidth),
+  },
+  phases: {
+    usableHostS: round(transition.parallelStart),
+    handoffHostS: round(transition.exteriorHandoffStart),
+    transferCompleteHostS: round(transition.transferComplete),
+    transferCompleteBranchS: round(transition.transferCompleteBranch),
+    goreHostS: round(transition.goreStart),
+    goreBranchS: round(transition.goreBranchStart),
+  },
+  corridor: {
+    sections: corridor.length,
+    acceptedLaneWidth: round(acceptedLaneWidth),
+    minimumWidth: round(minimumCorridorWidth),
     prematureClosureHostS: prematureClosure ? round(prematureClosure.hostS) : null,
-    endpointGapToBranchLane0: round(endpointGapToBranchLane0),
-    maximumReferencePathGap: round(maximumReferencePathGap),
-    maximumTangentStepDeg: round(maximumAuxTangentStep),
-    maximumAuthoritativeOuterStep: round(maximumAuthoritativeOuterStep),
-    maximumSourceOuterStep: round(maximumSourceOuterStep),
+    minimumConsecutiveOverlap: round(minimumConsecutiveOverlap),
+    maximumCentreTangentStepDeg: round(maximumCentreTangentStep),
+    maximumCentreMidpointError: round(maximumCentreMidpointError),
+    maximumPavedEnvelopeRetreat: round(maximumEnvelopeRetreat),
+    endpointCentreGap: round(endpointCentreGap),
+    endpointInnerGap: round(endpointInnerGap),
+    endpointOuterGap: round(endpointOuterGap),
+    branchTangentHandoffDeg: round(branchTangentHandoffDeg),
+    firstBranchOwnershipHostS: firstBranchOwnership ? round(firstBranchOwnership.hostS) : null,
   },
   pavementCollision: {
-    sampledStations: rows.filter((candidate) => candidate.hU >= transition.parallelStart).length,
+    sampledInteriorPoints: corridor.length * interiorFractions.length,
     pavementHoleSamples,
     collisionCorrectionSamples,
     maximumCollisionCorrection: round(maximumCollisionCorrection),
+    continuingBranchSamples,
+    continuingBranchPavementHoles,
+    continuingBranchWallHits,
   },
-  guardrail: {
-    emittedInteriorSamples: interiorRailSamples.length,
-    firstInteriorHostS: interiorRailSamples.length ? round(interiorRailSamples[0].distance) : null,
+  guardrailCollision: {
+    emittedRailSamples: emittedRails.length,
+    intrusiveRailSamples: intrusiveRails.length,
+    transitionWallSegments: transitionWalls.length,
+    intrusiveWallSegments: intrusiveWalls.length,
   },
   markings: {
-    illegalSolidAcrossExitLength: round(illegalSolidLength),
-    maximumDashGap: round(maximumDashGap),
-    handoffGapToBranchBoundary: round(markingHandoffGap),
+    prematureGorePieces: prematureGorePaint.length,
+    hostOuterPieces: hostOuterPaint.length,
+    hostInnerPieces: hostInnerPaint.length,
+    branchInnerPieces: branchInnerPaint.length,
+    branchDividerPieces: branchDividerPaint.length,
+    branchGorePieces: branchGorePaint.length,
+    maximumModelBoundaryGap: round(maximumModelMarkingBoundaryGap),
+    maximumEmittedBoundaryDeviation: round(maximumEmittedMarkingBoundaryDeviation),
+    outerSolidToDividerGap: outerSolidToDividerGap === null ? null : round(outerSolidToDividerGap),
+    innerDashRouteHandoffGap: innerDashRouteHandoffGap === null
+      ? null : round(innerDashRouteHandoffGap),
+    innerDashToGoreGap: innerDashToGoreGap === null ? null : round(innerDashToGoreGap),
+    dividerDashRouteHandoffGap: dividerDashRouteHandoffGap === null
+      ? null : round(dividerDashRouteHandoffGap),
+    goreSolidRouteEdgeGap: goreSolidRouteEdgeGap === null ? null : round(goreSolidRouteEdgeGap),
   },
 };
 
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
 check(transition.side === 'left', `driver-relative side is ${transition.side}`);
-check(minimumUsableExtraWidth >= transition.auxiliaryWidth - 0.15,
-  `auxiliary width closes to ${minimumUsableExtraWidth.toFixed(2)} m before branch alignment`);
-check(!prematureClosure, `premature lane closure starts at host s=${prematureClosure?.hostS.toFixed(1)}`);
-check(endpointGapToBranchLane0 <= 0.5,
-  `auxiliary endpoint is ${endpointGapToBranchLane0.toFixed(2)} m from branch lane 0`);
-check(maximumReferencePathGap <= 0.75,
-  `auxiliary path departs the source-derived handoff by ${maximumReferencePathGap.toFixed(2)} m`);
-check(maximumAuxTangentStep <= 5, `auxiliary tangent step ${maximumAuxTangentStep.toFixed(2)} deg`);
-check(maximumAuthoritativeOuterStep <= Math.max(0.7, maximumSourceOuterStep + 0.05),
-  `paved-union lateral step ${maximumAuthoritativeOuterStep.toFixed(2)} m exceeds source trajectory`);
-check(pavementHoleSamples === 0, `${pavementHoleSamples} intended-corridor pavement holes`);
+check(minimumCorridorWidth >= acceptedLaneWidth,
+  `corridor closes to ${minimumCorridorWidth.toFixed(2)} m (threshold ${acceptedLaneWidth.toFixed(2)} m)`);
+check(!prematureClosure, `premature closure at host s=${prematureClosure?.hostS.toFixed(2)}`);
+check(minimumConsecutiveOverlap > 0,
+  `consecutive corridor sections leave ${Math.abs(minimumConsecutiveOverlap).toFixed(2)} m uncovered`);
+check(maximumEnvelopeRetreat <= 0.01,
+  `outer paved envelope retreats ${maximumEnvelopeRetreat.toFixed(2)} m before branch ownership`);
+check(maximumCentreTangentStep <= 5,
+  `auxiliary centre tangent step ${maximumCentreTangentStep.toFixed(2)} deg`);
+check(maximumCentreMidpointError <= 0.05,
+  `auxiliary centre departs its two boundaries by ${maximumCentreMidpointError.toFixed(2)} m`);
+check(endpointCentreGap <= 0.15,
+  `centre ends ${endpointCentreGap.toFixed(2)} m from real branch lane centre`);
+check(endpointInnerGap <= 0.15,
+  `inner boundary ends ${endpointInnerGap.toFixed(2)} m from real branch lane boundary`);
+check(endpointOuterGap <= 0.15,
+  `outer boundary ends ${endpointOuterGap.toFixed(2)} m from real branch lane boundary`);
+check(branchTangentHandoffDeg <= 5,
+  `auxiliary centre reaches branch with a ${branchTangentHandoffDeg.toFixed(2)} deg tangent step`);
+check(branchOwnershipSections.length === 1
+  && Math.abs(firstBranchOwnership.hostS - transition.transferComplete) <= 0.01,
+`branch ownership starts before the complete final cross-section`);
+check(transition.goreStart >= transition.transferComplete - 0.01
+  && transition.goreBranchStart >= transition.transferCompleteBranch - 0.01,
+`gore begins before corridor transfer completes`);
+check(pavementHoleSamples === 0, `${pavementHoleSamples} corridor interior pavement holes`);
 check(collisionCorrectionSamples === 0,
-  `${collisionCorrectionSamples} intended-corridor collision corrections (max ${maximumCollisionCorrection.toFixed(2)} m)`);
-check(interiorRailSamples.length === 0,
-  `${interiorRailSamples.length} emitted host-rail samples lie inside the shared paved union`);
-check(illegalSolidLength <= 0.5, `${illegalSolidLength.toFixed(1)} m solid marking crosses the exit handoff`);
-check(maximumDashGap <= 6.2, `unexplained dash gap ${maximumDashGap.toFixed(2)} m`);
-check(markingHandoffGap <= 0.75,
-  `temporary boundary ends ${markingHandoffGap.toFixed(2)} m from the branch boundary`);
+  `${collisionCorrectionSamples} corridor interior collision corrections`);
+check(continuingBranchPavementHoles === 0,
+  `${continuingBranchPavementHoles} pavement holes after branch ownership`);
+check(continuingBranchWallHits === 0,
+  `${continuingBranchWallHits} collision walls block the continuing feed lane`);
+check(intrusiveRails.length === 0, `${intrusiveRails.length} emitted rail samples enter the corridor`);
+check(intrusiveWalls.length === 0, `${intrusiveWalls.length} collision wall segments enter the corridor`);
+check(prematureGorePaint.length === 0, `${prematureGorePaint.length} gore pieces precede transfer completion`);
+check(maximumModelMarkingBoundaryGap <= 0.01,
+  `marking model departs the authoritative lane boundaries by ${maximumModelMarkingBoundaryGap.toFixed(2)} m`);
+check(hostOuterPaint.length > 0 && hostInnerPaint.length > 0
+  && branchInnerPaint.length > 0 && branchDividerPaint.length > 0
+  && branchGorePaint.length > 0,
+'transition-owned host/branch marking geometry was not emitted');
+check(maximumEmittedMarkingBoundaryDeviation <= 0.5,
+  `emitted marking departs the authoritative boundary path by ${maximumEmittedMarkingBoundaryDeviation.toFixed(2)} m`);
+// Gaps are bounded by their actual dash pattern's off-length, with only a
+// small surface-frame interpolation allowance. These are continuity checks,
+// not values tuned to whatever the current renderer happens to emit.
+check(outerSolidToDividerGap !== null && outerSolidToDividerGap <= 1.5,
+  `solid-to-dashed outer handoff gap is ${outerSolidToDividerGap?.toFixed(2) ?? 'missing'} m`);
+check(innerDashRouteHandoffGap !== null && innerDashRouteHandoffGap <= 6.25,
+  `host-to-branch inner dash gap is ${innerDashRouteHandoffGap?.toFixed(2) ?? 'missing'} m`);
+check(innerDashToGoreGap !== null && innerDashToGoreGap <= 6.25,
+  `dashed-to-solid gore handoff gap is ${innerDashToGoreGap?.toFixed(2) ?? 'missing'} m`);
+check(dividerDashRouteHandoffGap !== null && dividerDashRouteHandoffGap <= 9.05,
+  `transition-to-route divider gap is ${dividerDashRouteHandoffGap?.toFixed(2) ?? 'missing'} m`);
+check(goreSolidRouteEdgeGap !== null && goreSolidRouteEdgeGap <= 2,
+  `gore-to-route solid handoff gap is ${goreSolidRouteEdgeGap?.toFixed(2) ?? 'missing'} m`);
 
-const report = { expectedInvariant: 'open auxiliary -> source-derived branch lane 0 handoff', metrics, failures };
+const report = {
+  expectedInvariant: 'once usable, P4 corridor remains positive and transfers into real r1_0 lane 0',
+  metrics,
+  failures,
+};
 if (outputPath) await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(metrics, null, 2));
 if (failures.length) {

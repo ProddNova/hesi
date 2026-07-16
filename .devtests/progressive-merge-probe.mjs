@@ -102,7 +102,12 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     }
     const first = transition.pavedEnvelope[0];
     const last = transition.pavedEnvelope.at(-1);
-    if (first.extraWidth > 0.002 || last.extraWidth > 0.002) fail(id, 'final width does not match stable host');
+    if (first.extraWidth > 0.002) fail(id, 'transition does not begin at stable host width');
+    if (transition.type === 'diverge') {
+      if (last.extraWidth < transition.auxiliaryWidth) {
+        fail(id, 'host envelope closes before branch ownership');
+      }
+    } else if (last.extraWidth > 0.002) fail(id, 'merge does not finalize at stable host width');
 
     // Lane topology and pavement/physics agreement.
     if (transition.temporaryLaneCount !== transition.hostLaneCount + 1) fail(id, 'temporary lane count');
@@ -122,6 +127,7 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     const sampleStride = Math.max(1, Math.floor(transition.pavedEnvelope.length / 24));
     const routeSequence = [];
     let worstHeightError = 0;
+    let worstHeightStation = null;
     for (let index = 0; index < transition.pavedEnvelope.length; index += sampleStride) {
       const row = transition.pavedEnvelope[index];
       const frame = map._frameAt(transition.sourceZone.host, map._normalizeDistance(transition.sourceZone.host, row.hostS));
@@ -147,7 +153,18 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       if (!info || !allowedRouteIds.includes(info.routeId)) {
         fail(id, `route ownership ${info?.routeId || 'none'} at ${row.hostS.toFixed(1)}`);
       }
-      if (info) worstHeightError = Math.max(worstHeightError, Math.abs(info.height - aux.position.y + 0.035));
+      if (info) {
+        const heightError = Math.abs(info.height - aux.position.y + 0.035);
+        if (heightError > worstHeightError) {
+          worstHeightError = heightError;
+          worstHeightStation = {
+            hostS: row.hostS,
+            routeId: info.routeId,
+            roadHeight: info.height,
+            pathHeight: aux.position.y - 0.035,
+          };
+        }
+      }
       const collision = map.resolveWallCollision(point, 1.1);
       if (collision.hit) fail(id, `wall in auxiliary lane at ${row.hostS.toFixed(1)}`);
     }
@@ -157,7 +174,7 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     if (routeSequence.join(',') !== expectedOwnership.join(',')) {
       fail(id, `route ownership sequence ${routeSequence.join(',')}`);
     }
-    if (worstHeightError > 0.08) fail(id, `height switch ${worstHeightError.toFixed(3)} m`);
+    if (worstHeightError > 0.08) fail(id, `height switch ${worstHeightError.toFixed(3)} m at host ${worstHeightStation?.hostS.toFixed(1)} (${worstHeightStation?.routeId}; road ${worstHeightStation?.roadHeight.toFixed(3)}, path ${worstHeightStation?.pathHeight.toFixed(3)})`);
 
     // Branch surface must hand its covered progressive section to the host.
     let progressiveHandOffs = 0;
@@ -202,10 +219,41 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       .sort((left, right) => left.sFrom - right.sFrom);
     if (!outerPieces.length) fail(id, 'missing progressive exterior edge line');
     if (!dashPieces.length) fail(id, 'missing progressive auxiliary dashes');
-    if (Math.abs(transition.boundaryLateralAt(transition.openingStart)
-      - transition.outerMarkingLateralAt(transition.openingStart)) > 0.01) fail(id, 'solid-to-dash lateral step');
-    if (Math.abs(transition.boundaryLateralAt(transition.transitionEnd)
-      - transition.outerMarkingLateralAt(transition.transitionEnd)) > 0.01) fail(id, 'dash-to-solid lateral step');
+    if (transition.type === 'diverge') {
+      if (Math.abs(transition.auxInnerMarkingLateralAt(transition.openingStart)
+        - transition.auxOuterMarkingLateralAt(transition.openingStart)) > 0.01) {
+        fail(id, 'solid-to-dash lateral step');
+      }
+      const branchFrame = map._frameAt(transition.sourceZone.branch, transition.transferCompleteBranch);
+      const feedLaneBoundary = map._deckPoint(
+        branchFrame,
+        map._laneOffset(transition.sourceZone.branch, transition.branchFeedLane, 1)
+          + transition.sourceZone.hostwardSign * transition.sourceZone.branch.laneWidth * 0.5,
+        0.055,
+      );
+      const innerMarkingEnd = transition.markingPaths
+        .find((path) => path.id === 'aux-inner-marking')?.points.at(-1)?.position;
+      if (!innerMarkingEnd || worldPoint(innerMarkingEnd).distanceTo(feedLaneBoundary) > 0.1) {
+        fail(id, 'inner marking misses the real branch lane boundary');
+      }
+      const standardSettledEdge = transition.sourceZone.hostwardSign
+        * (map._halfWidthAt(transition.sourceZone.branch, transition.markingSettleEnd) - 0.75);
+      if (Math.abs(transition.settledBranchInnerMarkingLateralAt(transition.markingSettleEnd)
+        - standardSettledEdge) > 0.01) {
+        fail(id, 'dash-to-solid branch-edge settle step');
+      }
+      const branchDivider = map._deckPoint(branchFrame, 0, 0.055);
+      const outerMarkingEnd = transition.markingPaths
+        .find((path) => path.id === 'aux-outer-marking')?.points.at(-1)?.position;
+      if (!outerMarkingEnd || worldPoint(outerMarkingEnd).distanceTo(branchDivider) > 0.1) {
+        fail(id, 'solid-to-dashed branch-divider step');
+      }
+    } else {
+      if (Math.abs(transition.boundaryLateralAt(transition.openingStart)
+        - transition.outerMarkingLateralAt(transition.openingStart)) > 0.01) fail(id, 'solid-to-dash lateral step');
+      if (Math.abs(transition.boundaryLateralAt(transition.transitionEnd)
+        - transition.outerMarkingLateralAt(transition.transitionEnd)) > 0.01) fail(id, 'dash-to-solid lateral step');
+    }
     for (let index = 1; index < dashPieces.length; index += 1) {
       const gap = dashPieces[index].sFrom - dashPieces[index - 1].sTo;
       if (gap > 6.2) fail(id, `unexplained dash gap ${gap.toFixed(2)} m`);
@@ -219,8 +267,10 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       if (claimed) fail(id, `branch route paint survives ${phase} at ${middle.toFixed(1)}`);
     }
 
-    // Guardrail: host rail follows the true progressive exterior; branch rail
-    // is suppressed while combined, and no coincident double rail survives.
+    // Guardrail ownership follows the authoritative paved exterior. The host
+    // owns it before the source-derived exterior handoff, then the branch
+    // exterior owns it; the hostward/gore rail remains absent until the full
+    // auxiliary corridor has transferred.
     const emittedRailSamples = (transition.sourceZone.host._progressiveRailSamples || [])
       .filter((sample) => sample.transitionId === id && sample.side === transition.sideSign);
     if (!emittedRailSamples.length) fail(id, 'missing emitted progressive rail geometry samples');
@@ -240,22 +290,19 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     if (!visiblyRelocated) fail(id, 'progressive rail never relocates beyond the stable host edge');
     for (let index = 0; index < transition.guardrailEnvelope.length; index += sampleStride) {
       const row = transition.guardrailEnvelope[index];
-      if (map._railZoneMode(transition.sourceZone.host, transition.sideSign, row.hostS) !== 'on') {
-        fail(id, `outer guardrail absent at ${row.hostS.toFixed(1)}`);
+      const expectedMode = transition.hostRailModeAt(row.hostS);
+      if (map._railZoneMode(transition.sourceZone.host, transition.sideSign, row.hostS) !== expectedMode) {
+        fail(id, `host rail ownership mismatch at ${row.hostS.toFixed(1)}`);
       }
       const envelope = transition.envelopeAt(row.hostS);
       if (Math.abs(row.lateral - envelope.outerLateral) > 0.02) fail(id, 'guardrail lateral envelope step');
     }
     for (const row of transition.sourceZone.samples) {
-      const phase = transition.phaseAtBranch(row.bS);
-      if (!phase) continue;
-      const shouldBeOpen = transition.type === 'merge'
-        ? phase !== 'approach'
-        : (phase === 'approach' || phase === 'opening' || phase === 'parallel');
-      if (!shouldBeOpen) continue;
       for (const side of [1, -1]) {
-        if (map._railZoneMode(transition.sourceZone.branch, side, row.bS) !== 'off') {
-          fail(id, `branch rail crosses ${phase} at ${row.bS.toFixed(1)}`);
+        const expectedMode = transition.branchRailModeAt?.(row.bS, side);
+        if (expectedMode
+          && map._railZoneMode(transition.sourceZone.branch, side, row.bS) !== expectedMode) {
+          fail(id, `branch rail ownership mismatch at ${row.bS.toFixed(1)} side ${side}`);
         }
       }
     }

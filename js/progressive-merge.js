@@ -101,22 +101,44 @@ function buildRecord(map, zone, prototype) {
     ))[0]
     : 0;
   const branchFeedLateral = map._laneOffset(zone.branch, branchFeedLane, 1);
+  const branchFeedHalfWidth = zone.branch.laneWidth * 0.5;
+  const branchFeedInnerLateral = branchFeedLateral
+    + zone.hostwardSign * branchFeedHalfWidth;
+  const branchFeedOuterLateral = branchFeedLateral
+    - zone.hostwardSign * branchFeedHalfWidth;
   const branchFeedOutwardAt = (row) => {
     const target = map._deckPoint(row.frame, branchFeedLateral);
     const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
     return zone.side * projection.signedLateral;
   };
+  const firstCrossing = (valueAt, target) => {
+    for (let index = 0; index < branchRows.length; index += 1) {
+      const right = branchRows[index];
+      const rightValue = valueAt(right);
+      if (rightValue < target) continue;
+      if (index === 0) return right;
+      const left = branchRows[index - 1];
+      const leftValue = valueAt(left);
+      const t = clamp((target - leftValue) / Math.max(1e-6, rightValue - leftValue), 0, 1);
+      return {
+        ...right,
+        bS: left.bS + (right.bS - left.bS) * t,
+        hU: left.hU + (right.hU - left.hU) * t,
+      };
+    }
+    return branchRows.at(-1);
+  };
   const alignmentRow = zone.kind === 'diverge'
-    ? branchRows.find((row) => branchFeedOutwardAt(row) >= Math.abs(parallelAuxLateral) - 0.05) || branchRows.at(-1)
+    ? firstCrossing(branchFeedOutwardAt, Math.abs(parallelAuxLateral))
     : null;
   const physicalSplitRow = zone.kind === 'diverge'
-    ? branchRows.find((row) => row.innerEdge >= row.hostHalf - 0.3) || branchRows.at(-1)
+    ? firstCrossing((row) => row.innerEdge - row.hostHalf, -0.3)
     : null;
   const exteriorHandoffRow = zone.kind === 'diverge'
-    ? branchRows.find((row) => row.unionOuter >= row.hostHalf + targetExtraWidth - 0.1) || physicalSplitRow
+    ? firstCrossing((row) => row.unionOuter - row.hostHalf, targetExtraWidth)
     : null;
-  const goreStartRow = zone.kind === 'diverge'
-    ? branchRows.find((row) => row.innerEdge >= row.hostHalf + 1.5) || branchRows.at(-1)
+  const sourceGoreClearanceRow = zone.kind === 'diverge'
+    ? firstCrossing((row) => row.innerEdge - row.hostHalf, 1.5)
     : null;
   let absorptionStart = clamp(
     Math.min(approachStart + length * 0.68, compatibleEnd - 8),
@@ -126,11 +148,18 @@ function buildRecord(map, zone, prototype) {
   if (zone.kind === 'diverge') {
     absorptionStart = clamp(alignmentRow.hU, parallelStart + 4, transitionEnd - 4);
   }
-  const divergeHandoffPoint = (hostS, startLateral, branchLateral, lift = 0.035) => {
+  const divergeHandoffPoint = (
+    hostS,
+    startLateral,
+    branchLateral,
+    lift = 0.035,
+    endHostS = transitionEnd,
+    endBranchS = branchRows.at(-1).bS,
+  ) => {
     const startS = exteriorHandoffRow.hU;
-    const endS = transitionEnd;
+    const endS = endHostS;
     const startFrame = map._frameAt(zone.host, startS);
-    const endFrame = map._frameAt(zone.branch, branchRows.at(-1).bS);
+    const endFrame = map._frameAt(zone.branch, endBranchS);
     const start = map._deckPoint(startFrame, startLateral, lift);
     const end = map._deckPoint(endFrame, branchLateral, lift);
     const controlLength = start.distanceTo(end) * 0.4;
@@ -164,11 +193,24 @@ function buildRecord(map, zone, prototype) {
     laneHandoffStart: exteriorHandoffRow?.hU ?? null,
     physicalSplitStart: physicalSplitRow?.hU ?? null,
     exteriorHandoffStart: exteriorHandoffRow?.hU ?? null,
-    goreStart: goreStartRow?.hU ?? null,
+    // A diverge gore is not allowed to begin merely because the source decks
+    // have opened a narrow gap.  It begins only after the auxiliary centre and
+    // both of its boundaries have landed on the real branch lane geometry.
+    transferComplete: zone.kind === 'diverge' ? transitionEnd : null,
+    goreStart: zone.kind === 'diverge' ? transitionEnd : null,
+    sourceGoreClearanceStart: sourceGoreClearanceRow?.hU ?? null,
     alignmentBranchStart: alignmentRow?.bS ?? null,
     physicalSplitBranchStart: physicalSplitRow?.bS ?? null,
     exteriorHandoffBranchStart: exteriorHandoffRow?.bS ?? null,
-    goreBranchStart: goreStartRow?.bS ?? null,
+    transferCompleteBranch: zone.kind === 'diverge' ? branchRows.at(-1).bS : null,
+    markingSettleEnd: zone.kind === 'diverge'
+      ? Math.min(zone.branch.length, branchRows.at(-1).bS + 12)
+      : null,
+    branchSettleEnd: zone.kind === 'diverge'
+      ? Math.min(zone.branch.length, branchRows.at(-1).bS + 32)
+      : null,
+    goreBranchStart: zone.kind === 'diverge' ? branchRows.at(-1).bS : null,
+    sourceGoreClearanceBranchStart: sourceGoreClearanceRow?.bS ?? null,
     length,
     phaseOrder: [...PROGRESSIVE_PHASES],
     hostLaneCount: zone.host.lanes,
@@ -190,11 +232,14 @@ function buildRecord(map, zone, prototype) {
     separatedLanes: zone.kind === 'diverge' ? ['aux:0'] : [],
     laneCentres: [],
     laneBoundaries: [],
+    markingPaths: [],
     branchLaneCentres: [],
+    auxiliaryCorridor: [],
     pavedEnvelope: [],
     crossableEnvelope: [],
     markingOwnership: [],
     guardrailEnvelope: [],
+    branchGuardrailEnvelope: [],
     automationStatus: 'prototype-enabled',
     manualReviewReason: null,
     sourceZone: zone,
@@ -204,6 +249,20 @@ function buildRecord(map, zone, prototype) {
     containsHost(distance, padding = 0) {
       const value = unwrappedHostDistance(zone, distance);
       return value >= approachStart - padding && value <= transitionEnd + padding;
+    },
+    hostRailModeAt(distance) {
+      if (zone.kind !== 'diverge') return 'on';
+      const hostS = unwrappedHostDistance(zone, distance);
+      if (hostS < exteriorHandoffRow.hU) return 'on';
+      if (hostS < transitionEnd) return 'off';
+      return 'on';
+    },
+    branchRailModeAt(distance, sideSign) {
+      if (zone.kind !== 'diverge') return null;
+      if (distance < branchRows[0].bS - 0.01 || distance > branchRows.at(-1).bS + 0.01) return null;
+      if (sideSign === zone.hostwardSign) return distance < branchRows.at(-1).bS ? 'off' : 'on';
+      if (sideSign === -zone.hostwardSign) return distance < exteriorHandoffRow.bS ? 'off' : 'on';
+      return null;
     },
     hostAtBranch(distance) {
       if (distance < branchRows[0].bS - 0.01 || distance > branchRows[branchRows.length - 1].bS + 0.01) return null;
@@ -227,6 +286,13 @@ function buildRecord(map, zone, prototype) {
       return left.bS + (right.bS - left.bS) * ((hostS - left.hU) / span);
     },
     branchDeckHostBlendAt(distance) {
+      if (zone.kind === 'diverge') {
+        const branchEnd = branchRows.at(-1).bS;
+        if (distance < branchRows[0].bS - 0.01) return 0;
+        if (distance <= branchEnd) return 1;
+        if (distance >= this.branchSettleEnd) return 0;
+        return 1 - quintic((distance - branchEnd) / (this.branchSettleEnd - branchEnd));
+      }
       const hostS = this.hostAtBranch(distance);
       if (hostS === null) return 0;
       if (zone.kind === 'merge') {
@@ -234,15 +300,22 @@ function buildRecord(map, zone, prototype) {
         if (hostS >= parallelStart) return 1;
         return quintic((hostS - openingStart) / (parallelStart - openingStart));
       }
-      if (hostS <= alignmentRow.hU) return 1;
-      if (hostS >= transitionEnd) return 0;
-      return 1 - quintic((hostS - alignmentRow.hU) / (transitionEnd - alignmentRow.hU));
+      return 0;
     },
     branchDeckOffsetAt(distance, lateral = 0) {
       const blend = this.branchDeckHostBlendAt(distance);
       if (blend <= 0) return 0;
-      if (distance < branchRows[0].bS - 0.01 || distance > branchRows[branchRows.length - 1].bS + 0.01) return 0;
       if (zone.kind === 'diverge') {
+        const branchEnd = branchRows.at(-1).bS;
+        if (distance > branchEnd) {
+          const last = branchRows.at(-1);
+          const ends = last.dyEnds || [last.dy, last.dy];
+          const half = Math.max(0.01, last.half || zone.branch.halfWidth);
+          const t = clamp((lateral + half) / (half * 2), 0, 1);
+          const dy = ends[0] + (ends[1] - ends[0]) * t;
+          return -dy * blend;
+        }
+        if (distance < branchRows[0].bS - 0.01) return 0;
         const branchFrame = map._frameAt(zone.branch, distance);
         const branchPoint = branchFrame.position.clone().addScaledVector(branchFrame.normal, lateral);
         branchPoint.y += Math.tan(branchFrame.bank) * lateral;
@@ -256,6 +329,7 @@ function buildRecord(map, zone, prototype) {
           + Math.tan(map._bankAt(zone.host, projection.distance)) * projection.signedLateral;
         return (hostDeckY - branchPoint.y) * blend;
       }
+      if (distance < branchRows[0].bS - 0.01 || distance > branchRows[branchRows.length - 1].bS + 0.01) return 0;
       let upper = 1;
       while (upper < branchRows.length && branchRows[upper].bS < distance) upper += 1;
       const right = branchRows[Math.min(upper, branchRows.length - 1)];
@@ -287,8 +361,12 @@ function buildRecord(map, zone, prototype) {
     },
     widthFactorAt(distance) {
       const value = unwrappedHostDistance(zone, distance);
-      if (value <= openingStart || value >= transitionEnd) return 0;
+      if (value <= openingStart || value > transitionEnd) return 0;
       if (value < parallelStart) return quintic((value - openingStart) / (parallelStart - openingStart));
+      // Once a diverge reaches full usable width it never closes on the host
+      // side. The branch assumes ownership of that same corridor at the final
+      // station; only stations beyond the transition return to the base host.
+      if (zone.kind === 'diverge') return 1;
       if (value <= absorptionStart) return 1;
       return 1 - quintic((value - absorptionStart) / (transitionEnd - absorptionStart));
     },
@@ -302,7 +380,8 @@ function buildRecord(map, zone, prototype) {
         const factor = quintic((value - openingStart) / (parallelStart - openingStart));
         return baseEdgeLine + (laneBoundary - baseEdgeLine) * factor;
       }
-      const boundaryCloseStart = zone.kind === 'diverge' ? physicalSplitRow.hU : absorptionStart;
+      if (zone.kind === 'diverge') return laneBoundary;
+      const boundaryCloseStart = absorptionStart;
       if (value <= boundaryCloseStart) return laneBoundary;
       const factor = quintic((value - boundaryCloseStart) / (transitionEnd - boundaryCloseStart));
       return laneBoundary + (baseEdgeLine - laneBoundary) * factor;
@@ -336,11 +415,17 @@ function buildRecord(map, zone, prototype) {
       owner: `route:${zone.host.id}`,
     })),
     {
-      id: `${record.id}:aux-boundary`,
-      role: zone.kind === 'merge' ? 'absorbed-lane-boundary' : 'opening-lane-boundary',
+      id: `${record.id}:aux-inner-boundary`,
+      role: zone.kind === 'merge' ? 'absorbed-lane-boundary' : 'auxiliary-inner-boundary',
       lateral: zone.side * hostLaneEdge,
       owner: `progressive:${record.id}`,
     },
+    ...(zone.kind === 'diverge' ? [{
+      id: `${record.id}:aux-outer-boundary`,
+      role: 'auxiliary-outer-boundary-to-branch-divider',
+      lateral: zone.side * (hostLaneEdge + auxiliaryWidth),
+      owner: `progressive:${record.id}`,
+    }] : []),
     {
       id: `${record.id}:outer-edge`,
       role: 'progressive-outer-edge',
@@ -357,6 +442,22 @@ function buildRecord(map, zone, prototype) {
 
   const sampleStep = 2;
   const sampleCount = Math.max(2, Math.ceil(length / sampleStep));
+  const sampleStations = Array.from(
+    { length: sampleCount + 1 },
+    (_, index) => approachStart + length * index / sampleCount,
+  );
+  sampleStations.push(
+    openingStart,
+    parallelStart,
+    absorptionStart,
+    exteriorHandoffRow?.hU,
+    physicalSplitRow?.hU,
+    transitionEnd,
+  );
+  sampleStations.sort((left, right) => left - right);
+  const stations = sampleStations.filter((station, index) => (
+    Number.isFinite(station) && (index === 0 || Math.abs(station - sampleStations[index - 1]) > 1e-4)
+  ));
   const lanePaths = Array.from({ length: record.temporaryLaneCount }, (_, lane) => ({
     id: lane < zone.host.lanes ? `host:${lane}` : 'aux:0',
     outcome: lane < zone.host.lanes ? 'survives' : (zone.kind === 'merge' ? 'absorbed' : 'separates'),
@@ -364,11 +465,31 @@ function buildRecord(map, zone, prototype) {
   }));
   const boundaryPaths = [
     ...hostDividerOffsets.map((lateral, index) => ({ id: `host-divider:${index}`, lateral, points: [] })),
-    { id: 'aux-boundary', lateral: zone.side * hostLaneEdge, points: [] },
+    { id: 'aux-inner-boundary', lateral: zone.side * hostLaneEdge, points: [] },
+    ...(zone.kind === 'diverge'
+      ? [{ id: 'aux-outer-boundary', lateral: zone.side * (hostLaneEdge + auxiliaryWidth), points: [] }]
+      : []),
     { id: 'outer-edge', lateral: null, points: [] },
   ];
-  for (let index = 0; index <= sampleCount; index += 1) {
-    const hostS = approachStart + length * index / sampleCount;
+  const markingPaths = zone.kind === 'diverge' ? [
+    { id: 'aux-inner-marking', points: [] },
+    { id: 'aux-outer-marking', points: [] },
+  ] : [];
+  const conformToBranchDeck = (hostS, worldPoint, lift) => {
+    const branchS = record.branchAtHost(hostS);
+    if (branchS === null) return worldPoint;
+    const projection = map._projectToRoute(
+      zone.branch,
+      worldPoint,
+      map._hostSeedIndex(zone.branch, branchS),
+    );
+    const branchFrame = map._frameAt(zone.branch, projection.distance);
+    const branchDeck = map._deckPoint(branchFrame, projection.signedLateral, lift);
+    branchDeck.y += record.branchDeckOffsetAt(projection.distance, projection.signedLateral);
+    worldPoint.y = branchDeck.y;
+    return worldPoint;
+  };
+  for (const hostS of stations) {
     const normalized = map._normalizeDistance(zone.host, hostS);
     const frame = map._frameAt(zone.host, normalized);
     const envelope = record.envelopeAt(hostS);
@@ -399,30 +520,44 @@ function buildRecord(map, zone, prototype) {
     const factor = record.widthFactorAt(hostS);
     const outerHostLane = zone.side > 0 ? 0 : zone.host.lanes - 1;
     const outerHostLateral = map._laneOffset(zone.host, outerHostLane, 1);
-    let auxLateral = outerHostLateral + (parallelAuxLateral - outerHostLateral) * factor;
+    const stableEdgeLine = zone.side * (frame.half - 0.75);
+    const fullInnerLateral = zone.side * hostLaneEdge;
+    const fullOuterLateral = zone.side * (hostLaneEdge + auxiliaryWidth);
+    const auxInnerStartLateral = stableEdgeLine
+      + (fullInnerLateral - stableEdgeLine) * factor;
+    const auxOuterStartLateral = stableEdgeLine
+      + (fullOuterLateral - stableEdgeLine) * factor;
+    let auxLateral = zone.kind === 'diverge'
+      ? outerHostLateral + (parallelAuxLateral - outerHostLateral) * factor
+      : outerHostLateral + (parallelAuxLateral - outerHostLateral) * factor;
     let auxPosition = map._deckPoint(frame, auxLateral, 0.035);
     if (zone.kind === 'merge' && hostS > absorptionStart) {
       const convergence = quintic((hostS - absorptionStart) / (transitionEnd - absorptionStart));
       auxLateral += (outerHostLateral - auxLateral) * convergence;
       auxPosition = map._deckPoint(frame, auxLateral, 0.035);
     } else if (zone.kind === 'diverge' && hostS > exteriorHandoffRow.hU) {
-      auxPosition = divergeHandoffPoint(hostS, parallelAuxLateral, branchFeedLateral, 0.035);
+      const inner = conformToBranchDeck(
+        hostS,
+        divergeHandoffPoint(hostS, zone.side * hostLaneEdge, branchFeedInnerLateral, 0.035),
+        0.035,
+      );
+      const outer = conformToBranchDeck(
+        hostS,
+        divergeHandoffPoint(
+          hostS,
+          zone.side * (hostLaneEdge + auxiliaryWidth),
+          branchFeedOuterLateral,
+          0.035,
+        ),
+        0.035,
+      );
+      // The centre is owned by the two authoritative boundary paths. This
+      // guarantees a non-collapsing cross-section and makes all three paths
+      // terminate on the same real branch lane rather than on independent
+      // animation targets.
+      auxPosition = inner.clone().lerp(outer, 0.5);
+      conformToBranchDeck(hostS, auxPosition, 0.035);
       auxLateral = auxPosition.clone().sub(frame.position).dot(frame.normal);
-      const branchS = record.branchAtHost(hostS);
-      if (branchS !== null) {
-        const branchProjection = map._projectToRoute(
-          zone.branch,
-          auxPosition,
-          map._hostSeedIndex(zone.branch, branchS),
-        );
-        const branchFrame = map._frameAt(zone.branch, branchProjection.distance);
-        const branchDeck = map._deckPoint(branchFrame, branchProjection.signedLateral, 0.035);
-        branchDeck.y += record.branchDeckOffsetAt(
-          branchProjection.distance,
-          branchProjection.signedLateral,
-        );
-        auxPosition.y = branchDeck.y;
-      }
     }
     lanePaths[lanePaths.length - 1].points.push({
       hostS,
@@ -430,15 +565,31 @@ function buildRecord(map, zone, prototype) {
       position: pointRecord(auxPosition),
     });
     for (const boundary of boundaryPaths) {
-      let lateral = boundary.id === 'outer-edge' ? envelope.outerLateral : boundary.lateral;
+      let lateral = boundary.id === 'outer-edge'
+        ? envelope.outerLateral
+        : (boundary.id === 'aux-outer-boundary'
+          ? auxOuterStartLateral
+          : (boundary.id === 'aux-inner-boundary' ? auxInnerStartLateral : boundary.lateral));
       let boundaryPosition = map._deckPoint(frame, lateral, 0.04);
       const branchS = zone.kind === 'diverge' ? record.branchAtHost(hostS) : null;
-      if (branchS !== null && boundary.id === 'aux-boundary' && hostS > exteriorHandoffRow.hU) {
-        const branchLaneEdge = zone.branch.lanes * zone.branch.laneWidth * 0.5;
-        boundaryPosition = divergeHandoffPoint(
+      if (branchS !== null && boundary.id === 'aux-inner-boundary'
+        && hostS > exteriorHandoffRow.hU) {
+        boundaryPosition = conformToBranchDeck(
           hostS,
-          zone.side * hostLaneEdge,
-          zone.hostwardSign * branchLaneEdge,
+          divergeHandoffPoint(hostS, zone.side * hostLaneEdge, branchFeedInnerLateral, 0.04),
+          0.04,
+        );
+        lateral = boundaryPosition.clone().sub(frame.position).dot(frame.normal);
+      } else if (branchS !== null && boundary.id === 'aux-outer-boundary'
+        && hostS > exteriorHandoffRow.hU) {
+        boundaryPosition = conformToBranchDeck(
+          hostS,
+          divergeHandoffPoint(
+            hostS,
+            zone.side * (hostLaneEdge + auxiliaryWidth),
+            branchFeedOuterLateral,
+            0.04,
+          ),
           0.04,
         );
         lateral = boundaryPosition.clone().sub(frame.position).dot(frame.normal);
@@ -451,9 +602,158 @@ function buildRecord(map, zone, prototype) {
       }
       boundary.points.push({ hostS, branchS, lateral, position: pointRecord(boundaryPosition) });
     }
+    if (zone.kind === 'diverge') {
+      const branchS = record.branchAtHost(hostS);
+      const innerMarking = markingPaths[0];
+      const outerMarking = markingPaths[1];
+      const innerBoundary = boundaryPaths.find((path) => path.id === 'aux-inner-boundary').points.at(-1);
+      const outerBoundary = boundaryPaths.find((path) => path.id === 'aux-outer-boundary').points.at(-1);
+      const innerLateral = innerBoundary.lateral;
+      const outerLateral = outerBoundary.lateral;
+      const innerPosition = pointRecord({
+        x: innerBoundary.position.x,
+        y: innerBoundary.position.y + 0.015,
+        z: innerBoundary.position.z,
+      });
+      const outerPosition = pointRecord({
+        x: outerBoundary.position.x,
+        y: outerBoundary.position.y + 0.015,
+        z: outerBoundary.position.z,
+      });
+      innerMarking.points.push({
+        hostS,
+        branchS,
+        lateral: innerLateral,
+        position: innerPosition,
+      });
+      outerMarking.points.push({
+        hostS,
+        branchS,
+        lateral: outerLateral,
+        position: outerPosition,
+      });
+    }
   }
   record.laneCentres = lanePaths;
   record.laneBoundaries = boundaryPaths;
+  record.markingPaths = markingPaths;
+  const auxInnerBoundaryPath = boundaryPaths.find((boundary) => boundary.id === 'aux-inner-boundary');
+  const auxOuterBoundaryPath = boundaryPaths.find((boundary) => boundary.id === 'aux-outer-boundary');
+  const pathSampleAtHost = (path, distance) => {
+    const hostS = unwrappedHostDistance(zone, distance);
+    const points = path.points;
+    let upper = 1;
+    while (upper < points.length && points[upper].hostS < hostS) upper += 1;
+    if (upper >= points.length) return { ...points.at(-1), position: { ...points.at(-1).position } };
+    const left = points[upper - 1];
+    const right = points[upper];
+    const t = clamp((hostS - left.hostS) / Math.max(1e-6, right.hostS - left.hostS), 0, 1);
+    return {
+      hostS,
+      branchS: left.branchS === null || right.branchS === null
+        ? null
+        : left.branchS + (right.branchS - left.branchS) * t,
+      lateral: left.lateral + (right.lateral - left.lateral) * t,
+      position: {
+        x: left.position.x + (right.position.x - left.position.x) * t,
+        y: left.position.y + (right.position.y - left.position.y) * t,
+        z: left.position.z + (right.position.z - left.position.z) * t,
+      },
+    };
+  };
+  const pathLateralAtBranch = (path, distance) => {
+    const hostS = record.hostAtBranch(distance);
+    if (hostS === null) return null;
+    const sample = pathSampleAtHost(path, hostS);
+    const world = map._frameAt(zone.branch, distance).position.clone().set(
+      sample.position.x,
+      sample.position.y,
+      sample.position.z,
+    );
+    const branchFrame = map._frameAt(zone.branch, distance);
+    return world.sub(branchFrame.position).dot(branchFrame.normal);
+  };
+  record.auxInnerBoundaryPointAt = (distance) => pathSampleAtHost(auxInnerBoundaryPath, distance);
+  record.auxOuterBoundaryPointAt = (distance) => pathSampleAtHost(
+    auxOuterBoundaryPath || auxInnerBoundaryPath,
+    distance,
+  );
+  record.auxInnerBoundaryLateralAt = (distance) => pathSampleAtHost(
+    auxInnerBoundaryPath,
+    distance,
+  ).lateral;
+  record.auxOuterBoundaryLateralAt = (distance) => pathSampleAtHost(
+    auxOuterBoundaryPath || auxInnerBoundaryPath,
+    distance,
+  ).lateral;
+  record.auxInnerBoundaryBranchLateralAt = (distance) => pathLateralAtBranch(
+    auxInnerBoundaryPath,
+    distance,
+  );
+  record.auxOuterBoundaryBranchLateralAt = (distance) => pathLateralAtBranch(
+    auxOuterBoundaryPath || auxInnerBoundaryPath,
+    distance,
+  );
+  // Compatibility aliases retain the pre-C2 API while making the inner
+  // boundary choice explicit for new rendering/probes.
+  record.auxBoundaryLateralAt = record.auxInnerBoundaryLateralAt;
+  record.auxBoundaryBranchLateralAt = record.auxInnerBoundaryBranchLateralAt;
+  if (zone.kind === 'diverge') {
+    const innerMarkingPath = markingPaths.find((path) => path.id === 'aux-inner-marking');
+    const outerMarkingPath = markingPaths.find((path) => path.id === 'aux-outer-marking');
+    record.auxInnerMarkingLateralAt = (distance) => pathSampleAtHost(
+      innerMarkingPath,
+      distance,
+    ).lateral;
+    record.auxOuterMarkingLateralAt = (distance) => pathSampleAtHost(
+      outerMarkingPath,
+      distance,
+    ).lateral;
+    record.auxInnerMarkingBranchLateralAt = (distance) => pathLateralAtBranch(
+      innerMarkingPath,
+      distance,
+    );
+    record.auxOuterMarkingBranchLateralAt = (distance) => pathLateralAtBranch(
+      outerMarkingPath,
+      distance,
+    );
+    record.settledBranchInnerMarkingLateralAt = (distance) => {
+      const start = branchFeedInnerLateral;
+      const standard = zone.hostwardSign * (map._halfWidthAt(zone.branch, distance) - 0.75);
+      if (distance <= record.transferCompleteBranch) return start;
+      if (distance >= record.markingSettleEnd) return standard;
+      const factor = quintic((distance - record.transferCompleteBranch)
+        / (record.markingSettleEnd - record.transferCompleteBranch));
+      return start + (standard - start) * factor;
+    };
+  }
+  if (zone.kind === 'diverge') {
+    record.auxiliaryCorridor = stations
+      .filter((hostS) => hostS >= parallelStart - 1e-4)
+      .map((hostS) => {
+        const inner = pathSampleAtHost(auxInnerBoundaryPath, hostS);
+        const outer = pathSampleAtHost(auxOuterBoundaryPath, hostS);
+        const width = Math.hypot(
+          inner.position.x - outer.position.x,
+          inner.position.z - outer.position.z,
+        );
+        return {
+          hostS,
+          branchS: record.branchAtHost(hostS),
+          ownership: hostS >= transitionEnd - 1e-4
+            ? 'branch'
+            : (hostS >= exteriorHandoffRow.hU ? 'shared' : 'host'),
+          width,
+          inner: inner.position,
+          outer: outer.position,
+          centre: {
+            x: (inner.position.x + outer.position.x) * 0.5,
+            y: (inner.position.y + outer.position.y) * 0.5,
+            z: (inner.position.z + outer.position.z) * 0.5,
+          },
+        };
+      });
+  }
   record.branchLaneCentres = Array.from({ length: zone.branch.lanes }, (_, lane) => ({
     id: `branch:${lane}`,
     outcome: lane === branchFeedLane ? 'fed-by-auxiliary' : 'forms-with-branch',
@@ -464,6 +764,18 @@ function buildRecord(map, zone, prototype) {
       position: pointRecord(map._deckPoint(row.frame, map._laneOffset(zone.branch, lane, 1), 0.035)),
     })),
   }));
+  record.branchGuardrailEnvelope = branchRows
+    .filter((row) => row.bS >= exteriorHandoffRow?.bS)
+    .map((row) => {
+      const lateral = -zone.hostwardSign * map._halfWidthAt(zone.branch, row.bS);
+      return {
+        branchS: row.bS,
+        hostS: row.hU,
+        role: 'branch-exterior',
+        lateral,
+        position: pointRecord(map._deckPoint(row.frame, lateral + zone.hostwardSign * 0.42, 0.02)),
+      };
+    });
   record.worldBounds = record.pavedEnvelope.reduce((bounds, row) => ({
     minX: Math.min(bounds.minX, row.lower.x, row.upper.x),
     maxX: Math.max(bounds.maxX, row.lower.x, row.upper.x),

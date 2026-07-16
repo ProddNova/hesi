@@ -38,7 +38,13 @@ const fail = (label, detail) => {
 };
 
 const zones = map.junctionZones.filter((z) => z.crossable);
-const summary = { convergenceChecked: 0, worstConvergence: 0, openingCrossed: 0, unexplainedGaps: 0 };
+const summary = {
+  convergenceChecked: 0,
+  worstConvergence: 0,
+  openingCrossed: 0,
+  unexplainedGaps: 0,
+  progressiveOwnershipTransfers: 0,
+};
 
 // The old chainage-only assertion produced a false positive once a progressive
 // host rail remained visible through the former mouth opening: it could not
@@ -71,10 +77,53 @@ for (const zone of zones) {
     const lastFrame = map._frameAt(zone.host, last.hostS);
     const firstBase = zone.side * map._halfWidthAt(zone.host, first.hostS);
     const lastBase = zone.side * map._halfWidthAt(zone.host, last.hostS);
-    const difference = Math.max(Math.abs(first.lateral - firstBase), Math.abs(last.lateral - lastBase));
-    summary.worstConvergence = Math.max(summary.worstConvergence, difference);
-    if (difference > 0.05 || !firstFrame || !lastFrame) {
-      fail('outer-rail-convergence', `${zone.id}: progressive envelope does not return to the stable host edge (${difference.toFixed(2)} m)`);
+    if (zone.progressive.type !== 'diverge') {
+      const difference = Math.max(Math.abs(first.lateral - firstBase), Math.abs(last.lateral - lastBase));
+      summary.worstConvergence = Math.max(summary.worstConvergence, difference);
+      if (difference > 0.05 || !firstFrame || !lastFrame) {
+        fail('outer-rail-convergence', `${zone.id}: progressive envelope does not return to the stable host edge (${difference.toFixed(2)} m)`);
+      }
+      continue;
+    }
+    // Old false-positive logic required the diverge host envelope to return
+    // to its original edge. That is precisely the premature lane closure P4
+    // must prohibit. Grade the actual exterior ownership transfer instead:
+    // widened host terminal -> branch exterior terminal, each on its own
+    // authoritative paved boundary, with a bounded world-space handoff gap.
+    const hostSamples = (zone.host._progressiveRailSamples || []).filter((sample) => (
+      sample.transitionId === zone.progressive.id && sample.role === 'host-exterior'));
+    const branchSamples = (zone.branch._progressiveRailSamples || []).filter((sample) => (
+      sample.transitionId === zone.progressive.id && sample.role === 'branch-exterior'));
+    let valid = hostSamples.length > 0 && branchSamples.length > 0;
+    valid &&= hostSamples.every((sample) => {
+      const envelope = zone.progressive.envelopeAt(sample.distance);
+      const squeeze = 0.36 * (1 - sample.terminalFactor);
+      const expectedBase = envelope.outerLateral - zone.side * (0.42 - squeeze);
+      return Math.abs(sample.actualOuterLateral - envelope.outerLateral) < 0.03
+        && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+    });
+    valid &&= branchSamples.every((sample) => {
+      const frame = map._frameAt(zone.branch, sample.distance);
+      const expectedOuter = sample.side * frame.half;
+      const squeeze = 0.36 * (1 - sample.terminalFactor);
+      const expectedBase = expectedOuter - sample.side * (0.42 - squeeze);
+      return Math.abs(sample.actualOuterLateral - expectedOuter) < 0.03
+        && Math.abs(sample.actualBaseLateral - expectedBase) < 0.03;
+    });
+    const hostEnd = hostSamples.at(-1)?.actualBasePosition;
+    const branchStart = branchSamples[0]?.actualBasePosition;
+    const handoffGap = hostEnd && branchStart ? Math.hypot(
+      hostEnd.x - branchStart.x,
+      hostEnd.y - branchStart.y,
+      hostEnd.z - branchStart.z,
+    ) : Infinity;
+    summary.worstConvergence = Math.max(summary.worstConvergence, handoffGap);
+    valid &&= handoffGap <= 6;
+    valid &&= Math.abs(last.lateral - lastBase) >= zone.progressive.auxiliaryWidth;
+    if (!valid) {
+      fail('outer-rail-convergence', `${zone.id}: invalid host-to-branch exterior ownership handoff (${handoffGap.toFixed(2)} m)`);
+    } else {
+      summary.progressiveOwnershipTransfers += 1;
     }
     continue;
   }
@@ -162,5 +211,6 @@ for (const zone of zones) {
 
 console.log(`\nzones with crossable=${zones.length} convergence-checked=${summary.convergenceChecked}`);
 console.log(`worst convergence diff=${summary.worstConvergence.toFixed(2)} m | opening-crossed=${summary.openingCrossed} | unexplained-branch-gaps=${summary.unexplainedGaps}`);
+console.log(`progressive exterior ownership transfers=${summary.progressiveOwnershipTransfers}`);
 if (failures) { console.log(`MERGE GUARDRAIL PROBE: FAIL (${failures})`); process.exit(1); }
 console.log('MERGE GUARDRAIL PROBE: PASS');

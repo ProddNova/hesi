@@ -46,7 +46,20 @@ for (const transition of map.progressiveTransitions) {
   check(transition.crossableEnvelope.length > 20, `${transition.id}: sparse crossable envelope`);
   const first = transition.pavedEnvelope[0];
   const last = transition.pavedEnvelope.at(-1);
-  check(first.extraWidth < 1e-6 && last.extraWidth < 1e-6, `${transition.id}: width does not finalize at base`);
+  check(first.extraWidth < 1e-6, `${transition.id}: transition does not begin at base width`);
+  if (transition.type === 'diverge') {
+    check(last.extraWidth >= transition.auxiliaryWidth,
+      `${transition.id}: host envelope closes before branch ownership`);
+    check(transition.goreStart >= transition.transferComplete - 0.01,
+      `${transition.id}: gore begins before lane transfer`);
+    check(transition.auxiliaryCorridor.length > 20,
+      `${transition.id}: missing explicit auxiliary corridor sections`);
+    check(transition.laneBoundaries.some((path) => path.id === 'aux-inner-boundary')
+      && transition.laneBoundaries.some((path) => path.id === 'aux-outer-boundary'),
+    `${transition.id}: missing explicit auxiliary boundaries`);
+  } else {
+    check(last.extraWidth < 1e-6, `${transition.id}: merge width does not finalize at base`);
+  }
   check(transition.pavedEnvelope.some((row) => row.extraWidth >= transition.auxiliaryWidth), `${transition.id}: no usable auxiliary width`);
   for (const lane of transition.laneCentres) {
     check(lane.points.length === transition.pavedEnvelope.length, `${transition.id}/${lane.id}: discontinuous sample count`);
