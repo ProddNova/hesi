@@ -204,7 +204,7 @@ class ShutokoNights {
     },480);
   }
   exitGarage(){
-    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('C1 access ramp // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
+    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
   }
 
   getInput(){

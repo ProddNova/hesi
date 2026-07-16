@@ -47,6 +47,16 @@ const EPSILON = 1e-5;
 const LANE_W = 3.55;
 const MEDIAN_W = 3.0;
 const SHOULDER_W = 1.3;
+// Broken lane-divider line: painted dash length + repeat period (metres).
+// Kept well under a car length so the dashes read as short ticks; the
+// progressive-transition divider reuses these so its phase mapping stays 1:1
+// with the normal route dashes.
+const LANE_DASH_LENGTH = 3.0;
+const LANE_DASH_PERIOD = 8;
+const SERVICE_DASH_PERIOD = 14;
+// Denser broken line marking a merge/exit boundary through junction zones.
+const ZONE_DASH_LENGTH = 3.0;
+const ZONE_DASH_PERIOD = 6;
 const CHUNK = 600;
 const CHUNK_VISIBLE = 1500;
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
@@ -119,6 +129,53 @@ function mulberry32(seed) {
     value = Math.imul(value ^ (value >>> 15), value | 1);
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Reverse the travel direction of the whole network (left-hand traffic).
+ *
+ * The OSM ways are digitised in the real (Japanese, left-hand) direction of
+ * travel, but the lon->x / lat->z projection renders a mirror image of Tokyo,
+ * so driving the data forward LOOKS like right-hand traffic: the opposite
+ * carriageway sits on the driver's left everywhere. Reversing every
+ * carriageway polyline (and re-basing every arc-length reference onto the
+ * flipped chainage) restores left-hand traffic in the rendered world without
+ * touching any world coordinate: merge edges become diverges and vice versa,
+ * endpoint refs swap, tunnel/bridge ranges flip, and a PA's data-side label
+ * ('left'/'right' relative to travel) swaps so each lot keeps its physical
+ * position. ROUTE_DATA itself is never mutated (probes build several maps
+ * from the same module instance).
+ */
+function reverseNetworkData(data) {
+  const lengthOf = new Map(data.routes.map((route) => [route.id, route.length]));
+  const closedIds = new Set(data.routes.filter((route) => route.closed).map((route) => route.id));
+  const flipDistance = (routeId, distance) => {
+    const length = lengthOf.get(routeId) ?? 0;
+    const flipped = length - distance;
+    return closedIds.has(routeId) ? wrap(flipped, length) : clamp(flipped, 0, length);
+  };
+  const flipZones = (zones, length) => (zones || []).map((zone) => ({
+    ...zone, start: length - zone.end, end: length - zone.start,
+  }));
+  return {
+    ...data,
+    routes: data.routes.map((route) => ({
+      ...route,
+      points: [...route.points].reverse(),
+      tunnels: flipZones(route.tunnels, route.length),
+      bridges: flipZones(route.bridges, route.length),
+    })),
+    edges: (data.edges || []).map((edge) => ({
+      ...edge,
+      kind: edge.kind === 'merge' ? 'diverge' : (edge.kind === 'diverge' ? 'merge' : edge.kind),
+      from: { ...edge.to, distance: flipDistance(edge.to.route, edge.to.distance) },
+      to: { ...edge.from, distance: flipDistance(edge.from.route, edge.from.distance) },
+    })),
+    serviceAreas: (data.serviceAreas || []).map((def) => ({
+      ...def,
+      side: def.side === 'left' ? 'right' : (def.side === 'right' ? 'left' : def.side),
+    })),
   };
 }
 
@@ -206,14 +263,44 @@ export class HighwayMap {
     this.trafficLanes = this.getTrafficLanes();
 
     const garageArea = this.serviceAreas.find((area) => area.hasGarage);
-    const mainRoute = this.routes.get(garageArea.routeId);
-    const spawnDistance = mainRoute.closed
-      ? wrap(garageArea.mainDistance + garageArea.direction * 620, mainRoute.length)
-      : clamp(garageArea.mainDistance + garageArea.direction * 620, 60, mainRoute.length - 140);
-    this.initialSpawn = this.sampleLane(garageArea.routeId, spawnDistance, 0, garageArea.direction);
-    this.initialSpawn.position.y += 0.65;
-    this.initialSpawn.serviceAreaId = garageArea.id;
-    this.initialSpawn.label = 'Shibaura PA outbound merge';
+    // Spawn (boot + garage exit) on the Tatsumi PA deck, facing the ramp_8
+    // exit. Falls back to the legacy beside-the-garage mainline spawn when
+    // the deck prototype could not be placed.
+    const tatsumiArea = this.serviceAreas.find((area) => area.id === 'tatsumi_pa' && area.futureAnchors?.spawn);
+    if (tatsumiArea) {
+      const anchor = tatsumiArea.futureAnchors.spawn;
+      const tangent = tatsumiArea.tangent.clone();
+      const normal = horizontalNormal(tangent, new THREE.Vector3());
+      const position = anchor.position.clone();
+      position.y += 0.65;
+      const quaternion = yawQuaternion(tangent, new THREE.Quaternion());
+      this.initialSpawn = {
+        routeId: tatsumiArea.exitRouteId || null,
+        position,
+        point: position,
+        center: position.clone(),
+        tangent,
+        forward: tangent,
+        normal,
+        right: normal.clone(),
+        left: normal.clone().multiplyScalar(-1),
+        up: UP.clone(),
+        quaternion,
+        rotation: quaternion,
+        heading: anchor.heading,
+        serviceAreaId: tatsumiArea.id,
+        label: 'Tatsumi PA deck',
+      };
+    } else {
+      const mainRoute = this.routes.get(garageArea.routeId);
+      const spawnDistance = mainRoute.closed
+        ? wrap(garageArea.mainDistance + garageArea.direction * 620, mainRoute.length)
+        : clamp(garageArea.mainDistance + garageArea.direction * 620, 60, mainRoute.length - 140);
+      this.initialSpawn = this.sampleLane(garageArea.routeId, spawnDistance, 0, garageArea.direction);
+      this.initialSpawn.position.y += 0.65;
+      this.initialSpawn.serviceAreaId = garageArea.id;
+      this.initialSpawn.label = 'Shibaura PA outbound merge';
+    }
     this.garagePosition = garageArea.garageEntrance.clone();
 
     if (this.scene) {
@@ -494,7 +581,9 @@ export class HighwayMap {
   // ------------------------------------------------------------------
 
   _defineNetwork() {
-    const data = ROUTE_DATA;
+    // Left-hand (Japanese) traffic is the default; options.legacyFlow keeps
+    // the original mirrored right-hand flow for comparison probes.
+    const data = this.options.legacyFlow === true ? ROUTE_DATA : reverseNetworkData(ROUTE_DATA);
     this.networkMeta = data.meta;
     this.groups = new Map((data.groups || []).map((group) => [group.id, group]));
     this._terrainSlabs = data.terrain || [];
@@ -1446,6 +1535,106 @@ export class HighwayMap {
         grade: (elevation - exitTarget.position.y) / Math.max(1, exitEdge.distanceTo(exitTarget.position)),
       },
     };
+
+    // 8. Player exit onto ramp_8. Under left-hand traffic ramp_8 descends
+    //    alongside the deck (route 9 -> wangan_0), passing within a few
+    //    metres of deck level, so a short one-lane connector can leave the
+    //    parking rows, cross the deck edge and glue onto the ramp's
+    //    deck-facing edge exactly like the legacy PA access lanes did:
+    //    the final two points ride the host's outer edge and a merge edge
+    //    hands the junction to the standard mouth/zone machinery (deck
+    //    blending, guardrail opening, dashed boundary, gore). Everything is
+    //    measured from the fitted runtime centrelines — no hand-typed
+    //    coordinate. Traffic never uses it (kind service, traffic false).
+    const rampSideSign = Math.sign(local(this._projectToRoute(ramp8, center).point).v - best.centerV) || -1;
+    const deckEdgeHalf = width * 0.5;
+    const deckLocalOf = (point) => ({
+      u: (point.x - center.x) * tangent.x + (point.z - center.z) * tangent.z,
+      v: (point.x - center.x) * outward.x + (point.z - center.z) * outward.z,
+    });
+    const glue = (station) => {
+      const hostSample = this._sampleCenter(ramp8, station, 1);
+      const towardDeck = TMP_A.copy(center).sub(hostSample.position);
+      const mouthSide = towardDeck.dot(hostSample.normal) >= 0 ? 1 : -1;
+      return hostSample.position.clone()
+        .addScaledVector(hostSample.normal, mouthSide * Math.max(0.8, ramp8.halfWidth - 1.6));
+    };
+    const glueTargetA = deckPoint(length * 0.45, rampSideSign * (deckEdgeHalf + 6));
+    const glueStationA = this._projectToRoute(ramp8, glueTargetA).distance;
+    const glueStationB = Math.min(ramp8.length - 40, glueStationA + 60);
+    if (glueStationB - glueStationA > 24) {
+      const lift = 0.05; // keep the on-deck lane clear of the lot slab surface
+      const onDeck = (u, v) => {
+        const point = deckPoint(u, v);
+        point.y = elevation + lift;
+        return point;
+      };
+      // The apron stays at deck height across the gap and along its first
+      // glued metres (an over-the-shoulder lip well past the collision
+      // coplanar tolerance, so the connector keeps its own corridor while
+      // its centre is still outside the ramp's drivable band), and only
+      // touches down once the lane rides the ramp's outer lane — where the
+      // host corridor already owns the car. No invisible dead band between
+      // the two, unlike the legacy access-lane mouths.
+      const glueA = glue(glueStationA);
+      glueA.y = elevation + lift;
+      const glueB = glue(glueStationB);
+      const edgeLeave = onDeck(length * 0.19, rampSideSign * (deckEdgeHalf - 0.6));
+      const midGap = edgeLeave.clone().lerp(glueA, 0.5);
+      midGap.y = elevation + lift;
+      const exitPoints = [
+        onDeck(-length * 0.2, rampSideSign * (deckEdgeHalf - 2.8)),
+        onDeck(length * 0.0, rampSideSign * (deckEdgeHalf - 1.9)),
+        edgeLeave,
+        midGap,
+        glueA,
+        glueB,
+      ];
+      const exitRoute = this._registerRoute({
+        id: 'tatsumi_pa_exit',
+        code: 'PA',
+        name: 'Tatsumi PA exit',
+        kind: 'service',
+        group: def.id,
+        synthetic: true,
+        points: exitPoints,
+        lanes: 1,
+        laneWidth: 4.6,
+        oneWay: true,
+        bidirectional: false,
+        speedLimit: 40,
+        traffic: false,
+        shoulder: 1.0,
+        destinations: [['湾岸線', 'WANGAN LINE']],
+      });
+      this._addEdge({
+        from: { routeId: exitRoute.id, distance: 'end', direction: 1 },
+        to: { routeId: ramp8.id, distance: glueStationB, direction: 1 },
+        kind: 'merge',
+        name: 'Tatsumi PA exit',
+      });
+      area.exitRouteId = exitRoute.id;
+      // Open the perimeter fence/kerb where the connector crosses the deck
+      // edge (exact centreline crossing of the fence line, padded for the
+      // lane width at its shallow leaving angle).
+      const fenceLine = deckEdgeHalf - 0.3;
+      let crossU = length * 0.18;
+      for (let i = 1; i < exitPoints.length; i += 1) {
+        const a = deckLocalOf(exitPoints[i - 1]);
+        const b = deckLocalOf(exitPoints[i]);
+        const aOut = Math.abs(a.v) >= fenceLine;
+        const bOut = Math.abs(b.v) >= fenceLine;
+        if (aOut === bOut) continue;
+        const t = (fenceLine - Math.abs(a.v)) / Math.max(1e-6, Math.abs(b.v) - Math.abs(a.v));
+        crossU = a.u + (b.u - a.u) * t;
+        break;
+      }
+      area.fenceOpenings = [{
+        side: rampSideSign,
+        from: Math.max(-length * 0.5 + 4, crossU - 14),
+        to: Math.min(length * 0.5 - 4, crossU + 16),
+      }];
+    }
     return area;
   }
 
@@ -5413,8 +5602,8 @@ export class HighwayMap {
     // painted onto the deck through _paintStrip so they share the road's
     // authoritative frame (see _frameAt) instead of floating as world-
     // horizontal boxes.
-    const dashStep = isService ? 26 : 15;
-    const dashLength = 6.2;
+    const dashStep = isService ? SERVICE_DASH_PERIOD : LANE_DASH_PERIOD;
+    const dashLength = LANE_DASH_LENGTH;
     // Junction mouths: paint only on the drawn part of the deck. Sections
     // covered by the host carry the HOST's paint; lines within the clipped
     // strip would float on (or duplicate over) the host surface. Where the
@@ -5580,7 +5769,7 @@ export class HighwayMap {
       const pieces = zone.dashPieces?.length ? zone.dashPieces : [zone.dash];
       for (const piece of pieces) {
         for (const [from, to] of this._zoneIntervalPieces(route, [piece.from, piece.to])) {
-          this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, 10, 5, 6, from, to);
+          this._paintDashedStrip(route, 'marking', () => zone.dashLat, 0.18, ZONE_DASH_PERIOD, ZONE_DASH_LENGTH, 6, from, to);
         }
       }
     }
@@ -5609,8 +5798,8 @@ export class HighwayMap {
           path('aux-inner-marking'),
           'marking',
           0.18,
-          10,
-          5,
+          ZONE_DASH_PERIOD,
+          ZONE_DASH_LENGTH,
           6,
           transition.openingStart,
           transition.transferComplete,
@@ -5621,8 +5810,8 @@ export class HighwayMap {
         // is suppressed before transfer. Host/branch chainages do not advance
         // at exactly 1:1 here, so mapping that real dash endpoint avoids the
         // small but visible phase drift left by a constant chainage offset.
-        const dividerPeriod = 15;
-        const dividerLength = 6.2;
+        const dividerPeriod = LANE_DASH_PERIOD;
+        const dividerLength = LANE_DASH_LENGTH;
         const routeDividerPhase = 6;
         const lastSuppressedDash = Math.floor((
           transition.transferCompleteBranch
@@ -5684,8 +5873,8 @@ export class HighwayMap {
             ? transition.auxInnerMarkingLateralAt(frame.distance)
             : transition.boundaryLateralAt(frame.distance),
           0.18,
-          10,
-          5,
+          ZONE_DASH_PERIOD,
+          ZONE_DASH_LENGTH,
           6,
           from,
           to,
@@ -5705,8 +5894,8 @@ export class HighwayMap {
             'marking',
             (frame) => transition.auxDividerLateralAt(frame.distance),
             0.18,
-            10,
-            5,
+            ZONE_DASH_PERIOD,
+            ZONE_DASH_LENGTH,
             6,
             from,
             to,
@@ -6402,19 +6591,47 @@ export class HighwayMap {
         }
       }
 
-      // kerb line under the perimeter fence
-      for (const side of [-1, 1]) {
-        const kerb = area.center.clone().addScaledVector(area.normal, side * (area.width * 0.5 - 0.28));
-        kerb.y = area.elevation + 0.09;
-        this._instance(kerb, vec(0.5, 0.18, area.length), orientation, 0x8f959e, 'box:parkedBody');
-      }
-
-      // perimeter fence (visual; the lot corridor is the collision)
+      // kerb line + perimeter fence, split around any exit openings on that
+      // side (area.fenceOpenings: u-ranges along the lot tangent where a
+      // connector lane crosses the deck edge — the Tatsumi ramp_8 exit).
+      const sideRuns = (side) => {
+        const openings = (area.fenceOpenings || [])
+          .filter((opening) => opening.side === side)
+          .sort((a, b) => a.from - b.from);
+        const runs = [];
+        let cursor = -area.length * 0.5;
+        for (const opening of openings) {
+          if (opening.from > cursor + 0.5) runs.push([cursor, opening.from]);
+          cursor = Math.max(cursor, opening.to);
+        }
+        if (area.length * 0.5 > cursor + 0.5) runs.push([cursor, area.length * 0.5]);
+        return runs;
+      };
       const fenceY = area.elevation + 0.6;
       for (const side of [-1, 1]) {
-        const rail = area.center.clone().addScaledVector(area.normal, side * (area.width * 0.5 - 0.3));
-        rail.y = fenceY;
-        this._instance(rail, vec(0.3, 1.2, area.length), orientation, null, 'box:fence');
+        for (const [runFrom, runTo] of sideRuns(side)) {
+          const runCenter = (runFrom + runTo) * 0.5;
+          const runLength = runTo - runFrom;
+          const kerb = area.center.clone()
+            .addScaledVector(area.tangent, runCenter)
+            .addScaledVector(area.normal, side * (area.width * 0.5 - 0.28));
+          kerb.y = area.elevation + 0.09;
+          this._instance(kerb, vec(0.5, 0.18, runLength), orientation, 0x8f959e, 'box:parkedBody');
+          const rail = area.center.clone()
+            .addScaledVector(area.tangent, runCenter)
+            .addScaledVector(area.normal, side * (area.width * 0.5 - 0.3));
+          rail.y = fenceY;
+          this._instance(rail, vec(0.3, 1.2, runLength), orientation, null, 'box:fence');
+          // end posts so the opening reads as intentional, not a missing rail
+          for (const [endU, isOpeningEnd] of [[runFrom, runFrom > -area.length * 0.5 + 1], [runTo, runTo < area.length * 0.5 - 1]]) {
+            if (!isOpeningEnd) continue;
+            const post = area.center.clone()
+              .addScaledVector(area.tangent, endU)
+              .addScaledVector(area.normal, side * (area.width * 0.5 - 0.3));
+            post.y = fenceY;
+            this._instance(post, vec(0.42, 1.3, 0.42), orientation, null, 'box:fence');
+          }
+        }
       }
       for (const endSide of [-1, 1]) {
         // One rail on the outward half only: the access lane crosses the lot
