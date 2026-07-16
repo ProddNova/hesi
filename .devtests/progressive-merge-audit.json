@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generatedFromBase": "e960f501776552cca3e46b911c7f46f684d45dfd",
+    "generatedFromBase": "1a80b1b2be8f7e4e25b923de3a79413c302b7e91",
     "totalConnections": 56,
     "merges": 27,
     "diverges": 29,
@@ -9,19 +9,14 @@
     "automaticSuitable": 2,
     "manualReview": 54,
     "selectedPrototypeIds": [
-      "J0:merge:c1_0:c1_3:end",
       "J2:diverge:c1_0:r1_0:start",
-      "J8:merge:r11_0:ramp_1:end",
-      "J10:merge:wangan_1:ramp_3:end"
+      "J48:merge:wangan_1:ramp_41:end"
     ],
     "activePrototypeIds": [
-      "J2:diverge:c1_0:r1_0:start"
+      "J2:diverge:c1_0:r1_0:start",
+      "J48:merge:wangan_1:ramp_41:end"
     ],
-    "deferredPrototypeIds": [
-      "J0:merge:c1_0:c1_3:end",
-      "J8:merge:r11_0:ramp_1:end",
-      "J10:merge:wangan_1:ramp_3:end"
-    ],
+    "deferredPrototypeIds": [],
     "classificationCounts": {
       "multi-lane merge": 11,
       "vertical-ramp-complex": 44,
@@ -117,8 +112,8 @@
         "manual review required"
       ],
       "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
-      "selectedPrototype": true,
-      "prototypeLabel": "two-to-two merge",
+      "selectedPrototype": false,
+      "prototypeLabel": null,
       "worldCoordinates": {
         "x": -897.45,
         "y": 52.37,
@@ -289,7 +284,7 @@
       ],
       "manualReviewReason": null,
       "selectedPrototype": true,
-      "prototypeLabel": "left-side diverge",
+      "prototypeLabel": "2+2 progressive diverge",
       "worldCoordinates": {
         "x": -1094.38,
         "y": 57.33,
@@ -804,8 +799,8 @@
         "manual review required"
       ],
       "manualReviewReason": "deck ownership breaks for 100 m while pavements still overlap in plan",
-      "selectedPrototype": true,
-      "prototypeLabel": "one-to-two merge",
+      "selectedPrototype": false,
+      "prototypeLabel": null,
       "worldCoordinates": {
         "x": -1128.45,
         "y": 73.04,
@@ -976,8 +971,8 @@
         "manual review required"
       ],
       "manualReviewReason": "deck ownership breaks for 32 m while pavements still overlap in plan",
-      "selectedPrototype": true,
-      "prototypeLabel": "two-to-three merge",
+      "selectedPrototype": false,
+      "prototypeLabel": null,
       "worldCoordinates": {
         "x": 696.08,
         "y": 29.71,
@@ -4221,8 +4216,8 @@
         "manual review required"
       ],
       "manualReviewReason": "deck ownership breaks for 12 m while pavements still overlap in plan",
-      "selectedPrototype": false,
-      "prototypeLabel": null,
+      "selectedPrototype": true,
+      "prototypeLabel": "2+3 progressive merge",
       "worldCoordinates": {
         "x": -8237.54,
         "y": 76.22,

@@ -220,11 +220,25 @@ for (const zone of map.junctionZones) {
 
 connections.sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
 const selected = connections.filter((connection) => connection.selectedPrototype);
-if (selected.length !== 4) throw new Error(`Expected exactly four selected prototypes, found ${selected.length}`);
+if (selected.length !== PROGRESSIVE_MERGE_PROTOTYPES.length) {
+  throw new Error(`Expected exactly ${PROGRESSIVE_MERGE_PROTOTYPES.length} selected prototypes, found ${selected.length}`);
+}
 for (const prototype of PROGRESSIVE_MERGE_PROTOTYPES) {
   const connection = connections.find((candidate) => candidate.id === prototype.id);
   if (!connection) throw new Error(`Selected prototype is absent from runtime audit: ${prototype.id}`);
 }
+const effectivePrototypeClassification = (connection) => {
+  const prototype = selectedById.get(connection.id);
+  if (prototype?.approvedSameLevel && !connection.progressiveDeckClassification.eligible) {
+    return {
+      category: 'same-level-approved',
+      eligible: true,
+      measuredCategory: connection.progressiveDeckClassification.category,
+      approvalReason: prototype.approvalReason,
+    };
+  }
+  return connection.progressiveDeckClassification;
+};
 
 const classificationCounts = {};
 for (const connection of connections) {
@@ -233,7 +247,7 @@ for (const connection of connections) {
   }
 }
 const summary = {
-  generatedFromBase: 'e960f501776552cca3e46b911c7f46f684d45dfd',
+  generatedFromBase: '1a80b1b2be8f7e4e25b923de3a79413c302b7e91',
   totalConnections: connections.length,
   merges: connections.filter((connection) => connection.type === 'merge').length,
   diverges: connections.filter((connection) => connection.type === 'diverge').length,
@@ -242,9 +256,9 @@ const summary = {
   automaticSuitable: connections.filter((connection) => connection.automaticGenerationSuitability !== 'manual-review').length,
   manualReview: connections.filter((connection) => connection.automaticGenerationSuitability === 'manual-review').length,
   selectedPrototypeIds: selected.map((connection) => connection.id),
-  activePrototypeIds: selected.filter((connection) => connection.progressiveDeckClassification.eligible)
+  activePrototypeIds: selected.filter((connection) => effectivePrototypeClassification(connection).eligible)
     .map((connection) => connection.id),
-  deferredPrototypeIds: selected.filter((connection) => !connection.progressiveDeckClassification.eligible)
+  deferredPrototypeIds: selected.filter((connection) => !effectivePrototypeClassification(connection).eligible)
     .map((connection) => connection.id),
   classificationCounts,
 };
@@ -252,7 +266,11 @@ const summary = {
 const jsonPath = fileURLToPath(new URL('./progressive-merge-audit.json', import.meta.url));
 writeFileSync(jsonPath, `${JSON.stringify({ summary, connections }, null, 2)}\n`);
 
-const selectedRows = selected.map((connection) => `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${connection.progressiveDeckClassification.eligible ? 'active' : 'deferred'} | ${connection.progressiveDeckClassification.category} | ${connection.worldCoordinates.x}, ${connection.worldCoordinates.y}, ${connection.worldCoordinates.z} |`).join('\n');
+const selectedRows = selected.map((connection) => {
+  const classification = effectivePrototypeClassification(connection);
+  const pin = selectedById.get(connection.id).pin;
+  return `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${classification.eligible ? 'active' : 'deferred'} | ${classification.category} | ${pin.x}, ${pin.y}, ${pin.z} |`;
+}).join('\n');
 const catalogueRows = connections.map((connection) => `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${connection.existingCrossableLength} | ${connection.possibleParallelLength} | ${connection.tangentMismatchDeg} | ${connection.verticalDifference.maximumAcrossOpening} | ${connection.automaticGenerationSuitability} | ${connection.classifications.join(', ')} |`).join('\n');
 const counts = Object.entries(classificationCounts)
   .sort(([left], [right]) => left.localeCompare(right))
@@ -281,12 +299,11 @@ ${counts}
 | --- | --- | --- | ---: | --- | --- | --- |
 ${selectedRows}
 
-All four are reachable through stable P1-P4 developer-map pins. P4 is the only
-active same-level prototype; P1-P3 retain legacy geometry and are visibly
-classified as deferred/manual. The classifier consumes the renderer's own
-cross-section ownership: an ownership break while pavement still overlaps in
-plan is a multi-level transition, even if the short transfer opening itself is
-nearly level.
+Exactly two pins are exposed by the developer map: P1 is the preserved
+\`J2\` progressive diverge, and P2 is the explicitly approved lower-deck
+\`J48\` merge. No deferred or obsolete P1/P2/P3/P4 marker remains. J48 retains
+its measured classifier result in the JSON while the approved runtime status
+is reported transparently as \`same-level-approved\`.
 
 ## Complete same-level catalogue
 

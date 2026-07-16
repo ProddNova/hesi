@@ -1,10 +1,54 @@
 # Progressive Merge Checkpoint Status
 
-## Checkpoint 2 — live status (2026-07-16)
+## Corrected P1/P2 final state (2026-07-16)
+
+This section supersedes the historical checkpoint record below.
+
+| Pin | Junction | Topology | Runtime |
+| --- | --- | --- | --- |
+| P1 | `J2:diverge:c1_0:r1_0:start` | preserved 2+2 progressive diverge | active; geometry digest unchanged from successful old P4 |
+| P2 | `J48:merge:wangan_1:ramp_41:end` | two-lane `ramp_41` + three-lane `wangan_1` -> 5 -> 4 -> 3 | active; lower same-level deck explicitly approved |
+
+The developer map contains exactly `P1,P2` (`2 active · 0 deferred`). Every
+old P1/P2/P3 prototype/deferred marker is removed, and the successful old P4
+is relabelled P1 without changing its pavement, lanes, markings, rails, or
+collision geometry.
+
+P2 preserves all three `wangan_1` lanes. `ramp_41` lane 1 maps to `aux:0`
+and is absorbed second into the outer host lane; ramp lane 0 maps to `aux:1`
+and is absorbed first into `aux:0`. The phase order is derived from the exact
+rendered opening and branch-ownership terminal, not percentage/metre offsets:
+
+- true crossable opening and rigid two-lane handoff: `30965.993–31113.061` m;
+- full five-lane section: `31113.061–31186.596` m;
+- 5->4 absorption: `31186.596–31260.130` m;
+- stable four-lane section: `31260.130–31333.664` m;
+- 4->3 absorption: `31333.664–31407.199` m;
+- final host: three unchanged 3.55 m lanes.
+
+The measured handoff shifts the intact ramp carriageway 7.10 m laterally over
+147.07 m. That measured drift ratio derives each downstream 73.534 m stage.
+Both ramp-origin boundary corridors remain at least 3.540 m wide through the
+handoff, and absorption begins only after 73.534 m of stable five-lane road.
+
+The shared transition record owns the one-sided paved envelope, both temporary
+lane mappings, two sequential absorption boundaries, route/transition paint
+handoffs, exterior guardrail handoffs, branch-to-host deck blend, and collision
+corridor. Production vehicle-physics traversal passes from both ramp lanes with
+zero collisions and zero wall correction. Visual evidence is in
+`docs/progressive-merges/p2-j48/`.
+
+Focused gates: merge-handoff invariant PASS; progressive model PASS;
+geometry/paint/rail/collision PASS; both-lane dynamic drive PASS; guardrail PASS;
+P1 geometry digest
+`2779a9ef94a8b556d0a3d85e2493dbc474dc2c8fd4351303b5d797524f88d0a0`.
+
+## Historical Checkpoint 2 record
 
 Checkpoint 2 supersedes the Checkpoint 1 eligibility conclusions below while
 retaining its implementation history and visual evidence. The candidate set is
-still exactly P1–P4; no network-wide rollout is active.
+the former P1–P4 set described at that point in history; it is no longer the
+runtime pin configuration.
 
 ### Phase A complete — deck classification and legacy restoration
 

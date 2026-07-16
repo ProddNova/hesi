@@ -1,7 +1,7 @@
 # Progressive Merge Connection Audit
 
 Generated deterministically from the runtime graph and the authoritative
-junction-zone measurements on base `e960f501776552cca3e46b911c7f46f684d45dfd`.
+junction-zone measurements on base `1a80b1b2be8f7e4e25b923de3a79413c302b7e91`.
 
 ## Summary
 
@@ -9,9 +9,9 @@ junction-zone measurements on base `e960f501776552cca3e46b911c7f46f684d45dfd`.
 - Side: 19 left, 37 right
 - Automatic/curved suitable: 2
 - Manual review: 54
-- Audited/pinned candidates: exactly 4
-- Active same-level prototypes: 1
-- Deferred multi-level/manual candidates: 3
+- Audited/pinned candidates: exactly 2
+- Active same-level prototypes: 2
+- Deferred multi-level/manual candidates: 0
 
 - curved but suitable: 1
 - deck-ownership incompatibility: 52
@@ -31,17 +31,14 @@ junction-zone measurements on base `e960f501776552cca3e46b911c7f46f684d45dfd`.
 
 | Junction ID | Traffic route pair | Side | Host/branch lanes | Status | Classification | World X, Y, Z |
 | --- | --- | --- | ---: | --- | --- | --- |
-| `J0:merge:c1_0:c1_3:end` | `c1_3 -> c1_0` | left | 2/2 | deferred | vertical-ramp-complex | -897.45, 52.37, -2806.42 |
 | `J2:diverge:c1_0:r1_0:start` | `c1_0 -> r1_0` | left | 2/2 | active | same-level-simple | -1094.38, 57.33, -3014.18 |
-| `J8:merge:r11_0:ramp_1:end` | `ramp_1 -> r11_0` | right | 2/1 | deferred | vertical-ramp-complex | -1128.45, 73.04, -3825.43 |
-| `J10:merge:wangan_1:ramp_3:end` | `ramp_3 -> wangan_1` | right | 3/2 | deferred | vertical-ramp-complex | 696.08, 29.71, -5832.86 |
+| `J48:merge:wangan_1:ramp_41:end` | `ramp_41 -> wangan_1` | right | 3/2 | active | same-level-approved | -8164.3, 76.7, -24238.6 |
 
-All four are reachable through stable P1-P4 developer-map pins. P4 is the only
-active same-level prototype; P1-P3 retain legacy geometry and are visibly
-classified as deferred/manual. The classifier consumes the renderer's own
-cross-section ownership: an ownership break while pavement still overlaps in
-plan is a multi-level transition, even if the short transfer opening itself is
-nearly level.
+Exactly two pins are exposed by the developer map: P1 is the preserved
+`J2` progressive diverge, and P2 is the explicitly approved lower-deck
+`J48` merge. No deferred or obsolete P1/P2/P3/P4 marker remains. J48 retains
+its measured classifier result in the JSON while the approved runtime status
+is reported transparently as `same-level-approved`.
 
 ## Complete same-level catalogue
 

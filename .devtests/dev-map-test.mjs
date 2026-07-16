@@ -72,10 +72,8 @@ const prototypePins = await page.evaluate(() => {
   dm._drawStatic();
   const dpr = dm._dpr;
   const expected = [
-    'J8:merge:r11_0:ramp_1:end',
-    'J0:merge:c1_0:c1_3:end',
-    'J10:merge:wangan_1:ramp_3:end',
     'J2:diverge:c1_0:r1_0:start',
+    'J48:merge:wangan_1:ramp_41:end',
   ];
   const pins = dm.network.prototypePins;
   const rendered = pins.every((pin) => {
@@ -94,34 +92,43 @@ const prototypePins = await page.evaluate(() => {
   return {
     count: pins.length,
     idsMatch: pins.map((pin) => pin.id).every((id, index) => id === expected[index]),
-    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P1,P2,P3,P4',
+    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P1,P2',
     finite: pins.every((pin) => Number.isFinite(pin.x + pin.y + pin.z + pin.distance)),
     metadataComplete: pins.every((pin) => ['progressive-prototype', 'deferred-progressive-candidate'].includes(pin.category)
       && ['merge', 'diverge'].includes(pin.type)
       && ['left', 'right'].includes(pin.side)
       && Number.isInteger(pin.hostLaneCount) && pin.hostLaneCount > 0
       && Number.isInteger(pin.branchLaneCount) && pin.branchLaneCount > 0
-      && (pin.status === 'prototype-enabled' || pin.status.startsWith('deferred-'))
+      && pin.status === 'prototype-enabled'
       && typeof pin.classification === 'string'
+      && typeof pin.topology === 'string'
+      && Number.isInteger(pin.temporaryLaneCount)
+      && Number.isInteger(pin.finalLaneCount)
       && pin.teleportRouteId === pin.hostRouteId),
     categoryCounts: {
       active: pins.filter((pin) => pin.category === 'progressive-prototype').length,
       deferred: pins.filter((pin) => pin.category === 'deferred-progressive-candidate').length,
     },
-    p4: pins.find((pin) => pin.pinId === 'P4'),
+    p1: pins.find((pin) => pin.pinId === 'P1'),
+    p2: pins.find((pin) => pin.pinId === 'P2'),
     rendered,
     info: document.querySelector('[data-info="prototypes"]')?.textContent || '',
   };
 });
-check('developer map exposes exactly four audited prototype pins', prototypePins.count === 4 && prototypePins.idsMatch && prototypePins.finite);
-check('prototype pins render as P1-P4', prototypePins.labelsMatch && prototypePins.rendered, prototypePins.info);
+check('developer map exposes exactly P1 and P2', prototypePins.count === 2 && prototypePins.idsMatch && prototypePins.finite);
+check('prototype pins render as P1/P2', prototypePins.labelsMatch && prototypePins.rendered, prototypePins.info);
 check('prototype pin data exposes topology and status', prototypePins.metadataComplete
-  && prototypePins.categoryCounts.active === 1 && prototypePins.categoryCounts.deferred === 3);
-check('P4 exposes left-side active phases', prototypePins.p4?.side === 'left'
-  && prototypePins.p4?.status === 'prototype-enabled'
-  && prototypePins.p4?.classification === 'same-level-simple'
-  && prototypePins.p4?.phases
-  && Object.values(prototypePins.p4.phases).every(Number.isFinite));
+  && prototypePins.categoryCounts.active === 2 && prototypePins.categoryCounts.deferred === 0);
+check('successful old P4 is now P1 without identity drift', prototypePins.p1?.side === 'left'
+  && prototypePins.p1?.id === 'J2:diverge:c1_0:r1_0:start'
+  && prototypePins.p1?.classification === 'same-level-simple'
+  && prototypePins.p1?.phases
+  && Object.values(prototypePins.p1.phases).filter((value) => value !== null).every(Number.isFinite));
+check('P2 exposes the approved J48 5→4→3 merge', prototypePins.p2?.side === 'right'
+  && prototypePins.p2?.id === 'J48:merge:wangan_1:ramp_41:end'
+  && prototypePins.p2?.classification === 'same-level-approved'
+  && prototypePins.p2?.topology === '2+3-merge'
+  && prototypePins.p2?.laneSequence?.join(',') === '5,4,3');
 
 const prototypeInteractions = await page.evaluate(() => {
   const g = window.shutoko;
@@ -178,7 +185,7 @@ const prototypeInteractions = await page.evaluate(() => {
   dm._updateInfo();
   return results;
 });
-check('P1-P4 use the distinct prototype hit category', prototypeInteractions.every((result, index) => (
+check('P1/P2 use the distinct prototype hit category', prototypeInteractions.every((result) => (
   result.hitCategory === 'prototype'
   && result.hitId === result.expectedId
   && result.routeId === result.expectedRouteId
