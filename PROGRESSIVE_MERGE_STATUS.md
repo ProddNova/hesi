@@ -1,5 +1,42 @@
 # Progressive Merge Checkpoint Status
 
+## P2 inverse candidate gate — stopped at Phase 1 (2026-07-16)
+
+The requested inverse same-level 2+2 merge cannot be implemented faithfully
+against the current runtime network. The existing audit was rerun from verified
+`origin/main` base `1a80b1b2be8f7e4e25b923de3a79413c302b7e91` and extended with
+travel-order surface/collision profiles for every exact 2-lane-host +
+2-lane-branch merge. The graph contains 27 merges, of which exactly five meet
+the lane-count filter; none passes the authoritative same-deck classifier.
+
+Ranked result:
+
+1. `J5:merge:c1_0:r6_3:end` (`r6_3 -> c1_0`) is the closest source, but loses
+   deck ownership for three overlap samples before lateral separation, reaches
+   1.033 m deck-edge separation, and contains 19.98° tangent mismatch plus
+   54.04°/100 m curvature.
+2. `J1:merge:c1_2:c1_6:end` disconnects and reconnects inside the overlap and
+   reaches 1.931 m vertical separation / 8.47% relative grade.
+3. `J0:merge:c1_0:c1_3:end` reaches 2.620 m / 8.34%, disconnects and
+   reconnects, and never reaches clean lateral separation in the measured span.
+4. `J33:merge:r6_0:ramp_22:end` spends 72 m of planar overlap on a different
+   deck and reaches 2.924 m / 13.05%.
+5. `J16:merge:r1_3:ramp_10:end` is not a shared render/collision deck at the
+   transfer itself and reaches 2.507 m / 12.76%.
+
+The closest case is visibly part of a multi-deck interchange, not a genuine
+same-level 2+2 approach. Promoting any candidate would require either accepting
+a ramp-over-mainline overlap or rewriting source geometry, both explicitly
+forbidden by the P2 brief. Work therefore stops after the detailed
+[P2 candidate report](docs/progressive-merges/P2-CANDIDATE-REPORT.md).
+
+No production road, junction, progressive topology, marking, guardrail,
+collision, traffic, or developer-map code is changed. In particular, the
+validated `J2:diverge:c1_0:r1_0:start` output remains byte-for-byte untouched.
+The old P4-to-P1 relabel and old-pin cleanup are intentionally not performed:
+the brief's no-valid-candidate clause says to stop after reporting rather than
+manufacture or partially advertise a P2. Vertical merges remain unsolved.
+
 ## Checkpoint 2 — live status (2026-07-16)
 
 Checkpoint 2 supersedes the Checkpoint 1 eligibility conclusions below while

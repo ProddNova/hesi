@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generatedFromBase": "e960f501776552cca3e46b911c7f46f684d45dfd",
+    "generatedFromBase": "1a80b1b2be8f7e4e25b923de3a79413c302b7e91",
     "totalConnections": 56,
     "merges": 27,
     "diverges": 29,
@@ -22,6 +22,105 @@
       "J8:merge:r11_0:ramp_1:end",
       "J10:merge:wangan_1:ramp_3:end"
     ],
+    "p2TwoPlusTwoMergeCandidates": [
+      {
+        "rank": 1,
+        "id": "J5:merge:c1_0:r6_3:end",
+        "routePair": "r6_3 -> c1_0",
+        "worldCoordinates": {
+          "x": 595.11,
+          "y": 51.64,
+          "z": 463.91
+        },
+        "eligible": false,
+        "score": 172.99,
+        "rejectionReasons": [
+          "3 overlap samples lose deck ownership before lateral separation",
+          "1.033 m maximum deck-edge separation",
+          "3.65% maximum relative grade",
+          "19.98 deg maximum tangent mismatch",
+          "54.04 deg/100 m source curvature"
+        ]
+      },
+      {
+        "rank": 2,
+        "id": "J1:merge:c1_2:c1_6:end",
+        "routePair": "c1_6 -> c1_2",
+        "worldCoordinates": {
+          "x": -1144.45,
+          "y": 50.99,
+          "z": -3025.86
+        },
+        "eligible": false,
+        "score": 286.11,
+        "rejectionReasons": [
+          "9 overlap samples lose deck ownership before lateral separation",
+          "1.931 m maximum deck-edge separation",
+          "8.47% maximum relative grade",
+          "deck ownership disconnects and reconnects inside the interaction"
+        ]
+      },
+      {
+        "rank": 3,
+        "id": "J0:merge:c1_0:c1_3:end",
+        "routePair": "c1_3 -> c1_0",
+        "worldCoordinates": {
+          "x": -897.45,
+          "y": 52.37,
+          "z": -2806.42
+        },
+        "eligible": false,
+        "score": 374.66,
+        "rejectionReasons": [
+          "9 overlap samples lose deck ownership before lateral separation",
+          "2.620 m maximum deck-edge separation",
+          "8.34% maximum relative grade",
+          "measured source span never reaches clean lateral separation",
+          "deck ownership disconnects and reconnects inside the interaction"
+        ]
+      },
+      {
+        "rank": 4,
+        "id": "J33:merge:r6_0:ramp_22:end",
+        "routePair": "ramp_22 -> r6_0",
+        "worldCoordinates": {
+          "x": 962.38,
+          "y": 60.26,
+          "z": 152.46
+        },
+        "eligible": false,
+        "score": 462.76,
+        "rejectionReasons": [
+          "19 overlap samples lose deck ownership before lateral separation",
+          "2.924 m maximum deck-edge separation",
+          "13.05% maximum relative grade",
+          "56.31 deg/100 m source curvature",
+          "measured source span never reaches clean lateral separation"
+        ]
+      },
+      {
+        "rank": 5,
+        "id": "J16:merge:r1_3:ramp_10:end",
+        "routePair": "ramp_10 -> r1_3",
+        "worldCoordinates": {
+          "x": -1919.32,
+          "y": 46.54,
+          "z": -12267.59
+        },
+        "eligible": false,
+        "score": 10375.29,
+        "rejectionReasons": [
+          "transfer is not one shared render/collision deck",
+          "12 overlap samples lose deck ownership before lateral separation",
+          "2.507 m maximum deck-edge separation",
+          "12.76% maximum relative grade",
+          "measured source span never reaches clean lateral separation",
+          "deck ownership disconnects and reconnects inside the interaction"
+        ]
+      }
+    ],
+    "validP2CandidateIds": [],
+    "p2Decision": "no-valid-candidate",
     "classificationCounts": {
       "multi-lane merge": 11,
       "vertical-ramp-complex": 44,
@@ -119,6 +218,136 @@
       "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": true,
       "prototypeLabel": "two-to-two merge",
+      "maximumBankingDifferenceDeg": 6.97,
+      "availableApproachLength": 283.31,
+      "availableLaneAbsorptionLength": 124,
+      "availableFinalHostLength": 2260.1,
+      "finalHostWidth": 9.7,
+      "trafficDirection": {
+        "branch": "c1_3 increasing chainage to end transfer",
+        "host": "c1_0 increasing chainage after merge"
+      },
+      "surfaceAndCollisionConnectedness": {
+        "transferConnected": true,
+        "connectedDeckLength": 124,
+        "planarOverlapLength": 164,
+        "connectedFraction": 0.756,
+        "ownershipBreakRows": 9,
+        "reconnectsAfterOwnershipBreak": true,
+        "collisionDeckOwnership": "breaks-before-lateral-separation"
+      },
+      "interactionProfile": [
+        {
+          "branchStation": 283.31,
+          "hostStation": 11176.3,
+          "centreDeckDifference": -2.62,
+          "maximumDeckEdgeSeparation": 2.62,
+          "tangentMismatchDeg": 11.02,
+          "gradeDifference": 0.0813,
+          "bankDifferenceDeg": 5.25,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 303.31,
+          "hostStation": 11195.82,
+          "centreDeckDifference": -0.673,
+          "maximumDeckEdgeSeparation": 1.232,
+          "tangentMismatchDeg": 8.71,
+          "gradeDifference": 0.0642,
+          "bankDifferenceDeg": 6.97,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 323.31,
+          "hostStation": 11215.84,
+          "centreDeckDifference": 0.172,
+          "maximumDeckEdgeSeparation": 0.595,
+          "tangentMismatchDeg": 5.28,
+          "gradeDifference": 0.0026,
+          "bankDifferenceDeg": 5.04,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 343.31,
+          "hostStation": 11234.34,
+          "centreDeckDifference": 0.077,
+          "maximumDeckEdgeSeparation": 0.314,
+          "tangentMismatchDeg": 3.26,
+          "gradeDifference": 0.0078,
+          "bankDifferenceDeg": 2.8,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 363.31,
+          "hostStation": 11255.44,
+          "centreDeckDifference": 0.018,
+          "maximumDeckEdgeSeparation": 0.309,
+          "tangentMismatchDeg": 1.03,
+          "gradeDifference": 0.0014,
+          "bankDifferenceDeg": 3.45,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 383.31,
+          "hostStation": 11278.31,
+          "centreDeckDifference": -0.016,
+          "maximumDeckEdgeSeparation": 0.218,
+          "tangentMismatchDeg": 0.45,
+          "gradeDifference": 0.0002,
+          "bankDifferenceDeg": 2.39,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 403.31,
+          "hostStation": 11295.83,
+          "centreDeckDifference": 0.007,
+          "maximumDeckEdgeSeparation": 0.165,
+          "tangentMismatchDeg": 0.13,
+          "gradeDifference": 0.0011,
+          "bankDifferenceDeg": 1.85,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 423.31,
+          "hostStation": 11315.66,
+          "centreDeckDifference": 0.004,
+          "maximumDeckEdgeSeparation": 0.009,
+          "tangentMismatchDeg": 0.05,
+          "gradeDifference": 0.0006,
+          "bankDifferenceDeg": 0.06,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 443.31,
+          "hostStation": 11335.05,
+          "centreDeckDifference": -0.001,
+          "maximumDeckEdgeSeparation": 0.202,
+          "tangentMismatchDeg": 0.05,
+          "gradeDifference": 0.0002,
+          "bankDifferenceDeg": 2.37,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 447.31,
+          "hostStation": 11339.45,
+          "centreDeckDifference": 0,
+          "maximumDeckEdgeSeparation": 0.26,
+          "tangentMismatchDeg": 0.06,
+          "gradeDifference": 0,
+          "bankDifferenceDeg": 3.06,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        }
+      ],
       "worldCoordinates": {
         "x": -897.45,
         "y": 52.37,
@@ -205,6 +434,147 @@
       "manualReviewReason": "deck ownership breaks for 28 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
+      "maximumBankingDifferenceDeg": 3.94,
+      "availableApproachLength": 203.7,
+      "availableLaneAbsorptionLength": 104,
+      "availableFinalHostLength": 14618.56,
+      "finalHostWidth": 9.7,
+      "trafficDirection": {
+        "branch": "c1_6 increasing chainage to end transfer",
+        "host": "c1_2 increasing chainage after merge"
+      },
+      "surfaceAndCollisionConnectedness": {
+        "transferConnected": true,
+        "connectedDeckLength": 104,
+        "planarOverlapLength": 144,
+        "connectedFraction": 0.722,
+        "ownershipBreakRows": 9,
+        "reconnectsAfterOwnershipBreak": true,
+        "collisionDeckOwnership": "breaks-before-lateral-separation"
+      },
+      "interactionProfile": [
+        {
+          "branchStation": 203.7,
+          "hostStation": 10756.41,
+          "centreDeckDifference": -2.191,
+          "maximumDeckEdgeSeparation": 2.191,
+          "tangentMismatchDeg": 8.69,
+          "gradeDifference": 0.0498,
+          "bankDifferenceDeg": 1.72,
+          "planarOverlap": false,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 219.7,
+          "hostStation": 10772.48,
+          "centreDeckDifference": -1.106,
+          "maximumDeckEdgeSeparation": 1.182,
+          "tangentMismatchDeg": 11.38,
+          "gradeDifference": 0.0847,
+          "bankDifferenceDeg": 0.79,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 235.7,
+          "hostStation": 10787.62,
+          "centreDeckDifference": -0.072,
+          "maximumDeckEdgeSeparation": 0.27,
+          "tangentMismatchDeg": 8.56,
+          "gradeDifference": 0.0484,
+          "bankDifferenceDeg": 2.53,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 251.7,
+          "hostStation": 10803.84,
+          "centreDeckDifference": 0.285,
+          "maximumDeckEdgeSeparation": 0.517,
+          "tangentMismatchDeg": 5.42,
+          "gradeDifference": 0.0008,
+          "bankDifferenceDeg": 2.74,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 267.7,
+          "hostStation": 10820.46,
+          "centreDeckDifference": 0.097,
+          "maximumDeckEdgeSeparation": 0.429,
+          "tangentMismatchDeg": 3.42,
+          "gradeDifference": 0.0117,
+          "bankDifferenceDeg": 3.94,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 283.7,
+          "hostStation": 10835.91,
+          "centreDeckDifference": 0.006,
+          "maximumDeckEdgeSeparation": 0.234,
+          "tangentMismatchDeg": 1.16,
+          "gradeDifference": 0.0008,
+          "bankDifferenceDeg": 2.72,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 299.7,
+          "hostStation": 10851.74,
+          "centreDeckDifference": 0.015,
+          "maximumDeckEdgeSeparation": 0.224,
+          "tangentMismatchDeg": 0.17,
+          "gradeDifference": 0.0003,
+          "bankDifferenceDeg": 2.47,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 315.7,
+          "hostStation": 10868.83,
+          "centreDeckDifference": 0.002,
+          "maximumDeckEdgeSeparation": 0.086,
+          "tangentMismatchDeg": 0.5,
+          "gradeDifference": 0.0009,
+          "bankDifferenceDeg": 0.99,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 331.7,
+          "hostStation": 10883.65,
+          "centreDeckDifference": 0.001,
+          "maximumDeckEdgeSeparation": 0.054,
+          "tangentMismatchDeg": 0.05,
+          "gradeDifference": 0.0001,
+          "bankDifferenceDeg": 0.62,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 347.7,
+          "hostStation": 10896.44,
+          "centreDeckDifference": -0.001,
+          "maximumDeckEdgeSeparation": 0.227,
+          "tangentMismatchDeg": 0.05,
+          "gradeDifference": 0.0002,
+          "bankDifferenceDeg": 2.66,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 351.7,
+          "hostStation": 10900.34,
+          "centreDeckDifference": 0,
+          "maximumDeckEdgeSeparation": 0.279,
+          "tangentMismatchDeg": 0.02,
+          "gradeDifference": 0.0004,
+          "bankDifferenceDeg": 3.28,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        }
+      ],
       "worldCoordinates": {
         "x": -1144.45,
         "y": 50.99,
@@ -548,6 +918,147 @@
       "manualReviewReason": "deck ownership breaks for 8 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
+      "maximumBankingDifferenceDeg": 5.61,
+      "availableApproachLength": 1756.43,
+      "availableLaneAbsorptionLength": 160,
+      "availableFinalHostLength": 12034.93,
+      "finalHostWidth": 9.7,
+      "trafficDirection": {
+        "branch": "r6_3 increasing chainage to end transfer",
+        "host": "c1_0 increasing chainage after merge"
+      },
+      "surfaceAndCollisionConnectedness": {
+        "transferConnected": true,
+        "connectedDeckLength": 160,
+        "planarOverlapLength": 172,
+        "connectedFraction": 0.93,
+        "ownershipBreakRows": 3,
+        "reconnectsAfterOwnershipBreak": false,
+        "collisionDeckOwnership": "breaks-before-lateral-separation"
+      },
+      "interactionProfile": [
+        {
+          "branchStation": 1756.43,
+          "hostStation": 1386.09,
+          "centreDeckDifference": -1.696,
+          "maximumDeckEdgeSeparation": 1.696,
+          "tangentMismatchDeg": 18.95,
+          "gradeDifference": 0.0355,
+          "bankDifferenceDeg": 0,
+          "planarOverlap": false,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 1776.43,
+          "hostStation": 1404.32,
+          "centreDeckDifference": -0.515,
+          "maximumDeckEdgeSeparation": 0.733,
+          "tangentMismatchDeg": 13.87,
+          "gradeDifference": 0.0216,
+          "bankDifferenceDeg": 2.5,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 1796.43,
+          "hostStation": 1423.36,
+          "centreDeckDifference": -0.136,
+          "maximumDeckEdgeSeparation": 0.601,
+          "tangentMismatchDeg": 6.75,
+          "gradeDifference": 0.0052,
+          "bankDifferenceDeg": 5.43,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1816.43,
+          "hostStation": 1442.13,
+          "centreDeckDifference": -0.008,
+          "maximumDeckEdgeSeparation": 0.466,
+          "tangentMismatchDeg": 3.48,
+          "gradeDifference": 0.0015,
+          "bankDifferenceDeg": 5.35,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1836.43,
+          "hostStation": 1462.58,
+          "centreDeckDifference": 0.047,
+          "maximumDeckEdgeSeparation": 0.35,
+          "tangentMismatchDeg": 2.6,
+          "gradeDifference": 0.001,
+          "bankDifferenceDeg": 3.47,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1856.43,
+          "hostStation": 1482.6,
+          "centreDeckDifference": 0.049,
+          "maximumDeckEdgeSeparation": 0.308,
+          "tangentMismatchDeg": 0.61,
+          "gradeDifference": 0.0003,
+          "bankDifferenceDeg": 3.04,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1876.43,
+          "hostStation": 1502.58,
+          "centreDeckDifference": 0.052,
+          "maximumDeckEdgeSeparation": 0.397,
+          "tangentMismatchDeg": 0.33,
+          "gradeDifference": 0.0002,
+          "bankDifferenceDeg": 4.07,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1896.43,
+          "hostStation": 1522.91,
+          "centreDeckDifference": 0.057,
+          "maximumDeckEdgeSeparation": 0.277,
+          "tangentMismatchDeg": 0.07,
+          "gradeDifference": 0.0001,
+          "bankDifferenceDeg": 2.6,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1916.43,
+          "hostStation": 1542.66,
+          "centreDeckDifference": 0.026,
+          "maximumDeckEdgeSeparation": 0.066,
+          "tangentMismatchDeg": 0,
+          "gradeDifference": 0.0039,
+          "bankDifferenceDeg": 0.48,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1936.43,
+          "hostStation": 1560.26,
+          "centreDeckDifference": -0.004,
+          "maximumDeckEdgeSeparation": 0.23,
+          "tangentMismatchDeg": 0.02,
+          "gradeDifference": 0.0007,
+          "bankDifferenceDeg": 2.67,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1940.43,
+          "hostStation": 1564.62,
+          "centreDeckDifference": 0,
+          "maximumDeckEdgeSeparation": 0.256,
+          "tangentMismatchDeg": 0.05,
+          "gradeDifference": 0.001,
+          "bankDifferenceDeg": 3.01,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        }
+      ],
       "worldCoordinates": {
         "x": 595.11,
         "y": 51.64,
@@ -1494,6 +2005,125 @@
       "manualReviewReason": "transfer is not a mouth-connected shared render/collision deck",
       "selectedPrototype": false,
       "prototypeLabel": null,
+      "maximumBankingDifferenceDeg": 5.73,
+      "availableApproachLength": 1889.31,
+      "availableLaneAbsorptionLength": 136,
+      "availableFinalHostLength": 3242.73,
+      "finalHostWidth": 9.7,
+      "trafficDirection": {
+        "branch": "ramp_10 increasing chainage to end transfer",
+        "host": "r1_3 increasing chainage after merge"
+      },
+      "surfaceAndCollisionConnectedness": {
+        "transferConnected": false,
+        "connectedDeckLength": 136,
+        "planarOverlapLength": 192,
+        "connectedFraction": 0.708,
+        "ownershipBreakRows": 12,
+        "reconnectsAfterOwnershipBreak": true,
+        "collisionDeckOwnership": "breaks-before-lateral-separation"
+      },
+      "interactionProfile": [
+        {
+          "branchStation": 1889.31,
+          "hostStation": 10173.82,
+          "centreDeckDifference": 2.507,
+          "maximumDeckEdgeSeparation": 2.507,
+          "tangentMismatchDeg": 5.94,
+          "gradeDifference": 0.1276,
+          "bankDifferenceDeg": 0.91,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 1913.31,
+          "hostStation": 10197.95,
+          "centreDeckDifference": 0.051,
+          "maximumDeckEdgeSeparation": 0.111,
+          "tangentMismatchDeg": 5.64,
+          "gradeDifference": 0.0567,
+          "bankDifferenceDeg": 0.48,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1937.31,
+          "hostStation": 10221.81,
+          "centreDeckDifference": -0.051,
+          "maximumDeckEdgeSeparation": 0.412,
+          "tangentMismatchDeg": 5.04,
+          "gradeDifference": 0.0198,
+          "bankDifferenceDeg": 4.4,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1961.31,
+          "hostStation": 10245.86,
+          "centreDeckDifference": 0.063,
+          "maximumDeckEdgeSeparation": 0.494,
+          "tangentMismatchDeg": 2.66,
+          "gradeDifference": 0.0004,
+          "bankDifferenceDeg": 5.34,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 1985.31,
+          "hostStation": 10268.94,
+          "centreDeckDifference": 0.091,
+          "maximumDeckEdgeSeparation": 0.468,
+          "tangentMismatchDeg": 1.75,
+          "gradeDifference": 0.0004,
+          "bankDifferenceDeg": 4.75,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 2009.31,
+          "hostStation": 10294.94,
+          "centreDeckDifference": 0.026,
+          "maximumDeckEdgeSeparation": 0.18,
+          "tangentMismatchDeg": 0.57,
+          "gradeDifference": 0.0059,
+          "bankDifferenceDeg": 2.02,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 2033.31,
+          "hostStation": 10317.83,
+          "centreDeckDifference": 0.258,
+          "maximumDeckEdgeSeparation": 0.258,
+          "tangentMismatchDeg": 0.2,
+          "gradeDifference": 0.0024,
+          "bankDifferenceDeg": 0,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 2057.31,
+          "hostStation": 10341.77,
+          "centreDeckDifference": 0.095,
+          "maximumDeckEdgeSeparation": 0.17,
+          "tangentMismatchDeg": 0.14,
+          "gradeDifference": 0.0142,
+          "bankDifferenceDeg": 0.95,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 2081.31,
+          "hostStation": 10365.9,
+          "centreDeckDifference": -0.002,
+          "maximumDeckEdgeSeparation": 0.378,
+          "tangentMismatchDeg": 0.02,
+          "gradeDifference": 0.0003,
+          "bankDifferenceDeg": 4.77,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        }
+      ],
       "worldCoordinates": {
         "x": -1919.32,
         "y": 46.54,
@@ -2943,6 +3573,136 @@
       "manualReviewReason": "deck ownership breaks for 72 m while pavements still overlap in plan",
       "selectedPrototype": false,
       "prototypeLabel": null,
+      "maximumBankingDifferenceDeg": 3.8,
+      "availableApproachLength": 492.38,
+      "availableLaneAbsorptionLength": 124,
+      "availableFinalHostLength": 1223.93,
+      "finalHostWidth": 9.7,
+      "trafficDirection": {
+        "branch": "ramp_22 increasing chainage to end transfer",
+        "host": "r6_0 increasing chainage after merge"
+      },
+      "surfaceAndCollisionConnectedness": {
+        "transferConnected": true,
+        "connectedDeckLength": 124,
+        "planarOverlapLength": 200,
+        "connectedFraction": 0.62,
+        "ownershipBreakRows": 19,
+        "reconnectsAfterOwnershipBreak": false,
+        "collisionDeckOwnership": "breaks-before-lateral-separation"
+      },
+      "interactionProfile": [
+        {
+          "branchStation": 492.38,
+          "hostStation": 599.01,
+          "centreDeckDifference": 2.924,
+          "maximumDeckEdgeSeparation": 2.924,
+          "tangentMismatchDeg": 0.88,
+          "gradeDifference": 0.1267,
+          "bankDifferenceDeg": 3.41,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 516.38,
+          "hostStation": 622.95,
+          "centreDeckDifference": 0.737,
+          "maximumDeckEdgeSeparation": 1,
+          "tangentMismatchDeg": 1.86,
+          "gradeDifference": 0.0724,
+          "bankDifferenceDeg": 3.39,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 540.38,
+          "hostStation": 647.95,
+          "centreDeckDifference": 0.306,
+          "maximumDeckEdgeSeparation": 0.316,
+          "tangentMismatchDeg": 9.99,
+          "gradeDifference": 0.0187,
+          "bankDifferenceDeg": 0.44,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 564.38,
+          "hostStation": 671.67,
+          "centreDeckDifference": 0.207,
+          "maximumDeckEdgeSeparation": 0.228,
+          "tangentMismatchDeg": 5.45,
+          "gradeDifference": 0.001,
+          "bankDifferenceDeg": 0,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": false
+        },
+        {
+          "branchStation": 588.38,
+          "hostStation": 695.92,
+          "centreDeckDifference": 0.053,
+          "maximumDeckEdgeSeparation": 0.059,
+          "tangentMismatchDeg": 2.44,
+          "gradeDifference": 0.0001,
+          "bankDifferenceDeg": 0,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 612.38,
+          "hostStation": 719.86,
+          "centreDeckDifference": 0.01,
+          "maximumDeckEdgeSeparation": 0.012,
+          "tangentMismatchDeg": 0.6,
+          "gradeDifference": 0.0011,
+          "bankDifferenceDeg": 0,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 636.38,
+          "hostStation": 743.8,
+          "centreDeckDifference": -0.025,
+          "maximumDeckEdgeSeparation": 0.057,
+          "tangentMismatchDeg": 1.48,
+          "gradeDifference": 0.0027,
+          "bankDifferenceDeg": 0.37,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 660.38,
+          "hostStation": 767.82,
+          "centreDeckDifference": 0.004,
+          "maximumDeckEdgeSeparation": 0.106,
+          "tangentMismatchDeg": 0.46,
+          "gradeDifference": 0,
+          "bankDifferenceDeg": 1.3,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 684.38,
+          "hostStation": 791.68,
+          "centreDeckDifference": 0,
+          "maximumDeckEdgeSeparation": 0.202,
+          "tangentMismatchDeg": 0.02,
+          "gradeDifference": 0.0001,
+          "bankDifferenceDeg": 2.56,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        },
+        {
+          "branchStation": 692.38,
+          "hostStation": 799.51,
+          "centreDeckDifference": 0,
+          "maximumDeckEdgeSeparation": 0.299,
+          "tangentMismatchDeg": 0.03,
+          "gradeDifference": 0.0002,
+          "bankDifferenceDeg": 3.8,
+          "planarOverlap": true,
+          "sharedRenderCollisionDeck": true
+        }
+      ],
       "worldCoordinates": {
         "x": 962.38,
         "y": 60.26,

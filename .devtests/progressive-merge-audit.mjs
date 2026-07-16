@@ -7,6 +7,7 @@
  *   docs/progressive-merges/AUDIT.md
  */
 import { writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from '../js/progressive-merge-prototypes.js';
 import { classifyProgressiveJunction } from '../js/progressive-junction-classifier.js';
@@ -20,6 +21,11 @@ console.warn = originalWarn;
 const deg = (radians) => radians * 180 / Math.PI;
 const round = (value, digits = 3) => Number.isFinite(value) ? +value.toFixed(digits) : null;
 const intervalLength = (interval) => interval ? Math.max(0, interval[1] - interval[0]) : 0;
+const horizontalGrade = (tangent) => tangent.y / Math.max(1e-6, Math.hypot(tangent.x, tangent.z));
+const deckEdgeSeparation = (row) => Math.max(
+  Math.abs(row.dy),
+  ...(row.dyEnds || []).map((value) => Math.abs(value)),
+);
 const angleBetween = (a, b) => {
   const cross = a.z * b.x - a.x * b.z;
   const dot = a.x * b.x + a.z * b.z;
@@ -78,6 +84,9 @@ for (const zone of map.junctionZones) {
   const hostBank = deg(map._bankAt(host, projected.distance));
   const branchBank = deg(map._bankAt(branch, mouthDistance));
   const bankDifference = Math.abs(hostBank - branchBank);
+  const maximumBankDifference = Math.max(...zone.samples.map((row) => (
+    Math.abs(deg(map._bankAt(branch, row.bS)) - deg(map._bankAt(host, row.hS)))
+  )));
   const maximumTangentMismatchAcrossMouth = Math.max(...zone.samples.map((row) => (
     angleBetween(row.frame.tangent, map._sampleCenter(host, row.hS, 1).tangent)
   )));
@@ -107,6 +116,12 @@ for (const zone of map.junctionZones) {
   );
   const branchCurvature = maxCurvatureDegPer100(branch, zone.branchSpan[0], zone.branchSpan[1]);
   const curvature = Math.max(hostCurvature, branchCurvature);
+  const availableApproachLength = zone.which === 'end'
+    ? zone.branchSpan[0]
+    : Math.max(0, branch.length - zone.branchSpan[1]);
+  const availableFinalHostLength = host.closed
+    ? host.length
+    : Math.max(0, host.length - projected.distance);
   const openingMid = zone.markingOpening
     ? (zone.markingOpening.host[0] + zone.markingOpening.host[1]) * 0.5
     : hostValue(zone, projected.distance);
@@ -164,6 +179,31 @@ for (const zone of map.junctionZones) {
     categories.push('curved but suitable');
   }
 
+  const seriousP2Candidate = zone.kind === 'merge' && host.lanes === 2 && branch.lanes === 2;
+  // Junction rows are stored transfer-outward for every mouth. P2 evidence is
+  // deliberately emitted in the branch's actual traffic order: an end merge
+  // travels from the smaller branch station toward its transfer endpoint.
+  const travelRows = zone.which === 'end' ? [...zone.samples].reverse() : [...zone.samples];
+  const interactionProfile = seriousP2Candidate
+    ? travelRows.filter((row, index) => (
+      index === 0 || index === travelRows.length - 1 || index % Math.max(1, Math.floor(travelRows.length / 8)) === 0
+    )).map((row) => {
+      const hostTangent = map._sampleCenter(host, row.hS, 1).tangent;
+      const branchTangent = map._sampleCenter(branch, row.bS, 1).tangent;
+      return {
+        branchStation: round(row.bS, 2),
+        hostStation: round(row.hU, 2),
+        centreDeckDifference: round(row.dy, 3),
+        maximumDeckEdgeSeparation: round(deckEdgeSeparation(row), 3),
+        tangentMismatchDeg: round(angleBetween(branchTangent, hostTangent), 2),
+        gradeDifference: round(Math.abs(horizontalGrade(branchTangent) - horizontalGrade(hostTangent)), 4),
+        bankDifferenceDeg: round(Math.abs(deg(map._bankAt(branch, row.bS)) - deg(map._bankAt(host, row.hS))), 2),
+        planarOverlap: row.innerEdge < row.hostHalf - 0.3,
+        sharedRenderCollisionDeck: row.merged && row.innerEdge < row.hostHalf - 0.3,
+      };
+    })
+    : null;
+
   connections.push({
     id: zone.id,
     hostRouteId: host.id,
@@ -210,6 +250,27 @@ for (const zone of map.junctionZones) {
     manualReviewReason: issues.length ? issues.join('; ') : null,
     selectedPrototype: selectedById.has(zone.id),
     prototypeLabel: selectedById.get(zone.id)?.label ?? null,
+    ...(seriousP2Candidate ? {
+      maximumBankingDifferenceDeg: round(maximumBankDifference, 2),
+      availableApproachLength: round(availableApproachLength, 2),
+      availableLaneAbsorptionLength: deckClassification.metrics.connectedDeckLength,
+      availableFinalHostLength: round(availableFinalHostLength, 2),
+      finalHostWidth: round(map._halfWidthAt(host, projected.distance) * 2, 2),
+      trafficDirection: {
+        branch: `${branch.id} increasing chainage to ${zone.which} transfer`,
+        host: `${host.id} increasing chainage after merge`,
+      },
+      surfaceAndCollisionConnectedness: {
+        transferConnected: deckClassification.metrics.transferConnected,
+        connectedDeckLength: deckClassification.metrics.connectedDeckLength,
+        planarOverlapLength: deckClassification.metrics.planarOverlapLength,
+        connectedFraction: deckClassification.metrics.connectedFraction,
+        ownershipBreakRows: deckClassification.metrics.ownershipBreakRows,
+        reconnectsAfterOwnershipBreak: deckClassification.metrics.reconnectsAfterOwnershipBreak,
+        collisionDeckOwnership: deckClassification.metrics.collisionDeckOwnership,
+      },
+      interactionProfile,
+    } : {}),
     worldCoordinates: {
       x: round(coordinateSample.position.x, 2),
       y: round(coordinateSample.position.y, 2),
@@ -232,8 +293,67 @@ for (const connection of connections) {
     classificationCounts[category] = (classificationCounts[category] || 0) + 1;
   }
 }
+
+const p2RejectionReasons = (candidate) => {
+  const metrics = candidate.progressiveDeckClassification.metrics;
+  const reasons = [];
+  if (!metrics.transferConnected) {
+    reasons.push('transfer is not one shared render/collision deck');
+  }
+  if (metrics.ownershipBreakRows > 0) {
+    reasons.push(`${metrics.ownershipBreakRows} overlap samples lose deck ownership before lateral separation`);
+  }
+  if (metrics.maximumVerticalDeckSeparation > 0.75) {
+    reasons.push(`${metrics.maximumVerticalDeckSeparation.toFixed(3)} m maximum deck-edge separation`);
+  }
+  if (metrics.maximumGradeDifference > 0.035) {
+    reasons.push(`${(metrics.maximumGradeDifference * 100).toFixed(2)}% maximum relative grade`);
+  }
+  if (candidate.maximumTangentMismatchAcrossMouthDeg > 12) {
+    reasons.push(`${candidate.maximumTangentMismatchAcrossMouthDeg.toFixed(2)} deg maximum tangent mismatch`);
+  }
+  if (candidate.curvatureDegPer100m.maximum > 50) {
+    reasons.push(`${candidate.curvatureDegPer100m.maximum.toFixed(2)} deg/100 m source curvature`);
+  }
+  if (!metrics.lateralSeparationReached) {
+    reasons.push('measured source span never reaches clean lateral separation');
+  }
+  if (metrics.reconnectsAfterOwnershipBreak) {
+    reasons.push('deck ownership disconnects and reconnects inside the interaction');
+  }
+  return reasons;
+};
+
+const p2CandidateScore = (candidate) => {
+  const metrics = candidate.progressiveDeckClassification.metrics;
+  return (metrics.transferConnected ? 0 : 10000)
+    + metrics.maximumVerticalDeckSeparation * 100
+    + metrics.ownershipBreakRows * 4
+    + metrics.maximumGradeDifference * 100
+    + candidate.curvatureDegPer100m.maximum
+    + (metrics.reconnectsAfterOwnershipBreak ? 25 : 0)
+    + (metrics.lateralSeparationReached ? 0 : 25);
+};
+
+const rankedP2Candidates = connections
+  .filter((connection) => connection.type === 'merge'
+    && connection.hostLaneCount === 2 && connection.branchLaneCount === 2)
+  .sort((left, right) => p2CandidateScore(left) - p2CandidateScore(right))
+  .map((candidate, index) => ({
+    rank: index + 1,
+    id: candidate.id,
+    routePair: candidate.trafficRoutePair,
+    worldCoordinates: candidate.worldCoordinates,
+    eligible: candidate.progressiveDeckClassification.eligible,
+    score: round(p2CandidateScore(candidate), 2),
+    rejectionReasons: p2RejectionReasons(candidate),
+  }));
+const validP2Candidates = rankedP2Candidates.filter((candidate) => candidate.eligible);
+const auditedBase = execFileSync(
+  'git', ['merge-base', 'HEAD', 'origin/main'], { encoding: 'utf8' },
+).trim();
 const summary = {
-  generatedFromBase: 'e960f501776552cca3e46b911c7f46f684d45dfd',
+  generatedFromBase: auditedBase,
   totalConnections: connections.length,
   merges: connections.filter((connection) => connection.type === 'merge').length,
   diverges: connections.filter((connection) => connection.type === 'diverge').length,
@@ -246,6 +366,9 @@ const summary = {
     .map((connection) => connection.id),
   deferredPrototypeIds: selected.filter((connection) => !connection.progressiveDeckClassification.eligible)
     .map((connection) => connection.id),
+  p2TwoPlusTwoMergeCandidates: rankedP2Candidates,
+  validP2CandidateIds: validP2Candidates.map((candidate) => candidate.id),
+  p2Decision: validP2Candidates.length ? 'candidate-available' : 'no-valid-candidate',
   classificationCounts,
 };
 
@@ -254,6 +377,30 @@ writeFileSync(jsonPath, `${JSON.stringify({ summary, connections }, null, 2)}\n`
 
 const selectedRows = selected.map((connection) => `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${connection.progressiveDeckClassification.eligible ? 'active' : 'deferred'} | ${connection.progressiveDeckClassification.category} | ${connection.worldCoordinates.x}, ${connection.worldCoordinates.y}, ${connection.worldCoordinates.z} |`).join('\n');
 const catalogueRows = connections.map((connection) => `| \`${connection.id}\` | \`${connection.trafficRoutePair}\` | ${connection.side} | ${connection.hostLaneCount}/${connection.branchLaneCount} | ${connection.existingCrossableLength} | ${connection.possibleParallelLength} | ${connection.tangentMismatchDeg} | ${connection.verticalDifference.maximumAcrossOpening} | ${connection.automaticGenerationSuitability} | ${connection.classifications.join(', ')} |`).join('\n');
+const p2Rows = rankedP2Candidates.map((ranked) => {
+  const candidate = connections.find((connection) => connection.id === ranked.id);
+  const metrics = candidate.progressiveDeckClassification.metrics;
+  return `| ${ranked.rank} | \`${candidate.id}\` | \`${candidate.trafficRoutePair}\` | ${candidate.worldCoordinates.x}, ${candidate.worldCoordinates.y}, ${candidate.worldCoordinates.z} | ${candidate.availableApproachLength} | ${candidate.possibleParallelLength} | ${candidate.availableLaneAbsorptionLength} | ${metrics.maximumVerticalDeckSeparation} | ${(metrics.maximumGradeDifference * 100).toFixed(2)} | ${candidate.maximumBankingDifferenceDeg} | ${candidate.maximumTangentMismatchAcrossMouthDeg} | ${candidate.curvatureDegPer100m.maximum} | ${ranked.rejectionReasons.join('; ')} |`;
+}).join('\n');
+const p2Profiles = rankedP2Candidates.map((ranked) => {
+  const candidate = connections.find((connection) => connection.id === ranked.id);
+  const rows = candidate.interactionProfile.map((sample) => (
+    `| ${sample.branchStation} | ${sample.hostStation} | ${sample.centreDeckDifference} | ${sample.maximumDeckEdgeSeparation} | ${sample.tangentMismatchDeg} | ${(sample.gradeDifference * 100).toFixed(2)} | ${sample.bankDifferenceDeg} | ${sample.planarOverlap ? 'yes' : 'no'} | ${sample.sharedRenderCollisionDeck ? 'yes' : 'no'} |`
+  )).join('\n');
+  const stem = candidate.id.split(':')[0].toLowerCase();
+  return `### ${ranked.rank}. \`${candidate.id}\` — \`${candidate.trafficRoutePair}\`
+
+![${candidate.id} plan](p2-candidate-audit/${stem}-plan.png)
+
+![${candidate.id} deck view](p2-candidate-audit/${stem}-deck.png)
+
+| Branch s | Host s | Centre ΔY m | Edge ΔY m | Tangent ° | Grade Δ % | Bank Δ ° | Plan overlap | Shared deck |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+${rows}
+
+Decision: **REJECT** — ${ranked.rejectionReasons.join('; ')}.
+`;
+}).join('\n');
 const counts = Object.entries(classificationCounts)
   .sort(([left], [right]) => left.localeCompare(right))
   .map(([category, count]) => `- ${category}: ${count}`)
@@ -274,6 +421,24 @@ junction-zone measurements on base \`${summary.generatedFromBase}\`.
 - Deferred multi-level/manual candidates: ${summary.deferredPrototypeIds.length}
 
 ${counts}
+
+## P2 exhaustive same-level 2+2 merge search
+
+The runtime graph contains ${summary.merges} merges. Exact lane-count filtering
+leaves ${rankedP2Candidates.length} serious 2-lane-host + 2-lane-branch
+candidates. Authoritative render/collision deck classification accepts
+**${validP2Candidates.length}**. The ranking below is diagnostic only: a lower
+score identifies the closest source geometry, but cannot override a failed
+same-deck invariant.
+
+| Rank | Junction | Traffic route pair | World X, Y, Z | Approach m | Parallel m | Max absorption m | Edge ΔY m | Grade Δ % | Bank Δ ° | Tangent Δ ° | Curvature °/100 m | Rejection |
+| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+${p2Rows}
+
+**Decision: ${summary.p2Decision}.** Per the P2 brief, no route is promoted and
+no prototype/developer-map configuration is changed when this gate has no
+valid candidate. Detailed travel-order profiles and runtime images are in
+[P2-CANDIDATE-REPORT.md](P2-CANDIDATE-REPORT.md).
 
 ## Selected representative prototype set
 
@@ -301,6 +466,71 @@ ${catalogueRows}
 const markdownPath = fileURLToPath(new URL('../docs/progressive-merges/AUDIT.md', import.meta.url));
 writeFileSync(markdownPath, markdown);
 
+const p2Markdown = `# P2 Same-Level 2+2 Merge Candidate Report
+
+Generated from runtime geometry on verified \`origin/main\` base
+\`${summary.generatedFromBase}\`. This report covers every graph connection
+whose operation is merge and whose host and branch both have exactly two
+lanes. Rows are sampled in actual branch travel order toward the merge, not by
+reversing P1 animation phases.
+
+## Result
+
+No genuine same-level 2+2 merge exists in the current source network. All five
+candidates either overlap while owned by different vertical decks, fail to
+connect at the transfer, or also contain source curvature/tangent defects.
+Creating P2 at any of them would violate the explicit same-level and
+no-ramp-over-mainline gates. The closest case, \`J5\`, still has a 1.033 m
+deck-edge split before lateral separation plus a 54.04 deg/100 m source curve.
+
+No road, junction geometry, progressive prototype, or developer-map marker is
+modified by this audit. The validated \`J2\` diverge therefore remains exactly
+as received, and the requested P4-to-P1/developer-map cleanup is intentionally
+not applied because the brief says to stop after the candidate report when no
+valid P2 exists.
+
+## Ranked candidates
+
+| Rank | Junction | Traffic route pair | World X, Y, Z | Approach m | Parallel m | Max absorption m | Edge ΔY m | Grade Δ % | Bank Δ ° | Tangent Δ ° | Curvature °/100 m | Rejection |
+| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+${p2Rows}
+
+## Runtime geometry in travel order
+
+\`Shared deck\` is the same emitted road-surface and collision-deck ownership
+decision used by production. A \`no\` while the paved envelopes overlap in
+plan is a vertical/multi-level interaction, not an opening available to a
+progressive four-lane merge.
+
+${p2Profiles}
+
+## Candidate order
+
+1. \`J5\` is closest by connected length and height, but is still vertically
+   split before lateral separation and has the worst unacceptable source kink
+   among the top three.
+2. \`J1\` has less vertical separation than \`J0\`, but its deck disconnects
+   and reconnects inside the overlap.
+3. \`J0\` has useful length but reaches a 2.620 m deck split, an 8.34% relative
+   grade, and never reaches clean lateral separation in the measured span.
+4. \`J33\` offers length but spends 72 m of overlap on a different deck and
+   reaches a 2.924 m split with 13.05% relative grade.
+5. \`J16\` is not a shared render/collision deck at the transfer itself, so it
+   cannot define the final stable host handoff.
+
+## Stop condition
+
+The requested P2 topology, lane mapping, marking/rail ownership, physics probe,
+visual matrix, developer-map two-pin state, and full regression/performance
+suite are not fabricated for an invalid location. Work stops at Phase 1 as
+directed by the brief. A future P2 requires corrected/new source geometry that
+provides a real same-level 2+2 merge; vertical merge support remains out of
+scope.
+`;
+const p2MarkdownPath = fileURLToPath(new URL('../docs/progressive-merges/P2-CANDIDATE-REPORT.md', import.meta.url));
+writeFileSync(p2MarkdownPath, p2Markdown);
+
 console.log(JSON.stringify(summary, null, 2));
 console.log(`audit: ${jsonPath}`);
 console.log(`summary: ${markdownPath}`);
+console.log(`P2 report: ${p2MarkdownPath}`);

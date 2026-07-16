@@ -1,7 +1,7 @@
 # Progressive Merge Connection Audit
 
 Generated deterministically from the runtime graph and the authoritative
-junction-zone measurements on base `e960f501776552cca3e46b911c7f46f684d45dfd`.
+junction-zone measurements on base `1a80b1b2be8f7e4e25b923de3a79413c302b7e91`.
 
 ## Summary
 
@@ -26,6 +26,28 @@ junction-zone measurements on base `e960f501776552cca3e46b911c7f46f684d45dfd`.
 - tangent mismatch too severe: 4
 - transition too short: 2
 - vertical-ramp-complex: 44
+
+## P2 exhaustive same-level 2+2 merge search
+
+The runtime graph contains 27 merges. Exact lane-count filtering
+leaves 5 serious 2-lane-host + 2-lane-branch
+candidates. Authoritative render/collision deck classification accepts
+**0**. The ranking below is diagnostic only: a lower
+score identifies the closest source geometry, but cannot override a failed
+same-deck invariant.
+
+| Rank | Junction | Traffic route pair | World X, Y, Z | Approach m | Parallel m | Max absorption m | Edge ΔY m | Grade Δ % | Bank Δ ° | Tangent Δ ° | Curvature °/100 m | Rejection |
+| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | `J5:merge:c1_0:r6_3:end` | `r6_3 -> c1_0` | 595.11, 51.64, 463.91 | 1756.43 | 140 | 160 | 1.033 | 3.65 | 5.61 | 19.98 | 54.04 | 3 overlap samples lose deck ownership before lateral separation; 1.033 m maximum deck-edge separation; 3.65% maximum relative grade; 19.98 deg maximum tangent mismatch; 54.04 deg/100 m source curvature |
+| 2 | `J1:merge:c1_2:c1_6:end` | `c1_6 -> c1_2` | -1144.45, 50.99, -3025.86 | 203.7 | 104 | 104 | 1.931 | 8.47 | 3.94 | 11.38 | 23.54 | 9 overlap samples lose deck ownership before lateral separation; 1.931 m maximum deck-edge separation; 8.47% maximum relative grade; deck ownership disconnects and reconnects inside the interaction |
+| 3 | `J0:merge:c1_0:c1_3:end` | `c1_3 -> c1_0` | -897.45, 52.37, -2806.42 | 283.31 | 128 | 124 | 2.62 | 8.34 | 6.97 | 11.02 | 18.32 | 9 overlap samples lose deck ownership before lateral separation; 2.620 m maximum deck-edge separation; 8.34% maximum relative grade; measured source span never reaches clean lateral separation; deck ownership disconnects and reconnects inside the interaction |
+| 4 | `J33:merge:r6_0:ramp_22:end` | `ramp_22 -> r6_0` | 962.38, 60.26, 152.46 | 492.38 | 128 | 124 | 2.924 | 13.05 | 3.8 | 9.99 | 56.31 | 19 overlap samples lose deck ownership before lateral separation; 2.924 m maximum deck-edge separation; 13.05% maximum relative grade; 56.31 deg/100 m source curvature; measured source span never reaches clean lateral separation |
+| 5 | `J16:merge:r1_3:ramp_10:end` | `ramp_10 -> r1_3` | -1919.32, 46.54, -12267.59 | 1889.31 | 168 | 136 | 2.507 | 12.76 | 5.73 | 6.45 | 13.83 | transfer is not one shared render/collision deck; 12 overlap samples lose deck ownership before lateral separation; 2.507 m maximum deck-edge separation; 12.76% maximum relative grade; measured source span never reaches clean lateral separation; deck ownership disconnects and reconnects inside the interaction |
+
+**Decision: no-valid-candidate.** Per the P2 brief, no route is promoted and
+no prototype/developer-map configuration is changed when this gate has no
+valid candidate. Detailed travel-order profiles and runtime images are in
+[P2-CANDIDATE-REPORT.md](P2-CANDIDATE-REPORT.md).
 
 ## Selected representative prototype set
 
