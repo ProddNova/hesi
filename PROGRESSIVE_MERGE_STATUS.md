@@ -88,7 +88,7 @@ hitbox, host continuation and branch continuation views. The plan/hitbox views
 show the host envelope and red wall path returning across the exit instead of
 handing exterior ownership to the branch.
 
-**Exact resume point:** Phase C will implement the source-derived P4 lane-0
+**Phase B handoff (completed in Phase C):** implement the source-derived P4 lane-0
 handoff and paved-envelope phase boundaries in the shared model. Rail and paint
 ownership will then be corrected against the same exterior/split landmarks.
 P5 remains disabled unless P4 passes all gates.
@@ -129,10 +129,151 @@ Focused results after Phase C:
 - dedicated P4 gate: geometry/topology/collision assertions now pass; only the
   intentionally unmodified rail and solid-marking assertions remain red.
 
-**Exact resume point:** Phase D will transfer outer rail ownership from the
+**Phase C handoff (completed in Phase D):** transfer outer rail ownership from the
 host to the branch at s=10973.973/140, delay the gore rails until physical
 clearance, and split transition-owned host/branch marking paths at the same
 landmarks. No geometry outside P4 is authorized.
+
+### Phase D complete — emitted ownership, markings, and guardrails
+
+The remaining paint defect was an emission-order problem, not a missing path.
+Branch-owned progressive paint was invoked while the host route was being
+dressed; world construction is sequential, so `r1_0.surfaceFrames` did not yet
+exist and those strips silently emitted no geometry. Branch paint now remains
+owned by the same progressive record but is emitted from the branch dressing
+loop, after its authoritative deck frames exist. Route-local host and branch
+paint is clipped for the full claimed A–B interval.
+
+The host solid exterior line, temporary dashed boundary, branch divider and
+post-transfer gore edge consequently use one pair of transition paths. The host
+solid no longer survives into the secondary carriageway, branch paint begins on
+the same path, and no slash/backslash fragment or retained route-local crossing
+is present.
+
+The query-only P4 ownership overlay grades geometry actually emitted, rather
+than nominal configuration:
+
+- red/green/yellow are host, branch and transition paint;
+- magenta is illegal retained paint;
+- blue/orange/white are host, branch and shared rail spans;
+- bright red is a rail/wall inside the drivable opening;
+- cyan is an unexplained rail gap.
+
+The guardrail probe was corrected at the same time. Its old chainage-only rule
+reported any host rail inside the former mouth interval as interior, even when
+the rail had moved laterally to the widened paved exterior. The corrected
+invariant compares the actual emitted parapet outer/base vertices (including
+terminal squeeze) with the authoritative progressive envelope. A rail on the
+old interior host edge still fails; only a rail at the relocated exterior
+passes. Commits `85d7f86` and `b3aee3e` contain the production ownership fix and
+its emitted-geometry diagnostics.
+
+### Phase E complete — P4 auxiliary-width visual correction
+
+Direct ownership-view inspection exposed a second, narrower P4 defect: the
+physical lane existed, but its two transition markings read as a pinched strip.
+The measured root cause had two parts:
+
+1. the host half-width already includes its 1.30 m shoulder, but the widening
+   added `laneWidth + shoulder` again. That produced a 4.85 m envelope increase
+   and left 2.60 m of dead pavement outside the solid line;
+2. transition paint was copied directly from the 3.55 m physical lane
+   boundaries. Normal outside lanes are read from their divider to an edge line
+   0.75 m inside the paved edge, which is 4.10 m here. P4 therefore looked
+   0.55 m (13.4%) narrower than the adjacent host/branch lanes.
+
+The shared record now adds exactly one 3.55 m lane to the existing host
+envelope. The outer marking sits 0.75 m inside that corrected paved edge. Once
+the lane is usable, its physical boundaries stay 3.55 m apart while its
+markings stay 4.10 m apart. During ownership transfer the same 0.55 m marking
+shoulder moves continuously from the host-exterior side to the branch-hostward
+edge; no width is lost or gained. The final targets are the real `r1_0:0`
+divider and outside edge line, not cosmetic offsets from the host road.
+
+The corrected source-derived landmarks are:
+
+| Event | Host s | Branch s |
+| --- | ---: | ---: |
+| Lane becomes fully usable | 10888.887 | — |
+| Exterior/paint/rail handoff begins | 10966.006 | 130.958 |
+| Physical source-deck split | 10988.871 | 153.907 |
+| Full lane ownership transfer / gore allowed | 10998.160 | 164.000 |
+
+The host solid ends at the measured exterior handoff. The branch-owned divider
+dash begins there with an aligned dash phase, reducing the real solid-to-dash
+handoff from the failing 10.412 m gap to 0.777 m. The post-transfer outside edge
+is already at its normal 4.10 m lateral, so there is no dashed-to-solid lateral
+settle. The host rail terminal is retained through the first real surface frame
+after analytic ownership handoff; this removes the discretisation hole while
+remaining outside the auxiliary corridor. The emitted rail handoff measures
+1.80 m in the visual overlay (2.00 m in the independent convergence probe),
+with no interior rail/wall and no unexplained gap.
+
+One temporary auxiliary lane is sufficient. `aux:0` remains one 3.55 m
+drivable corridor and feeds the actual `r1_0:0` centre/boundaries; `r1_0:1`
+forms as the second branch lane. A second P4-only temporary lane was evaluated
+but was not required, because the pinch was the duplicate-shoulder/edge-marking
+model rather than missing 2→2 topology.
+
+The strengthened P4 gate does not accept the new output by relaxing the old
+assertion. It now separately requires:
+
+- minimum physical corridor width 3.40 m (measured 3.55 m);
+- minimum marked width 4.05 m after usability (measured 4.10 m, maximum error
+  0.012 m);
+- consecutive cross-section overlap positive (minimum 0.586 m);
+- zero paved-envelope retreat, premature closure, pavement hole, collision
+  correction, intrusive rail, or intrusive wall;
+- exact real-branch centre/boundary/edge-line endpoints (all endpoint gaps
+  0.000 m);
+- conserved 0.55 m marking-shoulder budget and exact 0.75 m paved-edge inset;
+- bounded emitted paint handoffs using their real dash off-lengths.
+
+Phase E commit: `66560eb` (`Widen P4 auxiliary transition corridor`), pushed to
+`origin/codex/progressive-merge-prototype`.
+
+### P4 Phase E visual evidence
+
+The same repository camera fixtures were used before and after. Both standard
+and ownership-coloured matrices are committed:
+
+- [before width correction](docs/progressive-merges/checkpoint-2/before-width-fix/)
+- [after width correction](docs/progressive-merges/checkpoint-2/after-width-fix/)
+- [measured high plan overlay](docs/progressive-merges/checkpoint-2/after-width-fix/p4-corridor-debug-after-width-fix.png)
+
+The measured overlay exposes the auxiliary centre, both physical boundaries,
+real `r1_0:0` centre/boundaries, full-path width samples and ownership marker;
+its legend distinguishes the 3.55 m physical width from the 4.10 m marked
+width. Plan, chase, close-marking and guardrail-side views were inspected
+directly. No abrupt ribbon intersection, pavement kink, marking step, long
+unexplained gap, unrelated-lane crossing, slash fragment, blocking rail,
+collision-height switch, invisible wall or undrivable hole was observed.
+
+### Phase E validation and honest limits
+
+| Check | Result |
+| --- | --- |
+| P4 hard continuity / shared model / shared integration | PASS |
+| Dynamic P4 drive | PASS; 160.1 m, 0 collisions/corrections, 0.12 m max lane error, one `c1_0 → r1_0` ownership change |
+| A–B clipping / merge marking / marking orientation | PASS; every ownership violation counter 0, no diagonal strips |
+| Road surface | PASS; worst lateral 0.060 m, vertical 0.030 m, dash phase errors 0 |
+| Merge guardrail / guardrail | PASS; 1 exterior ownership transfer, 0 opening crossings, unexplained gaps, doubled rails or inside-asphalt rails |
+| Traffic smoke | PASS; 23 active after 20 s, finite positions |
+| Developer map | PASS 34/34; exactly P1–P4, full metadata and teleport |
+| Mobile e2e | PASS 41/41; shared DEV MAP works in landscape/portrait with pinch/pan/close |
+| Junction finishing | Known unchanged FAIL (6); P4 absent |
+| Lateral junction | PASS ratchet; P4 has 0 holes/doubles/steps/rails |
+| OSM validation | Known global FAIL 327 = 22 overlap + 245 ramp-drive + 60 smoothness; P4 absent. Restoring legacy behavior on invalid vertical P1–P3 restores 12 of their baseline wall-hit samples; no probe was weakened |
+| Network test | Global test remains red on its unrelated 70–95 km expectation (network is 206.8 km) and stale `dj` alias lookup; file was not changed in this P4 pass |
+| Performance | Only absolute Node build ratchet fails: 4111.9 ms vs 4000 ms. Browser build 3928.1 ms, 168 draw calls, 1,005,384 triangles, p95 83.3 ms, 0 errors |
+
+No P4 geometry or collision blocker remains. The only P4-specific manual
+follow-up is subjective player-speed confirmation of the now-measured visual
+rhythm; the fixed chase/marking views and production traversal are clean. The
+1.80 m rail handoff is an intentional pair of ramped terminals rather than a
+continuous full-height rail or an unexplained hole. P1–P3 remain untouched in
+legacy mode as vertical/split-level manual-review cases, P5 remains disabled,
+and no network-wide rollout or merge to `main` is authorized.
 
 ## Checkpoint contract
 
