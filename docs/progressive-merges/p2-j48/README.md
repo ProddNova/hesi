@@ -5,14 +5,20 @@ Approved transition: `J48:merge:wangan_1:ramp_41:end`, with two-lane
 
 At the nearest authoritative overlap sample, the rendered surfaces are
 75.776 m (`ramp_41`) and 75.972 m (`wangan_1`); collision decks are 75.777 m
-and 75.974 m. At the crossable opening they are 76.229/76.317 m, after which
-the ramp collision corridor defers to the single Wangan deck.
+and 75.974 m. The corrected handoff probe measures at most 0.017 m of height
+switch error while ownership transfers to the single Wangan deck.
 
-The corrected implementation uses the exact rendered opening at host station
-`30965.993` and the real ramp ownership terminal at `31113.061`. Both ramp
-lanes transfer as one rigid-width carriageway between those landmarks; neither
-lane begins absorption during that handoff. The minimum sampled pre-handoff
-lane-boundary width is 3.540 m.
+The corrected implementation derives topology from the true exterior lane
+edge of the unchanged three-lane host. Physical opening begins at host station
+`30935.105`; both ramp lanes reach their appended temporary slots and transfer
+pavement/collision ownership at `30939.383`. The full five-lane carriageway
+then remains stable until `31026.222`, before the first absorption. The first
+5→4 transition ends at `31113.061`, the four-lane plateau ends at `31199.901`,
+and the final 4→3 transition settles at `31286.740`.
+
+The right-side temporary lane-centre ordering is `10.650, 7.100, 3.550,
+0.000, -3.550 m`: two new ramp-origin slots outside the three original Wangan
+slots. The minimum sampled ramp-lane width through handoff is 3.550 m.
 
 The implemented sequence is:
 
@@ -31,9 +37,10 @@ The implemented sequence is:
 9. [Connected road-collision hitbox](p2-08-road-hitbox.png)
 10. [Annotated true-handoff plan](p2-09-handoff-debug-plan.png)
 
-The annotated plan shows `OPENING -> HANDOFF / FULL 5 START -> FULL 5 END /
-FIRST ABSORPTION -> SECOND ABSORPTION -> STABLE 3-LANE`, all five centre paths,
-and sampled widths for both ramp-origin lanes. The focused handoff, model,
-geometry/paint/collision, both-lane vehicle traversal, and guardrail probes all
-pass. Both `ramp_41` lanes traverse into `wangan_1` with zero collision events
-and zero wall correction.
+The annotated plan shows the true three-lane host exterior edge, all five
+temporary offsets, `OPENING -> HANDOFF / FULL 5 START -> FULL 5 END / FIRST
+ABSORPTION -> SECOND ABSORPTION -> STABLE 3-LANE`, and sampled widths for both
+ramp-origin lanes. The focused handoff, model, geometry/paint/collision,
+both-lane vehicle traversal, and guardrail probes all pass. Both `ramp_41`
+lanes traverse into `wangan_1` with zero collision events and zero wall
+correction.

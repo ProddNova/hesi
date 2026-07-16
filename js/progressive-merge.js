@@ -179,6 +179,24 @@ function buildRecord(map, zone, prototype) {
     }
     return branchRows.at(-1);
   };
+  const firstDescendingCrossing = (valueAt, target) => {
+    for (let index = 1; index < branchRows.length; index += 1) {
+      const left = branchRows[index - 1];
+      const right = branchRows[index];
+      const leftValue = valueAt(left);
+      const rightValue = valueAt(right);
+      if (leftValue < target || rightValue > target) continue;
+      const t = clamp((leftValue - target) / Math.max(1e-6, leftValue - rightValue), 0, 1);
+      return {
+        ...right,
+        bS: left.bS + (right.bS - left.bS) * t,
+        hS: left.hS + (right.hS - left.hS) * t,
+        hU: left.hU + (right.hU - left.hU) * t,
+        half: left.half + (right.half - left.half) * t,
+      };
+    }
+    return branchRows.at(-1);
+  };
   const alignmentRow = zone.kind === 'diverge'
     ? firstCrossing(branchExitOutwardAt, Math.abs(parallelExitCentreLateral))
     : null;
@@ -212,53 +230,49 @@ function buildRecord(map, zone, prototype) {
   const sourceGoreClearanceRow = zone.kind === 'diverge'
     ? firstCrossing((row) => row.innerEdge - row.hostHalf, 1.5)
     : null;
-  const mergeOpeningStart = twoPlusThreeMerge
-    ? Math.min(...(zone.markingOpening?.host || zone.crossable?.host || [openingStart]))
+  const branchHostwardPavementOutwardAt = (row) => {
+    const target = map._deckPoint(row.frame, zone.hostwardSign * row.half);
+    const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
+    return zone.side * projection.signedLateral;
+  };
+  // For J48, topology is determined from the real three-lane host edge, not
+  // from the old two-lane prototype's marking-opening station. OPENING is the
+  // first physical contact between the ramp pavement and the exterior lane
+  // boundary. FULL 5 begins only where the unmodified ramp pair midpoint has
+  // naturally reached the midpoint of the two appended normal-width slots.
+  const mergeOpeningRow = twoPlusThreeMerge
+    ? firstDescendingCrossing(branchHostwardPavementOutwardAt, hostLaneEdge)
     : null;
+  const mergeOpeningStart = mergeOpeningRow?.hU ?? null;
   const mergeHandoffRow = twoPlusThreeMerge
-    ? (zone.which === 'end' ? branchRows.at(-1) : branchRows[0])
+    ? firstDescendingCrossing(branchExitOutwardAt, Math.abs(parallelExitCentreLateral))
     : null;
   const mergeHandoffComplete = mergeHandoffRow?.hU ?? null;
-  const mergeDeckHandoffRow = twoPlusThreeMerge
-    ? firstCrossing((row) => {
-      const centre = map._deckPoint(row.frame, branchOuterLateral);
-      const projection = map._projectToRoute(
-        zone.host,
-        centre,
-        map._hostSeedIndex(zone.host, row.hS),
-      );
-      // Same full-vehicle inset used by collision ownership: the outer ramp
-      // lane is the last source lane to become wholly host-supported.
-      return row.hostHalf - 1.35 - zone.side * projection.signedLateral;
-    }, 0)
-    : null;
-  const mergeDeckHandoffComplete = mergeDeckHandoffRow?.hU ?? null;
+  const mergeDeckHandoffComplete = mergeHandoffComplete;
+  let mergeOpeningLateralShift = null;
   let mergeHandoffLateralShift = null;
   let mergeStageLength = null;
   if (twoPlusThreeMerge) {
-    // J48 is an end-merge: the renderer's exact crossable opening starts the
-    // shared handoff, and the ramp terminal is the first station at which the
-    // branch no longer owns any downstream pavement.  Those two measured
-    // landmarks replace the old percentage-based "parallel" guess.
+    // The ramp owns its unchanged cross-section through the geometric
+    // approach. At parallelStart its two lane centres exactly match the two
+    // appended host slots; downstream pavement/collision ownership transfers
+    // completely to the progressive host envelope.
     openingStart = mergeOpeningStart;
     parallelStart = mergeHandoffComplete;
-    const terminalHostFrame = map._frameAt(
-      zone.host,
-      map._normalizeDistance(zone.host, mergeHandoffComplete),
+    mergeOpeningLateralShift = Math.abs(
+      (hostLaneEdge + mergeOpeningRow.half) - Math.abs(parallelExitCentreLateral)
     );
-    const terminalBranchFrame = map._frameAt(zone.branch, mergeHandoffRow.bS);
-    const sourceCentre = map._deckPoint(terminalBranchFrame, branchExitCentreLateral);
-    const temporaryCentre = map._deckPoint(terminalHostFrame, parallelExitCentreLateral);
-    mergeHandoffLateralShift = Math.hypot(
-      temporaryCentre.x - sourceCentre.x,
-      temporaryCentre.z - sourceCentre.z,
+    const sourceTerminalRow = zone.which === 'end' ? branchRows.at(-1) : branchRows[0];
+    mergeHandoffLateralShift = Math.abs(
+      Math.abs(parallelExitCentreLateral) - branchExitOutwardAt(sourceTerminalRow)
     );
-    const measuredHandoffSpan = mergeHandoffComplete - mergeOpeningStart;
-    // Size every downstream stage from the actual handoff's longitudinal-to-
-    // lateral drift ratio.  Each plateau/drop receives the distance needed to
-    // move one normal lane width no faster than the real ramp-to-host handoff;
-    // no location-specific metre extension is involved.
-    mergeStageLength = measuredHandoffSpan * auxiliaryWidth / mergeHandoffLateralShift;
+    const measuredPostHandoffSpan = Math.abs(sourceTerminalRow.hU - mergeHandoffComplete);
+    // Preserve the ramp's measured post-handoff drift rate for every plateau
+    // and absorption. One stage is exactly the longitudinal run in which the
+    // source geometry would move one normal lane width; the resulting taper
+    // is geometry-derived and never falls back to a location metre constant.
+    mergeStageLength = measuredPostHandoffSpan
+      * auxiliaryWidth / Math.max(1e-6, mergeHandoffLateralShift);
   }
   let absorptionStart = clamp(
     Math.min(approachStart + length * 0.68, compatibleEnd - 8),
@@ -345,6 +359,10 @@ function buildRecord(map, zone, prototype) {
     const factor = hostS <= mergeOpeningStart
       ? 0
       : quintic((hostS - mergeOpeningStart) / (mergeHandoffComplete - mergeOpeningStart));
+    // The real ramp midpoint reaches the appended-pair midpoint here. Across
+    // the short physical opening, rotate the still-rigid 7.10 m cross-section
+    // by the measured tangent mismatch so both source lane centres terminate
+    // exactly on their host slots; no host lane index participates.
     const centre = sourceCentre.clone().multiplyScalar(1 - factor)
       .add(temporaryCentre.clone().multiplyScalar(factor));
     const outward = sourceOutward.multiplyScalar(1 - factor)
@@ -359,30 +377,68 @@ function buildRecord(map, zone, prototype) {
       pointAt(outwardOffset) {
         const point = centre.clone().addScaledVector(outward, outwardOffset);
         if (hostS >= mergeOpeningStart) {
-          const hostLateral = point.clone().sub(hostFrame.position).dot(hostFrame.normal);
-          const hostExtra = targetExtraWidth * factor;
-          const hostLower = -hostFrame.half;
-          const hostUpper = hostFrame.half + hostExtra;
-          const hostOwns = hostLateral > hostLower + 1.35
-            && hostLateral < hostUpper - 1.35;
-          if (hostOwns) {
-            point.y = hostFrame.position.y + Math.tan(hostFrame.bank) * hostLateral + lift;
-          } else {
-            const projection = map._projectToRoute(
-              zone.branch,
-              point,
-              map._hostSeedIndex(zone.branch, branchS),
-            );
-            const sourceFrame = map._frameAt(zone.branch, projection.distance);
-            point.y = sourceFrame.position.y
-              + Math.tan(sourceFrame.bank) * projection.signedLateral
-              + record.branchDeckOffsetAt(projection.distance, projection.signedLateral)
-              + lift;
-          }
+          const hostProjection = map._projectToRoute(
+            zone.host,
+            point,
+            map._hostSeedIndex(zone.host, hostS),
+          );
+          const hostDeckY = hostProjection.point.y
+            + Math.tan(map._bankAt(zone.host, hostProjection.distance))
+              * hostProjection.signedLateral;
+          const branchProjection = map._projectToRoute(
+            zone.branch,
+            point,
+            map._hostSeedIndex(zone.branch, branchS),
+          );
+          const sourceFrame = map._frameAt(zone.branch, branchProjection.distance);
+          const branchDeckY = sourceFrame.position.y
+            + Math.tan(sourceFrame.bank) * branchProjection.signedLateral;
+          // Height ownership transfers continuously with the same geometric
+          // handoff factor as plan ownership. A footprint-boundary predicate
+          // here previously flipped individual lane samples between decks and
+          // created a false vertical kink inside the opening.
+          point.y = branchDeckY + (hostDeckY - branchDeckY) * factor + lift;
         }
         return point;
       },
     };
+  };
+  const mergeFullFiveAlignmentAt = (distance, outwardOffset, lift = 0.035) => {
+    const hostS = clamp(unwrappedHostDistance(zone, distance), parallelStart, absorptionStart);
+    const startHostFrame = map._frameAt(zone.host, map._normalizeDistance(zone.host, parallelStart));
+    const endHostFrame = map._frameAt(zone.host, map._normalizeDistance(zone.host, absorptionStart));
+    const start = map._deckPoint(
+      startHostFrame,
+      parallelExitCentreLateral + zone.side * outwardOffset,
+      lift,
+    );
+    const end = map._deckPoint(
+      endHostFrame,
+      parallelExitCentreLateral + zone.side * outwardOffset,
+      lift,
+    );
+    // One complete appended carriageway width supplies the tangent-control
+    // run. The opening path arrives with the host tangent after its measured
+    // source-to-slot rotation; this full-five curve keeps that tangent and the
+    // rigid two-lane cross-section settled on the host before absorption.
+    const controlLength = Math.min(start.distanceTo(end) / 3, auxiliaryTotalWidth);
+    const control0 = start.clone().addScaledVector(startHostFrame.tangent, controlLength);
+    const control1 = end.clone().addScaledVector(endHostFrame.tangent, -controlLength);
+    const t = clamp((hostS - parallelStart) / Math.max(1e-6, absorptionStart - parallelStart), 0, 1);
+    const u = 1 - t;
+    const point = start.clone().multiplyScalar(u * u * u)
+      .add(control0.clone().multiplyScalar(3 * u * u * t))
+      .add(control1.clone().multiplyScalar(3 * u * t * t))
+      .add(end.clone().multiplyScalar(t * t * t));
+    const projection = map._projectToRoute(
+      zone.host,
+      point,
+      map._hostSeedIndex(zone.host, hostS),
+    );
+    point.y = projection.point.y
+      + Math.tan(map._bankAt(zone.host, projection.distance)) * projection.signedLateral
+      + lift;
+    return point;
   };
   const mergeEnvelopeExtraAt = (distance) => {
     if (!twoPlusThreeMerge || distance < mergeOpeningStart) return 0;
@@ -411,6 +467,7 @@ function buildRecord(map, zone, prototype) {
     mergeOpeningStart,
     mergeHandoffComplete,
     mergeDeckHandoffComplete,
+    mergeOpeningLateralShift,
     mergeHandoffLateralShift,
     mergeStageLength,
     fiveLaneStart: twoPlusThreeMerge ? parallelStart : null,
@@ -782,11 +839,19 @@ function buildRecord(map, zone, prototype) {
     absorptionStart,
     firstAbsorptionEnd,
     secondAbsorptionStart,
-    sourceTransitionEnd,
+    twoPlusThreeMerge ? null : sourceTransitionEnd,
     exteriorHandoffRow?.hU,
     physicalSplitRow?.hU,
     transitionEnd,
   );
+  if (twoPlusThreeMerge) {
+    const openingSamples = Math.max(2, Math.ceil(targetExtraWidth / 0.25));
+    for (let index = 1; index < openingSamples; index += 1) {
+      sampleStations.push(
+        openingStart + (parallelStart - openingStart) * index / openingSamples,
+      );
+    }
+  }
   sampleStations.sort((left, right) => left - right);
   const stations = sampleStations.filter((station, index) => (
     Number.isFinite(station) && (index === 0 || Math.abs(station - sampleStations[index - 1]) > 1e-4)
@@ -917,6 +982,12 @@ function buildRecord(map, zone, prototype) {
           // aux:0, retain a real four-lane plateau, then merge aux:0 into the
           // stable outer Wangan lane.
           lateral = fullLateral;
+          if (hostS < absorptionStart) {
+            const outwardOffset = -auxiliaryTotalWidth * 0.5
+              + auxiliaryWidth * (auxiliaryLane + 0.5);
+            position = mergeFullFiveAlignmentAt(hostS, outwardOffset, 0.035);
+            lateral = position.clone().sub(frame.position).dot(frame.normal);
+          }
           if (auxiliaryLane === 1 && hostS > absorptionStart) {
             const firstConvergence = quintic((hostS - absorptionStart)
               / (firstAbsorptionEnd - absorptionStart));
@@ -970,7 +1041,12 @@ function buildRecord(map, zone, prototype) {
         const innerLateral = zone.side * hostLaneEdge;
         const dividerLateral = zone.side * (hostLaneEdge + auxiliaryWidth);
         const outerLateral = zone.side * (hostLaneEdge + auxiliaryTotalWidth);
-        if (boundaryIndex === 0) {
+        if (hostS < absorptionStart) {
+          const outwardOffset = -auxiliaryTotalWidth * 0.5
+            + auxiliaryWidth * boundaryIndex;
+          boundaryPosition = mergeFullFiveAlignmentAt(hostS, outwardOffset, 0.04);
+          lateral = boundaryPosition.clone().sub(frame.position).dot(frame.normal);
+        } else if (boundaryIndex === 0) {
           lateral = innerLateral;
         } else if (boundaryIndex === 1) {
           const convergence = quintic((hostS - secondAbsorptionStart)
@@ -989,7 +1065,9 @@ function buildRecord(map, zone, prototype) {
             / (transitionEnd - secondAbsorptionStart));
           lateral = dividerLateral + (innerLateral - dividerLateral) * convergence;
         }
-        boundaryPosition = map._deckPoint(frame, lateral, 0.04);
+        if (hostS >= absorptionStart) {
+          boundaryPosition = map._deckPoint(frame, lateral, 0.04);
+        }
       } else if (branchS !== null && boundaryIndex !== null && hostS > divergePathStart) {
         const outwardOffset = -auxiliaryTotalWidth * 0.5 + auxiliaryWidth * boundaryIndex;
         boundaryPosition = divergeExitPoint(hostS, outwardOffset, 0.04);

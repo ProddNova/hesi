@@ -2104,6 +2104,26 @@ export class HighwayMap {
     if (!mouth) return null;
     const host = mouth.host;
     const half = frame.half;
+    const completedMerge = (route._progressiveTransitionsAsBranch || []).find((transition) => {
+      if (transition.topology !== '2+3-merge') return false;
+      const hostS = transition.hostAtBranch(frame.distance);
+      return hostS !== null && hostS >= transition.fiveLaneStart - 1e-4;
+    });
+    if (completedMerge) {
+      // At FULL 5 the ramp's real lane centres have reached the two appended
+      // slots. From this exact handoff onward the progressive host envelope
+      // is the sole pavement owner; retaining the old source ribbon would
+      // reintroduce two phantom lanes underneath the downstream 5→4→3 taper.
+      frame._jx = {
+        mouth,
+        hostward: completedMerge.sourceZone.hostwardSign,
+        skip: true,
+        intervals: [],
+        progressive: completedMerge.id,
+        removed: [-half, half],
+      };
+      return frame._jx;
+    }
 
     // Signed distance of a cross-section point OUTSIDE the host's paved
     // edge (g < 0 = inside the host surface), plus the vertical gap to the
@@ -2677,6 +2697,13 @@ export class HighwayMap {
         // true, so collision follows the same visible surface union instead
         // of putting an invisible wall through the source lane centre.
         if (hostS !== null && phase === 'approach' && zone.progressive.type === 'merge') return false;
+        if (hostS !== null && zone.progressive.topology === '2+3-merge'
+          && hostS >= zone.progressive.fiveLaneStart - 1e-4) {
+          // Visible ramp geometry terminates at the same full-five handoff.
+          // Collision must not resurrect that source corridor as the host
+          // envelope subsequently absorbs its two temporary lanes.
+          return true;
+        }
         if (hostS !== null) {
           const frame = this._frameAt(route, distance);
           const point = this._deckPoint(frame, lateral);
@@ -7351,13 +7378,16 @@ export class HighwayMap {
       depthWrite: false,
       toneMapped: false,
     });
-    const line = (name, records, color, lift = 0.42) => {
+    const line = (name, records, color, lift = 0.42, opacity = 0.96) => {
       const points = records.map((record) => new THREE.Vector3(
         record.x,
         record.y + lift,
         record.z,
       ));
-      const object = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material(color));
+      const object = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        material(color, opacity),
+      );
       object.name = name;
       object.renderOrder = 1100;
       object.frustumCulled = false;
@@ -7371,6 +7401,35 @@ export class HighwayMap {
       laneColors[index],
       0.55,
     ));
+    const hostLaneEdge = transition.sideSign
+      * transition.hostLaneCount * transition.auxiliaryWidth * 0.5;
+    const hostReferenceRows = transition.pavedEnvelope.filter((row) => (
+      row.hostS >= transition.approachStart - 0.01
+      && row.hostS <= transition.fiveLaneEnd + 0.01
+    ));
+    line('true three-lane host exterior edge', hostReferenceRows.map((row) => {
+      const frame = this._frameAt(
+        transition.sourceZone.host,
+        this._normalizeDistance(transition.sourceZone.host, row.hostS),
+      );
+      return this._deckPoint(frame, hostLaneEdge, 0.44);
+    }), 0xff3b30, 0, 0.92);
+    const fullFiveRows = hostReferenceRows.filter((row) => (
+      row.hostS >= transition.fiveLaneStart - 0.01
+    ));
+    [0, 1].forEach((lane) => {
+      const lateral = transition.sideSign * (
+        transition.hostLaneCount * transition.auxiliaryWidth * 0.5
+        + transition.auxiliaryWidth * (lane + 0.5)
+      );
+      line(`appended temporary slot aux:${lane}`, fullFiveRows.map((row) => {
+        const frame = this._frameAt(
+          transition.sourceZone.host,
+          this._normalizeDistance(transition.sourceZone.host, row.hostS),
+        );
+        return this._deckPoint(frame, lateral, 0.48);
+      }), lane === 0 ? 0xff8ee5 : 0xc2a8ff, 0, 0.44);
+    });
 
     const widthVertices = [];
     const handoffCorridors = transition.auxiliaryLaneCorridors.map((corridor) => (
@@ -7451,6 +7510,17 @@ export class HighwayMap {
       group.add(sprite);
     }
     const preHandoffWidths = handoffCorridors.flat().map((section) => section.width);
+    const temporaryLaneCentreOffsets = [
+      ...Array.from({ length: transition.hostLaneCount }, (_, lane) => (
+        this._laneOffset(transition.sourceZone.host, lane, 1)
+      )),
+      ...Array.from({ length: transition.auxiliaryLaneCount }, (_, lane) => (
+        transition.sideSign * (
+          transition.hostLaneCount * transition.auxiliaryWidth * 0.5
+          + transition.auxiliaryWidth * (lane + 0.5)
+        )
+      )),
+    ].sort((left, right) => (transition.sideSign > 0 ? right - left : left - right));
     group.userData = {
       readOnly: true,
       junctionId: transition.id,
@@ -7463,6 +7533,8 @@ export class HighwayMap {
       stableThreeLaneStart: transition.transitionEnd,
       minimumPreHandoffLaneWidth: Math.min(...preHandoffWidths),
       sampledPreHandoffLaneWidths: preHandoffWidths,
+      hostExteriorLaneEdgeOffset: hostLaneEdge,
+      temporaryLaneCentreOffsets,
     };
     this.group.add(group);
     this.progressiveMergeHandoffDebugOverlay = group;

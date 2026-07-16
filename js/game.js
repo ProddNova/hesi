@@ -314,6 +314,7 @@ class ShutokoNights {
     // Deterministic, query-only visual-audit cameras. These source-chainage
     // fixtures are intentionally independent of progressive phase output so
     // legacy/progressive comparisons use identical transforms.
+    const p2=this.map?.progressiveTransitionById?.get?.('J48:merge:wangan_1:ramp_41:end'),mid=(from,to)=>(from+to)*.5;
     const views={
       'high-plan':{routeId:'c1_0',distance:10928,lane:null,up:150,back:0,lateral:0,plan:true},
       'corridor-debug':{routeId:'c1_0',distance:10945,lane:null,up:125,back:0,lateral:-4,plan:true},
@@ -322,14 +323,14 @@ class ShutokoNights {
       'branch-handoff':{routeId:'r1_0',distance:148,lane:0,up:8,back:48,lateral:0},
       'guardrail-opening':{routeId:'r1_0',distance:140,lane:null,targetLateral:-4.1,up:13,back:30,lateral:-15},
       'collision-hitbox':{routeId:'c1_0',distance:10982.425,lane:null,up:72,back:0,lateral:0,plan:true,hitboxes:true},
-      'p2-handoff-debug':{routeId:'wangan_1',distance:31186.596,lane:null,up:500,back:0,lateral:0,plan:true},
-      'p2-ramp-opening':{routeId:'ramp_41',distance:575,lane:null,up:10,back:48,lateral:0},
-      'p2-full-five':{routeId:'wangan_1',distance:31148,lane:null,targetLateral:8.875,up:9,back:54,lateral:0},
-      'p2-first-abs':{routeId:'wangan_1',distance:31223,lane:null,targetLateral:8.875,up:10,back:58,lateral:0},
-      'p2-four-lane':{routeId:'wangan_1',distance:31297,lane:null,targetLateral:7.1,up:9,back:54,lateral:0},
-      'p2-second-abs':{routeId:'wangan_1',distance:31370,lane:null,targetLateral:5.9,up:10,back:58,lateral:0},
-      'p2-final-three':{routeId:'wangan_1',distance:31445,lane:0,up:8,back:52,lateral:0},
-      'p2-handoff-hitbox':{routeId:'wangan_1',distance:31045,lane:null,up:190,back:0,lateral:0,plan:true,hitboxes:true},
+      'p2-handoff-debug':{routeId:'wangan_1',distance:p2?mid(p2.openingStart,p2.transitionEnd):31110,lane:null,up:500,back:0,lateral:0,plan:true},
+      'p2-ramp-opening':{routeId:'ramp_41',distance:p2?p2.branchAtHost(mid(p2.openingStart,p2.fiveLaneStart)):555,lane:null,up:10,back:48,lateral:0},
+      'p2-full-five':{routeId:'wangan_1',distance:p2?mid(p2.fiveLaneStart,p2.fiveLaneEnd):30982,lane:null,targetLateral:8.875,up:9,back:54,lateral:0},
+      'p2-first-abs':{routeId:'wangan_1',distance:p2?mid(p2.absorptionStart,p2.firstAbsorptionEnd):31070,lane:null,targetLateral:8.875,up:10,back:58,lateral:0},
+      'p2-four-lane':{routeId:'wangan_1',distance:p2?mid(p2.firstAbsorptionEnd,p2.secondAbsorptionStart):31156,lane:null,targetLateral:7.1,up:9,back:54,lateral:0},
+      'p2-second-abs':{routeId:'wangan_1',distance:p2?mid(p2.secondAbsorptionStart,p2.transitionEnd):31243,lane:null,targetLateral:5.9,up:10,back:58,lateral:0},
+      'p2-final-three':{routeId:'wangan_1',distance:p2?p2.transitionEnd+p2.mergeStageLength*.5:31332,lane:0,up:8,back:52,lateral:0},
+      'p2-handoff-hitbox':{routeId:'wangan_1',distance:p2?mid(p2.fiveLaneStart,p2.fiveLaneEnd):30982,lane:null,up:190,back:0,lateral:0,plan:true,hitboxes:true},
       'normal-chase':{position:{x:-1052.7282169,y:64.8843403,z:-3016.0130739},target:{x:-1012.7993393,y:60.0715092,z:-3026.8561882}},
       'close-marking':{routeId:'r1_0',distance:154,lane:0,up:7,back:28,lateral:0},
       'guardrail-side':{routeId:'r1_0',distance:145,lane:null,targetLateral:-4.1,up:11,back:26,lateral:-16},
@@ -365,7 +366,7 @@ class ShutokoNights {
     const transition=this.map?.progressiveTransitionById?.get?.('J48:merge:wangan_1:ramp_41:end'),data=this.map?.progressiveMergeHandoffDebugOverlay?.userData;if(!transition||!data)return;
     const corridors=transition.auxiliaryLaneCorridors.map(corridor=>corridor.filter(section=>section.hostS<=transition.fiveLaneStart+.01)),count=corridors[0].length,indices=[0,.25,.5,.75,1].map(ratio=>Math.min(count-1,Math.round((count-1)*ratio))),samples=indices.map(index=>`${corridors[0][index].hostS.toFixed(1)}: ${corridors[0][index].width.toFixed(2)} / ${corridors[1][index].width.toFixed(2)} m`).join('<br>');
     const legend=document.createElement('div');legend.id='p2-handoff-legend';legend.style.cssText='position:fixed;left:18px;top:18px;z-index:9999;padding:13px 15px;background:rgba(2,5,12,.92);border:1px solid #fff04a;color:#f4f7ff;font:600 13px/1.43 ui-monospace,monospace;pointer-events:none;text-shadow:0 1px 2px #000;max-width:430px';
-    legend.innerHTML=`<div style="font-size:15px;color:#fff">P2 J48 TRUE HANDOFF PLAN</div><div style="color:#ff8f3f">OPENING ${transition.mergeOpeningStart.toFixed(2)}</div><div style="color:#fff04a">HANDOFF / FULL 5 START ${transition.fiveLaneStart.toFixed(2)}</div><div style="color:#55ff88">FULL 5 END / FIRST ABS ${transition.fiveLaneEnd.toFixed(2)}</div><div style="color:#d279ff">SECOND ABS 4-&gt;3 ${transition.secondAbsorptionStart.toFixed(2)}</div><div style="color:#45dfff">STABLE 3-LANE ${transition.transitionEnd.toFixed(2)}</div><div style="margin-top:5px"><span style="color:#35d6ff">--</span> host:0 &nbsp;<span style="color:#45ff89">--</span> host:1 &nbsp;<span style="color:#ffdf45">--</span> host:2</div><div><span style="color:#ff5cdb">--</span> ramp/aux:0 &nbsp;<span style="color:#a56cff">--</span> ramp/aux:1</div><div><span style="color:#fff">|</span> sampled ramp widths (aux:0 / aux:1)</div><div style="color:#dfe7f5">${samples}</div><div>minimum before handoff: ${data.minimumPreHandoffLaneWidth.toFixed(3)} m</div>`;
+    legend.innerHTML=`<div style="font-size:15px;color:#fff">P2 J48 TRUE 3+2 HANDOFF PLAN</div><div style="color:#ff8f3f">OPENING ${transition.mergeOpeningStart.toFixed(2)}</div><div style="color:#fff04a">HANDOFF / FULL 5 START ${transition.fiveLaneStart.toFixed(2)}</div><div style="color:#55ff88">FULL 5 END / FIRST ABS ${transition.fiveLaneEnd.toFixed(2)}</div><div style="color:#d279ff">SECOND ABS 4-&gt;3 ${transition.secondAbsorptionStart.toFixed(2)}</div><div style="color:#45dfff">STABLE 3-LANE ${transition.transitionEnd.toFixed(2)}</div><div style="margin-top:5px"><span style="color:#35d6ff">--</span> host:0 &nbsp;<span style="color:#45ff89">--</span> host:1 &nbsp;<span style="color:#ffdf45">--</span> host:2</div><div><span style="color:#ff5cdb">--</span> ramp/aux:0 &nbsp;<span style="color:#a56cff">--</span> ramp/aux:1</div><div style="color:#ff3b30">-- true host exterior edge ${data.hostExteriorLaneEdgeOffset.toFixed(3)} m</div><div>five-slot offsets: ${data.temporaryLaneCentreOffsets.map(value=>value.toFixed(3)).join(' / ')} m</div><div><span style="color:#fff">|</span> sampled ramp widths (aux:0 / aux:1)</div><div style="color:#dfe7f5">${samples}</div><div>minimum before handoff: ${data.minimumPreHandoffLaneWidth.toFixed(3)} m</div>`;
     document.body.append(legend);
   }
   installP4CorridorLegend(){
