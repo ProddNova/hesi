@@ -14,11 +14,12 @@ const direction = (left, right) => new THREE.Vector3(
 ).normalize();
 const worldPoint = (point, lift = 0) => new THREE.Vector3(point.x, point.y + lift, point.z);
 const intersects = (from, to, interval) => to >= interval[0] - 0.01 && from <= interval[1] + 0.01;
+const P2_ID = 'J48:merge:wangan_1:ramp_41:end';
 
 if (LEGACY && map.progressiveTransitions.length === 0) {
   console.log('PROGRESSIVE MERGE PROBE: PASS (legacy mode has no progressive transition records)');
 } else {
-  if (map.progressiveTransitions.length !== 1) fail('global', `record count ${map.progressiveTransitions.length}`);
+  if (map.progressiveTransitions.length !== 2) fail('global', `record count ${map.progressiveTransitions.length}`);
   for (const transition of map.progressiveTransitions) {
     const id = transition.id;
     const phaseValues = [
@@ -118,6 +119,14 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         || transition.temporaryLaneCount !== 4
         || transition.auxiliaryLaneCount !== 2)) {
       fail(id, 'P4 is not an explicit temporary 2+2 diverge');
+    }
+    if (id === P2_ID
+      && (transition.topology !== '2+3-merge'
+        || transition.temporaryLaneCount !== 5
+        || transition.auxiliaryLaneCount !== 2
+        || transition.finalLaneCount !== 3
+        || transition.absorptionSteps.length !== 2)) {
+      fail(id, 'P2 is not an explicit 5 -> 4 -> 3 merge');
     }
     const expectedFinalLanes = transition.type === 'diverge'
       ? transition.hostLaneCount + transition.branchLaneCount
@@ -225,6 +234,9 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     const outerPieces = progressivePieces.filter((piece) => piece.tag === 'progressiveOuterEdge');
     const dashPieces = progressivePieces.filter((piece) => piece.tag === 'progressiveAuxBoundary')
       .sort((left, right) => left.sFrom - right.sFrom);
+    const firstAbsorptionPieces = progressivePieces
+      .filter((piece) => piece.tag === 'progressiveMergeDivider')
+      .sort((left, right) => left.sFrom - right.sFrom);
     if (!outerPieces.length) fail(id, 'missing progressive exterior edge line');
     if (!dashPieces.length) fail(id, 'missing progressive auxiliary dashes');
     if (transition.type === 'diverge') {
@@ -274,6 +286,26 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         - transition.outerMarkingLateralAt(transition.openingStart)) > 0.01) fail(id, 'solid-to-dash lateral step');
       if (Math.abs(transition.boundaryLateralAt(transition.transitionEnd)
         - transition.outerMarkingLateralAt(transition.transitionEnd)) > 0.01) fail(id, 'dash-to-solid lateral step');
+      if (transition.auxiliaryLaneCount > 1) {
+        if (!firstAbsorptionPieces.length) fail(id, 'missing first absorption divider dashes');
+        const firstDropEnd = transition.absorptionSteps[0]?.to;
+        if (firstAbsorptionPieces.some((piece) => piece.sTo > firstDropEnd + 0.01)) {
+          fail(id, 'first absorption divider survives into the four-lane section');
+        }
+        const stations = [
+          transition.parallelStart,
+          transition.absorptionStart,
+          transition.secondAbsorptionStart,
+        ];
+        for (const station of stations) {
+          const outer = transition.outerMarkingLateralAt(station) * transition.sideSign;
+          const divider = transition.auxDividerLateralAt(station) * transition.sideSign;
+          const inner = transition.boundaryLateralAt(station) * transition.sideSign;
+          if (outer < divider + 0.5 || divider < inner + transition.auxiliaryWidth - 0.7) {
+            fail(id, `crossed/pinched progressive markings at ${station.toFixed(1)}`);
+          }
+        }
+      }
     }
     for (let index = 1; index < dashPieces.length; index += 1) {
       const gap = dashPieces[index].sFrom - dashPieces[index - 1].sTo;

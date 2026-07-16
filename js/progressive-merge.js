@@ -31,9 +31,10 @@ function unwrappedHostDistance(zone, distance) {
   return zone.hostRef + delta;
 }
 
-const P4_TWO_PLUS_TWO_ID = 'J2:diverge:c1_0:r1_0:start';
+const P1_TWO_PLUS_TWO_DIVERGE_ID = 'J2:diverge:c1_0:r1_0:start';
+const P2_TWO_PLUS_THREE_MERGE_ID = 'J48:merge:wangan_1:ramp_41:end';
 
-function laneMappings(zone, branchExitLanes = [0]) {
+function laneMappings(zone, branchExitLanes = [0], auxiliaryLaneCount = 1) {
   const { host, branch, kind, side } = zone;
   const outerHostLane = side > 0 ? 0 : host.lanes - 1;
   const mappings = Array.from({ length: host.lanes }, (_, lane) => ({
@@ -43,6 +44,19 @@ function laneMappings(zone, branchExitLanes = [0]) {
     outcome: 'survives',
   }));
   if (kind === 'merge') {
+    if (auxiliaryLaneCount === 2 && branchExitLanes.length >= 2) {
+      branchExitLanes.slice(0, 2).forEach((lane, auxiliaryLane) => {
+        mappings.push({
+          source: `branch:${lane}`,
+          temporary: `aux:${auxiliaryLane}`,
+          final: `host:${outerHostLane}`,
+          outcome: auxiliaryLane === 0
+            ? 'absorbed-second-into-outer-host-lane'
+            : 'absorbed-first-into-aux:0',
+        });
+      });
+      return mappings;
+    }
     for (let lane = 0; lane < branch.lanes; lane += 1) {
       mappings.push({
         source: `branch:${lane}`,
@@ -87,16 +101,24 @@ function buildRecord(map, zone, prototype) {
   );
   const hostLaneEdge = zone.host.lanes * zone.host.laneWidth * 0.5;
   const auxiliaryWidth = zone.host.laneWidth;
-  // P4 is a 2 -> 2 diverge. Its shared section must contain two continuing
+  // P1 is a 2 -> 2 diverge. Its shared section must contain two continuing
   // host lanes plus both exiting branch lanes; the former 2+1 model made the
   // host exterior line land on the branch divider. Keep this exception scoped
   // to the selected same-level prototype until the remaining candidates are
   // individually reviewed.
-  const twoPlusTwo = zone.id === P4_TWO_PLUS_TWO_ID
+  const twoPlusTwo = zone.id === P1_TWO_PLUS_TWO_DIVERGE_ID
     && zone.kind === 'diverge'
     && zone.host.lanes === 2
     && zone.branch.lanes === 2;
-  const auxiliaryLaneCount = twoPlusTwo ? 2 : 1;
+  // P2 is the approved conceptual inverse: the existing three-lane Wangan
+  // mainline remains untouched while both two-lane ramp feeds become real,
+  // normal-width temporary lanes. They are absorbed one at a time (5 -> 4
+  // -> 3) instead of being collapsed into the legacy single auxiliary lane.
+  const twoPlusThreeMerge = zone.id === P2_TWO_PLUS_THREE_MERGE_ID
+    && zone.kind === 'merge'
+    && zone.host.lanes === 3
+    && zone.branch.lanes === 2;
+  const auxiliaryLaneCount = twoPlusTwo || twoPlusThreeMerge ? 2 : 1;
   const targetExtraWidth = auxiliaryWidth * auxiliaryLaneCount;
   const hostEdgeMarkingShoulder = Math.max(0, (zone.host.shoulder || 0) - 0.75);
   const branchEdgeMarkingShoulder = Math.max(0, (zone.branch.shoulder || 0) - 0.75);
@@ -108,13 +130,15 @@ function buildRecord(map, zone, prototype) {
   const auxiliaryTotalWidth = auxiliaryWidth * auxiliaryLaneCount;
   const auxiliaryTotalMarkedWidth = auxiliaryTotalWidth + auxiliaryMarkingShoulder;
   const parallelExitCentreLateral = zone.side * (hostLaneEdge + auxiliaryTotalWidth * 0.5);
-  const orderedBranchLanes = zone.kind === 'diverge'
+  const orderedBranchLanes = zone.kind === 'diverge' || twoPlusThreeMerge
     ? Array.from({ length: zone.branch.lanes }, (_, lane) => lane).sort((left, right) => (
       zone.hostwardSign * map._laneOffset(zone.branch, right, 1)
       - zone.hostwardSign * map._laneOffset(zone.branch, left, 1)
     ))
     : [0];
-  const branchExitLanes = twoPlusTwo ? orderedBranchLanes : [orderedBranchLanes[0]];
+  const branchExitLanes = twoPlusTwo || twoPlusThreeMerge
+    ? orderedBranchLanes
+    : [orderedBranchLanes[0]];
   const branchFeedLane = branchExitLanes[0];
   const branchOuterLane = branchExitLanes.at(-1);
   const branchFeedLateral = map._laneOffset(zone.branch, branchFeedLane, 1);
@@ -190,6 +214,20 @@ function buildRecord(map, zone, prototype) {
   if (zone.kind === 'diverge' && !twoPlusTwo) {
     absorptionStart = clamp(alignmentRow.hU, parallelStart + 4, transitionEnd - 4);
   }
+  let firstAbsorptionEnd = null;
+  let secondAbsorptionStart = null;
+  if (twoPlusThreeMerge) {
+    const fiveLanePlateau = clamp(length * 0.16, 28, 36);
+    absorptionStart = clamp(
+      parallelStart + fiveLanePlateau,
+      parallelStart + 28,
+      transitionEnd - 92,
+    );
+    const fourLanePlateau = clamp(length * 0.075, 12, 18);
+    const laneDropLength = (transitionEnd - absorptionStart - fourLanePlateau) * 0.5;
+    firstAbsorptionEnd = absorptionStart + laneDropLength;
+    secondAbsorptionStart = firstAbsorptionEnd + fourLanePlateau;
+  }
   // The full P4 exit carriageway begins steering during the model's measured
   // absorption phase while it is still supported by the widened host deck.
   // Paint/rail ownership remains at the later source-envelope handoff. This
@@ -236,6 +274,8 @@ function buildRecord(map, zone, prototype) {
     openingStart,
     parallelStart,
     absorptionStart,
+    firstAbsorptionEnd,
+    secondAbsorptionStart,
     transitionEnd,
     alignmentStart: zone.kind === 'diverge' ? absorptionStart : null,
     exitPathStart: zone.kind === 'diverge' ? divergePathStart : null,
@@ -276,15 +316,35 @@ function buildRecord(map, zone, prototype) {
     auxiliaryTotalMarkedWidth,
     auxiliaryMarkingShoulder,
     targetExtraWidth,
-    topology: twoPlusTwo ? '2+2-diverge' : `${zone.host.lanes}+1-transition`,
+    topology: twoPlusTwo
+      ? '2+2-diverge'
+      : (twoPlusThreeMerge ? '2+3-merge' : `${zone.host.lanes}+1-transition`),
     branchInterval: [...zone.branchSpan],
     hostInterval: [approachStart, transitionEnd],
     crossableInterval: [openingStart, transitionEnd],
-    laneMappings: laneMappings(zone, branchExitLanes),
+    laneMappings: laneMappings(zone, branchExitLanes, auxiliaryLaneCount),
     branchFeedLane,
     branchExitLanes: [...branchExitLanes],
     survivingLanes: Array.from({ length: zone.host.lanes }, (_, lane) => `host:${lane}`),
-    absorbedLanes: zone.kind === 'merge' ? ['aux:0'] : [],
+    absorbedLanes: zone.kind === 'merge'
+      ? (twoPlusThreeMerge ? ['aux:1', 'aux:0'] : ['aux:0'])
+      : [],
+    absorptionSteps: twoPlusThreeMerge ? [
+      {
+        fromLaneCount: 5,
+        toLaneCount: 4,
+        lane: 'aux:1',
+        from: absorptionStart,
+        to: firstAbsorptionEnd,
+      },
+      {
+        fromLaneCount: 4,
+        toLaneCount: 3,
+        lane: 'aux:0',
+        from: secondAbsorptionStart,
+        to: transitionEnd,
+      },
+    ] : [],
     separatedLanes: zone.kind === 'diverge'
       ? Array.from({ length: auxiliaryLaneCount }, (_, lane) => `aux:${lane}`)
       : [],
@@ -310,13 +370,28 @@ function buildRecord(map, zone, prototype) {
       return value >= approachStart - padding && value <= transitionEnd + padding;
     },
     hostRailModeAt(distance) {
-      if (zone.kind !== 'diverge') return 'on';
       const hostS = unwrappedHostDistance(zone, distance);
+      if (twoPlusThreeMerge) {
+        if (hostS < openingStart || hostS >= parallelStart) return 'on';
+        // During the physical opening, the branch exterior owns the outside
+        // rail. Removing the host-side wall here prevents a parapet from
+        // spanning the drivable throat while the paved envelope widens.
+        return 'off';
+      }
+      if (zone.kind !== 'diverge') return 'on';
       if (hostS <= resolveHostRailRelease() + 1e-4) return 'on';
       if (hostS < transitionEnd) return 'off';
       return 'on';
     },
     branchRailModeAt(distance, sideSign) {
+      if (twoPlusThreeMerge) {
+        if (distance < branchRows[0].bS - 0.01 || distance > branchRows.at(-1).bS + 0.01) return null;
+        const hostS = this.hostAtBranch(distance);
+        if (hostS === null) return null;
+        if (sideSign === zone.hostwardSign) return hostS < openingStart ? 'on' : 'off';
+        if (sideSign === -zone.hostwardSign) return hostS < parallelStart ? 'on' : 'off';
+        return null;
+      }
       if (zone.kind !== 'diverge') return null;
       if (distance < branchRows[0].bS - 0.01 || distance > branchRows.at(-1).bS + 0.01) return null;
       if (sideSign === zone.hostwardSign) return distance < branchRows.at(-1).bS ? 'off' : 'on';
@@ -418,6 +493,15 @@ function buildRecord(map, zone, prototype) {
       if (value < transitionEnd) return 'absorption';
       return 'finalized';
     },
+    laneCountAt(distance) {
+      const value = unwrappedHostDistance(zone, distance);
+      if (!twoPlusThreeMerge) {
+        return value < transitionEnd ? this.temporaryLaneCount : this.finalLaneCount;
+      }
+      if (value < firstAbsorptionEnd) return 5;
+      if (value < transitionEnd) return 4;
+      return 3;
+    },
     widthFactorAt(distance) {
       const value = unwrappedHostDistance(zone, distance);
       if (value <= openingStart || value > transitionEnd) return 0;
@@ -427,6 +511,17 @@ function buildRecord(map, zone, prototype) {
       // station; only stations beyond the transition return to the base host.
       if (zone.kind === 'diverge') return 1;
       if (value <= absorptionStart) return 1;
+      if (twoPlusThreeMerge) {
+        if (value < firstAbsorptionEnd) {
+          const firstDrop = quintic((value - absorptionStart)
+            / (firstAbsorptionEnd - absorptionStart));
+          return 1 - firstDrop * 0.5;
+        }
+        if (value < secondAbsorptionStart) return 0.5;
+        const secondDrop = quintic((value - secondAbsorptionStart)
+          / (transitionEnd - secondAbsorptionStart));
+        return (1 - secondDrop) * 0.5;
+      }
       return 1 - quintic((value - absorptionStart) / (transitionEnd - absorptionStart));
     },
     boundaryLateralAt(distance) {
@@ -440,10 +535,22 @@ function buildRecord(map, zone, prototype) {
         return baseEdgeLine + (laneBoundary - baseEdgeLine) * factor;
       }
       if (zone.kind === 'diverge') return laneBoundary;
-      const boundaryCloseStart = absorptionStart;
+      const boundaryCloseStart = twoPlusThreeMerge
+        ? secondAbsorptionStart
+        : absorptionStart;
       if (value <= boundaryCloseStart) return laneBoundary;
       const factor = quintic((value - boundaryCloseStart) / (transitionEnd - boundaryCloseStart));
       return laneBoundary + (baseEdgeLine - laneBoundary) * factor;
+    },
+    auxDividerLateralAt(distance) {
+      const value = unwrappedHostDistance(zone, distance);
+      const frame = map._frameAt(zone.host, map._normalizeDistance(zone.host, value));
+      const stableEdgeLine = zone.side * (frame.half - 0.75);
+      const divider = zone.side * (hostLaneEdge + auxiliaryWidth);
+      if (value <= openingStart) return stableEdgeLine;
+      if (value >= parallelStart) return divider;
+      const factor = quintic((value - openingStart) / (parallelStart - openingStart));
+      return stableEdgeLine + (divider - stableEdgeLine) * factor;
     },
     outerMarkingLateralAt(distance) {
       const envelope = this.envelopeAt(distance);
@@ -479,9 +586,11 @@ function buildRecord(map, zone, prototype) {
       lateral: zone.side * hostLaneEdge,
       owner: `progressive:${record.id}`,
     },
-    ...(zone.kind === 'diverge' && auxiliaryLaneCount > 1 ? [{
+    ...(auxiliaryLaneCount > 1 ? [{
       id: `${record.id}:aux-divider-boundary`,
-      role: 'exiting-carriageway-lane-divider',
+      role: zone.kind === 'merge'
+        ? 'first-absorbed-lane-boundary'
+        : 'exiting-carriageway-lane-divider',
       lateral: zone.side * (hostLaneEdge + auxiliaryWidth),
       owner: `progressive:${record.id}`,
     }] : []),
@@ -533,7 +642,7 @@ function buildRecord(map, zone, prototype) {
   const boundaryPaths = [
     ...hostDividerOffsets.map((lateral, index) => ({ id: `host-divider:${index}`, lateral, points: [] })),
     { id: 'aux-inner-boundary', lateral: zone.side * hostLaneEdge, points: [] },
-    ...(zone.kind === 'diverge' && auxiliaryLaneCount > 1
+    ...(auxiliaryLaneCount > 1
       ? [{ id: 'aux-divider-boundary', lateral: zone.side * (hostLaneEdge + auxiliaryWidth), points: [] }]
       : []),
     ...(zone.kind === 'diverge'
@@ -633,7 +742,28 @@ function buildRecord(map, zone, prototype) {
         }
       } else {
         lateral = outerHostLateral + (fullLateral - outerHostLateral) * factor;
-        if (hostS > absorptionStart) {
+        if (twoPlusThreeMerge) {
+          // Once the five-lane section is established, do not derive lane
+          // centres from the shrinking outer envelope: doing so pinches both
+          // ramp lanes at once. Hold normal 3.55 m centres, merge aux:1 into
+          // aux:0, retain a real four-lane plateau, then merge aux:0 into the
+          // stable outer Wangan lane.
+          if (hostS >= parallelStart) lateral = fullLateral;
+          if (auxiliaryLane === 1 && hostS > absorptionStart) {
+            const firstConvergence = quintic((hostS - absorptionStart)
+              / (firstAbsorptionEnd - absorptionStart));
+            const innerAuxiliaryLateral = zone.side * (hostLaneEdge + auxiliaryWidth * 0.5);
+            lateral += (innerAuxiliaryLateral - lateral) * firstConvergence;
+          }
+          if (hostS > secondAbsorptionStart) {
+            const secondConvergence = quintic((hostS - secondAbsorptionStart)
+              / (transitionEnd - secondAbsorptionStart));
+            if (auxiliaryLane === 1) {
+              lateral = zone.side * (hostLaneEdge + auxiliaryWidth * 0.5);
+            }
+            lateral += (outerHostLateral - lateral) * secondConvergence;
+          }
+        } else if (hostS > absorptionStart) {
           const convergence = quintic((hostS - absorptionStart) / (transitionEnd - absorptionStart));
           lateral += (outerHostLateral - lateral) * convergence;
         }
@@ -973,7 +1103,17 @@ export function buildProgressiveTransitions(map, prototypes) {
       || zone.which !== prototype.which) {
       throw new Error(`Progressive prototype identity drift: ${prototype.id}`);
     }
-    const classification = classifyProgressiveJunction(map, zone);
+    const measuredClassification = classifyProgressiveJunction(map, zone);
+    const classification = prototype.approvedSameLevel && !measuredClassification.eligible
+      ? {
+        ...measuredClassification,
+        category: 'same-level-approved',
+        eligible: true,
+        reason: prototype.approvalReason,
+        measuredCategory: measuredClassification.category,
+        measuredReason: measuredClassification.reason,
+      }
+      : measuredClassification;
     const candidate = {
       ...prototype,
       pin: { ...prototype.pin },

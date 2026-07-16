@@ -9,7 +9,9 @@ const wrapAngle = (value) => THREE.MathUtils.euclideanModulo(value + Math.PI, Ma
 
 for (const transition of map.progressiveTransitions) {
   const route = transition.sourceZone.branch;
-  const lanes = transition.type === 'diverge' ? transition.branchExitLanes : [0];
+  const lanes = transition.type === 'diverge'
+    ? transition.branchExitLanes
+    : Array.from({ length: route.lanes }, (_, lane) => lane);
   const start = transition.branchInterval[0] + 2;
   // Cross the ownership boundary and continue on the real branch. The old
   // version stopped two metres before transfer, so it could not prove that a
@@ -123,7 +125,7 @@ for (const transition of map.progressiveTransitions) {
     if (maximumLaneError > 1) failures.push(`${label}: lane error ${maximumLaneError.toFixed(2)} m`);
     const expectedOwners = transition.type === 'diverge'
       ? [transition.hostRouteId, transition.branchRouteId]
-      : [transition.hostRouteId];
+      : [transition.branchRouteId, transition.hostRouteId];
     if (ownershipSequence.join(',') !== expectedOwners.join(',')) {
       failures.push(`${label}: ownership ${ownershipSequence.join(' -> ') || 'none'}`);
     }

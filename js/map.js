@@ -5409,6 +5409,28 @@ export class HighwayMap {
           to,
         );
       }
+      if (transition.type === 'merge' && transition.auxiliaryLaneCount > 1) {
+        this._markingTag = 'progressiveMergeDivider';
+        this._markingBoundary = `progressive-first-absorption-boundary:${transition.id}`;
+        const firstAbsorptionEnd = transition.absorptionSteps[0]?.to
+          ?? transition.secondAbsorptionStart;
+        for (const [from, to] of this._zoneIntervalPieces(
+          route,
+          [transition.openingStart, firstAbsorptionEnd],
+        )) {
+          this._paintDashedStrip(
+            route,
+            'marking',
+            (frame) => transition.auxDividerLateralAt(frame.distance),
+            0.18,
+            10,
+            5,
+            6,
+            from,
+            to,
+          );
+        }
+      }
     }
     // Branch-owned paint must be emitted while the branch itself is being
     // dressed. Route dressing is intentionally sequential, so attempting to
@@ -6872,6 +6894,15 @@ export class HighwayMap {
         branchRouteId: candidate.branchRouteId,
         hostLaneCount: candidate.hostLaneCount,
         branchLaneCount: candidate.branchLaneCount,
+        topology: candidate.active ? candidate.transition.topology : null,
+        temporaryLaneCount: candidate.active ? candidate.transition.temporaryLaneCount : null,
+        finalLaneCount: candidate.active ? candidate.transition.finalLaneCount : null,
+        laneSequence: candidate.active && candidate.transition.absorptionSteps.length
+          ? [
+            candidate.transition.temporaryLaneCount,
+            ...candidate.transition.absorptionSteps.map((step) => step.toLaneCount),
+          ]
+          : null,
         status: candidate.active ? candidate.transition.automationStatus : `deferred-${candidate.classification.category}`,
         teleportRouteId: candidate.hostRouteId,
         distance: candidate.distance,
@@ -6880,6 +6911,8 @@ export class HighwayMap {
           openingStart: candidate.transition.openingStart,
           parallelStart: candidate.transition.parallelStart,
           absorptionStart: candidate.transition.absorptionStart,
+          firstAbsorptionEnd: candidate.transition.firstAbsorptionEnd,
+          secondAbsorptionStart: candidate.transition.secondAbsorptionStart,
           transitionEnd: candidate.transition.transitionEnd,
         } : null,
         x: candidate.pin.x,

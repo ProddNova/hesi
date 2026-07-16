@@ -7,11 +7,10 @@ import { classifyProgressiveJunction } from '../js/progressive-junction-classifi
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
 const map = new HighwayMap(null, { addLighting: false, progressiveMerges: false });
+const activeMap = new HighwayMap(null, { addLighting: false, progressiveMerges: true });
 const expected = new Map([
-  ['P1', 'vertical-ramp-complex'],
+  ['P1', 'same-level-simple'],
   ['P2', 'vertical-ramp-complex'],
-  ['P3', 'vertical-ramp-complex'],
-  ['P4', 'same-level-simple'],
 ]);
 
 const source = await readFile(new URL('../js/progressive-junction-classifier.js', import.meta.url), 'utf8');
@@ -27,17 +26,23 @@ for (const prototype of PROGRESSIVE_MERGE_PROTOTYPES) {
   check(metrics.transferConnected === true, `${prototype.pinId}: transfer deck is not connected`);
   check(Number.isFinite(metrics.planarOverlapLength), `${prototype.pinId}: invalid overlap length`);
   check(Number.isFinite(metrics.maximumVerticalDeckSeparation), `${prototype.pinId}: invalid deck separation`);
-  if (prototype.pinId === 'P4') {
-    check(classification.eligible, 'P4: same-level candidate was rejected');
-    check(metrics.lateralSeparationReached, 'P4: no measured lateral separation');
-    check(metrics.ownershipBreakRows === 0, 'P4: deck ownership breaks before lateral separation');
+  if (prototype.pinId === 'P1') {
+    check(classification.eligible, 'P1: preserved same-level candidate was rejected');
+    check(metrics.lateralSeparationReached, 'P1: no measured lateral separation');
+    check(metrics.ownershipBreakRows === 0, 'P1: deck ownership breaks before lateral separation');
     check(metrics.collisionDeckOwnership === 'continuous-to-lateral-separation',
-      'P4: collision ownership invariant is not continuous');
+      'P1: collision ownership invariant is not continuous');
   } else {
-    check(!classification.eligible, `${prototype.pinId}: vertical candidate was enabled`);
+    check(prototype.approvedSameLevel === true, 'P2: missing explicit lower-deck approval');
+    check(!classification.eligible, 'P2: measured classifier result unexpectedly changed');
     check(metrics.ownershipBreakRows > 0, `${prototype.pinId}: missing planar-overlap ownership break evidence`);
     check(metrics.collisionDeckOwnership === 'breaks-before-lateral-separation',
       `${prototype.pinId}: incorrect collision ownership invariant`);
+    const effective = activeMap.progressiveCandidateClassifications
+      .find((candidate) => candidate.id === prototype.id);
+    check(effective?.active === true, 'P2: approved transition is not active');
+    check(effective?.classification.category === 'same-level-approved',
+      'P2: effective approval classification is not transparent');
   }
   console.log(`${prototype.pinId} ${prototype.id}: ${classification.category}`
     + ` ownership=${metrics.collisionDeckOwnership} overlap=${metrics.planarOverlapLength}m`);

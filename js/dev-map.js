@@ -852,11 +852,14 @@ export class DeveloperMap {
       `host: ${pin.hostRouteId} · ${pin.hostLaneCount} lanes`,
       `branch: ${pin.branchRouteId} · ${pin.branchLaneCount} lanes`,
       `${pin.type} · ${pin.side}`,
+      ...(active && pin.topology ? [
+        `topology: ${pin.topology}${pin.laneSequence ? ` · ${pin.laneSequence.join(' -> ')} lanes` : ''}`,
+      ] : []),
       `status: ${pin.status}`,
       `class: ${pin.classification}`,
       ...(active && pin.phases ? [
         `phases: ${pin.phases.approachStart.toFixed(0)} / ${pin.phases.openingStart.toFixed(0)} / ${pin.phases.parallelStart.toFixed(0)}`,
-        `        ${pin.phases.absorptionStart.toFixed(0)} / ${pin.phases.transitionEnd.toFixed(0)} m`,
+        `        ${pin.phases.absorptionStart.toFixed(0)}${Number.isFinite(pin.phases.secondAbsorptionStart) ? ` / ${pin.phases.secondAbsorptionStart.toFixed(0)}` : ''} / ${pin.phases.transitionEnd.toFixed(0)} m`,
       ] : []),
       ...(!active && pin.classificationReason ? [`reason: ${pin.classificationReason}`] : []),
       `click: teleport to ${pin.teleportRouteId || pin.hostRouteId}`,

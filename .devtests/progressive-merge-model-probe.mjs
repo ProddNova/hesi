@@ -1,6 +1,7 @@
 import { HighwayMap } from '../js/map.js';
 import { PROGRESSIVE_PHASES } from '../js/progressive-merge.js';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from '../js/progressive-merge-prototypes.js';
+import { createHash } from 'node:crypto';
 
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
@@ -9,15 +10,34 @@ const distance = (left, right) => Math.hypot(
   left.y - right.y,
   left.z - right.z,
 );
+const P1_ID = 'J2:diverge:c1_0:r1_0:start';
+const P2_ID = 'J48:merge:wangan_1:ramp_41:end';
 
 const map = new HighwayMap(null, { addLighting: false });
 const legacy = new HighwayMap(null, { addLighting: false, progressiveMerges: false });
-check(map.progressiveTransitions.length === 1, `active record count ${map.progressiveTransitions.length} != 1`);
+check(map.progressiveTransitions.length === 2, `active record count ${map.progressiveTransitions.length} != 2`);
 check(legacy.progressiveTransitions.length === 0, `legacy record count ${legacy.progressiveTransitions.length} != 0`);
-check(PROGRESSIVE_MERGE_PROTOTYPES.length === 4, 'prototype allow-list is not exactly four');
-check(map.progressiveCandidateClassifications.length === 4, 'candidate classification count is not exactly four');
-check(map.progressiveCandidateClassifications.filter((candidate) => !candidate.active).length === 3,
-  'expected exactly three deferred candidates');
+check(PROGRESSIVE_MERGE_PROTOTYPES.length === 2, 'prototype allow-list is not exactly P1/P2');
+check(map.progressiveCandidateClassifications.length === 2, 'candidate classification count is not exactly two');
+check(map.progressiveCandidateClassifications.every((candidate) => candidate.active),
+  'P1/P2 are not both active');
+const p1 = map.progressiveTransitionById.get(P1_ID);
+const p1GeometryDigest = createHash('sha256').update(JSON.stringify({
+  approachStart: p1.approachStart,
+  openingStart: p1.openingStart,
+  parallelStart: p1.parallelStart,
+  absorptionStart: p1.absorptionStart,
+  transitionEnd: p1.transitionEnd,
+  topology: p1.topology,
+  laneCentres: p1.laneCentres,
+  laneBoundaries: p1.laneBoundaries,
+  markingPaths: p1.markingPaths,
+  pavedEnvelope: p1.pavedEnvelope,
+  guardrailEnvelope: p1.guardrailEnvelope,
+  laneMappings: p1.laneMappings,
+})).digest('hex');
+check(p1GeometryDigest === '2779a9ef94a8b556d0a3d85e2493dbc474dc2c8fd4351303b5d797524f88d0a0',
+  `P1 geometry changed (${p1GeometryDigest})`);
 
 for (const transition of map.progressiveTransitions) {
   check(PROGRESSIVE_PHASES.every((phase, index) => transition.phaseOrder[index] === phase), `${transition.id}: phase order`);
@@ -32,7 +52,7 @@ for (const transition of map.progressiveTransitions) {
     ? transition.hostLaneCount + transition.branchLaneCount
     : transition.hostLaneCount), `${transition.id}: final lane count`);
   if (transition.type === 'diverge') {
-    check(transition.id !== 'J2:diverge:c1_0:r1_0:start'
+    check(transition.id !== P1_ID
       || (transition.topology === '2+2-diverge'
         && transition.auxiliaryLaneCount === 2
         && transition.temporaryLaneCount === 4),
@@ -81,6 +101,31 @@ for (const transition of map.progressiveTransitions) {
       `${transition.id}: missing per-lane exit corridors`);
   } else {
     check(last.extraWidth < 1e-6, `${transition.id}: merge width does not finalize at base`);
+    if (transition.id === P2_ID) {
+      check(transition.topology === '2+3-merge'
+        && transition.hostLaneCount === 3
+        && transition.branchLaneCount === 2
+        && transition.auxiliaryLaneCount === 2
+        && transition.temporaryLaneCount === 5
+        && transition.finalLaneCount === 3,
+      `${transition.id}: P2 topology is not 2+3 -> 5 -> 4 -> 3`);
+      check(transition.firstAbsorptionEnd > transition.absorptionStart
+        && transition.secondAbsorptionStart > transition.firstAbsorptionEnd
+        && transition.secondAbsorptionStart < transition.transitionEnd,
+      `${transition.id}: missing sequential absorption boundary`);
+      check(transition.absorptionSteps.length === 2
+        && transition.absorptionSteps[0].fromLaneCount === 5
+        && transition.absorptionSteps[0].toLaneCount === 4
+        && transition.absorptionSteps[1].fromLaneCount === 4
+        && transition.absorptionSteps[1].toLaneCount === 3,
+      `${transition.id}: absorption sequence is not 5 -> 4 -> 3`);
+      check(transition.laneMappings.filter((mapping) => mapping.source.startsWith('branch:')).length === 2
+        && transition.laneMappings.filter((mapping) => mapping.source.startsWith('host:'))
+          .every((mapping) => mapping.outcome === 'survives'),
+      `${transition.id}: branch/host lane mapping changed`);
+      check(transition.laneBoundaries.some((path) => path.id === 'aux-divider-boundary'),
+        `${transition.id}: missing first-absorption boundary`);
+    }
   }
   check(transition.pavedEnvelope.some((row) => row.extraWidth >= transition.auxiliaryWidth), `${transition.id}: no usable auxiliary width`);
   for (const lane of transition.laneCentres) {
@@ -94,13 +139,15 @@ for (const transition of map.progressiveTransitions) {
     check(row.lateralMin < row.lateralMax, `${transition.id}: inverted envelope at ${row.hostS}`);
   }
 }
-check(map.getMinimapData().prototypePins.length === 4, 'minimap does not expose exactly four prototype pins');
-check(map.getMinimapData().prototypePins.filter((pin) => pin.category === 'progressive-prototype').length === 1,
-  'minimap does not expose exactly one active prototype');
-check(map.getMinimapData().prototypePins.filter((pin) => pin.category === 'deferred-progressive-candidate').length === 3,
-  'minimap does not expose exactly three deferred candidates');
-check(map.getMinimapData().prototypePins.find((pin) => pin.pinId === 'P4')?.side === 'left',
-  'P4 is not labelled from the driver-relative lateral convention');
+check(map.getMinimapData().prototypePins.length === 2, 'minimap does not expose exactly P1/P2');
+check(map.getMinimapData().prototypePins.every((pin) => pin.category === 'progressive-prototype'),
+  'minimap contains a deferred/obsolete prototype pin');
+check(map.getMinimapData().prototypePins.map((pin) => pin.pinId).join(',') === 'P1,P2',
+  'minimap pin labels are not exactly P1,P2');
+check(map.getMinimapData().prototypePins.find((pin) => pin.pinId === 'P1')?.id === P1_ID,
+  'the successful old P4 was not relabelled P1');
+check(map.getMinimapData().prototypePins.find((pin) => pin.pinId === 'P2')?.id === P2_ID,
+  'P2 is not the approved J48 merge');
 check(legacy.getMinimapData().prototypePins.length === 0, 'legacy minimap exposes prototype pins');
 
 console.log(`records=${map.progressiveTransitions.length} legacy=${legacy.progressiveTransitions.length}`);

@@ -1,47 +1,46 @@
 # Progressive Merge Checkpoint Status
 
-## P2 inverse candidate gate — stopped at Phase 1 (2026-07-16)
+## Corrected P1/P2 final state (2026-07-16)
 
-The requested inverse same-level 2+2 merge cannot be implemented faithfully
-against the current runtime network. The existing audit was rerun from verified
-`origin/main` base `1a80b1b2be8f7e4e25b923de3a79413c302b7e91` and extended with
-travel-order surface/collision profiles for every exact 2-lane-host +
-2-lane-branch merge. The graph contains 27 merges, of which exactly five meet
-the lane-count filter; none passes the authoritative same-deck classifier.
+This section supersedes the historical checkpoint record below.
 
-Ranked result:
+| Pin | Junction | Topology | Runtime |
+| --- | --- | --- | --- |
+| P1 | `J2:diverge:c1_0:r1_0:start` | preserved 2+2 progressive diverge | active; geometry digest unchanged from successful old P4 |
+| P2 | `J48:merge:wangan_1:ramp_41:end` | two-lane `ramp_41` + three-lane `wangan_1` → 5 → 4 → 3 | active; lower same-level deck explicitly approved |
 
-1. `J5:merge:c1_0:r6_3:end` (`r6_3 -> c1_0`) is the closest source, but loses
-   deck ownership for three overlap samples before lateral separation, reaches
-   1.033 m deck-edge separation, and contains 19.98° tangent mismatch plus
-   54.04°/100 m curvature.
-2. `J1:merge:c1_2:c1_6:end` disconnects and reconnects inside the overlap and
-   reaches 1.931 m vertical separation / 8.47% relative grade.
-3. `J0:merge:c1_0:c1_3:end` reaches 2.620 m / 8.34%, disconnects and
-   reconnects, and never reaches clean lateral separation in the measured span.
-4. `J33:merge:r6_0:ramp_22:end` spends 72 m of planar overlap on a different
-   deck and reaches 2.924 m / 13.05%.
-5. `J16:merge:r1_3:ramp_10:end` is not a shared render/collision deck at the
-   transfer itself and reaches 2.507 m / 12.76%.
+The developer map contains exactly `P1,P2` (`2 active · 0 deferred`). Every
+old P1/P2/P3 prototype/deferred marker is removed, and the successful old P4
+is relabelled P1 without changing its pavement, lanes, markings, rails, or
+collision geometry.
 
-The closest case is visibly part of a multi-deck interchange, not a genuine
-same-level 2+2 approach. Promoting any candidate would require either accepting
-a ramp-over-mainline overlap or rewriting source geometry, both explicitly
-forbidden by the P2 brief. Work therefore stops after the detailed
-[P2 candidate report](docs/progressive-merges/P2-CANDIDATE-REPORT.md).
+P2 preserves all three `wangan_1` lanes. `ramp_41` lane 1 maps to `aux:0`
+and is absorbed second into the outer host lane; ramp lane 0 maps to `aux:1`
+and is absorbed first into `aux:0`. The measured phase stations are:
 
-No production road, junction, progressive topology, marking, guardrail,
-collision, traffic, or developer-map code is changed. In particular, the
-validated `J2:diverge:c1_0:r1_0:start` output remains byte-for-byte untouched.
-The old P4-to-P1 relabel and old-pin cleanup are intentionally not performed:
-the brief's no-valid-candidate clause says to stop after reporting rather than
-manufacture or partially advertise a P2. Vertical merges remain unsolved.
+- full five-lane section: `30977.909–31009.710` m;
+- 5→4 absorption: `31009.710–31053.932` m;
+- stable four-lane section: `31053.932–31068.839` m;
+- 4→3 absorption: `31068.839–31113.061` m;
+- final host: three unchanged 3.55 m lanes.
 
-## Checkpoint 2 — live status (2026-07-16)
+The shared transition record owns the one-sided paved envelope, both temporary
+lane mappings, two sequential absorption boundaries, route/transition paint
+handoffs, exterior guardrail handoffs, branch-to-host deck blend, and collision
+corridor. Production vehicle-physics traversal passes from both ramp lanes with
+zero collisions and zero wall correction. Visual evidence is in
+`docs/progressive-merges/p2-j48/`.
+
+Focused gates: progressive model PASS; geometry/paint/rail/collision PASS;
+both-lane dynamic drive PASS; guardrail PASS; P1 geometry digest
+`2779a9ef94a8b556d0a3d85e2493dbc474dc2c8fd4351303b5d797524f88d0a0`.
+
+## Historical Checkpoint 2 record
 
 Checkpoint 2 supersedes the Checkpoint 1 eligibility conclusions below while
 retaining its implementation history and visual evidence. The candidate set is
-still exactly P1–P4; no network-wide rollout is active.
+the former P1–P4 set described at that point in history; it is no longer the
+runtime pin configuration.
 
 ### Phase A complete — deck classification and legacy restoration
 
