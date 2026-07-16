@@ -10,7 +10,7 @@ Files:
 - `js/dev-map.js` — the self-contained `DeveloperMap` module (overlay, canvas
   renderer, transforms, hit-testing, teleport selection). Owns no game state.
 - `styles/dev-map.css` — the overlay styling (isolated from `styles.css`).
-- `.devtests/dev-map-test.mjs` — focused Playwright regression (27 checks).
+- `.devtests/dev-map-test.mjs` — focused Playwright regression (29 checks).
 - Integration lives in `js/game.js` (`setupDevMap`, `getDevNetwork`,
   `teleportToRoutePoint`) and one `<link>` in `index.html`.
 
@@ -30,6 +30,24 @@ Files:
 | **Centre position** | Pan to the live position |
 | **Follow: ON/OFF** | Keep the live position centred every frame |
 | **Labels: ON/OFF** | Draw route codes at sensible zooms (de-cluttered) |
+
+## Progressive prototype pins
+
+The four Checkpoint 1 progressive-transition prototypes are pinned as bright
+magenta diamonds `P1`–`P4`. Open the map with `M`, choose **Fit network**, zoom
+to the desired pin, then click the adjacent route to teleport. The info line
+must read `4 pinned (P1, P2, P3, P4)`.
+
+| Pin | Junction | Route pair | World X, Y, Z |
+| --- | --- | --- | --- |
+| P1 | `J8:merge:r11_0:ramp_1:end` | `ramp_1 → r11_0` | `-1128.45, 73.04, -3825.43` |
+| P2 | `J0:merge:c1_0:c1_3:end` | `c1_3 → c1_0` | `-897.45, 52.37, -2806.42` |
+| P3 | `J10:merge:wangan_1:ramp_3:end` | `ramp_3 → wangan_1` | `696.08, 29.71, -5832.86` |
+| P4 | `J2:diverge:c1_0:r1_0:start` | `c1_0 → r1_0` | `-1094.38, 57.33, -3014.18` |
+
+Pin data comes directly from the active progressive transition records. In
+legacy comparison mode (`?legacyProgressiveMerges=1`) the map exposes no
+prototype pins.
 
 While the map is open, gameplay is **frozen** — the vehicle and noclip drone
 stay put and all gameplay keys are swallowed. Freezing is intentional and

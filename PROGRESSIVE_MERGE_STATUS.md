@@ -168,6 +168,159 @@ continuous sampled lane paths; valid temporary/final counts; complete mapping
 and ownership records; usable auxiliary width; and base width restored at both
 ends.
 
-The geometry/physics/marking/rail consumers, legacy/progressive image matrix,
-performance comparison, limitations, and developer-map pin instructions will
-be appended as the remaining phases land.
+## Phase 4–8 — geometry, lanes, markings, rails, and drivability
+
+The allow-list records feed the existing map build once, before route meshes
+are emitted. No topology is rebuilt per frame and no route-pair scan was added
+to gameplay. The consumers now share the record as follows:
+
+- road rendering reads its asymmetric `pavedEnvelope` and adaptive host frames;
+- branch mouth clipping and vertical hand-off use the same host plane and
+  quintic phase blend, removing coplanar ribbons and height lips;
+- road lookup, collision bounds, swept wall collision, and route ownership use
+  the same envelope and retain a branch corridor until the host can contain a
+  full vehicle footprint;
+- host and branch route painters yield their claimed paths to one transition
+  owner, which paints the moving exterior solid and auxiliary dashed boundary;
+- guardrails follow the progressive exterior, while the source rail is removed
+  only for the phases in which the combined carriageway owns that edge;
+- legacy gore hatching/cushions are omitted only in the four claimed auxiliary
+  lanes because those areas remain drivable;
+- all other junctions continue through the unchanged legacy zone consumers.
+
+The implementation uses a zero-slope quintic envelope through all five phases.
+The branch remains locally sourced; global route centrelines and vertical
+crossings were not changed. `?legacyProgressiveMerges=1` restores legacy
+behavior for identical-camera and user comparisons.
+
+### Focused prototype gates
+
+`.devtests/progressive-merge-probe.mjs` checks the shared model, pavement,
+temporary lane paths/mappings, marking ownership, solid/dash alignment,
+guardrail envelope, branch/host height hand-off, route ownership, and a 1 m
+vehicle-footprint collision sweep. It passes all four cases:
+
+| Prototype | Length | Max lane step | Max tangent step | Max width step | Height switch | Source-lane drive samples |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| P1 / `J8` | 136.6 m | 2.66 m | 2.19° | 0.60 m | 0.003 m | 69 |
+| P2 / `J0` | 163.1 m | 2.89 m | 2.43° | 0.55 m | 0.001 m | 166 |
+| P3 / `J10` | 203.4 m | 2.49 m | 1.66° | 0.49 m | 0.000 m | 206 |
+| P4 / `J2` | 160.7 m | 2.99 m | 2.67° | 0.56 m | 0.002 m | 166 |
+
+`.devtests/progressive-merge-drive.mjs` additionally drives the production
+`VehiclePhysics` bicycle model, production surface sampler, and swept collision
+adapter along each source lane at about 50 km/h. All four complete their full
+132–200 m driven intervals with 0 collision events, 0 wall correction, and
+0.10–0.14 m maximum lane-following error. Ownership changes exactly once:
+`ramp_1 → r11_0`, `c1_3 → c1_0`, `ramp_3 → wangan_1`, and inverse
+`c1_0 → r1_0`; no oscillation remains.
+
+## Developer-map prototype pins
+
+The four modified locations are pinned in the existing developer map as bright
+magenta diamonds `P1`–`P4`. Press `M`, choose **Fit network**, then zoom to a
+pin; click the adjacent real route to teleport. The info line confirms
+`4 pinned (P1, P2, P3, P4)`. The pins are runtime data from the four transition
+records, not a second coordinate list inside the map UI.
+
+| Pin | Junction | Route pair | World X, Y, Z |
+| --- | --- | --- | --- |
+| P1 | `J8:merge:r11_0:ramp_1:end` | `ramp_1 → r11_0` | `-1128.45, 73.04, -3825.43` |
+| P2 | `J0:merge:c1_0:c1_3:end` | `c1_3 → c1_0` | `-897.45, 52.37, -2806.42` |
+| P3 | `J10:merge:wangan_1:ramp_3:end` | `ramp_3 → wangan_1` | `696.08, 29.71, -5832.86` |
+| P4 | `J2:diverge:c1_0:r1_0:start` | `c1_0 → r1_0` | `-1094.38, 57.33, -3014.18` |
+
+The developer-map Playwright smoke passes 29/29, including exact four-pin data,
+visible P1–P4 pixels, freeze/teleport behavior, route/elevation hit-testing,
+phone minimap preservation, and no console errors.
+
+## Mandatory visual matrix and direct review
+
+The final matrix contains 32 committed images: four cases × four camera types ×
+legacy/progressive. Cameras use identical host phase chainages in both modes.
+
+- [legacy matrix](docs/progressive-merges/final/legacy/)
+- [progressive matrix](docs/progressive-merges/final/progressive/)
+- P1: [plan](docs/progressive-merges/final/progressive/one-to-two-merge-plan-progressive.png), [chase](docs/progressive-merges/final/progressive/one-to-two-merge-chase-progressive.png), [marking](docs/progressive-merges/final/progressive/one-to-two-merge-marking-progressive.png), [guardrail](docs/progressive-merges/final/progressive/one-to-two-merge-guardrail-progressive.png)
+- P2: [plan](docs/progressive-merges/final/progressive/two-to-two-merge-plan-progressive.png), [chase](docs/progressive-merges/final/progressive/two-to-two-merge-chase-progressive.png), [marking](docs/progressive-merges/final/progressive/two-to-two-merge-marking-progressive.png), [guardrail](docs/progressive-merges/final/progressive/two-to-two-merge-guardrail-progressive.png)
+- P3: [plan](docs/progressive-merges/final/progressive/two-to-three-merge-plan-progressive.png), [chase](docs/progressive-merges/final/progressive/two-to-three-merge-chase-progressive.png), [marking](docs/progressive-merges/final/progressive/two-to-three-merge-marking-progressive.png), [guardrail](docs/progressive-merges/final/progressive/two-to-three-merge-guardrail-progressive.png)
+- P4: [plan](docs/progressive-merges/final/progressive/right-diverge-plan-progressive.png), [chase](docs/progressive-merges/final/progressive/right-diverge-chase-progressive.png), [marking](docs/progressive-merges/final/progressive/right-diverge-marking-progressive.png), [guardrail](docs/progressive-merges/final/progressive/right-diverge-guardrail-progressive.png)
+
+The images were inspected directly, not merely generated. The four progressive
+views show a longitudinal approach/opening/parallel/absorption process instead
+of a short intersecting ribbon; pavement and lane paths are continuous; the
+temporary lane is readable; solid/dash paths meet without a lateral step; no
+slash/backslash fragments or unrelated host-line crossings are visible; and
+rails remain on the true exterior without a drivable-opening crossing. P1/P3
+are deliberately subtle from high plan view because the branch surface is
+properly absorbed into one widened host rather than left as an overlapping
+ribbon; chase and marking views expose the temporary topology more clearly.
+
+## Final regression comparison
+
+Results below are from the final implementation unless identified as an
+unchanged baseline failure.
+
+| Check | Final result and baseline comparison |
+| --- | --- |
+| Progressive model + focused probe | PASS; exactly 4 active / 0 legacy; all geometry/topology/paint/rail/physics gates pass |
+| Dynamic prototype drive | PASS; four full traversals, 0 collision events/corrections, no ownership oscillation |
+| A–B marking clipping | PASS; 56/56 exact, 112,703 strips, every violation counter 0 (98 intentional prototype-owned strips over baseline) |
+| Merge marking | PASS; 56 zones, all counters 0 |
+| Marking orientation | PASS; 0 diagonal pieces, 0 alternating runs, 0 crossable-boundary chevrons; max lateral jump 0.15 m |
+| Merge guardrail | PASS; 52 convergence checks, 0 opening crossings/gaps |
+| Guardrail | PASS; 207 runs / 84 gaps, 0 unexplained/doubled/inside-asphalt rails; four legacy run/gap pairs replaced intentionally |
+| Junction finishing | Known unchanged FAIL (6), exactly the six baseline source-curve/collision-height families |
+| Lateral junction | PASS ratchet; exact baseline totals: 56 mouths, 20,185 points, 0 holes/steps/rails, 22 duplicate samples |
+| Road surface | PASS; 40,046 surface / 17,644 render frames, worst lateral 0.060 m, vertical 0.030 m, dash phase errors 0 |
+| Traffic runtime | PASS; 23 active after 20 s, finite position, 5 meshes/vehicle |
+| OSM validation | Known FAIL improves 329 → 315: rail 0, overlap unchanged 22, ramp-drive 247 → 233, smoothness unchanged 60, hygiene 0; selected route pairs have 0 ramp-drive failures |
+| Developer map | PASS 29/29, including the exact four visible pins and phone/touch preservation |
+| Complete mobile e2e | PASS 34/34 at iPhone-sized touch viewport; no console errors |
+
+No non-prototype lateral, finishing, overlap, smoothness, rail, or hygiene
+ratchet moved. The global OSM improvement is entirely the removal of selected
+prototype wall-hit samples. Existing non-prototype OSM ramp-drive failures are
+still out of checkpoint scope.
+
+## Performance comparison
+
+The final topology is precomputed during map construction. It adds no per-frame
+network scan, no per-marking draw call, and avoids empty-array allocation in
+the hot deck/rail helpers.
+
+A same-machine `origin/main` worktree control was necessary because the current
+host made the historical 4,000 ms Node threshold fail on the base itself:
+
+| Metric | `origin/main` control | Prototype | Delta |
+| --- | ---: | ---: | ---: |
+| Node map-build median | 4,759.6 ms | 4,903.4 ms | +3.0% |
+| Browser map build | 4,141.8 ms | 4,398.9 ms | +6.2% |
+| Scene triangles | 1,005,534 | 1,005,178 | −356 |
+| Stored triangles | 960,054 | 959,698 | −356 |
+| Draw calls | 169 | 171 | +2 |
+| Frame p95 | 99.9 ms | 99.9 ms | no change |
+
+An isolated repeat ranged to 5,062.9 ms Node / 4,741.0 ms browser, confirming
+large host timing variance. The performance script therefore reports FAIL on
+its absolute 4,000 ms map-build threshold (also failed by the base control) and
+the prototype's 171 calls against its 170-call ratchet. Geometry budgets and
+frame p95 remain inside limits, mobile e2e passes, and the measured +2 calls are
+documented rather than hidden. Rechecking on the target evaluation hardware is
+recommended before any network-wide rollout.
+
+## Checkpoint limitations and stop condition
+
+- Traffic uses the existing graph/lane behavior; no progressive traffic-AI
+  rewrite was attempted. The runtime smoke is clean, but final traffic lane
+  choice through temporary lanes belongs to a later checkpoint.
+- Four audit rows remain manual-review-only because of short/extreme source
+  geometry (`J27`, `J31`, `J36`, `J53`); they were not forced through the model.
+- The inherited six junction-finishing and 315 OSM findings remain documented;
+  none is reclassified as fixed.
+- The +2 visible draw calls and timing variance above are the known performance
+  limitation for evaluation.
+
+Rollout is intentionally and verifiably limited to exactly four records in one
+data-driven allow-list. No fifth junction is enabled, no network-wide rollout
+has begun, and `legacyProgressiveMerges=1` remains the comparison/rollback path.

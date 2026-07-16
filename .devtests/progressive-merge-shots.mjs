@@ -64,14 +64,27 @@ await page.evaluate(() => {
   const game = window.shutoko;
   game.traffic?.setDensity?.(0);
   game.traffic?.vehicles?.forEach?.((vehicle) => { if (vehicle.mesh) vehicle.mesh.visible = false; });
+  const technicalEvidenceClutter = new Set([
+    game.map.materials.facadeOffice,
+    game.map.materials.facadeDark,
+    game.map.materials.facadeHotel,
+    game.map.materials.facadeIndustrial,
+    game.map.materials.building,
+  ]);
+  game.map.group.traverse((object) => {
+    if (!object.isMesh) return;
+    if (technicalEvidenceClutter.has(object.material)) object.visible = false;
+  });
+  document.querySelector('#hud')?.setAttribute('style', 'display:none!important');
+  document.querySelector('#debug-drone-hud')?.setAttribute('style', 'display:none!important');
 });
 
 // Validation fixtures only. Production enablement lives in one data module.
 const cases = [
-  { name: 'one-to-two-merge', branch: 'ramp_1', host: 'r11_0', which: 'end' },
-  { name: 'two-to-two-merge', branch: 'c1_3', host: 'c1_0', which: 'end' },
-  { name: 'two-to-three-merge', branch: 'ramp_3', host: 'wangan_1', which: 'end' },
-  { name: 'right-diverge', branch: 'r1_0', host: 'c1_0', which: 'start' },
+  { name: 'one-to-two-merge', branch: 'ramp_1', host: 'r11_0', which: 'end', phases: [3009.085, 3029.082, 3059.082, 3101.971, 3145.683] },
+  { name: 'two-to-two-merge', branch: 'c1_3', host: 'c1_0', which: 'end', phases: [11176.304, 11195.882, 11228.512, 11287.246, 11339.454] },
+  { name: 'two-to-three-merge', branch: 'ramp_3', host: 'wangan_1', which: 'end', phases: [4392.541, 4420.358, 4457.615, 4530.823, 4595.896] },
+  { name: 'right-diverge', branch: 'r1_0', host: 'c1_0', which: 'start', phases: [10837.464, 10856.748, 10888.887, 10946.737, 10998.160] },
 ];
 
 for (const fixture of cases) {
@@ -82,8 +95,6 @@ for (const fixture of cases) {
     const zone = map.junctionZones.find((candidate) => candidate.branch === branch
       && candidate.host === host && candidate.which === spec.which);
     if (!branch || !host || !zone?.crossable) return null;
-    const h0 = zone.crossable.host[0];
-    const h1 = zone.crossable.host[1];
     const hostAt = (distance) => {
       const sample = map._sampleCenter(host, map._normalizeDistance(host, distance), 1);
       return {
@@ -91,38 +102,53 @@ for (const fixture of cases) {
         tangent: { x: sample.tangent.x, y: sample.tangent.y, z: sample.tangent.z },
       };
     };
-    const branchAt = (distance) => {
-      const sample = map._sampleCenter(branch, Math.max(0, Math.min(branch.length, distance)), 1);
-      return {
-        position: { x: sample.position.x, y: sample.position.y, z: sample.position.z },
-        tangent: { x: sample.tangent.x, y: sample.tangent.y, z: sample.tangent.z },
-      };
-    };
-    const openingBranch = zone.markingOpening?.branch || zone.crossable.branch;
-    const branchApproach = spec.which === 'end'
-      ? Math.max(0, openingBranch[0] - 55)
-      : Math.min(branch.length, openingBranch[1] + 55);
+    const [approachStart, openingStart, parallelStart, absorptionStart, transitionEnd] = spec.phases;
     return {
-      plan: hostAt((h0 + h1) * 0.5),
-      chase: branchAt(branchApproach),
-      marking: hostAt(spec.which === 'end' ? h0 : h1),
-      rail: hostAt(spec.which === 'end' ? h1 : h0),
+      plan: hostAt((openingStart + transitionEnd) * 0.5),
+      chase: hostAt(parallelStart),
+      marking: hostAt((parallelStart + absorptionStart) * 0.5),
+      rail: hostAt((parallelStart + absorptionStart) * 0.5),
       side: zone.side,
       zoneId: zone.id,
       lanes: `${branch.lanes}->${host.lanes}`,
+      phaseSpan: transitionEnd - approachStart,
     };
   }, fixture);
   if (!geometry) throw new Error(`Missing validation fixture ${fixture.branch}->${fixture.host}`);
 
   const views = [
-    { name: 'plan', sample: geometry.plan, up: 118, back: 0, lateral: 0, pitch: -1.50 },
-    { name: 'chase', sample: geometry.chase, up: 6.5, back: 38, lateral: 0, pitch: -0.13 },
-    { name: 'marking', sample: geometry.marking, up: 9, back: 24, lateral: -geometry.side * 5, pitch: -0.22 },
-    { name: 'guardrail', sample: geometry.rail, up: 5.5, back: 20, lateral: geometry.side * 20, pitch: -0.12 },
+    { name: 'plan', sample: geometry.plan, up: 145, back: 0, lateral: 0 },
+    { name: 'chase', sample: geometry.chase, up: 8, back: 64, lateral: 0 },
+    { name: 'marking', sample: geometry.marking, up: 11, back: 25, lateral: -geometry.side * 7 },
+    { name: 'guardrail', sample: geometry.rail, up: 15, back: 25, lateral: geometry.side * 14 },
   ];
   for (const view of views) {
     await page.evaluate(({ sample, camera }) => {
       const game = window.shutoko;
+      const planMaterials = new Set([
+        game.map.materials.road,
+        game.map.materials.roadAlt,
+        game.map.materials.roadService,
+        game.map.materials.marking,
+        game.map.materials.concrete,
+        game.map.materials.concreteDark,
+        game.map.materials.barrier,
+        game.map.materials.railMetal,
+        game.map.materials.cushion,
+      ]);
+      const clutterMaterials = new Set([
+        game.map.materials.facadeOffice,
+        game.map.materials.facadeDark,
+        game.map.materials.facadeHotel,
+        game.map.materials.facadeIndustrial,
+        game.map.materials.building,
+      ]);
+      game.map.group.traverse((object) => {
+        if (!object.isMesh) return;
+        object.visible = camera.name === 'plan'
+          ? planMaterials.has(object.material)
+          : !clutterMaterials.has(object.material);
+      });
       if (!game.debug.noclip) game.setNoclip(true);
       const normalX = -sample.tangent.z;
       const normalZ = sample.tangent.x;
@@ -131,7 +157,8 @@ for (const fixture of cases) {
       const z = sample.position.z - sample.tangent.z * camera.back + normalZ * camera.lateral;
       game.debug.position.set(x, y, z);
       game.debug.yaw = Math.atan2(sample.position.x - x, sample.position.z - z);
-      game.debug.pitch = camera.pitch;
+      const horizontal = Math.hypot(sample.position.x - x, sample.position.z - z);
+      game.debug.pitch = Math.atan2(sample.position.y - y, Math.max(0.001, horizontal));
       game._snapNoclipCamera();
       game.map._visibleKey = null;
       game.map.update(game.debug.position, performance.now() / 1000);
