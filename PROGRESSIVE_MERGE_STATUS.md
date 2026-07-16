@@ -396,6 +396,128 @@ fixed-camera inspection and production-physics traversals are clean. P1–P3 are
 unchanged, P5 remains disabled, the legacy toggle remains available, and no
 network-wide rollout or merge to `main` occurred.
 
+### P4 solved-state handoff snapshot
+
+This is the authoritative resume point for the completed P4-only pass. The
+snapshot was taken from a clean worktree immediately before the documentation-
+only handoff commit which adds this section.
+
+| Field | Exact value |
+| --- | --- |
+| Current branch | `codex/progressive-merge-prototype` |
+| Verified solved-state HEAD | `b3e3a0b3e27514e85065d6cadd9ab80647b6f89c` |
+| Verified remote tracking tip | `origin/codex/progressive-merge-prototype` at `b3e3a0b3e27514e85065d6cadd9ab80647b6f89c` |
+| P4 implementation/evidence commit | `893c8e9ffed72d40d3181d6fe8bb16ccee210f7f` |
+| Prototype | P4 = `J2:diverge:c1_0:r1_0:start` |
+| Scope at handoff | P4 active; P1–P3 deferred in legacy mode; P5 disabled; no network rollout |
+| Compatibility switch | `?legacyProgressiveMerges=1` restores legacy rendering |
+
+The handoff-document commit necessarily advances the branch beyond the
+solved-state SHA recorded above: a Git commit cannot contain its own final SHA
+because that SHA is derived from the committed content. On resume,
+`git rev-parse HEAD` and `git rev-parse @{u}` are the authoritative final
+documentation-tip check; both must match and `git status --short` must be empty.
+
+#### Exact architecture and lane-topology rule
+
+`js/progressive-merge.js` owns the P4 transition model and its phase landmarks,
+temporary lane paths, cross-sections, mappings, paved envelope, ownership
+handoff, marking paths, and guardrail envelope. `js/map.js` consumes that single
+model for rendered pavement, road collision, transition-owned paint, route-paint
+suppression, and exterior rail terminals. `js/game.js` only visualizes the same
+records in the query-controlled ownership/topology overlay; it does not own an
+independent geometry rule. The focused probes consume those production records
+rather than reconstructing a more permissive test-only transition.
+
+For P4 only, `topologyKind = 2+2-diverge` and the shared transition must contain
+exactly four temporary lanes: continuing `host:0` and `host:1`, plus exiting
+`aux:0 -> r1_0:0` and `aux:1 -> r1_0:1`. The exiting carriageway is a rigid
+7.10 m cross-section made of two 3.55 m lanes. Its inner boundary, centre
+divider, outer boundary, and both lane centres rotate and translate together
+into the corresponding real branch geometry. The outer boundary and its solid
+yellow marking remain the branch outer edge; they must never target branch
+lateral 0 or change role into the branch divider. Ownership transfers only
+after the host/branch paved union supports the complete 2+2 section. The gore
+and separating rail may begin only after that transfer. P4 must fail if either
+exit lane closes, consecutive cross-sections stop overlapping, a centre misses
+its real branch lane, paint order crosses, or rail/collision geometry enters the
+drivable exit corridor.
+
+The authoritative phase landmarks are: full usable widening at host
+`s=10888.887`; steering begins at host `s=10946.737`; exterior handoff at
+host/branch `s=10980.270/146.042`; full branch ownership and gore permission at
+host/branch `s=10998.160/164.000`. These are source-envelope/branch-target
+landmarks, not an arbitrary animation extension.
+
+#### Tests and visual evidence at this resume point
+
+The final Phase F run passed the classification, shared model, shared
+integration, P4 hard 2+2, two-lane dynamic drive, A–B clipping, merge marking,
+marking orientation, merge guardrail, guardrail envelope, road surface, traffic,
+developer-map, generic mobile e2e, legacy-toggle, and lateral-junction ratchet
+checks. Exact measured results and the intentionally unchanged global failures
+are in the Phase F table above. The commands for the green gates are:
+
+```powershell
+node .devtests/progressive-junction-classification-probe.mjs
+node .devtests/progressive-merge-model-probe.mjs
+node .devtests/progressive-merge-probe.mjs
+node .devtests/p4-diverge-continuity-probe.mjs
+node .devtests/progressive-merge-drive.mjs
+node .devtests/ab-marking-clipping-probe.mjs
+node .devtests/merge-marking-probe.mjs
+node .devtests/marking-orientation-probe.mjs
+node .devtests/merge-guardrail-probe.mjs
+node .devtests/guardrail-probe.mjs
+node .devtests/road-surface-probe.mjs
+node .devtests/traffic-test.mjs
+node .devtests/dev-map-test.mjs
+node .devtests/e2e.mjs
+node .devtests/progressive-merge-probe.mjs --legacy
+node .devtests/lateral-junction-probe.mjs
+```
+
+The identical-camera comparison is preserved as eight failing 2+1 images in
+[`before-2plus2`](docs/progressive-merges/checkpoint-2/before-2plus2/) and eight
+corrected 2+2 images in
+[`after-2plus2`](docs/progressive-merges/checkpoint-2/after-2plus2/): elevated
+plan, normal chase, close marking, and guardrail-side, each in normal and
+ownership-colour form. The corrected directory also contains the
+[`measured topology overlay`](docs/progressive-merges/checkpoint-2/after-2plus2/p4-corridor-debug-topology-after-2plus2.png),
+and the machine-readable hard-gate record is
+[`P4-AFTER-2PLUS2.json`](docs/progressive-merges/checkpoint-2/P4-AFTER-2PLUS2.json).
+All nine corrected views were directly inspected.
+
+#### Remaining work and precise resume instructions
+
+There is no remaining measured P4 pavement, topology, marking, collision,
+drivability, or guardrail defect. The only P4 follow-up is subjective visual
+rhythm at player speed. P1–P3 remain real vertical/split-level source-data cases
+for a separate manual-review/design pass; P5 and a network-wide rollout remain
+out of scope. The inherited red suites remain unchanged: junction finishing
+fails six cases with P4 absent; OSM validation reports 327 non-P4 findings;
+network validation has its stale 70–95 km and `dj` expectations; and this host
+exceeds only the absolute 4 s Node map-build performance limit.
+
+Resume exactly as follows:
+
+```powershell
+Set-Location C:\Users\giaco\Documents\GitHub\hesi
+git switch codex/progressive-merge-prototype
+git fetch origin
+git pull --ff-only origin codex/progressive-merge-prototype
+git rev-parse HEAD
+git rev-parse '@{u}'
+git status --short
+```
+
+The two SHAs must match and the status command must print nothing. Read this
+handoff and `P4-AFTER-2PLUS2.json`, inspect the corrected plan/ownership overlay,
+then run the focused commands above before changing geometry. Preserve P4's
+2+2 rule and all existing A–B, developer-map/mobile, surface, marking, collision,
+and rail behavior. Do not reactivate P1–P3, enable P5, touch unrelated
+junctions, begin a rollout, open a PR, or merge to `main` without new scope.
+
 ## Checkpoint contract
 
 - Branch: `codex/progressive-merge-prototype`
