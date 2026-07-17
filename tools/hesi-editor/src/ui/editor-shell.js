@@ -39,6 +39,8 @@ export function createEditorShell(root) {
     element('span', 'toolbar-divider'),
     button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
     button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
+    button('Save', 'save-project', { title: 'Save the current project to disk (Ctrl+S)' }),
+    button('Project', 'show-project', { title: 'Open project save/load controls' }),
     element('span', 'toolbar-divider'),
     button('Move', 'transform-translate', { pressed: true, title: 'Translate selected (W in Orbit mode)' }),
     button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected (E in Orbit mode)' }),
@@ -97,7 +99,10 @@ export function createEditorShell(root) {
   const worldWarning = element('div', 'world-warning');
   worldWarning.hidden = true;
   worldWarning.dataset.testid = 'world-warning';
-  viewportWrap.append(viewportHost, viewportLabel, worldWarning);
+  const projectNotice = element('div', 'project-notice');
+  projectNotice.hidden = true;
+  projectNotice.dataset.testid = 'project-notice';
+  viewportWrap.append(viewportHost, viewportLabel, worldWarning, projectNotice);
 
   const right = element('aside', 'panel panel-right');
   const rightHeader = element('div', 'panel-header');
@@ -113,11 +118,13 @@ export function createEditorShell(root) {
   const worldTab = element('button', 'tab-button active', 'World');
   const controlsTab = element('button', 'tab-button', 'Controls');
   const editTab = element('button', 'tab-button', 'Edit');
-  worldTab.type = controlsTab.type = editTab.type = 'button';
+  const projectTab = element('button', 'tab-button', 'Project');
+  worldTab.type = controlsTab.type = editTab.type = projectTab.type = 'button';
   worldTab.dataset.tab = 'world';
   controlsTab.dataset.tab = 'controls';
   editTab.dataset.tab = 'edit';
-  tabs.append(worldTab, editTab, controlsTab);
+  projectTab.dataset.tab = 'project';
+  tabs.append(worldTab, editTab, projectTab, controlsTab);
   const bottomCaption = element('small', '', 'Loading metadata');
   bottomHeader.append(tabs, bottomCaption);
   const bottomContent = element('div', 'panel-content');
@@ -163,6 +170,7 @@ export function createEditorShell(root) {
   let actionHandler = () => {};
   let transformState = { mode: 'translate', space: 'world', axes: { x: true, y: true, z: true }, translateSnap: null, rotateSnapDegrees: null, scaleSnap: null, attached: false };
   let historyState = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null, dirty: false };
+  let projectInfo = { name: 'HESI Main World', path: 'data/editor/hesi-world-project.json', recent: [], autosavePath: '' };
   let currentTab = 'world';
   const triggerAction = (action, detail = null) => actionHandler(action, detail);
   const editButton = (label, action, title = '') => {
@@ -174,7 +182,57 @@ export function createEditorShell(root) {
     worldTab.classList.toggle('active', currentTab === 'world');
     controlsTab.classList.toggle('active', currentTab === 'controls');
     editTab.classList.toggle('active', currentTab === 'edit');
+    projectTab.classList.toggle('active', currentTab === 'project');
     bottomContent.innerHTML = '';
+    if (currentTab === 'project') {
+      const panel = element('div', 'project-panel');
+      const fields = element('div', 'project-fields');
+      const nameLabel = element('label', 'project-field');
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.value = projectInfo.name;
+      nameInput.setAttribute('aria-label', 'Project name');
+      nameLabel.append(element('span', '', 'Project name'), nameInput);
+      const pathLabel = element('label', 'project-field');
+      const pathInput = document.createElement('input');
+      pathInput.type = 'text';
+      pathInput.value = projectInfo.path;
+      pathInput.setAttribute('aria-label', 'Project path');
+      pathLabel.append(element('span', '', 'Project path (under data/editor)'), pathInput);
+      const recentLabel = element('label', 'project-field');
+      const recent = document.createElement('select');
+      recent.setAttribute('aria-label', 'Recent projects');
+      recent.add(new Option('Recent projects', ''));
+      projectInfo.recent.forEach((path) => recent.add(new Option(path, path)));
+      recent.addEventListener('change', () => { if (recent.value) pathInput.value = recent.value; });
+      recentLabel.append(element('span', '', 'Recent'), recent);
+      fields.append(nameLabel, pathLabel, recentLabel);
+      const actions = element('div', 'project-actions');
+      const details = () => ({ name: nameInput.value, path: pathInput.value });
+      const projectButton = (label, action) => {
+        const node = button(label, action);
+        node.addEventListener('click', () => triggerAction(action, details()));
+        return node;
+      };
+      actions.append(
+        projectButton('Save', 'project-save'),
+        projectButton('Save As', 'project-save-as'),
+        projectButton('Load', 'project-load'),
+        projectButton('Export Overrides', 'project-export'),
+        projectButton('Reset Unsaved Changes', 'project-reset-unsaved'),
+        projectButton('Reset Selected Override', 'reset-overrides'),
+        projectButton('Reset All Overrides', 'project-reset-all'),
+      );
+      const facts = element('div', 'project-summary');
+      facts.append(
+        element('b', '', historyState.dirty ? 'UNSAVED CHANGES' : 'SAVED TO DISK'),
+        element('span', '', `Current: ${projectInfo.path}`),
+        element('span', '', `Recovery: ${projectInfo.autosavePath || 'not configured'}`),
+      );
+      panel.append(fields, actions, facts);
+      bottomContent.append(panel);
+      return;
+    }
     if (currentTab === 'edit') {
       const panel = element('div', 'edit-panel');
       const actions = element('div', 'edit-actions');
@@ -510,6 +568,7 @@ export function createEditorShell(root) {
       redo.title = historyState.redoLabel ? `Redo: ${historyState.redoLabel}` : 'Nothing to redo';
       dirtyChip.textContent = historyState.dirty ? 'UNSAVED' : 'SAVED';
       dirtyChip.classList.toggle('dirty', historyState.dirty);
+      if (currentTab === 'project') renderBottom();
     },
     setTransformState(state) {
       transformState = { ...transformState, ...state, axes: { ...transformState.axes, ...(state.axes || {}) } };
@@ -523,6 +582,17 @@ export function createEditorShell(root) {
       dirtyChip.textContent = dirty ? 'UNSAVED' : 'SAVED';
       dirtyChip.classList.toggle('dirty', Boolean(dirty));
     },
+    setProject(info) {
+      projectInfo = { ...projectInfo, ...info };
+      bottomCaption.textContent = `Project · ${projectInfo.path}`;
+      if (currentTab === 'project') renderBottom();
+    },
+    showTab(tab) {
+      if (!['world', 'edit', 'project', 'controls'].includes(tab)) return false;
+      currentTab = tab;
+      renderBottom();
+      return true;
+    },
     setLoading(show, message = 'Preparing viewport') {
       loadingOverlay.hidden = !show;
       loadingCopy.querySelector('p').textContent = message;
@@ -535,6 +605,10 @@ export function createEditorShell(root) {
     showWorldWarning(message) {
       worldWarning.textContent = message || '';
       worldWarning.hidden = !message;
+    },
+    showProjectNotice(message) {
+      projectNotice.textContent = message || '';
+      projectNotice.hidden = !message;
     },
     setStatus(message) { statusMessage.textContent = message; },
     setAdapter(nextAdapter) {

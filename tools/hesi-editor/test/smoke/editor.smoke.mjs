@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -8,6 +8,7 @@ const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const OUT = path.join(ROOT, 'tools', 'hesi-editor', 'test', 'smoke', 'artifacts');
 const PORT = 9600 + (process.pid % 300);
 const BASE = `http://127.0.0.1:${PORT}`;
+const PROJECT_PATH = 'data/editor/.test-smoke-project.json';
 await mkdir(OUT, { recursive: true });
 
 const child = spawn(process.execPath, ['tools/hesi-editor/server.mjs'], {
@@ -32,7 +33,7 @@ try {
   const errors = [];
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('pageerror', (error) => errors.push(String(error)));
-  await page.goto(`${BASE}/editor`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE}/editor?project=${encodeURIComponent(PROJECT_PATH)}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'real', null, { timeout: 60000 });
   await page.waitForSelector('[data-testid="loading-overlay"]', { state: 'hidden' });
 
@@ -48,7 +49,7 @@ try {
     entities: window.hesiEditor.registry.list().length,
     layers: window.hesiEditor.registry.layers(),
   }));
-  if (state.checkpoint !== 3 || state.strategy !== 'real' || !state.real) throw new Error(`Real adapter did not load: ${JSON.stringify(state)}`);
+  if (state.checkpoint !== 4 || state.strategy !== 'real' || !state.real) throw new Error(`Real adapter did not load: ${JSON.stringify(state)}`);
   if (state.routes < 60 || state.chunks < 1 || state.children < 1) throw new Error(`Real world inventory is incomplete: ${JSON.stringify(state)}`);
   if (state.entities < 10000 || state.layers.some((layer) => layer.count < 1)) throw new Error(`Semantic registry is incomplete: ${JSON.stringify(state)}`);
   if (!state.warning) throw new Error('Demo/fallback warning is visible in real mode');
@@ -108,9 +109,26 @@ try {
   await page.keyboard.press('Control+Shift+Z');
   await page.getByRole('button', { name: 'Focus selected', exact: true }).click();
   await page.screenshot({ path: path.join(OUT, 'checkpoint-3-real-lamp-editing.png'), fullPage: true });
+  await page.locator('[data-action="save-project"]').click();
+  await page.waitForFunction(() => window.hesiEditor.history.dirty === false);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'real' && window.hesiEditor.registry.has('placed:0001'), null, { timeout: 60000 });
+  const persisted = await page.evaluate(() => ({
+    checkpoint: window.hesiEditor.checkpoint,
+    path: window.hesiEditor.persistence.currentPath,
+    placed: window.hesiEditor.projectState.toJSON().placedObjects.length,
+    lampX: window.hesiEditor.registry.getById('lamp:wangan-0:0042').object3D.position.x,
+  }));
+  if (persisted.checkpoint !== 4 || persisted.path !== PROJECT_PATH || persisted.placed !== 1 || Math.abs(persisted.lampX - (Number(originalX) + 6)) > 0.01) {
+    throw new Error(`Disk project did not survive browser reload: ${JSON.stringify(persisted)}`);
+  }
+  await page.getByTestId('hierarchy-search').fill('placed:0001');
+  await page.locator('[data-entity-id="placed:0001"]').click();
+  await page.getByRole('button', { name: 'Project', exact: true }).last().click();
+  await page.screenshot({ path: path.join(OUT, 'checkpoint-4-project-persistence.png'), fullPage: true });
 
   const demo = await browser.newPage({ viewport: { width: 1100, height: 760 } });
-  await demo.goto(`${BASE}/editor?world=demo`, { waitUntil: 'domcontentloaded' });
+  await demo.goto(`${BASE}/editor?world=demo&project=${encodeURIComponent('data/editor/hesi-world-project.json')}`, { waitUntil: 'domcontentloaded' });
   await demo.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'demo', null, { timeout: 20000 });
   const demoState = await demo.evaluate(() => ({ strategy: window.hesiEditor.adapter.strategy, real: window.hesiEditor.adapter.isRealWorld }));
   if (demoState.strategy !== 'demo' || demoState.real) throw new Error(`Explicit demo mode failed: ${JSON.stringify(demoState)}`);
@@ -127,4 +145,7 @@ try {
 } finally {
   await browser?.close();
   child.kill();
+  await rm(path.join(ROOT, PROJECT_PATH), { force: true });
+  await rm(path.join(ROOT, `${PROJECT_PATH}.bak`), { force: true });
+  await rm(path.join(ROOT, PROJECT_PATH.replace(/\.json$/i, '.autosave.json')), { force: true });
 }

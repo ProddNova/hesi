@@ -26,6 +26,8 @@ index.html
         -> interaction/edit-actions.js
         -> interaction/command-history.js
         -> overrides/world-project-state.js
+           -> overrides/override-schema.js
+           -> overrides/project-persistence.js
 ```
 
 ## Responsibilities
@@ -106,6 +108,23 @@ instances. Duplicates share source geometry/material references and create an
 editor-owned group under the adapter's `editorObjectsGroup`; project records
 contain an asset ID and transform, never geometry.
 
+### Project persistence boundary
+
+`overrides/override-schema.js` is shared by browser and dev server. It accepts
+only schema version 1 JSON, validates finite transforms, duplicate placed IDs,
+known generated IDs and asset IDs (when the browser supplies those catalogs),
+and canonicalizes keys/order/numbers for byte-stable serialization.
+
+`overrides/project-persistence.js` converts runtime quaternions to persisted XYZ
+Euler radians, applies loaded overrides only after semantic/asset validation,
+recreates placed objects from asset references, and owns save/load/recent/
+autosave/recovery/reset/export behavior. Reloading never deserializes geometry.
+
+`server.mjs` exposes a narrow `/__hesi_editor_project` GET/PUT endpoint. Paths
+must remain under `data/editor/` and end in `.json`; requests are capped at 2
+MiB. PUT validates again, writes a unique temporary sibling, and creates a
+pre-overwrite `.bak`. DELETE is restricted to autosave recovery files.
+
 ## Ownership and cleanup
 
 - The adapter owns world geometry/material disposal.
@@ -123,8 +142,8 @@ or visibility changes behind.
 
 ## Extension points
 
-Later checkpoints add persistence/validation/recovery, debug overlays, and
-asset-browser services beside these modules instead of expanding the adapter
-into a monolith. Material catalogs, road-specific editing, export integration,
-and AI commands remain later modules. The archived
+The final checkpoint adds debug overlays and asset-browser services beside
+these modules instead of expanding the adapter into a monolith. Material
+catalogs, road-specific editing, export integration, and AI commands remain
+later modules. The archived
 `CONTRACTS_PHASE1_PROVISIONAL.md` is useful research, but it is not binding.

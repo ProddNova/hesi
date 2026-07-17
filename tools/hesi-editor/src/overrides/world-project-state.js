@@ -15,7 +15,17 @@ export class WorldProjectState {
     this.listeners = new Set();
   }
 
+  replaceDocument(document) {
+    this.document = clone(document);
+    this._emit({ type: 'document-replace' });
+  }
+
   getOverride(id) { return clone(this.document.entityOverrides[id] ?? null); }
+
+  updateProject(patch) {
+    this.document.project = { ...this.document.project, ...clone(patch) };
+    this._emit({ type: 'project-update', patch: clone(patch) });
+  }
 
   replaceOverride(id, value) {
     if (value == null || !Object.keys(value).length) delete this.document.entityOverrides[id];

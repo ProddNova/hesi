@@ -8,6 +8,7 @@ import { TransformManager } from './interaction/transform-manager.js';
 import { EditActions } from './interaction/edit-actions.js';
 import { WorldProjectState } from './overrides/world-project-state.js';
 import { AssetRegistry } from './world/asset-registry.js';
+import { ProjectPersistence } from './overrides/project-persistence.js';
 
 export async function createEditorApp(root) {
   if (!root) throw new Error('Editor root element is missing');
@@ -24,11 +25,17 @@ export async function createEditorApp(root) {
   let transformManager = null;
   let editActions = null;
   let assetRegistry = null;
+  let persistence = null;
   let disposed = false;
   let gridVisible = true;
   let axesVisible = false;
   const projectState = new WorldProjectState();
   const history = new CommandHistory({ onChange: (state) => shell.setHistory(state) });
+  const runProjectTask = (task) => Promise.resolve().then(task).catch((error) => {
+    shell.setStatus(`Project operation failed · ${error.message}`);
+    shell.showError(error, 'Project operation failed');
+    return null;
+  });
 
   const applyPreset = (id) => {
     const preset = adapter?.getPreset(id);
@@ -49,6 +56,8 @@ export async function createEditorApp(root) {
   shell.onToolbar('focus-selected', () => selection?.focusSelected());
   shell.onToolbar('undo', () => history.undo());
   shell.onToolbar('redo', () => history.redo());
+  shell.onToolbar('save-project', () => persistence && runProjectTask(() => persistence.save()));
+  shell.onToolbar('show-project', () => shell.showTab('project'));
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));
@@ -91,6 +100,12 @@ export async function createEditorApp(root) {
       'snap-rotate': () => transformManager.setSnaps({ rotateDegrees: detail }),
       'snap-scale': () => transformManager.setSnaps({ scale: detail }),
       'axis-toggle': () => transformManager.setAxes({ ...transformManager.axes, [detail.axis]: detail.enabled }),
+      'project-save': () => runProjectTask(() => persistence.save({ name: detail.name })),
+      'project-save-as': () => runProjectTask(() => persistence.save({ path: detail.path, name: detail.name })),
+      'project-load': () => runProjectTask(async () => { shell.showProjectNotice(''); await persistence.load(detail.path); }),
+      'project-export': () => persistence.exportOverrides(),
+      'project-reset-unsaved': () => runProjectTask(async () => { shell.showProjectNotice(''); await persistence.resetUnsaved(); }),
+      'project-reset-all': () => persistence.resetAll(),
     };
     actions[action]?.();
   });
@@ -104,6 +119,7 @@ export async function createEditorApp(root) {
       return;
     }
     if (commandKey && event.code === 'KeyY') { event.preventDefault(); history.redo(); return; }
+    if (commandKey && event.code === 'KeyS') { event.preventDefault(); if (persistence) runProjectTask(() => persistence.save()); return; }
     if (commandKey && event.code === 'KeyD') { event.preventDefault(); editActions?.duplicate(); return; }
     if (event.code === 'Delete') { event.preventDefault(); editActions?.deleteSelected(); return; }
     if (event.code === 'KeyX') {
@@ -171,7 +187,19 @@ export async function createEditorApp(root) {
       },
       onStatus: (message) => shell.setStatus(message),
     });
+    persistence = new ProjectPersistence({
+      projectState, registry, assetRegistry, adapter, selection, transformManager, history,
+      onStatus: (message) => shell.setStatus(message),
+      onProjectChange: (state) => shell.setProject(state),
+      onRecovery: (message) => shell.showProjectNotice(message),
+    });
     shell.setTransformState(transformManager.state());
+    shell.setLoading(true, 'Loading saved editor project');
+    const initialProjectPath = mode === 'demo' && !params.has('project')
+      ? 'data/editor/hesi-world-project.json'
+      : persistence.initialPath();
+    await persistence.load(initialProjectPath, { allowMissing: true });
+    persistence.startAutosave();
     shell.showWorldWarning(adapter.warning);
     applyPreset(adapter.presets.has('tatsumi-pa') ? 'tatsumi-pa' : 'initial-spawn');
     shell.setLoading(false);
@@ -191,6 +219,7 @@ export async function createEditorApp(root) {
     window.removeEventListener('keydown', onKeyDown);
     unsubscribeRegistry();
     editActions?.exitIsolation();
+    persistence?.dispose();
     transformManager?.dispose();
     selection?.dispose();
     registry.clear();
@@ -202,7 +231,7 @@ export async function createEditorApp(root) {
   window.addEventListener('beforeunload', dispose, { once: true });
 
   return {
-    checkpoint: 3,
+    checkpoint: 4,
     registry,
     viewport,
     shell,
@@ -211,6 +240,7 @@ export async function createEditorApp(root) {
     get transformManager() { return transformManager; },
     get editActions() { return editActions; },
     get assetRegistry() { return assetRegistry; },
+    get persistence() { return persistence; },
     get selection() { return selection; },
     get adapter() { return adapter; },
     applyPreset,

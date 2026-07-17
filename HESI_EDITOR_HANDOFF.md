@@ -2,41 +2,43 @@
 
 Branch: `kimi/hesi-world-editor-foundation`
 
-Latest completed commit: `8a1d278c9b58e70f461495533a3ef37aa855211f`
+Latest completed commit: `9af52dc49663bfbb24bc78ca3f6016961dfb4dad`
 
-Checkpoint commit being created: `Add interactive world editing tools`
+Checkpoint commit being created: `Persist HESI world editor overrides`
 
 ## Completed
 
-- Checkpoints 1–2 remain green.
-- Real generated instances are edited in place through reversible matrix
-  overrides; composite lamp parts stay coherent and neighbors remain unchanged.
-- TransformControls, numeric editing, snapping, axes, spaces, entity actions,
-  declarative asset-reference duplication, command history, shortcuts, and
-  dirty state are operational on the real map.
-- Editor-created placed objects participate in registry search, selection,
-  inspector, transform, lock/hide/rename/delete, undo/redo, and raycast mapping.
+- Checkpoints 1–3 remain green.
+- Schema-versioned deterministic project files validate generated IDs, asset
+  references, placed-ID uniqueness, finite transforms, and JSON safety.
+- Project UI and Ctrl+S drive real disk writes through the scoped dev endpoint;
+  saves create backups, and failures surface visibly.
+- Load/full reload reapplies generated matrix overrides and reconstructs placed
+  objects from asset IDs with no geometry in JSON.
+- Save As, recent paths, export, all reset modes, disk autosave, and crash
+  recovery/discard behavior passed in Chromium.
 
 ## Files changed
 
-- `src/interaction/{command-history,edit-actions,entity-transform,transform-manager}.js`
-- `src/overrides/world-project-state.js`
-- `src/world/asset-registry.js` and dynamic discovery registration
-- app, adapter, registry, selection, shell, styles, smoke/unit tests, and docs
+- `data/editor/hesi-world-project.json`
+- `src/overrides/{override-schema,project-persistence,world-project-state}.js`
+- server endpoint, registry batching, asset ID lookup, app/shell/styles
+- schema/server/smoke tests and documentation
 
 ## Tests and screenshots
 
-- `npm --prefix tools/hesi-editor test` — PASS (13 unit + 3 server)
-- real Chromium stable-lamp edit/action workflow — PASS
-- `world-editor-mvp/checkpoint-3-real-lamp-editing.png`
+- `npm --prefix tools/hesi-editor test` — PASS (16 unit + 4 server)
+- full browser save/reload/reapply, Save As/Load/reset/export — PASS
+- disk autosave/full-reload recovery/discard — PASS
+- `world-editor-mvp/checkpoint-4-project-persistence.png`
 
 ## Known bugs
 
-None in completed checkpoint behavior. Semantic-only route/collision rows and
-generated batch granularity are documented runtime-source limitations.
+None in completed checkpoint behavior. The clean default project is committed;
+browser acceptance projects, autosaves, and `.bak` files were removed/ignored.
 
 ## Exact next checkpoint
 
-Implement versioned validated project persistence with safe atomic disk writes,
-save/open/save-as, autosave/recovery, recent projects, reference repair, and
-real-ID round-trip tests.
+Finish debug visualization, asset library/primitive placement, import/export
+reports and diagnostics, performance/leak validation, full acceptance, final
+screenshots, and the production-isolation/documentation audit.

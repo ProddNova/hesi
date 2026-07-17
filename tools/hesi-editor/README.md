@@ -82,12 +82,24 @@ available on Windows.
   geometry/material resources are never serialized into project state
 - compact command history with one entry per gizmo drag, clear Undo/Redo labels,
   keyboard shortcuts, and an explicit saved/unsaved indicator
+- versioned project files under `data/editor/` with deterministic JSON,
+  finite-number/reference/duplicate validation, five-decimal rounding, and no
+  executable code or embedded geometry
+- Save, Save As, Load, Export Overrides, Reset Unsaved Changes, Reset Selected
+  Override, and undoable Reset All Overrides controls
+- safe server-side writes through a project-only endpoint: a temporary sibling
+  is fully written before replacement and the previous file is copied to `.bak`
+- automatic project load after a full browser reload, recent project paths,
+  30-second disk autosaves, and explicit newer-autosave recovery/discard UX
 - explicit demo adapter and safe real-world fallback state
 
 Editing shortcuts in Orbit mode are `W` move, `E` rotate, `R` scale, and `X`
 world/local. `Delete` disables a generated entity or deletes a placed object;
 `Ctrl+D` duplicates a supported reusable asset; `Ctrl+Z` undoes; and
 `Ctrl+Shift+Z` or `Ctrl+Y` redoes. Fly mode retains its navigation bindings.
+`Ctrl+S` saves the current project. The committed clean default is
+`data/editor/hesi-world-project.json`; Save As paths are intentionally confined
+to `data/editor/*.json`.
 
 ## Tests
 
@@ -108,6 +120,6 @@ If Chromium is not installed for the editor-local Playwright version, run:
 npm --prefix tools/hesi-editor exec playwright install chromium
 ```
 
-Persistence/recovery, debug overlays, and asset-browser workflows are delivered
-in subsequent MVP checkpoints. The separate Asset & Tile Editor (modeling, UVs,
-textures, reusable road/tunnel modules) is intentionally out of scope here.
+Debug overlays and the complete asset-browser workflow are delivered in the
+final MVP checkpoint. The separate Asset & Tile Editor (modeling, UVs, textures,
+reusable road/tunnel modules) is intentionally out of scope here.

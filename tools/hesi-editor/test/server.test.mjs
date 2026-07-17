@@ -1,12 +1,13 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 
 const ROOT = new URL('../../../', import.meta.url);
 const PORT = 9100 + (process.pid % 500);
 const BASE = `http://127.0.0.1:${PORT}`;
 let child;
+const TEST_PROJECT = `data/editor/.test-project-${PORT}.json`;
 
 before(async () => {
   child = spawn(process.execPath, ['tools/hesi-editor/server.mjs'], {
@@ -27,7 +28,11 @@ before(async () => {
   });
 });
 
-after(() => child?.kill());
+after(async () => {
+  child?.kill();
+  await rm(new URL(`../../../${TEST_PROJECT}`, import.meta.url), { force: true });
+  await rm(new URL(`../../../${TEST_PROJECT}.bak`, import.meta.url), { force: true });
+});
 
 test('server starts and editor page resolves', async () => {
   const health = await fetch(`${BASE}/__hesi_editor_health`);
@@ -51,4 +56,34 @@ test('server redirects editor aliases and blocks traversal', async () => {
 test('production page does not import editor code', async () => {
   const source = await readFile(new URL('../../../index.html', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /tools\/hesi-editor|hesiEditor/);
+});
+
+test('project endpoint validates, saves, backs up, and reloads deterministic JSON', async () => {
+  const document = {
+    version: 1,
+    project: { name: 'Endpoint test' },
+    entityOverrides: { 'lamp:test:0001': { visible: false } },
+    placedObjects: [], groups: [], editorState: {},
+  };
+  const save = await fetch(`${BASE}/__hesi_editor_project`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: TEST_PROJECT, document }),
+  });
+  assert.equal(save.status, 200);
+  assert.equal((await save.json()).backup, null);
+  const load = await fetch(`${BASE}/__hesi_editor_project?path=${encodeURIComponent(TEST_PROJECT)}`);
+  const loaded = await load.json();
+  assert.equal(loaded.document.project.name, 'Endpoint test');
+  assert.ok(Number.isFinite(loaded.modifiedMs));
+  document.project.name = 'Endpoint test second save';
+  const overwrite = await fetch(`${BASE}/__hesi_editor_project`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: TEST_PROJECT, document }),
+  });
+  assert.equal((await overwrite.json()).backup, `${TEST_PROJECT}.bak`);
+  const backup = JSON.parse(await readFile(new URL(`../../../${TEST_PROJECT}.bak`, import.meta.url), 'utf8'));
+  assert.equal(backup.project.name, 'Endpoint test');
+  const invalid = await fetch(`${BASE}/__hesi_editor_project`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: '../outside.json', document }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.match((await invalid.json()).error, /data\/editor/);
 });

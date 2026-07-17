@@ -17,7 +17,12 @@ export function createEntityRegistry({ layers = EDITOR_LAYERS } = {}) {
   const listeners = new Set();
   const layerState = new Map(layers.map((name) => [name, { visible: true, locked: false }]));
   const originalVisibility = new Map();
-  const emit = (change) => listeners.forEach((listener) => listener(change));
+  let batchDepth = 0;
+  let batchChanged = false;
+  const emit = (change) => {
+    if (batchDepth) { batchChanged = true; return; }
+    listeners.forEach((listener) => listener(change));
+  };
   const visibilityObjects = (entity) => entity.visibilityObjects?.length
     ? entity.visibilityObjects
     : (entity.object3D ? [entity.object3D] : []);
@@ -118,6 +123,17 @@ export function createEntityRegistry({ layers = EDITOR_LAYERS } = {}) {
       records.delete(id);
       emit({ type: 'unregister', id, layer: record.entity.layer });
       return record.entity;
+    },
+    batch(callback) {
+      batchDepth += 1;
+      try { return callback(); }
+      finally {
+        batchDepth -= 1;
+        if (!batchDepth && batchChanged) {
+          batchChanged = false;
+          listeners.forEach((listener) => listener({ type: 'batch' }));
+        }
+      }
     },
     clear() {
       originalVisibility.forEach((visible, object) => { object.visible = visible; });

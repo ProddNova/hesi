@@ -47,10 +47,16 @@ export class AssetRegistry {
     return Boolean(entity?.assetId && this.assets.has(entity.assetId));
   }
 
+  has(assetId) { return this.assets.has(assetId); }
+  ids() { return new Set(this.assets.keys()); }
+  sourceEntityId(assetId) { return this.assets.get(assetId)?.sourceEntityId || null; }
+
   createPlacedEntity(sourceEntity, { id = null, name = null } = {}) {
     const asset = this.assets.get(sourceEntity?.assetId);
     if (!asset) throw new Error('This entity has no reusable asset reference');
     const placedId = id || `placed:${String(this.nextPlacedIndex++).padStart(4, '0')}`;
+    const placedIndex = Number(placedId.match(/^placed:(\d+)$/)?.[1]);
+    if (Number.isInteger(placedIndex)) this.nextPlacedIndex = Math.max(this.nextPlacedIndex, placedIndex + 1);
     const root = new THREE.Group();
     root.name = name || `${sourceEntity.name} copy`;
     root.userData.editorPlacedObject = true;
