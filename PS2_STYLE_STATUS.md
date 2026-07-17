@@ -1,0 +1,120 @@
+# PS2 VISUAL OVERHAUL — STATUS
+
+Branch: `claude/full-ps2-style-overhaul-8uy7p7`
+Target: coherent late-PS2 / early-2000s Japanese racing-game presentation
+(GT4 / NFSU2 / MC2 era) via **textures, materials, assets and restrained
+lighting** — explicitly NOT the previous neon/glow/decal direction.
+
+---
+
+## CHECKPOINT 1 — AUDIT (complete)
+
+### Baseline capture
+
+- `.devtests/ps2-style-shots.mjs` (new, committed) captures 12 deterministic
+  views + renderer metrics. Baseline run: `.devtests/shots/PS2-*-baseline.png`
+  (shots dir is gitignored; script is reproducible from any commit).
+- Baseline metrics (chase view, 960×540@2x, headless SwiftShader):
+  - draw calls **182**, triangles **63.6k**, geometries 209, **13 textures**,
+    23 programs. Frame times in headless are software-rendered and only
+    useful relative to each other.
+
+### How the world is built (what we must work with)
+
+- `js/map.js` (~8.3k lines) builds everything statically at boot into
+  ~`CHUNK`-sized groups: merged `BufferGeometry` per chunk **per material
+  name** (`_bucket`/`_pushQuad`, UV support already present but road/barrier
+  quads currently push default `[0,0,1,1]` UVs), plus per-chunk
+  `InstancedMesh` pools (`_instance`, `box:material` / `lamppost:concrete` /
+  `pool:lightPool` types). Chunk visibility streams around the player.
+  **This is a great PS2-friendly base: we can keep the entire pipeline and
+  swap flat colors for small CanvasTextures + real UVs.**
+- Physics/collision/markings are derived from analytic route frames —
+  completely independent of visuals as long as we do not touch
+  `_frameAt`/`_paintStrip` inputs, wallSegments, or route geometry.
+
+### What breaks the PS2 illusion today (worst first)
+
+1. **Zero surface texture anywhere.** Road (`road` = flat 0x14171f Lambert),
+   barriers, concrete, tunnel walls, fascia — all untextured flat colors.
+   At night this reads as vector graphics, not a textured game world.
+2. **Garage is a near-black empty box** with a handful of primitive-colored
+   boxes (bench, PC, drum). No floor/wall texture, no shelving/clutter, no
+   workshop identity. Spawning here sets the wrong tone for the whole game.
+3. **Buildings are pure emissive window grids.** The facade CanvasTexture has
+   no wall tone, banding, or structure — towers read as floating LED panels
+   (accidentally "cyber"), not concrete buildings with lit windows.
+4. **Light pools/streaks are big additive decals** under every lamp
+   (11×15 m pools + 30 m streaks). This is exactly the "circular light
+   decals" the brief bans. They also wash the road out around lamps.
+5. **Parked cars / props are single flat-colored boxes** (Daikoku lot reads
+   as colored LEGO). No trucks/vans/forklifts/pallets; PA feels placeholder.
+6. **HUD/UI is modern web** (skewed flex panels, glows, thin monospace,
+   giant anti-aliased numerals). Nothing early-2000s about it.
+7. **No mid-ground density**: outside the C1 canyon there are large black
+   gaps between the road and the skyline; K1/Wangan roadside is sparse.
+8. **Sky is featureless pure black**, no horizon gradient/low haze band, so
+   unlit areas have no silhouette contrast at all.
+
+### What can be retained
+
+- Chunk/bucket/instancing pipeline, quality system (`low/medium/high`),
+  route-frame road builder, marking painter (readable markings), traffic
+  merged-geometry vehicles (good shapes, just flat), sign canvas generator
+  (already period-correct look), fog + dark night direction (correct,
+  just needs tuning), minimap, all gameplay.
+
+### Rebuild plan (visual only)
+
+- **Texture atlas module** (new `js/textures.js`): small shared
+  CanvasTextures (64–256 px), nearest/low-filtered, baked shading:
+  asphalt, shoulder/service concrete, parapet/jersey barrier, pillar
+  concrete, tunnel panel wall, retaining wall, building facade atlases
+  (office/residential/hotel/industrial with real wall tone), shutter,
+  garage floor/walls, prop atlas (containers, cabinets, vending, pallets),
+  vehicle-side atlases for parked cars/trucks.
+- **UV-mapped road/barrier emit**: pass distance/lateral-based UVs in
+  `_buildRouteGeometry` deck + parapet quads so textures tile in metres.
+- **Lighting**: kill the giant additive pools/streaks (replace with small,
+  dim, few); keep sodium lamps as small emissive heads; slightly raise
+  material albedo to compensate; keep night dark; add subtle horizon band.
+- **Density**: cheap facade-card rows + low warehouse/apartment blocks along
+  Wangan/K1 gaps; more container/prop clutter near port; parked trucks/vans
+  built from 2–3 textured boxes sharing one atlas.
+- **Garage**: full retexture + shelving, tool cabinets, tire stacks, drums,
+  pallets, posters, cables — all boxes/cylinders with baked-texture faces.
+- **HUD/UI**: restyle styles.css toward flat early-2000s console look:
+  chunky italic display numerals, hard edges, limited palette, simple
+  gradients, no glows/skews; PC/phone reskin in the same language.
+
+### Cost control
+
+- All new textures are generated CanvasTextures (no downloads, few KB).
+- No new lights (the only real-time lights stay: hemisphere+ambient+moon,
+  headlights, garage fixtures, one garage-entrance beacon).
+- Draw calls should stay ~flat: same buckets, same instancing; new props ride
+  existing instanced types or new shared types (one mesh per chunk per type).
+- Low quality keeps hiding effect layers; texture sizes stay ≤256 px.
+
+## CHECKPOINT 2 — STYLE SLICE (next)
+
+Prototype on the Wangan: tiled low-res asphalt with per-metre UVs, textured
+parapet/rail, concrete pillars, facade atlases with real wall tone, giant
+light pools removed (small dim pools remain), horizon haze, restrained
+sodium. Validate against references before global rollout.
+
+## CHECKPOINT 3 — WORLD FOUNDATION (pending)
+
+## CHECKPOINT 4 — CITY DENSITY + PROPS (pending)
+
+## CHECKPOINT 5 — GARAGE (pending)
+
+## CHECKPOINT 6 — HUD/UI (pending)
+
+## CHECKPOINT 7 — PERF + CONSISTENCY (pending)
+
+---
+
+**Status: Checkpoint 1 complete. Next action: implement the Wangan style
+slice (texture module + UV-mapped road emit + lighting restraint) and
+capture `PS2-*-slice.png` for comparison.**
