@@ -6,8 +6,8 @@ import { classifyProgressiveJunction } from '../js/progressive-junction-classifi
 
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
-const map = new HighwayMap(null, { addLighting: false, progressiveMerges: false });
-const activeMap = new HighwayMap(null, { addLighting: false, progressiveMerges: true });
+const map = new HighwayMap(null, { addLighting: false, legacyFlow: true, progressiveMerges: false });
+const activeMap = new HighwayMap(null, { addLighting: false, legacyFlow: true, progressiveMerges: true });
 const expected = new Map([
   ['P1', 'same-level-simple'],
   ['P2', 'vertical-ramp-complex'],

@@ -1257,6 +1257,20 @@ export class HighwayMap {
       const area = this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, accessRoute.id);
       area.sideSign = sideSign;
     }
+
+    // Single active garage: while the Tatsumi deck garage is live, every
+    // other lot (Shibaura's legacy workshop included) drops its garage flag
+    // so spawn, minimap marker, proximity prompt and the exterior shell all
+    // follow the deck. The paAccessLanes twin never activates the deck
+    // garage, so Shibaura keeps the flag there.
+    const deckGarage = this.serviceAreas.find(
+      (candidate) => candidate.id === 'tatsumi_pa' && candidate.hasGarage,
+    );
+    if (deckGarage) {
+      for (const other of this.serviceAreas) {
+        if (other !== deckGarage) other.hasGarage = false;
+      }
+    }
   }
 
   _pushServiceArea(def, route, distance, center, tangent, outward, elevation, accessRouteId) {
@@ -1569,24 +1583,44 @@ export class HighwayMap {
         point.y = elevation + lift;
         return point;
       };
-      // The apron stays at deck height across the gap and along its first
-      // glued metres (an over-the-shoulder lip well past the collision
-      // coplanar tolerance, so the connector keeps its own corridor while
-      // its centre is still outside the ramp's drivable band), and only
-      // touches down once the lane rides the ramp's outer lane — where the
-      // host corridor already owns the car. No invisible dead band between
-      // the two, unlike the legacy access-lane mouths.
+      // The apron holds deck height until the lane has fully cleared the
+      // kerb line (so the crossing band stays flush with the lot surface),
+      // then descends to meet the ramp surface exactly where the two paved
+      // bands begin to overlap. The entire descent lies inside the merge
+      // zone, so the host owns every overlapping collision sample and the
+      // profile stays step-free — holding deck height deeper into the band
+      // left a ~0.9 m ledge beside (and a 0.33 m step under) the lane. The
+      // glue points ride the host surface at its own height, exactly like
+      // the legacy PA access-lane mouths.
       const glueA = glue(glueStationA);
-      glueA.y = elevation + lift;
       const glueB = glue(glueStationB);
+      // Height of the (banked) ramp deck plane at the point's own lateral
+      // offset, so the descent meets the actual surface, not the centreline.
+      const rampYAt = (point) => {
+        const projection = this._projectToRoute(ramp8, point);
+        const frame = this._frameAt(ramp8, projection.distance);
+        return this._deckPoint(frame, projection.signedLateral ?? 0).y;
+      };
       const edgeLeave = onDeck(length * 0.19, rampSideSign * (deckEdgeHalf - 0.6));
-      const midGap = edgeLeave.clone().lerp(glueA, 0.5);
-      midGap.y = elevation + lift;
+      const clearEdge = edgeLeave.clone().lerp(glueA, 0.3);
+      clearEdge.y = elevation + lift;
+      // Ease the crest: a quarter-way point keeps the fitted spline from
+      // overshooting above deck height right where the lot hands the
+      // collision to the lane corridor.
+      const crestEase = edgeLeave.clone().lerp(glueA, 0.37);
+      crestEase.y = (elevation + lift) * 0.75 + rampYAt(crestEase) * 0.25;
+      const descent = [0.45, 0.6, 0.75, 0.9].map((t) => {
+        const point = edgeLeave.clone().lerp(glueA, t);
+        point.y = rampYAt(point);
+        return point;
+      });
       const exitPoints = [
         onDeck(-length * 0.2, rampSideSign * (deckEdgeHalf - 2.8)),
         onDeck(length * 0.0, rampSideSign * (deckEdgeHalf - 1.9)),
         edgeLeave,
-        midGap,
+        clearEdge,
+        crestEase,
+        ...descent,
         glueA,
         glueB,
       ];
@@ -1634,6 +1668,39 @@ export class HighwayMap {
         from: Math.max(-length * 0.5 + 4, crossU - 14),
         to: Math.min(length * 0.5 - 4, crossU + 16),
       }];
+
+      // 9. Active garage on the deck. The workshop moves from Shibaura to
+      //    Tatsumi together with the spawn: the shell is fitted to the deck
+      //    (the legacy 48 x 34 Shibaura shell is wider than the lot), stands
+      //    at the far end from the exit facing the parking rows, and the
+      //    ENTER trigger sits on the aisle in front of the shutter.
+      //    _defineServiceAreas clears every other lot's garage flag while
+      //    this one is active; the paAccessLanes twin never reaches this
+      //    block, so the legacy Shibaura garage survives there untouched.
+      const shellFrontU = -length * 0.32;
+      area.hasGarage = true;
+      area.garageShell = {
+        anchor: deckPoint(shellFrontU, 0),
+        front: tangent.clone().multiplyScalar(-1),
+        size: { w: Math.min(20, width - 5), h: 9.4, d: 26 },
+      };
+      area.garageLotAnchor = area.garageShell.anchor.clone();
+      area.garageEntrance = deckPoint(shellFrontU + 8, 0);
+      area.garageEntrance.y = elevation + 0.15;
+      // Spawn on the aisle between the lamp line and the exit-side parking
+      // row, far enough from the ENTER trigger not to re-prompt, facing the
+      // fence opening ahead. The exit-side row keeps a car-free swathe from
+      // just before the spawn through the fence opening so the departure
+      // never threads between parked cars; the shell zone drops its stalls
+      // and lamp entirely.
+      area.futureAnchors.spawn = {
+        position: deckPoint(-length * 0.19, rampSideSign * 3.2),
+        heading,
+      };
+      area.dressingKeepouts = [
+        { from: -length * 0.5, to: shellFrontU + 14 },
+        { from: area.fenceOpenings[0].from - 16, to: area.fenceOpenings[0].to, side: rampSideSign },
+      ];
     }
     return area;
   }
@@ -1811,7 +1878,17 @@ export class HighwayMap {
       }
     }
     this._prepareJunctionZones();
-    this.progressiveTransitions = buildProgressiveTransitions(this, PROGRESSIVE_MERGE_PROTOTYPES);
+    // The progressive prototypes were engineered, measured and golden-digested
+    // against the original (pre-left-hand-traffic) network flow. Reversing the
+    // network turns P1's diverge into a merge and P2's merge into a diverge,
+    // and the transition builder cannot reproduce the engineered treatment in
+    // the flipped sense (missing lane mappings, marking targets missed). They
+    // therefore stay bound to the legacy flow: the live left-hand network uses
+    // the standard junction treatment at both locations (which passes every
+    // generic gate there), and legacyFlow probes keep validating the intact
+    // prototypes against their recorded geometry.
+    const prototypes = this.options.legacyFlow === true ? PROGRESSIVE_MERGE_PROTOTYPES : [];
+    this.progressiveTransitions = buildProgressiveTransitions(this, prototypes);
     this.progressiveTransitionById = new Map(
       this.progressiveTransitions.map((transition) => [transition.id, transition]),
     );
@@ -6643,12 +6720,19 @@ export class HighwayMap {
         this._instance(rail, vec(area.width * 0.44, 1.2, 0.3), orientation, null, 'box:fence');
       }
 
-      // painted stalls: rows along the lot
+      // painted stalls: rows along the lot. area.dressingKeepouts (u-ranges,
+      // optionally restricted to one side of the lot axis) clear stalls and
+      // lamps out of a garage-shell zone or an exit-lane swathe (Tatsumi).
+      const keepouts = area.dressingKeepouts || [];
+      const keptOut = (along, across) => keepouts.some((keepout) => along >= keepout.from
+        && along <= keepout.to
+        && (keepout.side == null || Math.sign(across) === keepout.side));
       const rows = packed ? [-area.width * 0.3, -area.width * 0.05, area.width * 0.22] : [-area.width * 0.28, area.width * 0.18];
       const stallPitch = 6.4;
       const stallSlots = [];
       for (const across of rows) {
         for (let along = -area.length * 0.38; along <= area.length * 0.38; along += stallPitch) {
+          if (keptOut(along, across) || keptOut(along + stallPitch, across)) continue;
           const position = area.center.clone()
             .addScaledVector(area.tangent, along)
             .addScaledVector(area.normal, across);
@@ -6726,6 +6810,7 @@ export class HighwayMap {
       // (arm side) maps to -horizontalNormal(tangent) under yawQuaternion
       const armDirection = horizontalNormal(area.tangent, new THREE.Vector3()).multiplyScalar(-1);
       for (const along of [-area.length * 0.33, 0, area.length * 0.33]) {
+        if (keptOut(along, 0)) continue;
         const position = area.center.clone().addScaledVector(area.tangent, along);
         position.y = area.elevation;
         this._instance(position, vec(1, 1, 1), orientation, null, 'lamppost:concrete');
@@ -6762,19 +6847,25 @@ export class HighwayMap {
     // Building, shutter and fascia sign stay on the LOT anchor; the pulsing
     // transition ring + beacon follow the functional entrance trigger, which
     // sits on the mainline shoulder while the access lane is disabled.
-    const lotAnchor = area.garageLotAnchor || area.garageEntrance;
-    const frontNormal = area.normal.clone();
+    // A lot may fit its own shell (area.garageShell: the Tatsumi deck is
+    // narrower than the legacy Shibaura 48 x 34 building, and its shutter
+    // faces along the deck instead of across it); the shell anchor is the
+    // shutter face, the building extends along `front` behind it.
+    const shell = area.garageShell || null;
+    const lotAnchor = shell?.anchor || area.garageLotAnchor || area.garageEntrance;
+    const frontNormal = (shell?.front || area.normal).clone();
+    const size = shell?.size || { w: 48, h: 12.4, d: 34 };
     const orientation = yawQuaternion(frontNormal);
-    const buildingPos = lotAnchor.clone().addScaledVector(frontNormal, 18);
-    buildingPos.y = area.elevation + 6.2;
-    this._instance(buildingPos, vec(48, 12.4, 34), orientation, null, 'box:garage');
+    const buildingPos = lotAnchor.clone().addScaledVector(frontNormal, size.d * 0.5 + 1);
+    buildingPos.y = area.elevation + size.h * 0.5;
+    this._instance(buildingPos, vec(size.w, size.h, size.d), orientation, null, 'box:garage');
 
     const shutterPos = lotAnchor.clone().addScaledVector(frontNormal, 0.8);
     shutterPos.y = area.elevation + 3.45;
-    this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:vending');
-    const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', 17, 3.25, true);
+    this._instance(shutterPos, vec(Math.min(24, size.w - 4), 6.8, 0.42), orientation, null, 'box:vending');
+    const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', Math.min(17, size.w - 3), 3.25, true);
     const signPos = lotAnchor.clone().addScaledVector(frontNormal, 0.45);
-    signPos.y = area.elevation + 8.5;
+    signPos.y = area.elevation + Math.min(8.5, size.h - 0.9);
     sign.position.copy(signPos);
     sign.quaternion.copy(yawQuaternion(frontNormal.clone().multiplyScalar(-1)));
     this._addChunkMesh(sign, signPos);

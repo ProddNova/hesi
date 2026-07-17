@@ -14,7 +14,7 @@ import { classifyProgressiveJunction } from '../js/progressive-junction-classifi
 const { HighwayMap } = await import('../js/map.js');
 const originalWarn = console.warn;
 console.warn = () => {};
-const map = new HighwayMap(null, { addLighting: false, markingDebug: true, progressiveMerges: false });
+const map = new HighwayMap(null, { addLighting: false, legacyFlow: true, markingDebug: true, progressiveMerges: false });
 console.warn = originalWarn;
 
 const deg = (radians) => radians * 180 / Math.PI;

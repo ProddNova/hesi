@@ -39,9 +39,12 @@ const check = (ok, label) => {
 const isAccessId = (id) => typeof id === 'string' && id.endsWith('_access');
 
 // --- 1. no registered geometry ---------------------------------------------
+// Exception: the Tatsumi deck's player exit onto ramp_8 is the one service
+// connector that exists while access lanes stay disabled (traffic:false,
+// merge edge only — see _defineTatsumiDeck section 8).
 const serviceRoutes = [...map.routes.values()].filter((r) => r.kind === 'service');
-check(serviceRoutes.length === 0,
-  `service routes still registered: ${serviceRoutes.map((r) => r.id).join(', ')}`);
+check(serviceRoutes.length === 1 && serviceRoutes[0].id === 'tatsumi_pa_exit',
+  `service routes beyond the Tatsumi exit: ${serviceRoutes.map((r) => r.id).join(', ') || '(none)'}`);
 check(map.serviceAreas.length > 0, 'no service areas at all (lots should stay)');
 for (const area of map.serviceAreas) {
   check(area.accessDisabled === true, `${area.id} not flagged accessDisabled`);
@@ -85,11 +88,13 @@ check(accessEdges.length === 0, `${accessEdges.length} runtime edges reference a
 
 // --- 4. minimap --------------------------------------------------------------
 const minimap = map.getMinimapData();
-const minimapService = minimap.routes.filter((route) => route.kind === 'service' || isAccessId(route.id));
+const minimapService = minimap.routes.filter((route) => (route.kind === 'service' || isAccessId(route.id))
+  && route.id !== 'tatsumi_pa_exit');
 check(minimapService.length === 0, `${minimapService.length} minimap polylines are service connectors`);
 
 // --- 5. junction artefacts ----------------------------------------------------
-const serviceZones = (map.junctionZones || []).filter((zone) => zone.branch.kind === 'service' || zone.host.kind === 'service');
+const serviceZones = (map.junctionZones || []).filter((zone) => (zone.branch.kind === 'service' || zone.host.kind === 'service')
+  && zone.branch.id !== 'tatsumi_pa_exit');
 check(serviceZones.length === 0, `${serviceZones.length} junction zones involve service lanes`);
 let serviceWalls = 0;
 for (const segment of map.wallSegments) {
@@ -98,29 +103,30 @@ for (const segment of map.wallSegments) {
 check(serviceWalls === 0, `${serviceWalls} wall segments belong to access routes`);
 
 // --- 6. garage flow preserved -------------------------------------------------
+// The active garage lives on the Tatsumi deck while access lanes are
+// disabled: the ENTER trigger and the spawn both sit on the drivable lot
+// surface instead of a mainline shoulder.
 const garageArea = map.serviceAreas.find((area) => area.hasGarage);
 check(!!garageArea, 'garage service area missing');
+check(garageArea?.id === 'tatsumi_pa', `active garage is ${garageArea?.id}`);
 if (garageArea) {
-  const host = map.routes.get(garageArea.routeId);
-  check(!!host && host.kind !== 'service', 'garage host route missing or a service lane');
-  const projection = map._projectToRoute(host, garageArea.garageEntrance);
-  const halfWidth = map._halfWidthAt(host, projection.distance);
-  check(Math.abs(projection.signedLateral) < halfWidth - 0.5,
-    `garage entrance trigger off the host deck (|lat| ${Math.abs(projection.signedLateral).toFixed(2)} vs half ${halfWidth.toFixed(2)})`);
-  check(Math.abs(garageArea.garageEntrance.y - projection.point.y) < 2,
-    'garage entrance trigger floats off the host deck');
+  const entranceInfo = map.getRoadInfo(garageArea.garageEntrance.clone());
+  check(!!entranceInfo?.inServiceArea && !!entranceInfo?.drivable,
+    'garage entrance trigger not on the drivable deck surface');
+  check(Math.abs(garageArea.garageEntrance.y - garageArea.elevation) < 2,
+    'garage entrance trigger floats off the deck');
   const transition = map.getGarageTransition(garageArea.garageEntrance.clone(), 13);
-  check(!!transition?.triggered, 'getGarageTransition does not fire at the relocated entrance');
+  check(!!transition?.triggered, 'getGarageTransition does not fire at the deck entrance');
   check(!!garageArea.garageLotAnchor, 'garage lot anchor (building position) missing');
   check(garageArea.garageLotAnchor.distanceTo(garageArea.garageEntrance) > 5,
-    'garage building anchor and mainline trigger unexpectedly coincide');
+    'garage building anchor and entrance trigger unexpectedly coincide');
   check(minimap.garage
     && Math.hypot(minimap.garage.x - garageArea.garageEntrance.x, minimap.garage.z - garageArea.garageEntrance.z) < 1,
   'minimap garage marker does not sit on the entrance trigger');
   const spawn = map.initialSpawn;
-  const spawnRoute = map.routes.get(spawn.routeId);
-  check(!!spawnRoute && spawnRoute.kind !== 'service' && spawnRoute.kind !== 'ramp',
-    `initial spawn not on a mainline (route ${spawn.routeId})`);
+  check(spawn.serviceAreaId === 'tatsumi_pa', `initial spawn anchored to ${spawn.serviceAreaId}`);
+  const spawnInfo = map.getRoadInfo(spawn.position.clone());
+  check(!!spawnInfo?.inServiceArea && !!spawnInfo?.drivable, 'initial spawn not on the drivable deck');
 }
 
 // --- 7. reversibility ----------------------------------------------------------

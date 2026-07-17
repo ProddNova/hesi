@@ -115,20 +115,12 @@ const prototypePins = await page.evaluate(() => {
     info: document.querySelector('[data-info="prototypes"]')?.textContent || '',
   };
 });
-check('developer map exposes exactly P1 and P2', prototypePins.count === 2 && prototypePins.idsMatch && prototypePins.finite);
-check('prototype pins render as P1/P2', prototypePins.labelsMatch && prototypePins.rendered, prototypePins.info);
-check('prototype pin data exposes topology and status', prototypePins.metadataComplete
-  && prototypePins.categoryCounts.active === 2 && prototypePins.categoryCounts.deferred === 0);
-check('successful old P4 is now P1 without identity drift', prototypePins.p1?.side === 'left'
-  && prototypePins.p1?.id === 'J2:diverge:c1_0:r1_0:start'
-  && prototypePins.p1?.classification === 'same-level-simple'
-  && prototypePins.p1?.phases
-  && Object.values(prototypePins.p1.phases).filter((value) => value !== null).every(Number.isFinite));
-check('P2 exposes the approved J48 5→4→3 merge', prototypePins.p2?.side === 'right'
-  && prototypePins.p2?.id === 'J48:merge:wangan_1:ramp_41:end'
-  && prototypePins.p2?.classification === 'same-level-approved'
-  && prototypePins.p2?.topology === '2+3-merge'
-  && prototypePins.p2?.laneSequence?.join(',') === '5,4,3');
+// The progressive prototypes are bound to the legacy (pre-left-hand-traffic)
+// flow: the live reversed network flips both junction senses, so the map
+// builds them only under options.legacyFlow (see js/map.js) and the live
+// developer map carries no prototype pins. Their geometry stays validated by
+// the progressive probe suite, which constructs legacyFlow maps.
+check('developer map exposes no prototype pins under left-hand flow', prototypePins.count === 0, prototypePins.info);
 
 const prototypeInteractions = await page.evaluate(() => {
   const g = window.shutoko;

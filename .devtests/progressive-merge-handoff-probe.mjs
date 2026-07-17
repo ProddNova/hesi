@@ -1,7 +1,7 @@
 import { HighwayMap } from '../js/map.js';
 
 const P2_ID = 'J48:merge:wangan_1:ramp_41:end';
-const map = new HighwayMap(null, { addLighting: false });
+const map = new HighwayMap(null, { addLighting: false, legacyFlow: true });
 const transition = map.progressiveTransitionById.get(P2_ID);
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };

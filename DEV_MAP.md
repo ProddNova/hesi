@@ -37,12 +37,21 @@ Files:
 
 ## Progressive pins
 
-The final developer map exposes exactly two active progressive pins. Both are
-bright magenta diamonds; every obsolete P1/P2/P3/P4 prototype or deferred pin
-has been removed. Open the map with `M` or the mobile **DEV MAP** button, choose
-**Fit network**, hover a pin for classification/topology/status metadata, and
-click the diamond to teleport to the host transition. The info line reads
-`2 active · 0 deferred (P1, P2)`.
+**Left-hand traffic note (2026-07):** the live network now runs reversed
+(Japanese left-hand traffic — see `reverseNetworkData` in `js/map.js`), which
+flips both prototype junction senses. The prototypes were engineered and
+golden-digested against the original flow, so they only build under
+`options.legacyFlow` — the live developer map exposes **no** prototype pins,
+and the two junctions use the standard treatment. The progressive probe suite
+(`.devtests/progressive-*.mjs`) constructs `legacyFlow` maps and keeps
+validating both records, including the P1 geometry digest.
+
+Under legacy flow the map exposes exactly two active progressive pins. Both
+are bright magenta diamonds; every obsolete P1/P2/P3/P4 prototype or deferred
+pin has been removed. Open the map with `M` or the mobile **DEV MAP** button,
+choose **Fit network**, hover a pin for classification/topology/status
+metadata, and click the diamond to teleport to the host transition. The info
+line reads `2 active · 0 deferred (P1, P2)`.
 
 | Pin | Junction | Route pair | Side | Topology | World X, Y, Z |
 | --- | --- | --- | --- | --- | --- |

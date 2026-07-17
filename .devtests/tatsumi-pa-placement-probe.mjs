@@ -16,15 +16,16 @@
  *     resolves to its own carriageway (drivable, not in a service area), and
  *     ramp stations (including lane-edge excursions) are never captured by
  *     the lot. Support pillars stand clear of both carriageways below.
- *  7. NOTHING NEW ENABLED — no access route, junction edge or traffic lane
- *     references Tatsumi; the service-route count stays zero while PA access
- *     lanes are disabled, and the paAccessLanes:true twin still restores the
- *     legacy behaviour (4 lanes, legacy Tatsumi placement).
- *  8. CHECKPOINT GUARANTEE — the active garage (Shibaura) and initialSpawn
- *     are untouched by this prototype.
- *  9. FUTURE ANCHORS — garage / spawn / wangan_0-exit anchors are exposed,
- *     sit on the deck surface, and the exit descends to wangan_0 at a sane
- *     grade. No runtime system consumes them yet.
+ *  7. ONLY THE EXIT ENABLED — the deck's ramp_8 player exit is the single
+ *     service route/edge in the disabled-lane network; traffic never routes
+ *     onto it, and the paAccessLanes:true twin still restores the legacy
+ *     behaviour (4 lanes, legacy Tatsumi placement).
+ *  8. LIVE GARAGE + SPAWN — tatsumi_pa owns the only garage flag and the
+ *     initialSpawn sits on the deck (see tatsumi-pa-flow-probe for the
+ *     detailed drivability/obstruction assertions).
+ *  9. ANCHORS — garage / spawn / wangan_0-exit anchors are exposed and sit
+ *     on the deck surface; the spawn anchor is consumed by initialSpawn,
+ *     the wangan_0 exit remains a future checkpoint.
  *
  * Run: node .devtests/tatsumi-pa-placement-probe.mjs
  */
@@ -47,7 +48,7 @@ if (!area) { console.log('TATSUMI PA PROBE: FAIL (1)'); process.exit(1); }
 check(area.placement === 'tatsumi-elevated-deck', `placement override not applied (${area.placement})`);
 check(area.accessDisabled === true, 'tatsumi_pa not flagged accessDisabled');
 check(area.accessRouteId === null, `tatsumi_pa has an access route (${area.accessRouteId})`);
-check(area.hasGarage === false, 'tatsumi_pa must not own the garage in this checkpoint');
+check(area.hasGarage === true, 'tatsumi_pa must own the active garage');
 check(map.serviceAreas.length === 4, `service area count changed (${map.serviceAreas.length})`);
 for (const key of ['center', 'tangent', 'normal', 'width', 'length', 'elevation']) {
   check(area[key] !== undefined && area[key] !== null, `lot field ${key} missing`);
@@ -197,27 +198,31 @@ for (const along of [-area.length * 0.36, 0, area.length * 0.36]) {
   }
 }
 
-// --- 7. nothing new enabled ------------------------------------------------------------
+// --- 7. only the Tatsumi exit enabled ---------------------------------------------------
+// The continuation checkpoint intentionally registers exactly one service
+// connector (the deck -> ramp_8 player exit) and its merge edge; every other
+// PA access lane stays disabled and traffic never routes onto the exit.
 const serviceRoutes = [...map.routes.values()].filter((route) => route.kind === 'service');
-check(serviceRoutes.length === 0, `service routes registered while disabled: ${serviceRoutes.map((r) => r.id).join(', ')}`);
-check(![...map.routes.keys()].some((id) => id.includes('tatsumi')), 'a tatsumi route id is registered');
+check(serviceRoutes.length === 1 && serviceRoutes[0].id === 'tatsumi_pa_exit',
+  `unexpected service routes: ${serviceRoutes.map((r) => r.id).join(', ') || '(none)'}`);
 const tatsumiEdges = map.edges.filter((edge) => `${edge.from.routeId}${edge.to.routeId}`.includes('tatsumi'));
-check(tatsumiEdges.length === 0, `${tatsumiEdges.length} edges reference tatsumi`);
+check(tatsumiEdges.length === 1 && tatsumiEdges[0].kind === 'merge' && tatsumiEdges[0].to.routeId === 'ramp_8',
+  `tatsumi edges: ${tatsumiEdges.map((e) => `${e.kind}:${e.from.routeId}->${e.to.routeId}`).join(', ') || '(none)'}`);
 const tatsumiLanes = map.getTrafficLanes().filter((lane) => `${lane.routeId ?? lane.id}`.includes('tatsumi'));
 check(tatsumiLanes.length === 0, `${tatsumiLanes.length} traffic lanes reference tatsumi`);
-check(map.edges.length === twin.edges.length - 8,
-  `edge count drift: disabled ${map.edges.length} vs twin ${twin.edges.length} (twin adds 2 per access lane)`);
+check(map.edges.length === twin.edges.length - 8 + 1,
+  `edge count drift: disabled ${map.edges.length} vs twin ${twin.edges.length} (twin adds 2 per access lane, disabled adds the Tatsumi exit)`);
 
-// --- 8. garage + initialSpawn untouched ---------------------------------------------------
+// --- 8. garage + initialSpawn live on the deck --------------------------------------------
 const garageArea = map.serviceAreas.find((candidate) => candidate.hasGarage);
-check(garageArea?.id === 'shibaura_pa', `active garage moved to ${garageArea?.id}`);
-check(map.initialSpawn.serviceAreaId === 'shibaura_pa', `initialSpawn anchored to ${map.initialSpawn.serviceAreaId}`);
-check(map.initialSpawn.routeId === 'r11_0', `initialSpawn moved to ${map.initialSpawn.routeId}`);
-check(map.initialSpawn.label === 'Shibaura PA outbound merge', `initialSpawn label changed (${map.initialSpawn.label})`);
+check(garageArea?.id === 'tatsumi_pa', `active garage is ${garageArea?.id}`);
+check(map.serviceAreas.filter((candidate) => candidate.hasGarage).length === 1, 'more than one active garage');
+check(map.initialSpawn.serviceAreaId === 'tatsumi_pa', `initialSpawn anchored to ${map.initialSpawn.serviceAreaId}`);
+check(map.initialSpawn.label === 'Tatsumi PA deck', `initialSpawn label changed (${map.initialSpawn.label})`);
 const spawnToDeck = Math.hypot(map.initialSpawn.position.x - area.center.x, map.initialSpawn.position.z - area.center.z);
-check(spawnToDeck > 2000, `initialSpawn suspiciously close to Tatsumi (${spawnToDeck.toFixed(0)} m)`);
-check(garageArea && map.garagePosition.equals(garageArea.garageEntrance), 'garagePosition detached from the Shibaura entrance');
-check(!!map.getGarageTransition(map.garagePosition.clone(), 13)?.triggered, 'Shibaura garage transition no longer fires');
+check(spawnToDeck < area.length * 0.5, `initialSpawn off the deck (${spawnToDeck.toFixed(0)} m from centre)`);
+check(garageArea && map.garagePosition.equals(garageArea.garageEntrance), 'garagePosition detached from the deck entrance');
+check(!!map.getGarageTransition(map.garagePosition.clone(), 13)?.triggered, 'deck garage transition does not fire');
 
 // --- 9. future anchors -----------------------------------------------------------------------
 const anchors = area.futureAnchors;
