@@ -37,37 +37,65 @@ whole progressive probe suite now constructs `legacyFlow` maps — including
 the re-recorded P1 geometry digest, which was already stale on the
 pre-continuation baseline (every hashed field is byte-identical to 34909c3).
 
-## 2. Garage + spawn on the deck
+## 2. Compact empty deck, garage + spawn (refined 2026-07-17)
 
-- `_defineTatsumiDeck` section 9 marks the deck `hasGarage`, fits a
-  20 × 9.4 × 26 shell at the south-west end (shutter facing the parking
-  rows along the deck axis — `area.garageShell`, consumed by a
-  parameterised `_buildGarageExterior`), and puts the ENTER trigger on the
-  aisle 8 m in front of the shutter. `_defineServiceAreas` then clears every
-  other lot's garage flag (single active garage); the `paAccessLanes:true`
-  twin never activates the deck garage, so Shibaura keeps it there.
-- `initialSpawn` (used by boot, garage exit, tow and crash recovery alike —
-  `game.js placeAtSpawn`) sits on the aisle at deck u=−39, v=−3.2, facing
-  the exit end, 0.65 m above the lot collision, outside the ENTER radius,
-  clear of the parked rows / lamp line / shell (probe-asserted).
-- `area.dressingKeepouts` clears stalls, parked cars and lamps out of the
-  shell zone and out of an exit-side swathe from just before the spawn
-  through the fence opening, so the departure never threads between props.
+The fitted rectangle is trimmed to a fixed 110 m around its centre
+(re-fitted, so the shorter window keeps the extra width its own pinches
+allow — now 27.5 m wide) and the lot is deliberately BARE
+(`area.dressingMinimal`): no stalls, parked cars, konbini, vending, lamps,
+signs or refuel/PA markers — only the slab, the support pillars in the
+Wangan median gap, the unbroken perimeter kerb/fence, the end rails on the
+outward halves, and the pulsing garage ENTER ring + beacon
+(`_buildGarageExterior` builds just the ring for minimal lots).
+`_defineServiceAreas` still clears every other lot's garage flag; the
+`paAccessLanes:true` twin keeps the legacy Shibaura garage.
 
-## 3. ramp_8 player exit
+- ENTER ring at deck u=−24, on the far side of the aisle; `initialSpawn`
+  (boot, garage exit, tow, crash recovery) sits at deck u=0 on the aisle
+  (v=−3.2), facing the exit end — outside both the 13 m transition radius
+  and the 18 m proximity-prompt radius.
 
-`tatsumi_pa_exit` (service, 1 lane, traffic:false) leaves the parking rows,
-crosses the deck edge through a fence/kerb opening (split runs + end posts,
-`area.fenceOpenings`), descends an apron and glues onto ramp_8's deck-facing
-edge with a standard merge edge (zone J56 machinery: deck blending, host
-guardrail opening 651–754, dashed boundary). The vertical profile holds deck
-height until the lane clears the kerb line, then tracks the **banked ramp
-deck plane** at each point's own lateral (`rampYAt` via `_frameAt` +
-`_deckPoint`) so the collision hand-off is step-free — the interrupted
-session's flat apron left a 0.9 m ledge beside the lane and a 0.33 m step
-under it. Measured now: worst collision step 0.093 m per 0.5 m station
-across the centreline and both wheel tracks (continuous ~10 % crest, 0.038 m
-at 0.25 m sampling), zero undrivable stations, no wall/rail crossing.
+## 3. ramp_8 access — one entry, one exit (refined 2026-07-17)
+
+Both connectors pass through the deck ENDS, exactly like the legacy access
+lanes did (their lot legs attached at ±0.52 L — the end rails only ever
+covered the outward half of each end, so the gates are open by
+construction and the side fence stays unbroken):
+
+- **Entry** (`tatsumi_pa_entry`, 260 m): probability-0 diverge from ramp_8
+  upstream (player-only, like legacy PA entries), a 60 m legacy mouth pair
+  + glide riding INSIDE the ramp's paved band exactly ON its banked deck
+  plane (`_frameAt` + `_deckPoint` at each point's own lateral), pinned
+  hand-off points just off the band, then a descent through the leftover
+  fitted-corridor channel (the ramps keep their clearance for ~60 m past
+  each deck end) resampled every ~9 m with a trapezoidal ease — grade
+  ≤ 4.7 % — flush at the end line, then the aisle.
+- **Exit** (`tatsumi_pa_exit`, 202 m): aisle → end gate (flush) → eased
+  descent over the void → band join on the ramp plane → glide to the
+  legacy mouth inset → 60 m mouth pair → merge edge, downstream of which
+  ramp_8 continues into `wangan_0` (the Bayshore continuation). Grade
+  ≤ 3.6 %.
+- Band ride lateral is 3.55 m (inside the 4.5 m half-width, clear of the
+  corridor outer-wall correction band at car radius ~0.8).
+
+**Sinking root cause + fix.** The previous glue drew its own descending
+strip up to ~0.9 m above the ramp plane while `getRoadInfo` scored the
+ramp corridor best — the car rode the ramp plane *under* the drawn branch
+asphalt (and scraped the rail between the two strips). Now every point
+that can overlap the ramp corridor lies exactly ON the ramp's banked
+plane, the descents are sole-owner (over the void), and the deck sections
+are flush with the lot — rendering, collision and road lookup share one
+profile everywhere (probe: collision-vs-render ≤ 0.063 m, steps ≤ 0.113 m
+per 0.5 m station across centreline and both wheel tracks, zero
+wall-collision hits sweeping both lanes at car radius).
+
+One shared-machinery fix fell out of this: `_surfaceDefersToHost` handed a
+branch centreline to the host as soon as its coplanar strip was covered by
+the host's DRAWN deck, but the host's drivable band is ~0.4–0.9 m
+narrower, so crossing the host's edge line left a no-man's ring that
+wall-corrected (scraped) the car mid-crossing. The non-progressive defer
+now keeps the branch corridor alive in that margin (heights agree either
+way — the dy gate already guarantees coplanarity).
 
 ## 4. Dashed markings
 
@@ -82,10 +110,13 @@ ownership changed (`road-surface`, `ab-marking-clipping`, `merge-marking`,
 
 ## Verification
 
-- `.devtests/tatsumi-pa-flow-probe.mjs` — NEW: garage/spawn/exit/mouth/
-  grade-separation/left-hand-traffic/nothing-else-enabled. PASS.
+- `.devtests/tatsumi-pa-flow-probe.mjs` — garage/spawn on the bare deck,
+  entry+exit continuity + one-height-authority (incl. physics wall sweeps
+  and visible-rail gap coverage at both edge crossings), end gates,
+  grade separation, left-hand traffic, nothing-else-enabled. PASS.
 - `.devtests/tatsumi-pa-placement-probe.mjs` — updated to the live-garage
-  state (exactly one service route/edge allowed; twin reversibility kept). PASS.
+  state (exactly the entry+exit pair allowed; thresholds scaled to the
+  compact deck; twin reversibility kept). PASS.
 - `.devtests/pa-access-probe.mjs` — updated: deck garage instead of the
   Shibaura shoulder trigger; twin still restores all 4 legacy lanes. PASS.
 - Progressive suite (`progressive-merge-probe/-handoff/-model/-drive`,
@@ -102,15 +133,16 @@ ownership changed (`road-surface`, `ab-marking-clipping`, `merge-marking`,
   prototype pins under live flow). `performance.mjs` — map build over its
   4000 ms limit like the baseline (7.3 s vs 6.1 s; frame p95 improved
   166.7 → 150.1 ms).
-- Screenshots (`.devtests/shots/`, gitignored): `FLOW-top-down`,
-  `FLOW-spawn-chase`, `FLOW-exit-inside`, `FLOW-exit-from-ramp`,
-  `FLOW-side-elevation`, `FLOW-markings-chase(-before)`,
+- Screenshots (`.devtests/shots/`, gitignored): `FLOW-top-down` (compact
+  empty deck), `FLOW-spawn-chase`, `FLOW-entrance`, `FLOW-exit`,
+  `FLOW-drive-entry`/`FLOW-drive-exit` (the car mid-transition, no
+  sinking), `FLOW-side-elevation`, `FLOW-markings-chase(-before)`,
   `FLOW-traffic-directions` — via `.devtests/tatsumi-pa-flow-shots.mjs`.
 
 ## Remaining / debt
 
-- The deck→ramp apron crest is briefly ~10 % — continuous and drivable, but
-  a longer diagonal would read softer.
+- The entry descent peaks at 4.7 % and the exit at 3.6 % — comfortably
+  drivable; a longer swing could soften them further.
 - game.js debug capture views (`p2-*`, `auxiliary`) reference legacy-flow
   transitions/chainages; they no-op safely under live flow.
 - The direct `wangan_0` exit anchor (`futureAnchors.wanganExit`) is still

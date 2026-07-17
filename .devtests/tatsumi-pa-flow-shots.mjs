@@ -1,21 +1,19 @@
 /**
- * Deterministic screenshots for the Tatsumi PA continuation checkpoint
- * (garage spawn on the deck, ramp_8 exit, left-hand traffic, denser dashes).
+ * Deterministic screenshots for the refined Tatsumi PA (compact empty deck,
+ * end-gate entry + exit onto ramp_8, left-hand traffic, denser dashes).
  * All cameras derive from the runtime service-area record and the fitted
  * centrelines, so before/after runs frame identical spots.
  *
- *  1. top-down        — plan view: deck between ramp_8 and ramp_9.
- *  2. spawn-chase     — the real chase camera right after exitGarage().
- *  3. exit-inside     — from the deck aisle, looking through the fence
- *                       opening onto the ramp_8 connector.
- *  4. exit-from-ramp  — driver height on ramp_8 upstream of the glue,
- *                       looking downstream at the joining connector.
- *  5. side-elevation  — broadside: Wangan carriageways under the deck.
- *  6. markings-chase  — wangan_0 dashes at chase-camera distance
- *                       (run with `before` suffix on the old tree to compare).
- *  7. traffic-directions — both Wangan carriageways with live traffic:
- *                       own carriageway shows taillights, opposing shows
- *                       headlights on the driver's right.
+ *  1. top-down          — plan view: the shortened deck between the ramps.
+ *  2. spawn-chase       — the real chase camera right after exitGarage().
+ *  3. entrance          — the entry lane: diverge, descent and end gate.
+ *  4. exit              — the exit lane: end gate, descent and merge.
+ *  5. side-elevation    — broadside: Wangan under the elevated deck.
+ *  6. drive-entry       — chase camera mid-way down the entry transition.
+ *  7. drive-exit        — chase camera mid-way down the exit transition.
+ *  8. markings-chase    — wangan_0 dashes at chase distance (compare with
+ *                         the `before` suffix from an older tree).
+ *  9. traffic-directions— both Wangan carriageways with live traffic.
  *
  * Run: CHROMIUM_PATH=... node .devtests/tatsumi-pa-flow-shots.mjs [suffix] [--case=name]
  * Writes .devtests/shots/FLOW-<case>[-suffix].png
@@ -75,6 +73,26 @@ if (want('spawn-chase')) {
   await shoot('spawn-chase');
 }
 
+// --- drive-throughs: the actual car rolling down each transition -------------
+const driveShot = async (name, routeKey, fraction) => {
+  await page.evaluate(({ key, f }) => {
+    const g = window.shutoko;
+    if (g.debug?.noclip) g.setNoclip(false);
+    const map = g.map;
+    const area = map.serviceAreas.find((a) => a.id === 'tatsumi_pa');
+    const route = map.routes.get(key === 'entry' ? area.entryRouteId : area.exitRouteId);
+    const s = route.length * f;
+    const c = map._sampleCenter(route, s, 1);
+    const heading = Math.atan2(c.tangent.x, c.tangent.z);
+    g.physics.setPosition(c.position.x, c.position.y + 0.45, c.position.z, heading);
+    g.physics.setSpeed?.(9);
+  }, { key: routeKey, f: fraction });
+  await page.waitForTimeout(900);
+  await shoot(name);
+};
+if (want('drive-entry')) await driveShot('drive-entry', 'entry', 0.72);
+if (want('drive-exit')) await driveShot('drive-exit', 'exit', 0.30);
+
 // Hide traffic for the geometry shots.
 await page.evaluate(() => {
   const g = window.shutoko;
@@ -109,51 +127,32 @@ const deckCamera = async (spec) => page.evaluate((s) => {
 
 // --- 1. top-down ---------------------------------------------------------------
 if (want('top-down')) {
-  await place(await deckCamera({ up: 290 }), -1.55);
+  await place(await deckCamera({ up: 230 }), -1.55);
   await shoot('top-down');
 }
 
-// --- 3. the exit seen from inside the PA ----------------------------------------
-if (want('exit-inside')) {
-  // stand on the aisle just behind the spawn, look toward the fence opening
-  const setup = await page.evaluate(() => {
-    const map = window.shutoko.map;
-    const area = map.serviceAreas.find((candidate) => candidate.id === 'tatsumi_pa');
-    const opening = area.fenceOpenings?.[0];
-    if (!opening) return { missing: 'fence opening' };
-    const eye = area.center.clone()
-      .addScaledVector(area.tangent, opening.from - 55)
-      .addScaledVector(area.normal, opening.side * -2);
-    eye.y = area.elevation + 2.6;
-    const target = area.center.clone()
-      .addScaledVector(area.tangent, (opening.from + opening.to) * 0.5)
-      .addScaledVector(area.normal, opening.side * (area.width * 0.5 + 6));
-    target.y = area.elevation + 0.4;
-    const d = target.clone().sub(eye);
-    return {
-      position: { x: eye.x, y: eye.y, z: eye.z },
-      yaw: Math.atan2(d.x, d.z),
-    };
-  });
-  await place(setup, -0.05);
-  await shoot('exit-inside');
+// --- 3/4. entrance and exit transitions from a low 3/4 view ----------------------
+const connectorCamera = async (routeKey, fraction, back, up) => page.evaluate((s) => {
+  const map = window.shutoko.map;
+  const area = map.serviceAreas.find((candidate) => candidate.id === 'tatsumi_pa');
+  const route = map.routes.get(s.routeKey === 'entry' ? area.entryRouteId : area.exitRouteId);
+  if (!route) return { missing: s.routeKey };
+  const at = route.length * s.fraction;
+  const c = map._sampleCenter(route, at, 1);
+  const eye = c.position.clone().addScaledVector(c.tangent, -s.back);
+  eye.y = c.position.y + s.up;
+  return {
+    position: { x: eye.x, y: eye.y, z: eye.z },
+    yaw: Math.atan2(c.tangent.x, c.tangent.z),
+  };
+}, { routeKey, fraction, back, up });
+if (want('entrance')) {
+  await place(await connectorCamera('entry', 0.62, 46, 14), -0.3);
+  await shoot('entrance');
 }
-
-// --- 4. the connector seen from ramp_8 -------------------------------------------
-if (want('exit-from-ramp')) {
-  const setup = await page.evaluate(() => {
-    const map = window.shutoko.map;
-    const zone = map.junctionZones.find((candidate) => candidate.branch?.id === 'tatsumi_pa_exit');
-    if (!zone) return { missing: 'exit zone' };
-    const station = Math.max(0, zone.hostSpan[0] - 110);
-    const sample = map._sampleCenter(zone.host, station, 1);
-    return {
-      position: { x: sample.position.x, y: sample.position.y + 2.4, z: sample.position.z },
-      yaw: Math.atan2(sample.tangent.x, sample.tangent.z),
-    };
-  });
-  await place(setup, -0.04);
-  await shoot('exit-from-ramp');
+if (want('exit')) {
+  await place(await connectorCamera('exit', 0.28, 52, 16), -0.3);
+  await shoot('exit');
 }
 
 // --- 5. side elevation: Wangan under the deck --------------------------------------
@@ -162,13 +161,12 @@ if (want('side-elevation')) {
   await shoot('side-elevation');
 }
 
-// --- 6. dashed markings at chase distance -------------------------------------------
+// --- 8. dashed markings at chase distance -------------------------------------------
 if (want('markings-chase')) {
   const setup = await page.evaluate(() => {
     const map = window.shutoko.map;
     const wangan = map.routes.get('wangan_0');
     const sample = map._sampleCenter(wangan, 8000, 1);
-    // chase-camera geometry: ~6 m back, ~2.6 m up from a lane position
     const eye = sample.position.clone().addScaledVector(sample.tangent, -6);
     eye.y = sample.position.y + 2.6;
     return {
@@ -180,10 +178,8 @@ if (want('markings-chase')) {
   await shoot('markings-chase');
 }
 
-// --- 7. traffic direction on both carriageways ---------------------------------------
+// --- 9. traffic direction on both carriageways ---------------------------------------
 if (want('traffic-directions')) {
-  // Park the car on wangan_0 near Tatsumi so traffic populates both
-  // carriageways, then hover behind it over the median.
   await page.evaluate(() => {
     const g = window.shutoko;
     const map = g.map;
@@ -200,7 +196,6 @@ if (want('traffic-directions')) {
     const g = window.shutoko;
     const map = g.map;
     const wangan = map.routes.get('wangan_0');
-    // Frame the densest cluster of live wangan traffic near the car.
     const stations = (g.traffic?.active || g.traffic?.pool || [])
       .filter((v) => v.active && /^wangan_[01]$/.test(v.laneRef?.routeId || ''))
       .map((v) => map._projectToRoute(wangan, v.mesh?.position || v.position).distance)
@@ -208,7 +203,6 @@ if (want('traffic-directions')) {
       .sort((a, b) => a - b);
     const focus = stations.length ? stations[Math.floor(stations.length / 2)] : 5950;
     const sample = map._sampleCenter(wangan, focus - 60, 1);
-    // over the gap between the carriageways (opposing sits on the right)
     const eye = sample.position.clone().addScaledVector(sample.normal, 9);
     eye.y = sample.position.y + 22;
     return {

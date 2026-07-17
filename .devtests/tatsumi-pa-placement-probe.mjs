@@ -16,10 +16,10 @@
  *     resolves to its own carriageway (drivable, not in a service area), and
  *     ramp stations (including lane-edge excursions) are never captured by
  *     the lot. Support pillars stand clear of both carriageways below.
- *  7. ONLY THE EXIT ENABLED — the deck's ramp_8 player exit is the single
- *     service route/edge in the disabled-lane network; traffic never routes
- *     onto it, and the paAccessLanes:true twin still restores the legacy
- *     behaviour (4 lanes, legacy Tatsumi placement).
+ *  7. ONLY THE ENTRY/EXIT PAIR ENABLED — the deck's two ramp_8 connectors
+ *     are the only service routes/edges in the disabled-lane network;
+ *     traffic never routes onto them, and the paAccessLanes:true twin still
+ *     restores the legacy behaviour (4 lanes, legacy Tatsumi placement).
  *  8. LIVE GARAGE + SPAWN — tatsumi_pa owns the only garage flag and the
  *     initialSpawn sits on the deck (see tatsumi-pa-flow-probe for the
  *     detailed drivability/obstruction assertions).
@@ -149,7 +149,7 @@ for (let u = -area.length / 2 + 1.5; u <= area.length / 2 - 1.5; u += 8) {
     if (info) deckYSpread = Math.max(deckYSpread, Math.abs(info.y - area.elevation));
   }
 }
-check(deckSamples > 120, `too few deck samples (${deckSamples})`);
+check(deckSamples > area.length * 0.7, `too few deck samples (${deckSamples})`);
 check(deckBad === 0, `${deckBad}/${deckSamples} deck samples not flat drivable lot surface`);
 check(map.isInServiceArea(area.center.clone())?.id === 'tatsumi_pa', 'isInServiceArea misses the deck centre');
 
@@ -168,7 +168,7 @@ for (const route of [wangan0, wangan1]) {
     if (!info || info.routeId !== route.id || !info.onRoad || info.inServiceArea) wanganBad += 1;
   }
 }
-check(wanganUnder > 40, `too few Wangan under-deck samples (${wanganUnder})`);
+check(wanganUnder > area.length * 0.25, `too few Wangan under-deck samples (${wanganUnder})`);
 check(wanganBad === 0, `${wanganBad} Wangan stations under the deck lost their carriageway`);
 let rampCaptured = 0;
 for (const route of [ramp8, ramp9]) {
@@ -198,20 +198,24 @@ for (const along of [-area.length * 0.36, 0, area.length * 0.36]) {
   }
 }
 
-// --- 7. only the Tatsumi exit enabled ---------------------------------------------------
-// The continuation checkpoint intentionally registers exactly one service
-// connector (the deck -> ramp_8 player exit) and its merge edge; every other
-// PA access lane stays disabled and traffic never routes onto the exit.
+// --- 7. only the Tatsumi entry/exit enabled -----------------------------------------------
+// The refined checkpoint registers exactly two service connectors (the
+// ramp_8 -> deck entry and the deck -> ramp_8 exit) with one edge each;
+// every other PA access lane stays disabled and traffic never routes onto
+// either connector.
 const serviceRoutes = [...map.routes.values()].filter((route) => route.kind === 'service');
-check(serviceRoutes.length === 1 && serviceRoutes[0].id === 'tatsumi_pa_exit',
-  `unexpected service routes: ${serviceRoutes.map((r) => r.id).join(', ') || '(none)'}`);
+check(serviceRoutes.length === 2
+  && serviceRoutes.every((route) => ['tatsumi_pa_entry', 'tatsumi_pa_exit'].includes(route.id)),
+`unexpected service routes: ${serviceRoutes.map((r) => r.id).join(', ') || '(none)'}`);
 const tatsumiEdges = map.edges.filter((edge) => `${edge.from.routeId}${edge.to.routeId}`.includes('tatsumi'));
-check(tatsumiEdges.length === 1 && tatsumiEdges[0].kind === 'merge' && tatsumiEdges[0].to.routeId === 'ramp_8',
-  `tatsumi edges: ${tatsumiEdges.map((e) => `${e.kind}:${e.from.routeId}->${e.to.routeId}`).join(', ') || '(none)'}`);
+check(tatsumiEdges.length === 2
+  && tatsumiEdges.some((edge) => edge.kind === 'merge' && edge.to.routeId === 'ramp_8')
+  && tatsumiEdges.some((edge) => edge.kind === 'diverge' && edge.from.routeId === 'ramp_8'),
+`tatsumi edges: ${tatsumiEdges.map((e) => `${e.kind}:${e.from.routeId}->${e.to.routeId}`).join(', ') || '(none)'}`);
 const tatsumiLanes = map.getTrafficLanes().filter((lane) => `${lane.routeId ?? lane.id}`.includes('tatsumi'));
 check(tatsumiLanes.length === 0, `${tatsumiLanes.length} traffic lanes reference tatsumi`);
-check(map.edges.length === twin.edges.length - 8 + 1,
-  `edge count drift: disabled ${map.edges.length} vs twin ${twin.edges.length} (twin adds 2 per access lane, disabled adds the Tatsumi exit)`);
+check(map.edges.length === twin.edges.length - 8 + 2,
+  `edge count drift: disabled ${map.edges.length} vs twin ${twin.edges.length} (twin adds 2 per access lane, disabled adds the Tatsumi entry+exit)`);
 
 // --- 8. garage + initialSpawn live on the deck --------------------------------------------
 const garageArea = map.serviceAreas.find((candidate) => candidate.hasGarage);

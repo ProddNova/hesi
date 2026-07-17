@@ -39,12 +39,13 @@ const check = (ok, label) => {
 const isAccessId = (id) => typeof id === 'string' && id.endsWith('_access');
 
 // --- 1. no registered geometry ---------------------------------------------
-// Exception: the Tatsumi deck's player exit onto ramp_8 is the one service
-// connector that exists while access lanes stay disabled (traffic:false,
-// merge edge only — see _defineTatsumiDeck section 8).
+// Exception: the Tatsumi deck's player entry/exit pair on ramp_8 are the
+// only service connectors that exist while access lanes stay disabled
+// (traffic:false; probability-0 diverge — see _defineTatsumiDeck section 8).
 const serviceRoutes = [...map.routes.values()].filter((r) => r.kind === 'service');
-check(serviceRoutes.length === 1 && serviceRoutes[0].id === 'tatsumi_pa_exit',
-  `service routes beyond the Tatsumi exit: ${serviceRoutes.map((r) => r.id).join(', ') || '(none)'}`);
+check(serviceRoutes.length === 2
+  && serviceRoutes.every((r) => ['tatsumi_pa_entry', 'tatsumi_pa_exit'].includes(r.id)),
+  `service routes beyond the Tatsumi pair: ${serviceRoutes.map((r) => r.id).join(', ') || '(none)'}`);
 check(map.serviceAreas.length > 0, 'no service areas at all (lots should stay)');
 for (const area of map.serviceAreas) {
   check(area.accessDisabled === true, `${area.id} not flagged accessDisabled`);
@@ -89,12 +90,12 @@ check(accessEdges.length === 0, `${accessEdges.length} runtime edges reference a
 // --- 4. minimap --------------------------------------------------------------
 const minimap = map.getMinimapData();
 const minimapService = minimap.routes.filter((route) => (route.kind === 'service' || isAccessId(route.id))
-  && route.id !== 'tatsumi_pa_exit');
+  && !['tatsumi_pa_entry', 'tatsumi_pa_exit'].includes(route.id));
 check(minimapService.length === 0, `${minimapService.length} minimap polylines are service connectors`);
 
 // --- 5. junction artefacts ----------------------------------------------------
 const serviceZones = (map.junctionZones || []).filter((zone) => (zone.branch.kind === 'service' || zone.host.kind === 'service')
-  && zone.branch.id !== 'tatsumi_pa_exit');
+  && !['tatsumi_pa_entry', 'tatsumi_pa_exit'].includes(zone.branch.id));
 check(serviceZones.length === 0, `${serviceZones.length} junction zones involve service lanes`);
 let serviceWalls = 0;
 for (const segment of map.wallSegments) {
