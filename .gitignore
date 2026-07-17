@@ -2,3 +2,4 @@ node_modules/
 .devtests/shots/
 tools/cache/
 tools/road-editor/backups/
+tools/hesi-editor/test/smoke/artifacts/

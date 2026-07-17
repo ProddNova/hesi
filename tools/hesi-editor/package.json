@@ -1,0 +1,18 @@
+{
+  "name": "@hesi/world-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "test": "npm run test:unit && npm run test:server",
+    "test:unit": "node --test \"test/unit/*.test.mjs\"",
+    "test:server": "node --test test/server.test.mjs",
+    "test:smoke": "node test/smoke/editor.smoke.mjs"
+  },
+  "dependencies": {
+    "three": "0.166.1"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}
