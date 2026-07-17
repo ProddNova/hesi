@@ -1,6 +1,6 @@
 # HESI Editor Architecture
 
-## Checkpoint 1 boundary
+## World-editor boundary
 
 The editor is a browser-only tool served by a dependency-free Node static
 server. Its package and dependencies are contained under `tools/hesi-editor/`.
@@ -13,6 +13,7 @@ index.html
      -> src/editor-app.js
         -> ui/editor-shell.js
         -> viewport.js
+           -> navigation/fly-camera-controller.js
         -> world-adapter.js
         -> entity-registry.js
 ```
@@ -27,30 +28,28 @@ checks; and disposes each owned resource on unload.
 
 ### `ui/editor-shell.js`
 
-Creates all editor regions and visible loading/error states using DOM APIs. UI
-controls call narrow callbacks and never reach into `HighwayMap` or game code.
-Disabled selection, transform, road, asset, material, and inspector surfaces
-make unsupported functions explicit.
+Creates all editor regions and visible loading/error/fallback states using DOM
+APIs. UI controls call narrow callbacks and never reach into `HighwayMap` or
+game code. Required controls are functional; future tools are omitted.
 
 ### `viewport.js`
 
 Owns Three.js rendering: Scene, PerspectiveCamera, WebGLRenderer,
-OrbitControls, helpers, ResizeObserver, animation loop, focus framing, and
-statistics. `setWorldGroup()` is the only scene attachment boundary for a
-world adapter.
+OrbitControls, no-clip fly controller, helpers, ResizeObserver, animation loop,
+camera presets, focus framing, world-update callback, and statistics.
+`setWorldGroup()` is the only scene attachment boundary for a world adapter.
 
 ### `world-adapter.js`
 
-Returns a uniform adapter contract. The default representative strategy builds
-a small editor-only highway scene with one high-level Object3D group for each
-required layer. This keeps Checkpoint 1 fast and completely independent of
-gameplay.
+Returns a uniform adapter contract. Real mode is the default: it dynamically
+imports only `/js/map.js`, instantiates `HighwayMap` without a game scene,
+measures the fully generated chunk set, and then restores camera-driven chunk
+streaming. It exposes bounds, scale, origin, exact inverse projection, counts,
+services, and metadata-derived camera presets. It does not import `game.js`,
+`traffic.js`, `physics.js`, `audio.js`, `garage.js`, `save.js`, or `ui.js`.
 
-`?world=full` dynamically imports only `/js/map.js`, instantiates `HighwayMap`
-without a game scene, and exposes the generated world as one read-only entity.
-It does not import `game.js`, `traffic.js`, `physics.js`, `audio.js`, `garage.js`,
-`save.js`, or `ui.js`. Any full-mode failure produces a representative fallback
-with a user-visible warning.
+`?world=demo` is explicit. A real-mode exception creates the same demo adapter
+with `demo-fallback` strategy and an unavoidable warning banner.
 
 ### `entity-registry.js`
 
@@ -73,7 +72,7 @@ or visibility changes behind.
 
 ## Extension points
 
-Checkpoint 2 should add services beside the registry instead of expanding the
+Later checkpoints add services beside the registry instead of expanding the
 adapter into a monolith:
 
 - selection state and raycasting service

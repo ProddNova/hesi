@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+const EARTH_RADIUS_METRES = 6371000;
+
 function standard(color, extra = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0.08, ...extra });
 }
@@ -25,142 +27,194 @@ function disposeObject(root) {
 }
 
 function entity(id, type, layer, name, object3D, source = 'representative') {
-  return { id, type, layer, name, object3D, editable: false, source };
+  return { id, type, layer, name, object3D, editable: false, generated: true, source, metadata: {} };
 }
 
-function makeRepresentativeWorld(onProgress) {
-  onProgress('Building representative highway scene');
+function framePreset(box, label) {
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const direction = new THREE.Vector3(0.72, 0.82, 0.72).normalize();
+  const distance = Math.max(200, sphere.radius * 2.45);
+  return {
+    id: 'entire-world',
+    label,
+    position: sphere.center.clone().addScaledVector(direction, distance),
+    target: sphere.center.clone(),
+    near: Math.max(0.5, distance / 30000),
+    far: Math.max(120000, distance * 4),
+    chunkMode: 'all',
+  };
+}
+
+function makeRepresentativeWorld(onProgress, { fallbackError = null } = {}) {
+  onProgress('Building explicit representative demo scene');
   const world = new THREE.Group();
   world.name = 'HESI representative world';
-
   const asphalt = standard(0x171b21, { roughness: 0.92 });
   const concrete = standard(0x66707a);
   const metal = standard(0x8d9aa5, { roughness: 0.38, metalness: 0.68 });
-  const markingMaterial = new THREE.MeshBasicMaterial({ color: 0xe7edf0 });
-  const buildingMaterials = [standard(0x172230), standard(0x202937), standard(0x121a25)];
-  const glass = standard(0x22465c, { emissive: 0x0b1d29, emissiveIntensity: 0.8 });
-
+  const marking = new THREE.MeshBasicMaterial({ color: 0xe7edf0 });
   const roads = new THREE.Group();
   roads.name = 'Roads';
   addBox(roads, [18, 0.7, 190], [0, 7.5, 0], asphalt, 'Elevated highway deck');
   addBox(roads, [14, 0.55, 116], [45, 15, -8], asphalt, 'Cross route deck').rotation.y = Math.PI / 2;
   world.add(roads);
-
   const markings = new THREE.Group();
-  markings.name = 'Markings';
-  for (let z = -84; z <= 84; z += 12) addBox(markings, [0.18, 0.035, 5], [0, 7.89, z], markingMaterial, 'Lane dash');
-  for (const x of [-8.2, 8.2]) addBox(markings, [0.16, 0.035, 184], [x, 7.89, 0], markingMaterial, 'Edge line');
+  markings.name = 'Road markings';
+  for (let z = -84; z <= 84; z += 12) addBox(markings, [0.18, 0.035, 5], [0, 7.89, z], marking, 'Lane dash');
   world.add(markings);
-
-  const guardrails = new THREE.Group();
-  guardrails.name = 'Guardrails';
-  for (const x of [-9.15, 9.15]) {
-    addBox(guardrails, [0.18, 0.28, 188], [x, 8.55, 0], metal, 'Guardrail rail');
-    for (let z = -90; z <= 90; z += 6) addBox(guardrails, [0.16, 1.2, 0.16], [x, 8.15, z], metal, 'Guardrail post');
-  }
-  world.add(guardrails);
-
   const pillars = new THREE.Group();
   pillars.name = 'Pillars';
-  for (let z = -72; z <= 72; z += 24) {
-    addBox(pillars, [2.2, 15, 2.2], [0, 0, z], concrete, 'Expressway pillar');
-    addBox(pillars, [12, 1.2, 2.8], [0, 6.3, z], concrete, 'Pillar cap');
-  }
+  for (let z = -72; z <= 72; z += 24) addBox(pillars, [2.2, 15, 2.2], [0, 0, z], concrete, 'Expressway pillar');
   world.add(pillars);
-
-  const buildings = new THREE.Group();
-  buildings.name = 'Buildings';
-  const buildingDefs = [
-    [-32, 12, -52, 18, 25, 22], [-38, 20, -10, 23, 41, 18], [-30, 15, 36, 18, 31, 23],
-    [34, 13, -62, 20, 27, 20], [38, 24, -22, 21, 49, 24], [33, 17, 43, 26, 35, 20],
-  ];
-  buildingDefs.forEach(([x, y, z, w, h, d], index) => {
-    addBox(buildings, [w, h, d], [x, y, z], buildingMaterials[index % buildingMaterials.length], `Building ${index + 1}`);
-    addBox(buildings, [w * 0.72, 0.06, d * 0.72], [x, y + h / 2 + 0.04, z], glass, 'Rooftop glow');
-  });
-  world.add(buildings);
-
   const props = new THREE.Group();
   props.name = 'Props';
-  for (const z of [-58, -18, 22, 62]) {
-    addBox(props, [0.3, 6, 0.3], [-12, 11, z], metal, 'Light pole');
-    const lamp = new THREE.PointLight(0x79d9ff, 7, 22, 2);
-    lamp.position.set(-12, 14, z);
-    props.add(lamp);
-  }
-  addBox(props, [10, 3.5, 0.25], [0, 14, -36], glass, 'Overhead route sign');
-  addBox(props, [0.25, 7, 0.25], [-4.5, 10.5, -36], metal, 'Sign post');
-  addBox(props, [0.25, 7, 0.25], [4.5, 10.5, -36], metal, 'Sign post');
+  addBox(props, [10, 3.5, 0.25], [0, 14, -36], metal, 'Overhead route sign');
   world.add(props);
-
-  const garage = new THREE.Group();
-  garage.name = 'Garage';
-  addBox(garage, [25, 8, 20], [-31, 4, 72], concrete, 'Garage shell');
-  addBox(garage, [12, 5, 0.2], [-31, 3, 61.9], new THREE.MeshBasicMaterial({ color: 0xf0a74a }), 'Garage door');
-  world.add(garage);
-
-  const lighting = new THREE.Group();
-  lighting.name = 'Lighting';
-  const moon = new THREE.DirectionalLight(0xa9c9ff, 1.6);
-  moon.position.set(45, 80, 30);
-  lighting.add(moon);
-  lighting.add(new THREE.HemisphereLight(0x32516e, 0x080a0d, 1.8));
-  world.add(lighting);
-
+  const bounds = new THREE.Box3().setFromObject(world);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const presets = new Map([
+    ['initial-spawn', { id: 'initial-spawn', label: 'Demo start', position: new THREE.Vector3(105, 72, 118), target: center.clone(), chunkMode: 'all' }],
+    ['map-center', { id: 'map-center', label: 'Demo center', position: center.clone().add(new THREE.Vector3(90, 80, 90)), target: center.clone(), chunkMode: 'all' }],
+    ['entire-world', framePreset(bounds, 'Entire demo')],
+  ]);
   const entities = [
     entity('roads:representative-network', 'network', 'Roads', 'Representative expressway', roads),
-    entity('markings:representative-network', 'road-markings', 'Markings', 'Lane and edge markings', markings),
-    entity('guardrails:representative-network', 'guardrail-system', 'Guardrails', 'Highway guardrails', guardrails),
-    entity('pillars:representative-network', 'support-system', 'Pillars', 'Elevated deck supports', pillars),
-    entity('buildings:representative-city', 'city-block', 'Buildings', 'Representative city blocks', buildings),
-    entity('props:representative-dressing', 'prop-collection', 'Props', 'Lights and signage', props),
-    entity('garage:representative-pa', 'garage', 'Garage', 'Representative PA garage', garage),
-    entity('lighting:representative-rig', 'lighting-rig', 'Lighting', 'Editor preview lighting', lighting),
+    entity('markings:representative-network', 'road-markings', 'Road Markings', 'Representative markings', markings),
+    entity('pillars:representative-network', 'support-system', 'Pillars', 'Representative supports', pillars),
+    entity('props:representative-dressing', 'prop-collection', 'Props', 'Representative props', props),
   ];
-
   return {
     group: world,
     entities,
-    strategy: 'representative',
-    label: 'Representative scene',
-    warning: null,
+    strategy: fallbackError ? 'demo-fallback' : 'demo',
+    label: fallbackError ? 'DEMO FALLBACK' : 'Explicit demo world',
+    isRealWorld: false,
+    warning: fallbackError
+      ? `REAL HESI WORLD FAILED TO LOAD. This is the demo fallback, not production data. ${fallbackError.message || fallbackError}`
+      : 'Explicit demo mode requested with ?world=demo.',
+    fallbackError,
     focusTarget: world,
+    bounds,
+    metadata: {
+      worldCenter: center, worldSize: size, routeCount: 0, mapOrigin: null, mapScale: '1 unit = 1 metre',
+      approximateAreaKm2: size.x * size.z / 1e6, coordinateSystem: 'Local demo coordinates; no GPS conversion',
+    },
+    presets,
+    getPreset(id) { return presets.get(id) || null; },
+    setChunkMode() {},
+    updateForCamera() {},
     dispose() { disposeObject(world); },
   };
 }
 
-async function makeFullWorld(onProgress) {
-  onProgress('Importing the current HESI map generator');
-  const { HighwayMap } = await import('/js/map.js');
-  onProgress('Building the current HESI world (this may take a moment)');
-  const map = new HighwayMap({ quality: 'low', applyFog: false });
+function localToGps(origin, x, z) {
+  if (!origin || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+  const radians = Math.PI / 180;
   return {
+    lat: origin.lat + z / (EARTH_RADIUS_METRES * radians),
+    lon: origin.lon + x / (EARTH_RADIUS_METRES * radians * Math.cos(origin.lat * radians)),
+  };
+}
+
+async function makeFullWorld(onProgress) {
+  onProgress('Importing the production HESI map generator');
+  const { HighwayMap } = await import('/js/map.js');
+  onProgress('Generating real routes, structures, terrain, and props');
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const map = new HighwayMap({ quality: 'low', applyFog: false });
+  onProgress(`Measuring ${map._chunks?.size || 0} generated world chunks`);
+
+  const chunks = [...(map._chunks?.values?.() || [])];
+  const savedVisibility = chunks.map((chunk) => chunk.group.visible);
+  chunks.forEach((chunk) => { chunk.group.visible = true; });
+  map.group.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(map.group);
+  chunks.forEach((chunk, index) => { chunk.group.visible = savedVisibility[index]; });
+  map.update(map.initialSpawn?.position, 0);
+
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const origin = map.networkMeta?.origin || null;
+  const spawn = map.getInitialSpawn?.() || map.initialSpawn;
+  const tatsumi = map.serviceAreas?.find((area) => area.id === 'tatsumi_pa') || null;
+  const spawnTarget = spawn?.position?.clone?.() || center.clone();
+  const spawnForward = spawn?.tangent?.clone?.() || new THREE.Vector3(0, 0, -1);
+  const spawnPosition = spawnTarget.clone().addScaledVector(spawnForward, -52).add(new THREE.Vector3(0, 26, 0));
+  const presets = new Map();
+  if (tatsumi?.center) {
+    const target = tatsumi.center.clone();
+    const tangent = tatsumi.tangent?.clone?.() || spawnForward;
+    presets.set('tatsumi-pa', {
+      id: 'tatsumi-pa', label: 'Tatsumi PA', position: target.clone().addScaledVector(tangent, -75).add(new THREE.Vector3(0, 42, 0)),
+      target, near: 0.1, far: 120000, chunkMode: 'nearby', source: 'serviceAreas:tatsumi_pa',
+    });
+  }
+  presets.set('initial-spawn', {
+    id: 'initial-spawn', label: spawn?.label || 'Initial spawn', position: spawnPosition, target: spawnTarget,
+    near: 0.1, far: 120000, chunkMode: 'nearby', source: spawn?.serviceAreaId || spawn?.routeId || 'map.initialSpawn',
+  });
+  presets.set('map-center', {
+    id: 'map-center', label: 'Map center', position: center.clone().add(new THREE.Vector3(900, 1200, 900)), target: center.clone(),
+    near: 0.5, far: 120000, chunkMode: 'nearby', source: 'calculated world bounds',
+  });
+  presets.set('entire-world', framePreset(bounds, 'Entire real world'));
+
+  let chunkMode = 'nearby';
+  const setChunkMode = (mode, cameraPosition = null) => {
+    chunkMode = mode === 'all' ? 'all' : 'nearby';
+    if (chunkMode === 'all') chunks.forEach((chunk) => { chunk.group.visible = true; });
+    else {
+      map._visibleKey = null;
+      map.update(cameraPosition || spawnTarget, performance.now() / 1000);
+    }
+  };
+
+  const minimap = map.getMinimapData?.();
+  const metadata = {
+    worldBounds: bounds,
+    worldCenter: center,
+    worldSize: size,
+    mapOrigin: origin,
+    mapScale: '1 world unit = 1 metre',
+    routeCount: map.routes?.size || minimap?.routes?.length || 0,
+    sourceRouteCount: map.networkMeta?.stats?.routeCount ?? null,
+    chunkCount: chunks.length,
+    serviceAreaCount: map.serviceAreas?.length || 0,
+    junctionCount: map.junctions?.length || 0,
+    approximateAreaKm2: size.x * size.z / 1e6,
+    coordinateSystem: 'Local equirectangular metres: +X east, +Z north, +Y up',
+    conversion: origin ? 'Exact inverse of HighwayMap._ll local equirectangular projection' : null,
+    worldToGps: origin ? (position) => localToGps(origin, position.x, position.z) : null,
+  };
+
+  return {
+    map,
     group: map.group,
-    entities: [entity(
-      'world:current-hesi-map',
-      'generated-world',
-      'Roads',
-      'Current generated HESI world (read-only)',
-      map.group,
-      'js/map.js',
-    )],
-    strategy: 'full',
-    label: 'Current HESI world',
-    warning: 'The generated world is exposed as one read-only high-level entity in Checkpoint 1.',
-    focusTarget: map.group,
+    entities: [entity('world:current-hesi-map', 'generated-world', 'Roads', 'Current generated HESI world', map.group, 'js/map.js')],
+    strategy: 'real',
+    label: 'REAL HESI WORLD',
+    isRealWorld: true,
+    warning: null,
+    focusTarget: bounds,
+    bounds,
+    metadata,
+    presets,
+    getPreset(id) { return presets.get(id) || null; },
+    setChunkMode,
+    updateForCamera(position, timeSeconds) { if (chunkMode === 'nearby') map.update(position, timeSeconds); },
     dispose() { map.dispose(); },
   };
 }
 
-export async function loadWorld({ mode = 'representative', onProgress = () => {} } = {}) {
-  if (mode !== 'full') return makeRepresentativeWorld(onProgress);
+export async function loadWorld({ mode = 'real', onProgress = () => {} } = {}) {
+  if (mode === 'demo') return makeRepresentativeWorld(onProgress);
   try {
     return await makeFullWorld(onProgress);
   } catch (error) {
-    const fallback = makeRepresentativeWorld(onProgress);
-    fallback.strategy = 'representative-fallback';
-    fallback.label = 'Representative scene (fallback)';
-    fallback.warning = `Full world could not load: ${error?.message || error}`;
-    return fallback;
+    console.error('[hesi-editor] real world failed; activating explicit fallback warning', error);
+    return makeRepresentativeWorld(onProgress, { fallbackError: error });
   }
 }
+
+export { makeFullWorld, makeRepresentativeWorld, localToGps };

@@ -43,9 +43,10 @@ const server = createServer(async (req, res) => {
       res.end();
       return;
     }
-    const path = decodeURIComponent(req.url.split('?')[0]);
+    const requestUrl = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+    const path = decodeURIComponent(requestUrl.pathname);
     if (path === '/' || path === '/editor' || path === '/editor/') {
-      res.writeHead(302, { location: EDITOR_PATH });
+      res.writeHead(302, { location: `${EDITOR_PATH}${requestUrl.search}` });
       res.end();
       return;
     }

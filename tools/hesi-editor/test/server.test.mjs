@@ -42,6 +42,8 @@ test('server redirects editor aliases and blocks traversal', async () => {
   const alias = await fetch(`${BASE}/editor`, { redirect: 'manual' });
   assert.equal(alias.status, 302);
   assert.equal(alias.headers.get('location'), '/tools/hesi-editor/index.html');
+  const demoAlias = await fetch(`${BASE}/editor?world=demo`, { redirect: 'manual' });
+  assert.equal(demoAlias.headers.get('location'), '/tools/hesi-editor/index.html?world=demo');
   const traversal = await fetch(`${BASE}/..%2f..%2fpackage.json`);
   assert.equal(traversal.status, 403);
 });

@@ -1,7 +1,7 @@
 # HESI World Editor
 
-This folder contains a standalone, read-only editor foundation for HESI. It is
-not imported by the game and does not run traffic, player physics, scoring,
+This folder contains the standalone HESI World Editor. It is not imported by
+the game and does not run traffic, player physics, scoring,
 economy, audio, or garage gameplay loops.
 
 ## Run the editor
@@ -28,11 +28,10 @@ $env:HESI_EDITOR_PORT=8082
 npm run editor
 ```
 
-The default URL loads a fast representative, read-only HESI scene. To try the
-current generated `HighwayMap` directly, open
-<http://localhost:8081/editor?world=full>. Full mode remains experimental; a
-failure is surfaced as a warning and the adapter falls back to the
-representative scene.
+The default URL loads the real current `HighwayMap`. The representative scene
+is available only through <http://localhost:8081/editor?world=demo> or as a
+prominently labelled fallback after a real load failure. The editor never
+silently presents demo geometry as the production map.
 
 ## Run the game
 
@@ -46,22 +45,25 @@ Then open <http://localhost:8080>. This is only a convenience alias for the
 existing `python -m http.server 8080` flow. `start-game.bat` also remains
 available on Windows.
 
-## What works
+## Navigation and current checkpoint
 
-- Three.js perspective viewport with orbit camera
+- real HESI world generation with live chunk streaming
+- orbit and dedicated no-clip fly cameras
+- fly controls: click viewport for mouse look, `W/A/S/D`, `Q/E`, `Shift`,
+  mouse wheel, and `Escape`
+- slow, normal, and fast speed presets
+- metadata-driven Tatsumi PA, initial-spawn, map-center, and entire-world views
+- measured world bounds, origin, scale, route/service/junction/chunk counts,
+  and the exact inverse of the runtime local equirectangular projection
 - resize handling and deterministic cleanup
-- camera reset and focus controls
 - grid and axes toggles
 - frame, draw-call, and triangle statistics
-- professional foundation layout: toolbar, hierarchy/layers, viewport,
-  inspector, assets/materials tabs, and status bar
+- editor layout with toolbar, hierarchy/layers, viewport, world inspector,
+  metadata/control tabs, and status bar
 - loading overlay and dismissible visible error overlay
-- eight required layers with visibility toggles
+- fourteen semantic target layers with visibility toggles
 - high-level entity registry with stable IDs
-- safe representative world adapter and optional full-world adapter
-
-Editing surfaces are visibly disabled. They are extension points, not simulated
-functionality.
+- explicit demo adapter and safe real-world fallback state
 
 ## Tests
 
@@ -70,10 +72,10 @@ npm --prefix tools/hesi-editor test
 npm --prefix tools/hesi-editor run test:smoke
 ```
 
-The first command runs pure registry/adapter tests plus server and production
-isolation checks. The smoke command launches Chromium, verifies WebGL startup,
-world loading and layer visibility, then captures normal and error-state images
-under `test/smoke/artifacts/` (ignored by Git).
+The first command runs registry/adapter tests plus server and production
+isolation checks. The smoke command launches Chromium, verifies the default real
+world, fly/orbit switching, explicit demo mode, and disposal, then captures
+checkpoint evidence under `test/smoke/artifacts/`.
 
 If Chromium is not installed for the editor-local Playwright version, run:
 
@@ -81,9 +83,7 @@ If Chromium is not installed for the editor-local Playwright version, run:
 npm --prefix tools/hesi-editor exec playwright install chromium
 ```
 
-## Current boundary
-
-There is no viewport selection, transform gizmo, persistence, material editor,
-road editor, or AI command runner yet. The next checkpoint is exactly:
-
-**Selection + transform gizmos + declarative overrides**
+The semantic registry, selection, inspector, editing, persistence, debug, and
+asset-placement systems are delivered in subsequent MVP checkpoints. The
+separate Asset & Tile Editor (modeling, UVs, textures, reusable road/tunnel
+modules) is intentionally out of scope here.

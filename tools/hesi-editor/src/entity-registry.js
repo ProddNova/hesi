@@ -1,6 +1,7 @@
 export const EDITOR_LAYERS = Object.freeze([
-  'Roads', 'Markings', 'Guardrails', 'Pillars',
-  'Buildings', 'Props', 'Garage', 'Lighting',
+  'Roads', 'Road Markings', 'Guardrails', 'Barriers', 'Pillars',
+  'Buildings', 'Lamps', 'Signs', 'Props', 'Tunnels', 'Garage',
+  'Terrain', 'Lighting', 'Collisions',
 ]);
 
 function assertEntity(entity, layers) {

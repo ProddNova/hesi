@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070b12">
-  <meta name="description" content="External read-only world editor foundation for HESI.">
+  <meta name="description" content="Standalone real-map world editor for HESI.">
   <title>HESI World Editor</title>
   <link rel="stylesheet" href="./styles.css">
   <script type="importmap">
@@ -17,7 +17,7 @@
   </script>
 </head>
 <body>
-  <!-- The whole shell skeleton (layout grid, overlays) is built by src/shell/layout.js. -->
+  <!-- The isolated editor shell is built at runtime and is never imported by the game. -->
   <div id="app"></div>
   <noscript>This editor requires JavaScript.</noscript>
   <script type="module" src="./src/main.js"></script>
