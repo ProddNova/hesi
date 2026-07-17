@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { HighwayMap } from '../js/map.js';
 import { VehiclePhysics } from '../js/physics.js';
 
-const map = new HighwayMap(null, { addLighting: false, progressiveMerges: true });
+const map = new HighwayMap(null, { addLighting: false, legacyFlow: true, progressiveMerges: true });
 const failures = [];
 const wrapAngle = (value) => THREE.MathUtils.euclideanModulo(value + Math.PI, Math.PI * 2) - Math.PI;
 

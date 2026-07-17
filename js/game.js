@@ -200,7 +200,7 @@ class ShutokoNights {
   enterGarage(reason='service'){
     this.ui.fade(true);setTimeout(()=>{
       if(reason==='crash'||reason==='tow'){this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};}
-      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Shiba PA workshop // Shift complete','amber');if(this.p4CaptureView)setTimeout(()=>this.exitGarage(),80);
+      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Tatsumi PA workshop // Shift complete','amber');if(this.p4CaptureView)setTimeout(()=>this.exitGarage(),80);
     },480);
   }
   exitGarage(){
@@ -233,7 +233,7 @@ class ShutokoNights {
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
-    this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'SHIBA PA',areaName:'WANGAN WORKS'});
+    this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
   }
 
   updateDriving(dt){
@@ -347,7 +347,7 @@ class ShutokoNights {
     if(view.position&&view.target){
       this.debug.position.copy(vec(view.position));target=vec(view.target);tangent=target.clone().sub(this.debug.position).normalize();normal=new THREE.Vector3(tangent.z,0,-tangent.x).normalize();
     }else if(view.path==='auxiliary'){
-      const transition=this.map.progressiveTransitionById.get('J2:diverge:c1_0:r1_0:start'),path=transition.laneCentres.find(entry=>entry.id==='aux:0').points;
+      const transition=this.map.progressiveTransitionById.get('J2:diverge:c1_0:r1_0:start');if(!transition)return;const path=transition.laneCentres.find(entry=>entry.id==='aux:0').points;
       const sampleAt=hostS=>{let upper=1;while(upper<path.length&&path[upper].hostS<hostS)upper++;const right=path[Math.min(upper,path.length-1)],left=path[Math.max(0,upper-1)],t=clamp((hostS-left.hostS)/Math.max(1e-6,right.hostS-left.hostS),0,1);return vec(left.position).lerp(vec(right.position),t);};
       const anchor=sampleAt(view.hostS),look=sampleAt(Math.min(transition.transferComplete,view.hostS+view.lookAhead));target=look;tangent=look.clone().sub(sampleAt(view.hostS-2)).normalize();normal=new THREE.Vector3(tangent.z,0,-tangent.x).normalize();
       this.debug.position.copy(anchor).addScaledVector(tangent,-view.back).addScaledVector(normal,view.lateral);this.debug.position.y=anchor.y+view.up;

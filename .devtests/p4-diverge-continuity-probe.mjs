@@ -13,7 +13,7 @@ import { HighwayMap } from '../js/map.js';
 const ID = 'J2:diverge:c1_0:r1_0:start';
 const outputArg = process.argv.find((argument) => argument.startsWith('--json='));
 const outputPath = outputArg?.slice('--json='.length) || null;
-const map = new HighwayMap(null, { addLighting: false, markingDebug: true });
+const map = new HighwayMap(null, { addLighting: false, legacyFlow: true, markingDebug: true });
 const transition = map.progressiveTransitions.find((candidate) => candidate.id === ID);
 if (!transition) throw new Error('P4 active transition is missing');
 const zone = transition.sourceZone;

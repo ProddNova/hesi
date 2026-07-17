@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { HighwayMap } from '../js/map.js';
 
 const LEGACY = process.argv.includes('--legacy');
-const map = new HighwayMap(null, { addLighting: false, markingDebug: true, progressiveMerges: !LEGACY });
+const map = new HighwayMap(null, { addLighting: false, legacyFlow: true, markingDebug: true, progressiveMerges: !LEGACY });
 const failures = [];
 const fail = (id, message) => failures.push(`${id}: ${message}`);
 const radiansToDegrees = (value) => value * 180 / Math.PI;

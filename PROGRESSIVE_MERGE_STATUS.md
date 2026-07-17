@@ -1,5 +1,17 @@
 # Progressive Merge Checkpoint Status
 
+## Left-hand-traffic binding (2026-07-17)
+
+The live network now loads reversed for Japanese left-hand traffic
+(`reverseNetworkData`, js/map.js), which flips both prototype junction
+senses. The prototypes below are engineered for the original flow and are
+therefore **legacy-flow-bound**: `js/map.js` activates them only when the
+map is built with `options.legacyFlow === true`. The live game uses the
+standard junction treatment at J2/J48 (all generic marking/rail/collision
+gates pass there), the live developer map shows no prototype pins, and the
+entire progressive probe suite constructs `legacyFlow` maps, where every
+record below — including the P1 geometry digest — still validates.
+
 ## Corrected P1/P2 final state (2026-07-16)
 
 This section supersedes the historical checkpoint record below.
@@ -41,7 +53,12 @@ zero collisions and zero wall correction. Visual evidence is in
 Focused gates: merge-handoff invariant PASS; progressive model PASS;
 geometry/paint/rail/collision PASS; both-lane dynamic drive PASS; guardrail PASS;
 P1 geometry digest
-`2779a9ef94a8b556d0a3d85e2493dbc474dc2c8fd4351303b5d797524f88d0a0`.
+`2779a9ef94a8b556d0a3d85e2493dbc474dc2c8fd4351303b5d797524f88d0a0`
+(re-recorded 2026-07-17 as
+`5a1b3642963c888ec53a5ae93780c7a777a1792b55f543e23978591812b235ca` — the old
+constant no longer matched the pre-continuation baseline 34909c3 either; all
+hashed fields are byte-identical between that baseline and the current
+legacyFlow build).
 
 ## Historical Checkpoint 2 record
 

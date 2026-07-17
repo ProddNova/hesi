@@ -1257,6 +1257,20 @@ export class HighwayMap {
       const area = this._pushServiceArea(def, route, distance, center, tangent, outward, elevation, accessRoute.id);
       area.sideSign = sideSign;
     }
+
+    // Single active garage: while the Tatsumi deck garage is live, every
+    // other lot (Shibaura's legacy workshop included) drops its garage flag
+    // so spawn, minimap marker, proximity prompt and the exterior shell all
+    // follow the deck. The paAccessLanes twin never activates the deck
+    // garage, so Shibaura keeps the flag there.
+    const deckGarage = this.serviceAreas.find(
+      (candidate) => candidate.id === 'tatsumi_pa' && candidate.hasGarage,
+    );
+    if (deckGarage) {
+      for (const other of this.serviceAreas) {
+        if (other !== deckGarage) other.hasGarage = false;
+      }
+    }
   }
 
   _pushServiceArea(def, route, distance, center, tangent, outward, elevation, accessRouteId) {
@@ -1440,6 +1454,15 @@ export class HighwayMap {
       console.warn('Shutoko map: Tatsumi deck cannot clear the ramps; using generic PA placement');
       return null;
     }
+    // 4b. The corridor supports a ~200 m slab, but the PA only needs a
+    //     compact lot (entry + aisle + exit). Trim the rectangle to a fixed
+    //     length around its centre, re-fitted so the shorter window keeps
+    //     whatever extra width its own (fewer) ramp pinches allow.
+    const TARGET_LENGTH = 110;
+    if (best.uB - best.uA > TARGET_LENGTH) {
+      const midU = (best.uA + best.uB) / 2;
+      best = fit(midU - TARGET_LENGTH / 2, midU + TARGET_LENGTH / 2) || best;
+    }
 
     // 5. Elevation from the surrounding ramp decks (mean of both ramps across
     //    the deck window), then verify the Wangan pair keeps enough headroom
@@ -1536,68 +1559,79 @@ export class HighwayMap {
       },
     };
 
-    // 8. Player exit onto ramp_8. Under left-hand traffic ramp_8 descends
-    //    alongside the deck (route 9 -> wangan_0), passing within a few
-    //    metres of deck level, so a short one-lane connector can leave the
-    //    parking rows, cross the deck edge and glue onto the ramp's
-    //    deck-facing edge exactly like the legacy PA access lanes did:
-    //    the final two points ride the host's outer edge and a merge edge
-    //    hands the junction to the standard mouth/zone machinery (deck
-    //    blending, guardrail opening, dashed boundary, gore). Everything is
-    //    measured from the fitted runtime centrelines — no hand-typed
-    //    coordinate. Traffic never uses it (kind service, traffic false).
+    // 8. Player access: one entry from ramp_8 (upstream end) and one exit
+    //    back onto ramp_8 (downstream end). Under left-hand traffic ramp_8
+    //    descends alongside the deck (route 9 -> wangan_0), crossing deck
+    //    level about halfway along it, so the entry leaves the ramp while
+    //    the ramp is still slightly above the deck and the exit rejoins it a
+    //    little below — both aprons stay under ~3 % grade. Each connector
+    //    follows the legacy PA access-lane mouth pattern: a ~60 m pair of
+    //    points riding the host's deck-facing edge with the junction edge at
+    //    the pair, so the standard zone machinery (deck blending, guardrail
+    //    opening, dashed boundary) owns the mouth. Traffic never routes onto
+    //    either (traffic:false; the diverge carries probability 0).
+    //
+    //    ONE HEIGHT AUTHORITY: everywhere a connector corridor can overlap
+    //    the ramp corridor (host lateral < PLANE_LEAVE), its centreline
+    //    points sit exactly ON the ramp's banked deck plane at their own
+    //    lateral (_frameAt + _deckPoint), so the rendered strip, the
+    //    connector corridor height and the ramp corridor height agree no
+    //    matter which corridor getRoadInfo scores best. The previous glue
+    //    drew its own descending strip above the ramp plane while collision
+    //    picked the ramp underneath — the car visibly sank below the drawn
+    //    asphalt (and scraped the rail between the two strips).
     const rampSideSign = Math.sign(local(this._projectToRoute(ramp8, center).point).v - best.centerV) || -1;
     const deckEdgeHalf = width * 0.5;
+    const aisleV = rampSideSign * 3.2;
+    const lift = 0.05; // keep the on-deck lane strip clear of the lot slab
     const deckLocalOf = (point) => ({
       u: (point.x - center.x) * tangent.x + (point.z - center.z) * tangent.z,
       v: (point.x - center.x) * outward.x + (point.z - center.z) * outward.z,
     });
-    const glue = (station) => {
-      const hostSample = this._sampleCenter(ramp8, station, 1);
-      const towardDeck = TMP_A.copy(center).sub(hostSample.position);
-      const mouthSide = towardDeck.dot(hostSample.normal) >= 0 ? 1 : -1;
-      return hostSample.position.clone()
-        .addScaledVector(hostSample.normal, mouthSide * Math.max(0.8, ramp8.halfWidth - 1.6));
+    const onDeck = (u, v) => {
+      const point = deckPoint(u, v);
+      point.y = elevation + lift;
+      return point;
     };
-    const glueTargetA = deckPoint(length * 0.45, rampSideSign * (deckEdgeHalf + 6));
-    const glueStationA = this._projectToRoute(ramp8, glueTargetA).distance;
-    const glueStationB = Math.min(ramp8.length - 40, glueStationA + 60);
-    if (glueStationB - glueStationA > 24) {
-      const lift = 0.05; // keep the on-deck lane clear of the lot slab surface
-      const onDeck = (u, v) => {
-        const point = deckPoint(u, v);
-        point.y = elevation + lift;
-        return point;
-      };
-      // The apron stays at deck height across the gap and along its first
-      // glued metres (an over-the-shoulder lip well past the collision
-      // coplanar tolerance, so the connector keeps its own corridor while
-      // its centre is still outside the ramp's drivable band), and only
-      // touches down once the lane rides the ramp's outer lane — where the
-      // host corridor already owns the car. No invisible dead band between
-      // the two, unlike the legacy access-lane mouths.
-      const glueA = glue(glueStationA);
-      glueA.y = elevation + lift;
-      const glueB = glue(glueStationB);
-      const edgeLeave = onDeck(length * 0.19, rampSideSign * (deckEdgeHalf - 0.6));
-      const midGap = edgeLeave.clone().lerp(glueA, 0.5);
-      midGap.y = elevation + lift;
-      const exitPoints = [
-        onDeck(-length * 0.2, rampSideSign * (deckEdgeHalf - 2.8)),
-        onDeck(length * 0.0, rampSideSign * (deckEdgeHalf - 1.9)),
-        edgeLeave,
-        midGap,
-        glueA,
-        glueB,
-      ];
-      const exitRoute = this._registerRoute({
-        id: 'tatsumi_pa_exit',
+    // Host-frame helpers: signed side of the deck, and a point ON the ramp's
+    // banked deck plane at a given station/lateral magnitude.
+    const hostSideAt = (station) => {
+      // Deck-facing side of the ramp at this station. Compare against the
+      // deck AXIS at the sample's own u (not the distant lot centre): far
+      // upstream the ramp curves enough that the centre lands on the wrong
+      // side of its local normal.
+      const sample = this._sampleCenter(ramp8, station, 1);
+      const sampleU = (sample.position.x - center.x) * tangent.x
+        + (sample.position.z - center.z) * tangent.z;
+      const axisPoint = TMP_A.copy(center).addScaledVector(tangent, sampleU);
+      return axisPoint.sub(sample.position).dot(sample.normal) >= 0 ? 1 : -1;
+    };
+    const hostPlanePoint = (station, lateralMagnitude) => this._deckPoint(
+      this._frameAt(ramp8, station),
+      hostSideAt(station) * lateralMagnitude,
+      0,
+    );
+    const hostStationNear = (u, beyondEdge) => this._projectToRoute(
+      ramp8,
+      deckPoint(u, rampSideSign * (deckEdgeHalf + beyondEdge)),
+    ).distance;
+    const MOUTH_INSET = Math.max(0.8, ramp8.halfWidth - 1.6); // legacy mouth lateral
+    const BAND_ENTER = 3.55; // band-ride lateral: inside the edge, clear of the
+    // corridor's outer-wall correction (half 4.5 - car radius ~0.8)
+    const BAND_RUN = 110;    // host-frame run from band entry to the junction edge
+    const MOUTH = 60;        // legacy mouth-pair length
+    const BEYOND_END_OUT = 42; // band join past the downstream end (exit)
+    const BEYOND_END_IN = 95;  // band leave before the upstream end (entry)
+
+    const registerConnector = (id, name, points, edge) => {
+      const route = this._registerRoute({
+        id,
         code: 'PA',
-        name: 'Tatsumi PA exit',
+        name,
         kind: 'service',
         group: def.id,
         synthetic: true,
-        points: exitPoints,
+        points,
         lanes: 1,
         laneWidth: 4.6,
         oneWay: true,
@@ -1605,36 +1639,206 @@ export class HighwayMap {
         speedLimit: 40,
         traffic: false,
         shoulder: 1.0,
-        destinations: [['湾岸線', 'WANGAN LINE']],
+        destinations: edge.kind === 'merge' ? [['湾岸線', 'WANGAN LINE']] : [['辰巳PA', 'TATSUMI PA']],
       });
-      this._addEdge({
-        from: { routeId: exitRoute.id, distance: 'end', direction: 1 },
-        to: { routeId: ramp8.id, distance: glueStationB, direction: 1 },
-        kind: 'merge',
-        name: 'Tatsumi PA exit',
-      });
-      area.exitRouteId = exitRoute.id;
-      // Open the perimeter fence/kerb where the connector crosses the deck
-      // edge (exact centreline crossing of the fence line, padded for the
-      // lane width at its shallow leaving angle).
-      const fenceLine = deckEdgeHalf - 0.3;
-      let crossU = length * 0.18;
-      for (let i = 1; i < exitPoints.length; i += 1) {
-        const a = deckLocalOf(exitPoints[i - 1]);
-        const b = deckLocalOf(exitPoints[i]);
-        const aOut = Math.abs(a.v) >= fenceLine;
-        const bOut = Math.abs(b.v) >= fenceLine;
-        if (aOut === bOut) continue;
-        const t = (fenceLine - Math.abs(a.v)) / Math.max(1e-6, Math.abs(b.v) - Math.abs(a.v));
-        crossU = a.u + (b.u - a.u) * t;
-        break;
+      this._addEdge(edge.kind === 'merge'
+        ? {
+          from: { routeId: route.id, distance: 'end', direction: 1 },
+          to: { routeId: ramp8.id, distance: edge.hostStation, direction: 1 },
+          kind: 'merge',
+          name,
+        }
+        : {
+          from: { routeId: ramp8.id, distance: edge.hostStation, direction: 1 },
+          to: { routeId: route.id, distance: 0, direction: 1 },
+          kind: 'diverge',
+          probability: 0, // player-only, like the legacy PA entries
+          name,
+        });
+      return route;
+    };
+
+    // Both connectors pass through the deck ENDS, exactly like the legacy
+    // PA access lanes did (their lot legs attached at +-0.52 L, which is why
+    // the end rails only ever covered the outward half of each end). The
+    // entry leaves ramp_8 upstream of the deck, the exit rejoins it
+    // downstream, and each lane crosses nothing but the open end gate:
+    //   band (exactly ON the ramp's banked plane, coplanar with the host
+    //   corridor) -> free descent over the void beyond the deck end (the
+    //   connector is the only authority there) -> flush with the lot at the
+    //   end line -> straight down the aisle. Heights therefore agree with
+    //   whichever authority owns any sample: ramp plane on the band, the
+    //   connector itself over the void, the lot on the deck.
+    const gateY = elevation + lift;
+    const bandStationAt = (u) => this._projectToRoute(
+      ramp8,
+      deckPoint(u, rampSideSign * (deckEdgeHalf + 3)),
+    ).distance;
+    // Free-descent leg between the end gate (deck height) and the band
+    // point (ramp plane height). `gateEnd` marks which end of the leg is the
+    // gate: that end gets a flat flare point right at the deck end line so
+    // the lane is exactly flush where the lot takes over the collision.
+    const descentPoints = (fromPoint, toPoint, gateEnd) => {
+      const points = [];
+      const push = (t, y) => {
+        const point = fromPoint.clone().lerp(toPoint, t);
+        point.y = y;
+        points.push(point);
+      };
+      const yAt = (t) => {
+        const s = t * t * (3 - 2 * t);
+        return fromPoint.y + (toPoint.y - fromPoint.y) * s;
+      };
+      if (gateEnd === 'from') {
+        push(0.12, fromPoint.y);
+        push(0.45, yAt(0.4));
+        push(0.75, yAt(0.75));
+      } else {
+        push(0.25, yAt(0.25));
+        push(0.55, yAt(0.6));
+        push(0.88, toPoint.y);
       }
-      area.fenceOpenings = [{
-        side: rampSideSign,
-        from: Math.max(-length * 0.5 + 4, crossU - 14),
-        to: Math.min(length * 0.5 - 4, crossU + 16),
-      }];
+      return points;
+    };
+
+    const planeRun = (fromStation, toStation, lateral) => {
+      const points = [];
+      for (let station = fromStation; station <= toStation + 0.01; station += 15) {
+        points.push(hostPlanePoint(Math.min(station, toStation), lateral));
+      }
+      if ((toStation - fromStation) % 15 > 0.01) points.push(hostPlanePoint(toStation, lateral));
+      return points;
+    };
+    // Exit: aisle -> end gate -> free descent -> band join -> glide to the
+    // mouth inset -> legacy mouth pair -> merge edge.
+    {
+      const joinStation = bandStationAt(length * 0.5) + BEYOND_END_OUT;
+      const joinPoint = hostPlanePoint(joinStation, BAND_ENTER);
+      const exitEnd = Math.min(ramp8.length - 40, joinStation + BAND_RUN);
+      const mouthStationA = exitEnd - MOUTH;
+      const glidePoints = [];
+      for (let station = joinStation + 14; station < mouthStationA - 8; station += 14) {
+        const t = (station - joinStation) / Math.max(1, mouthStationA - joinStation);
+        glidePoints.push(hostPlanePoint(station, BAND_ENTER + (MOUTH_INSET - BAND_ENTER) * t));
+      }
+      const gate = deckPoint(length * 0.5 - 2, aisleV);
+      gate.y = gateY;
+      const points = [
+        onDeck(8, aisleV),
+        onDeck(length * 0.5 - 26, aisleV),
+        gate,
+        ...descentPoints(gate, joinPoint, 'from'),
+        joinPoint,
+        ...glidePoints,
+        ...planeRun(mouthStationA, exitEnd, MOUTH_INSET),
+      ];
+      const exitRoute = registerConnector('tatsumi_pa_exit', 'Tatsumi PA exit', points,
+        { kind: 'merge', hostStation: exitEnd });
+      area.exitRouteId = exitRoute.id;
     }
+
+    // Entry: diverge edge -> legacy mouth pair -> glide to the band edge ->
+    // pinned plane hand-off -> outward arc around the ramp's bow, descending
+    // over the void -> end gate -> aisle. The two off-band points right
+    // after the band keep the fitted spline ON the plane through the
+    // surface hand-off (the branch strip defers to the host inside the
+    // band, so the spline must meet the plane exactly where its own surface
+    // resumes); the arc then earns enough run to keep the descent under
+    // ~5 % while clearing the bowing ramp in plan.
+    {
+      const anchorStation = bandStationAt(-length * 0.5);
+      const leaveStation = anchorStation - BEYOND_END_IN;
+      const leavePoint = hostPlanePoint(leaveStation, BAND_ENTER);
+      const entryStart = Math.max(40, leaveStation - BAND_RUN);
+      const mouthStationB = entryStart + MOUTH;
+      const glidePoints = [];
+      for (let station = mouthStationB + 14; station < leaveStation - 8; station += 14) {
+        const t = (station - mouthStationB) / Math.max(1, leaveStation - mouthStationB);
+        glidePoints.push(hostPlanePoint(station, MOUTH_INSET + (BAND_ENTER - MOUTH_INSET) * t));
+      }
+      const offA = hostPlanePoint(leaveStation + 10, 5.4);
+      const offB = hostPlanePoint(leaveStation + 20, 6.6);
+      offB.y = hostPlanePoint(leaveStation + 20, 5.4).y; // cap bank extrapolation
+      const gate = deckPoint(-length * 0.5 + 2, aisleV);
+      gate.y = gateY;
+      // Inward swing: the leftover fitted corridor continues upstream of the
+      // deck as a wide free channel along the axis (the ramps keep their
+      // clearance for ~60 m past each end), so the descent crosses the band
+      // edge once and then runs down the middle of that channel to the gate.
+      const arc = [
+        deckPoint(-length * 0.5 - 70, rampSideSign * 8),
+        deckPoint(-length * 0.5 - 40, rampSideSign * 4.6),
+        deckPoint(-length * 0.5 - 15, rampSideSign * Math.abs(aisleV)),
+      ];
+      // Resample the descent polyline densely and distribute the drop with
+      // a trapezoidal ease (smooth caps, near-linear middle), so the fitted
+      // spline cannot concentrate the grade between sparse control points.
+      const descent = [];
+      {
+        const polyline = [offB, ...arc, gate];
+        const cumulative = [0];
+        for (let i = 1; i < polyline.length; i += 1) {
+          cumulative.push(cumulative[i - 1] + polyline[i].distanceTo(polyline[i - 1]));
+        }
+        const total = cumulative[cumulative.length - 1];
+        const cap = 0.18;
+        const ease = (t) => {
+          if (t < cap) return (t * t) / (2 * cap * (1 - cap));
+          if (t > 1 - cap) return 1 - ((1 - t) ** 2) / (2 * cap * (1 - cap));
+          return (t - cap / 2) / (1 - cap);
+        };
+        const sampleAt = (distance) => {
+          let index = 1;
+          while (index < cumulative.length - 1 && cumulative[index] < distance) index += 1;
+          const t = (distance - cumulative[index - 1])
+            / Math.max(1e-6, cumulative[index] - cumulative[index - 1]);
+          return polyline[index - 1].clone().lerp(polyline[index], t);
+        };
+        const steps = Math.max(6, Math.round(total / 9));
+        for (let i = 1; i < steps; i += 1) {
+          const distance = (i / steps) * total;
+          const point = sampleAt(distance);
+          point.y = offB.y + (gateY - offB.y) * ease(distance / total);
+          descent.push(point);
+        }
+      }
+      const points = [
+        ...planeRun(entryStart, mouthStationB, MOUTH_INSET),
+        ...glidePoints,
+        leavePoint,
+        offA,
+        offB,
+        ...descent,
+        gate,
+        onDeck(-length * 0.5 + 26, aisleV),
+        onDeck(-8, aisleV),
+      ];
+      const entryRoute = registerConnector('tatsumi_pa_entry', 'Tatsumi PA entry', points,
+        { kind: 'diverge', hostStation: entryStart });
+      area.entryRouteId = entryRoute.id;
+    }
+    // Both openings pass through the deck ends; the side fence and kerb stay
+    // unbroken.
+    area.fenceOpenings = [];
+
+    // 9. Active garage on the (deliberately empty) deck: no building and no
+    //    props for now — just the pulsing ENTER ring across the aisle from
+    //    the openings, the perimeter kerb/fence and the spawn.
+    //    _defineServiceAreas clears every other lot's garage flag while this
+    //    one is active; the paAccessLanes twin never reaches this block, so
+    //    the legacy Shibaura garage survives there untouched.
+    area.hasGarage = true;
+    area.dressingMinimal = true;
+    area.garageEntrance = deckPoint(-length * 0.22, -rampSideSign * 5);
+    area.garageEntrance.y = elevation + 0.15;
+    area.garageLotAnchor = deckPoint(-length * 0.22 - 12, -rampSideSign * 5);
+    // Spawn on the aisle at the deck middle (between the entry strip's end
+    // and the exit strip's start), facing the exit end, outside both the
+    // 13 m ENTER transition radius and the 18 m proximity-prompt radius.
+    area.futureAnchors.spawn = {
+      position: deckPoint(0, aisleV),
+      heading,
+    };
     return area;
   }
 
@@ -1811,7 +2015,17 @@ export class HighwayMap {
       }
     }
     this._prepareJunctionZones();
-    this.progressiveTransitions = buildProgressiveTransitions(this, PROGRESSIVE_MERGE_PROTOTYPES);
+    // The progressive prototypes were engineered, measured and golden-digested
+    // against the original (pre-left-hand-traffic) network flow. Reversing the
+    // network turns P1's diverge into a merge and P2's merge into a diverge,
+    // and the transition builder cannot reproduce the engineered treatment in
+    // the flipped sense (missing lane mappings, marking targets missed). They
+    // therefore stay bound to the legacy flow: the live left-hand network uses
+    // the standard junction treatment at both locations (which passes every
+    // generic gate there), and legacyFlow probes keep validating the intact
+    // prototypes against their recorded geometry.
+    const prototypes = this.options.legacyFlow === true ? PROGRESSIVE_MERGE_PROTOTYPES : [];
+    this.progressiveTransitions = buildProgressiveTransitions(this, prototypes);
     this.progressiveTransitionById = new Map(
       this.progressiveTransitions.map((transition) => [transition.id, transition]),
     );
@@ -3179,7 +3393,22 @@ export class HighwayMap {
       // 0.35 m are cosmetic ghosts, not decks. A section with NO strip
       // keeps its corridor unless it is buried — a full-width ribbon
       // above the host is a real second deck and carries the car.
-      if (dy < (best.removed ? 0.35 : 0.18)) return true;
+      if (dy < (best.removed ? 0.35 : 0.18)) {
+        // ...but only where the host can actually carry the car. The host's
+        // drawn deck reaches ~0.4 m past its drivable band, so a branch
+        // centreline crossing the host's edge line is "covered" while the
+        // host corridor would still wall-correct it — handing over there
+        // leaves a no-man's ring that scrapes the car mid-crossing. Keep
+        // the branch corridor alive in that margin; its surface is
+        // coplanar with the host (dy gate above), so heights agree either
+        // way.
+        const frame = this._frameAt(route, distance);
+        const point = this._deckPoint(frame, lateral);
+        const hostProjection = this._projectToRoute(zone.host, point);
+        const hostHalf = this._halfWidthAt(zone.host, hostProjection.distance);
+        if (Math.abs(hostProjection.signedLateral) > hostHalf - 0.9) continue;
+        return true;
+      }
     }
     return false;
   }
@@ -6643,6 +6872,15 @@ export class HighwayMap {
         this._instance(rail, vec(area.width * 0.44, 1.2, 0.3), orientation, null, 'box:fence');
       }
 
+      // Internal dressing (stalls, parked cars, buildings, vending, lamps,
+      // signs, markers) is skipped for a deliberately bare lot
+      // (area.dressingMinimal — the Tatsumi deck), which keeps only the
+      // slab, pillars, perimeter kerb/fence and the garage ENTER ring.
+      if (area.dressingMinimal) {
+        if (area.hasGarage) this._buildGarageExterior(area);
+        continue;
+      }
+
       // painted stalls: rows along the lot
       const rows = packed ? [-area.width * 0.3, -area.width * 0.05, area.width * 0.22] : [-area.width * 0.28, area.width * 0.18];
       const stallPitch = 6.4;
@@ -6761,23 +6999,27 @@ export class HighwayMap {
   _buildGarageExterior(area) {
     // Building, shutter and fascia sign stay on the LOT anchor; the pulsing
     // transition ring + beacon follow the functional entrance trigger, which
-    // sits on the mainline shoulder while the access lane is disabled.
-    const lotAnchor = area.garageLotAnchor || area.garageEntrance;
-    const frontNormal = area.normal.clone();
-    const orientation = yawQuaternion(frontNormal);
-    const buildingPos = lotAnchor.clone().addScaledVector(frontNormal, 18);
-    buildingPos.y = area.elevation + 6.2;
-    this._instance(buildingPos, vec(48, 12.4, 34), orientation, null, 'box:garage');
+    // sits on the mainline shoulder while the access lane is disabled. A
+    // bare lot (area.dressingMinimal — the Tatsumi deck) keeps only the
+    // functional ring + beacon.
+    if (!area.dressingMinimal) {
+      const lotAnchor = area.garageLotAnchor || area.garageEntrance;
+      const frontNormal = area.normal.clone();
+      const orientation = yawQuaternion(frontNormal);
+      const buildingPos = lotAnchor.clone().addScaledVector(frontNormal, 18);
+      buildingPos.y = area.elevation + 6.2;
+      this._instance(buildingPos, vec(48, 12.4, 34), orientation, null, 'box:garage');
 
-    const shutterPos = lotAnchor.clone().addScaledVector(frontNormal, 0.8);
-    shutterPos.y = area.elevation + 3.45;
-    this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:vending');
-    const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', 17, 3.25, true);
-    const signPos = lotAnchor.clone().addScaledVector(frontNormal, 0.45);
-    signPos.y = area.elevation + 8.5;
-    sign.position.copy(signPos);
-    sign.quaternion.copy(yawQuaternion(frontNormal.clone().multiplyScalar(-1)));
-    this._addChunkMesh(sign, signPos);
+      const shutterPos = lotAnchor.clone().addScaledVector(frontNormal, 0.8);
+      shutterPos.y = area.elevation + 3.45;
+      this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:vending');
+      const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', 17, 3.25, true);
+      const signPos = lotAnchor.clone().addScaledVector(frontNormal, 0.45);
+      signPos.y = area.elevation + 8.5;
+      sign.position.copy(signPos);
+      sign.quaternion.copy(yawQuaternion(frontNormal.clone().multiplyScalar(-1)));
+      this._addChunkMesh(sign, signPos);
+    }
 
     const ring = new THREE.Mesh(new THREE.TorusGeometry(10.5, 0.72, 4, 18), this.materials.marker);
     ring.position.copy(area.garageEntrance);
