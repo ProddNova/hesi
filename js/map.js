@@ -306,8 +306,11 @@ export class HighwayMap {
     if (this.scene) {
       this.scene.add(this.group);
       if (this.options.applyFog !== false) {
-        this.scene.background = new THREE.Color(0x03050e);
-        this.scene.fog = new THREE.FogExp2(0x050713, this.options.fogDensity || 0.00125);
+        // Warm murk, not blue night: distant geometry sinks into the same
+        // sodium-brown haze the sky dome glows with, so the horizon reads as
+        // light pollution instead of a void.
+        this.scene.background = new THREE.Color(0x050403);
+        this.scene.fog = new THREE.FogExp2(0x0e0a06, this.options.fogDensity || 0.0013);
       }
     }
     this.update(this.initialSpawn.position, 0);
@@ -331,22 +334,24 @@ export class HighwayMap {
         : lambert(0x151a24);
     };
     return {
-      facadeOffice: facade('facadeOffice', { cols: 10, rows: 13, lit: 0.44, warm: 0.45, base: '#141823', cellW: 3.4, cellH: 3.3, seed: 0x1a2b3c }),
-      facadeDark: facade('facadeDark', { cols: 10, rows: 13, lit: 0.13, warm: 0.55, base: '#0f1219', cellW: 3.4, cellH: 3.3, seed: 0x2b3c4d }),
-      facadeHotel: facade('facadeHotel', { cols: 12, rows: 14, lit: 0.32, warm: 0.85, base: '#171a21', cellW: 2.8, cellH: 3.0, seed: 0x3c4d5e }),
-      facadeIndustrial: facade('facadeIndustrial', { cols: 7, rows: 5, lit: 0.2, warm: 0.35, base: '#171a1e', cellW: 5.5, cellH: 4.2, seed: 0x4d5e6f }),
-      road: lambert(0x14171f),
-      roadAlt: lambert(0x171a23),
-      roadService: lambert(0x1d2029),
+      facadeOffice: facade('facadeOffice', { cols: 10, rows: 13, lit: 0.44, warm: 0.52, base: '#16151c', cellW: 3.4, cellH: 3.3, seed: 0x1a2b3c }),
+      facadeDark: facade('facadeDark', { cols: 10, rows: 13, lit: 0.13, warm: 0.6, base: '#100f14', cellW: 3.4, cellH: 3.3, seed: 0x2b3c4d }),
+      facadeHotel: facade('facadeHotel', { cols: 12, rows: 14, lit: 0.32, warm: 0.85, base: '#18161a', cellW: 2.8, cellH: 3.0, seed: 0x3c4d5e }),
+      facadeIndustrial: facade('facadeIndustrial', { cols: 7, rows: 5, lit: 0.2, warm: 0.45, base: '#171613', cellW: 5.5, cellH: 4.2, seed: 0x4d5e6f }),
+      // One warm-neutral palette: asphalt, concrete and steel all sit on the
+      // sodium side so nothing reads as a modern cool-blue asset.
+      road: lambert(0x181613),
+      roadAlt: lambert(0x1b1915),
+      roadService: lambert(0x211e18),
       // Concrete/steel carry a small emissive floor so barriers stay readable
       // under the dark PS2 night lighting (they define the road edge at speed).
-      concrete: lambert(0x848a94, { side: THREE.DoubleSide, emissive: 0x1e2126 }),
-      concreteDark: lambert(0x272a31),
-      barrier: lambert(0x9096a0, { side: THREE.DoubleSide, emissive: 0x2e3138 }),
-      railMetal: lambert(0xaab2bc, { side: THREE.DoubleSide, emissive: 0x23262c }),
-      tunnelWall: lambert(0x2c2f36, { side: THREE.DoubleSide }),
-      tunnelDark: lambert(0x191c22, { side: THREE.DoubleSide }),
-      portal: lambert(0x3a3d44),
+      concrete: lambert(0x8f8a7e, { side: THREE.DoubleSide, emissive: 0x24211a }),
+      concreteDark: lambert(0x2b2822),
+      barrier: lambert(0x9a9488, { side: THREE.DoubleSide, emissive: 0x342f25 }),
+      railMetal: lambert(0xb3aca0, { side: THREE.DoubleSide, emissive: 0x282520 }),
+      tunnelWall: lambert(0x322e27, { side: THREE.DoubleSide }),
+      tunnelDark: lambert(0x1d1a15, { side: THREE.DoubleSide }),
+      portal: lambert(0x403b33),
       marking: basic(0xd8d6bf),
       amber: basic(0xe8a844),
       reflector: basic(0xffc36a),
@@ -357,22 +362,23 @@ export class HighwayMap {
       exitGreen: basic(0x37e57f),
       matrix: basic(0xff8b1f),
       redBlink: basic(0xff3040),
-      building: lambert(0x11141e),
+      building: lambert(0x131114),
       neon: basic(0xffffff),
-      shed: lambert(0x1a1d24),
-      crane: lambert(0x233042),
+      shed: lambert(0x1e1b16, { emissive: 0x0c0a07 }),
+      crane: lambert(0x2a3138),
       container: lambert(0x54331f),
-      water: lambert(0x061019, { transparent: true, opacity: 0.9 }),
-      ground: lambert(0x080a11),
-      towerWhite: lambert(0xb8bcc4),
+      water: lambert(0x060e14, { transparent: true, opacity: 0.9 }),
+      ground: lambert(0x0a0806),
+      // Floodlit broadcast tower: warm orange like the real thing at night.
+      towerWhite: lambert(0xd8a26b, { emissive: 0x40260e }),
       cable: basic(0x9aa3ad),
       cableLight: basic(0xcfe6ff),
-      garage: lambert(0x222632),
-      shutter: lambert(0x6e7379),
+      garage: lambert(0x26221a),
+      shutter: lambert(0x6e6a60),
       vending: basic(0x8ad9ff),
       konbini: basic(0xd8ffe9),
       canopy: basic(0xfff2c9),
-      fence: lambert(0x30343b),
+      fence: lambert(0x363229),
       cushion: basic(0xe0b52f),
       parkedBody: lambert(0xffffff),
       parkedGlass: lambert(0x0e1620),
@@ -386,12 +392,12 @@ export class HighwayMap {
       // Additive decals: sodium pools under lamps + stretched wet-asphalt
       // streaks — the cheap PS2 stand-in for real reflections.
       lightPool: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xff9b42, transparent: true, opacity: 0.34,
+        map: this._glowTexture(), color: 0xff9b42, transparent: true, opacity: 0.42,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
       }),
       lightStreak: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xffb066, transparent: true, opacity: 0.26,
+        map: this._glowTexture(), color: 0xffb066, transparent: true, opacity: 0.3,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }),
@@ -4504,13 +4510,62 @@ export class HighwayMap {
     }
 
     if (this.options.addLighting !== false) {
-      const hemisphere = new THREE.HemisphereLight(0x314167, 0x05050a, 0.72);
+      const hemisphere = new THREE.HemisphereLight(0x4a3e28, 0x070503, 0.6);
       hemisphere.name = 'Night ambient light';
-      const moon = new THREE.DirectionalLight(0x7884a4, 0.26);
+      const moon = new THREE.DirectionalLight(0x6d7488, 0.22);
       moon.name = 'Cool city fill light';
       moon.position.set(-2, 6, -3);
       this.group.add(hemisphere, moon);
     }
+
+    this._buildSkyDome();
+  }
+
+  /**
+   * Light-pollution sky: a low-res vertical gradient on an inverted dome that
+   * follows the player — near-black zenith down into a warm sodium band at
+   * the horizon. fog:false keeps it crisp behind the fogged world, which is
+   * exactly how PS2 racers faked "city glow behind the haze".
+   */
+  _buildSkyDome() {
+    const texture = this._skyTexture();
+    if (!texture) return;
+    const geometry = new THREE.SphereGeometry(1040, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.62);
+    const material = new THREE.MeshBasicMaterial({
+      map: texture, side: THREE.BackSide, fog: false, toneMapped: false,
+      depthWrite: false, depthTest: false,
+    });
+    const dome = new THREE.Mesh(geometry, material);
+    dome.name = 'Sky dome';
+    dome.renderOrder = -100;
+    dome.frustumCulled = false;
+    this._skyDome = dome;
+    this._ownedTextures.add({ dispose: () => { geometry.dispose(); material.dispose(); } });
+    this.group.add(dome);
+  }
+
+  _skyTexture() {
+    if (typeof document === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 128;
+    const context = canvas.getContext('2d');
+    const gradient = context.createLinearGradient(0, 0, 0, 128);
+    gradient.addColorStop(0.0, '#030408');  // zenith: near-black, hint of blue
+    gradient.addColorStop(0.48, '#080709');
+    gradient.addColorStop(0.68, '#120d09');  // warm murk rising
+    gradient.addColorStop(0.78, '#2a1d0e');  // sodium glow band at the horizon
+    gradient.addColorStop(0.86, '#150f08');
+    gradient.addColorStop(1.0, '#070503');   // below horizon
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 8, 128);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    this._ownedTextures.add(texture);
+    return texture;
   }
 
   /**
@@ -7274,6 +7329,35 @@ export class HighwayMap {
     );
   }
 
+  /**
+   * PS2 lot prop: a parked truck from three instanced boxes (chassis shadow,
+   * cab, cargo box or flat bed) on the ground plane. White/silver fleet
+   * colors with the odd dark one, matching the era's port dressing.
+   */
+  _parkedTruck(random, x, z, yaw) {
+    const quaternion = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
+    const forward = vec(Math.sin(yaw), 0, Math.cos(yaw));
+    const colors = [0xd8d4c8, 0xd8d4c8, 0xb8bcc0, 0x46523f, 0x4a4038];
+    const body = colors[Math.floor(random() * colors.length)];
+    const baseY = -0.1;
+    const at = (dz, y) => vec(x + forward.x * dz, baseY + y, z + forward.z * dz);
+    // chassis / baked shadow
+    this._instance(at(0, 0.36), vec(2.2, 0.72, 6.9), quaternion, 0x0c0b09, 'box:container');
+    // cab
+    this._instance(at(2.75, 1.55), vec(2.2, 1.7, 1.6), quaternion, body, 'box:container');
+    if (random() < 0.72) {
+      // box truck
+      this._instance(at(-0.85, 1.95), vec(2.35, 2.5, 5.1), quaternion, body, 'box:container');
+    } else {
+      // flatbed, sometimes loaded with one container
+      this._instance(at(-0.85, 0.92), vec(2.35, 0.4, 5.1), quaternion, body, 'box:container');
+      if (random() < 0.5) {
+        this._instance(at(-0.85, 2.2), vec(2.3, 2.2, 4.6), quaternion,
+          [0x54331f, 0x1f4654, 0x2e4a1f][Math.floor(random() * 3)], 'box:container');
+      }
+    }
+  }
+
   _buildCity() {
     const random = mulberry32(this.seed ^ 0xa73b91);
     this._footprints = new Map();
@@ -7338,7 +7422,8 @@ export class HighwayMap {
     }
     }
 
-    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers.
+    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers,
+    // and parked trucks dressing the yards between the sheds and the viaduct.
     const k1 = this._groupChains('k1')[0];
     if (!k1) return;
     for (let distance = 0; distance < k1.length; distance += 56) {
@@ -7364,6 +7449,38 @@ export class HighwayMap {
           stack.y = stackHeight * 0.5;
           this._instance(stack, vec(3.2, stackHeight, 3.2), null, null, 'box:concreteDark');
           this._instance(vec(position.x, stackHeight + 0.8, position.z), vec(1.1, 1.1, 1.1), null, null, 'box:redBlink');
+        }
+        // Loading yard in front of the shed: 1-2 parked trucks + pallet
+        // stacks. Pure instanced boxes, no new materials or draw-call types.
+        if (random() < 0.55) {
+          const yardCenter = center.position.clone()
+            .addScaledVector(normal, side * (k1.halfWidth + setback * (0.45 + random() * 0.25)));
+          if (this._distanceToRouteXZ(yardCenter) > k1.halfWidth + 7) {
+            const count = 1 + (random() < 0.4 ? 1 : 0);
+            for (let t = 0; t < count; t += 1) {
+              const spot = yardCenter.clone()
+                .addScaledVector(center.baseTangent, (t - 0.5) * 7 + (random() - 0.5) * 5);
+              const yaw = heading + (random() < 0.4 ? Math.PI * 0.5 : 0) + (random() - 0.5) * 0.24;
+              this._parkedTruck(random, spot.x, spot.z, yaw);
+            }
+            if (random() < 0.5) {
+              const pallets = yardCenter.clone().addScaledVector(center.baseTangent, 8 + random() * 5);
+              this._instance(vec(pallets.x, 0.55, pallets.z), vec(2.4, 1.3, 2.8),
+                new THREE.Quaternion().setFromAxisAngle(UP, heading + random() * 0.6), 0x6b5638, 'box:container');
+            }
+            // one sodium lot lamp so the yard reads from the viaduct at night
+            const lampPos = yardCenter.clone().addScaledVector(center.baseTangent, -7);
+            lampPos.y = -0.1;
+            const lampOrientation = yawQuaternion(center.baseTangent);
+            const armDirection = horizontalNormal(center.baseTangent, new THREE.Vector3()).multiplyScalar(-1);
+            this._instance(lampPos, vec(1, 1, 1), lampOrientation, null, 'lamppost:concrete');
+            const lens = lampPos.clone().addScaledVector(armDirection, 2.28);
+            lens.y = lampPos.y + 9.36;
+            this._instance(lens, vec(1.1, 0.1, 0.34), lampOrientation, null, 'box:lampSodium');
+            const pool = lampPos.clone().addScaledVector(armDirection, 3.4);
+            pool.y = 0.04;
+            this._instance(pool, vec(14, 1, 17), lampOrientation, null, 'pool:lightPool');
+          }
         }
       }
     }
@@ -8272,6 +8389,7 @@ export class HighwayMap {
     // Chunk streaming: toggle visibility around the player. Cheap enough to
     // run whenever the player crosses into a new cell or every 0.6 s.
     if (playerPosition) {
+      if (this._skyDome) this._skyDome.position.copy(playerPosition);
       const key = this._chunkKey(playerPosition.x, playerPosition.z);
       if (key !== this._visibleKey || timeSeconds - this._lastVisibleUpdate > 0.6) {
         this._visibleKey = key;
