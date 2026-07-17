@@ -217,7 +217,7 @@ export class HighwayMap {
     // Quality-scalable effect layers (light pools / wet-asphalt streaks):
     // instanced meshes whose geometry name is in _effectTypes get collected so
     // setQuality can hide them on Low.
-    this._effectTypes = new Set(['lightStreak']);
+    this._effectTypes = new Set(['lightStreak', 'lightPool']);
     this._effectMeshes = [];
     this._quality = this.options.quality === 'low' ? 'low' : 'high';
     this._signMaterials = new Map();
@@ -389,7 +389,7 @@ export class HighwayMap {
       parkedGlass: lambert(0x10161f),
       tire: lambert(0x0a0c0e),
       pallet: lambert(0x6a5233),
-      marker: basic(0x57e3ff, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
+      marker: basic(0xffb84a, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
       billboardGlow: basic(0xffffff),
       signGreen: basic(0x0c604e, { side: THREE.DoubleSide }),
       signBack: basic(0x23262c),
@@ -7339,7 +7339,7 @@ export class HighwayMap {
     this._addChunkMesh(ring, ring.position);
     this.animatedMarkers.push(ring);
 
-    const beacon = new THREE.PointLight(0x55ccff, 1.4, 46, 1.8);
+    const beacon = new THREE.PointLight(0xffab4a, 1.4, 46, 1.8);
     beacon.position.copy(area.garageEntrance).add(vec(0, 5, 0));
     this._addChunkMesh(beacon, beacon.position);
   }
@@ -7891,7 +7891,7 @@ export class HighwayMap {
       const gondolaAngle = (i / 11) * Math.PI * 2;
       const gondola = new THREE.Mesh(
         new THREE.BoxGeometry(2.6, 2.6, 2.6),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(i / 11, 0.85, 0.6), fog: true, toneMapped: false }),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(i / 11, 0.45, 0.48), fog: true, toneMapped: false }),
       );
       gondola.position.set(Math.cos(gondolaAngle) * 52, Math.sin(gondolaAngle) * 52, 0);
       wheelGroup.add(gondola);

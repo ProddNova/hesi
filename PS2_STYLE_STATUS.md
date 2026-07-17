@@ -191,10 +191,43 @@ styles.css only (no markup/logic changes):
 - PC market overlay kept as the auction-sheet look (period-correct)
   with consistency fixes.
 
-## CHECKPOINT 7 — PERF + CONSISTENCY (pending)
+## CHECKPOINT 7 — PERF + CONSISTENCY (complete)
+
+- Accidental-neon sweep: garage-entrance ring + beacon re-tinted from
+  cyan to sodium amber; ferris-wheel gondolas desaturated.
+- Low quality now hides the small light pools as well as streaks
+  (`_effectTypes`), on top of the existing 0.55 render scale.
+- Full e2e suite: 41/41 checks pass. Marking/A-B probes pass.
 
 ---
 
-**Status: Checkpoint 2 complete — pixel-tile art direction validated on
-the slice (candidate A). Next action: propagate to remaining surfaces
-(Checkpoint 3), then density/props.**
+## FINAL REPORT
+
+Fixed-camera before/after: `.devtests/shots/PS2-*-baseline.png` vs
+`PS2-*-final.png` (12 views: road close-up, chase, Wangan night,
+barriers/pillars, industrial, skyline, tunnel, Daikoku lot, garage ×2,
+HUD driving, garage/PC UI). Reproduce with
+`node .devtests/ps2-style-shots.mjs <suffix>`.
+
+| metric (chase fixture, medium) | baseline | final |
+| --- | --- | --- |
+| draw calls | 182 | 198 |
+| triangles | 63.6k | 64.4k |
+| textures | 13 | 30 |
+| Low-quality draw calls | — | 152 (@0.55 scale) |
+
+- **Textures created** (all generated canvases, 64-256 px): asphalt ×2 +
+  shoulder, service slabs, barrier/wall concrete, pillar concrete,
+  tunnel panels, container siding, warehouse siding, roller shutter,
+  sky gradient, 4 facade atlases, garage floor/wall/shutter/crate,
+  3 posters. Zero downloaded assets.
+- **Lights**: no new dynamic lights anywhere; garage 9 → 5 points;
+  additive decals shrunk ~45% and dimmed ~55%, hidden entirely on Low.
+- **Props**: shared instanced kit — parked cars (body/glasshouse/wheels),
+  box trucks, forklifts, pallets, drums, containers; PA + port + K1
+  placements.
+- **Remaining visual debt**: traffic vehicles still untextured
+  (vertex-colored, decent shapes); player-car mesh still simple box art;
+  PA fences/kerbs flat-colored; boot screen unchanged (CSS art).
+
+**Status: ALL CHECKPOINTS COMPLETE.**
