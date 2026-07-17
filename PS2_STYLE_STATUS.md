@@ -160,7 +160,19 @@ Slice shots: `PS2-*-slice.png` vs `PS2-*-baseline.png`. Draw calls 177
 - Draw calls 203 (baseline 182) — the removed giant light decals offset
   most of the prop cost. Probes pass.
 
-## CHECKPOINT 5 — GARAGE (pending)
+## CHECKPOINT 5 — GARAGE (complete)
+
+- `createGarageTextures` (textures.js): whole-room pixel floor with slab
+  joints, painted work bay and shutter scuff lanes; block wall courses
+  with plinth + faded banner stripe; slat shutter; cardboard crate tile;
+  three low-res posters (Gekko Tires, Wangan Night, 安全第一).
+- Five steel shelving units with instanced crate clutter (34 crates, one
+  draw call), instanced tire stacks, drums, bench shelf with paint cans,
+  ceiling cable trays with drop conduits, extra NO SMOKING sign.
+- Point lights reduced 9 → 5 (alternating fixtures, slightly stronger);
+  fixture tubes stay emissive. GridHelper and per-slat meshes removed.
+- All interaction points/clearances untouched (PC, exit, delivery zone,
+  car footprint, walk clamps).
 
 ## CHECKPOINT 6 — HUD/UI (pending)
 

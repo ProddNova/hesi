@@ -331,4 +331,179 @@ export function createWorldTextures(seed = 0x51a7c1, { asphaltStyle = null } = {
   };
 }
 
+// ---------------------------------------------------------------------
+// Garage interior tiles — same pixel language, workshop palette.
+// ---------------------------------------------------------------------
+
+/**
+ * Whole-room garage floor (not tiled): slab grid, a painted work-bay
+ * outline around the car footprint, posterized oil shadows and tire
+ * scuffs leading to the shutter. Drawn on a 64-texel grid for the room's
+ * 22×28 m, so one texel is ~0.4 m — chunky and readable.
+ */
+const garageFloorTexture = (random) => {
+  const T = 64;
+  const veins = makeValueNoise(10, random);
+  const canvas = pixelTile(T, T, 256, 256, (set) => {
+    for (let y = 0; y < T; y += 1) {
+      for (let x = 0; x < T; x += 1) {
+        const vein = (veins(x / T, y / T) - 0.5) * 1.4;
+        const jitter = (random() - 0.5) * 1.4;
+        const k = Math.max(0, Math.min(3, Math.round(1.5 + vein + jitter)));
+        let value = 0.30 + (k - 1.5) * 0.026;
+        if (x % 16 === 0 || y % 16 === 0) value -= 0.07;             // slab joints
+        // painted work bay outline around the car footprint (room centre)
+        const inBayX = x >= 22 && x <= 42;
+        const inBayY = y >= 16 && y <= 46;
+        const onBorder = (inBayX && (y === 16 || y === 46)) || (inBayY && (x === 22 || x === 42));
+        // oil shadow inside the bay + scuff lanes toward the shutter (high y)
+        if (inBayX && y > 24 && y < 40 && random() < 0.3) value -= 0.05;
+        if ((x === 29 || x === 30 || x === 34 || x === 35) && y > 40 && random() < 0.75) value -= 0.045;
+        if (onBorder) {
+          set(x, y, `rgb(${Math.round(198 * 0.72)},${Math.round(188 * 0.72)},${Math.round(120 * 0.72)})`);
+          continue;
+        }
+        set(x, y, grey(value, 0.15));
+      }
+    }
+  });
+  return finishTexture(canvas);
+};
+
+/**
+ * Garage wall: concrete block courses with mortar lines, dark plinth and
+ * a faded workshop banner stripe. Horizontal features only, so one box
+ * face stretch across the whole wall stays invisible; repeat is set by
+ * the consumer.
+ */
+const garageWallTexture = (random) => {
+  const canvas = pixelTile(32, 32, 128, 128, (set) => {
+    for (let y = 0; y < 32; y += 1) {
+      for (let x = 0; x < 32; x += 1) {
+        const course = Math.floor(y / 4);
+        const offset = course % 2 === 0 ? 0 : 4;
+        let value = 0.27 + (Math.round((random() - 0.5) * 2) * 0.02);
+        if (y % 4 === 3) value -= 0.06;                              // mortar row
+        if ((x + offset) % 8 === 0) value -= 0.05;                   // head joints
+        if (y >= 28) value -= 0.08;                                  // plinth
+        if (y === 19 || y === 20) {
+          // faded safety banner stripe
+          set(x, y, `rgb(${Math.round(140 * 0.62)},${Math.round(52 * 0.62)},${Math.round(48 * 0.62)})`);
+          continue;
+        }
+        set(x, y, grey(value, 0.1));
+      }
+    }
+  });
+  return finishTexture(canvas);
+};
+
+/** Small workshop poster: simple blocks + text, downsampled for the era look. */
+const posterTexture = (kind) => {
+  const [big, b] = canvas2d(96, 128);
+  if (kind === 'tires') {
+    b.fillStyle = '#20242c';
+    b.fillRect(0, 0, 96, 128);
+    b.fillStyle = '#d8d3c4';
+    b.fillRect(6, 6, 84, 22);
+    b.fillStyle = '#15181d';
+    b.font = 'bold 15px monospace';
+    b.textAlign = 'center';
+    b.fillText('月光タイヤ', 48, 22);
+    b.strokeStyle = '#aab0ba';
+    b.lineWidth = 7;
+    b.beginPath();
+    b.arc(48, 72, 26, 0, Math.PI * 2);
+    b.stroke();
+    b.fillStyle = '#0c0e12';
+    b.beginPath();
+    b.arc(48, 72, 19, 0, Math.PI * 2);
+    b.fill();
+    b.fillStyle = '#c8b26a';
+    b.font = 'bold 12px monospace';
+    b.fillText('GEKKO TIRES', 48, 118);
+  } else if (kind === 'safety') {
+    b.fillStyle = '#c9b23a';
+    b.fillRect(0, 0, 96, 128);
+    b.fillStyle = '#15161a';
+    for (let i = -3; i < 8; i += 1) {
+      b.save();
+      b.translate(i * 18, 0);
+      b.rotate(-0.6);
+      b.fillRect(0, -10, 9, 44);
+      b.restore();
+    }
+    b.fillStyle = '#15161a';
+    b.fillRect(0, 34, 96, 62);
+    b.fillStyle = '#e8dfc2';
+    b.font = 'bold 20px monospace';
+    b.textAlign = 'center';
+    b.fillText('安全第一', 48, 62);
+    b.font = 'bold 11px monospace';
+    b.fillText('SAFETY FIRST', 48, 82);
+  } else {
+    b.fillStyle = '#101623';
+    b.fillRect(0, 0, 96, 128);
+    b.fillStyle = '#2a3a5c';
+    b.fillRect(0, 84, 96, 44);
+    // simple coupe silhouette
+    b.fillStyle = '#b8384a';
+    b.fillRect(14, 74, 68, 14);
+    b.fillRect(30, 64, 34, 12);
+    b.fillStyle = '#0a0c10';
+    b.fillRect(22, 84, 12, 8);
+    b.fillRect(62, 84, 12, 8);
+    b.fillStyle = '#e2e6ee';
+    b.font = 'bold 14px monospace';
+    b.textAlign = 'center';
+    b.fillText('WANGAN', 48, 24);
+    b.fillText('NIGHT', 48, 40);
+    b.fillStyle = '#c8b26a';
+    b.font = '10px monospace';
+    b.fillText('SAT 25:00', 48, 116);
+  }
+  // era finish: downsample to half, back up — softened low-res print
+  const [half, hc] = canvas2d(48, 64);
+  hc.imageSmoothingEnabled = true;
+  hc.drawImage(big, 0, 0, 48, 64);
+  const [canvas, c] = canvas2d(96, 128);
+  c.imageSmoothingEnabled = true;
+  c.drawImage(half, 0, 0, 96, 128);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+};
+
+/** Cardboard crate face: taped box with a chunky label block. */
+const crateTexture = (random) => {
+  const canvas = pixelTile(16, 16, 64, 64, (set) => {
+    for (let y = 0; y < 16; y += 1) {
+      for (let x = 0; x < 16; x += 1) {
+        let value = 0.44 + (Math.round((random() - 0.5) * 2) * 0.025);
+        if (x === 7 || x === 8) value += 0.09;                       // tape
+        if (y === 0 || y === 15 || x === 0 || x === 15) value -= 0.08;
+        if (x >= 2 && x <= 5 && y >= 10 && y <= 12) value -= 0.14;   // label
+        set(x, y, `rgb(${Math.round(255 * value)},${Math.round(214 * value)},${Math.round(158 * value)})`);
+      }
+    }
+  });
+  return finishTexture(canvas);
+};
+
+export function createGarageTextures(seed = 0x6a7a8a) {
+  if (typeof document === 'undefined') return null;
+  const rng = (salt) => mulberry32((seed ^ salt) >>> 0);
+  return {
+    floor: garageFloorTexture(rng(0x11)),
+    wall: garageWallTexture(rng(0x22)),
+    shutter: shutterPixel(rng(0x33), { base: 0.4 }),
+    crate: crateTexture(rng(0x44)),
+    posterTires: posterTexture('tires'),
+    posterSafety: posterTexture('safety'),
+    posterNight: posterTexture('night'),
+  };
+}
+
 export default createWorldTextures;

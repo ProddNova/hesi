@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createGarageTextures } from './textures.js';
 
 const V = (x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 
@@ -15,63 +16,133 @@ export class GarageSystem {
   mesh(geo,mat,pos,rot=V()){const o=new THREE.Mesh(geo,mat);o.position.copy(pos);o.rotation.set(rot.x,rot.y,rot.z);this.root.add(o);return o;}
 
   build(){
-    // Room shell rebuilt with explicit clearances: no coplanar faces anywhere
-    // (the old build z-fought at the front/back beams, shutter slats and wall
-    // panels). All interaction points are unchanged: PC (7.5,-9.3), exit
-    // (0,12.6+), car footprint at the origin, delivery zone (-7.2,10.3),
-    // walk clamps +/-10.25 x and +/-13.1 z.
+    // Room shell with explicit clearances: no coplanar faces anywhere.
+    // All interaction points are unchanged: PC (7.5,-9.3), exit (0,12.6+),
+    // car footprint at the origin, delivery zone (-7.2,10.3), walk clamps
+    // +/-10.25 x and +/-13.1 z. Visual language matches the world pass:
+    // pixel-tile concrete, baked paint, low-res posters, boxy clutter.
     this.scene.background=new THREE.Color(0x05070b);this.scene.fog=new THREE.Fog(0x05070b,18,36);
     this.root=new THREE.Group();this.scene.add(this.root);
-    this.mesh(new THREE.PlaneGeometry(22,28,11,14),this.mat(0x22272c),V(0,0,0),V(-Math.PI/2,0,0));
-    const grid=new THREE.GridHelper(22,22,0x474b4e,0x2d3235);grid.position.y=.008;this.root.add(grid);
+    this.tex=createGarageTextures?.()||null;
+    const texMat=(t,extra={})=>this.tex?new THREE.MeshLambertMaterial({map:t,...extra}):this.mat(extra.fallback??0x22272c);
+    // Floor: whole-room pixel concrete with slab joints, painted work bay
+    // around the car and scuff lanes toward the shutter (baked, no grid).
+    this.mesh(new THREE.PlaneGeometry(22,28,1,1),texMat(this.tex?.floor,{fallback:0x22272c}),V(0,0,0),V(-Math.PI/2,0,0));
     // Structural shell: side walls (inner face x=+/-10.825), back wall (inner
     // face z=-13.825), ceiling resting ON the wall tops (bottom face y=10.02).
-    this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(-11,5,0));
-    this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(11,5,0));
-    this.mesh(new THREE.BoxGeometry(21.65,10,.35),this.mat(0x22272a),V(0,5,-14));
+    let wallMat=this.mat(0x252a2f);
+    if(this.tex){const wallTex=this.tex.wall.clone();wallTex.wrapS=THREE.RepeatWrapping;wallTex.wrapT=THREE.ClampToEdgeWrapping;wallTex.repeat.set(6,1);wallTex.needsUpdate=true;wallMat=new THREE.MeshLambertMaterial({map:wallTex});}
+    this.mesh(new THREE.BoxGeometry(.35,10,28.7),wallMat,V(-11,5,0));
+    this.mesh(new THREE.BoxGeometry(.35,10,28.7),wallMat,V(11,5,0));
+    this.mesh(new THREE.BoxGeometry(21.65,10,.35),wallMat,V(0,5,-14));
     this.mesh(new THREE.BoxGeometry(22.7,.35,28.7),this.mat(0x15191d),V(0,10.2,0));
-    // Front wall around the shutter opening (|x|<4, y<5): two piers + lintel,
-    // all clear of the shutter body.
-    this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(-7.325,5,14));
-    this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(7.325,5,14));
-    this.mesh(new THREE.BoxGeometry(8.3,5,.35),this.mat(0x22272a),V(0,7.5,14));
-    // Interior trim: beams pulled 0.25 m proud of the walls, stripes/panels
-    // layered at distinct depths and heights.
+    // Front wall around the shutter opening (|x|<4, y<5): two piers + lintel.
+    this.mesh(new THREE.BoxGeometry(6.65,10,.35),wallMat,V(-7.325,5,14));
+    this.mesh(new THREE.BoxGeometry(6.65,10,.35),wallMat,V(7.325,5,14));
+    this.mesh(new THREE.BoxGeometry(8.3,5,.35),wallMat,V(0,7.5,14));
+    // Interior trim beams + ceiling cable trays with drop conduits.
     this.mesh(new THREE.BoxGeometry(21.4,.4,.3),this.mat(0x30343a),V(0,5.1,-13.55));
     this.mesh(new THREE.BoxGeometry(21.4,.4,.3),this.mat(0x30343a),V(0,5.1,13.55));
+    for(const x of [-8.2,8.2])this.mesh(new THREE.BoxGeometry(.5,.12,27),this.mat(0x3a4046),V(x,9.9,0));
+    this.mesh(new THREE.BoxGeometry(.09,8.8,.09),this.mat(0x3a4046),V(-10.6,5.4,-10.5));
+    this.mesh(new THREE.BoxGeometry(.09,8.8,.09),this.mat(0x3a4046),V(10.6,5.4,-6.5));
     for(const s of [-1,1]){
       this.mesh(new THREE.BoxGeometry(.06,1.6,27),this.mat(0x7b2729),V(s*10.77,1.15,0));
       for(let z=-11;z<13;z+=4)this.mesh(new THREE.BoxGeometry(.07,3.2,3.5),this.mat(0x33383d),V(s*10.77,6.4,z));
     }
-    // Fluorescent fixtures hang 0.33 m below the ceiling underside.
+    // Fluorescent fixtures: 8 emissive tubes, 4 real lights (alternating) —
+    // half the point-light cost of the old room, same perceived coverage.
+    let fixtureIndex=0;
     for(const z of [-9,-3,3,9]) for(const x of [-5.5,5.5]){
       this.mesh(new THREE.BoxGeometry(4,.1,.35),this.mat(0xeaf5e5,0xeaf5e5,2),V(x,9.69,z));
-      const light=new THREE.PointLight(0xd8e8dc,12,14,1.8);light.position.set(x,8.8,z);this.root.add(light);
+      if(fixtureIndex%2===0){const light=new THREE.PointLight(0xd8e8dc,15,16,1.8);light.position.set(x,8.8,z);this.root.add(light);}
+      fixtureIndex+=1;
     }
     const warm=new THREE.PointLight(0xff762e,10,11,1.6);warm.position.set(-8,4,-10);this.root.add(warm);
-    // Shutter inside the front opening; slats 25 mm proud of the shutter face.
-    this.shutter=this.mesh(new THREE.BoxGeometry(7.9,5,.25),this.mat(0x42484d),V(0,2.5,13.82));
-    for(let y=.35;y<5;y+=.46)this.mesh(new THREE.BoxGeometry(7.7,.025,.06),this.mat(0x171b1f),V(0,y,13.64));
+    // Shutter: slat texture on the door body (baked slats, no strip meshes).
+    this.shutter=this.mesh(new THREE.BoxGeometry(7.9,5,.25),texMat(this.tex?.shutter,{fallback:0x42484d}),V(0,2.5,13.82));
     this.exitGlow=this.mesh(new THREE.PlaneGeometry(4.5,2.2),new THREE.MeshBasicMaterial({color:0xff8d2c,transparent:true,opacity:.12,side:THREE.DoubleSide}),V(0,1.1,13.48),V(0,0,0));
-    // Workbench, tools and compressor.
+    // Workbench, pegboard tools and compressor.
     this.mesh(new THREE.BoxGeometry(7,.25,1.8),this.mat(0x584333),V(-7.2,1.1,-8));
     for(const x of [-9.8,-4.6])this.mesh(new THREE.BoxGeometry(.22,2,.22),this.mat(0x2b3036),V(x,1,-8));
     this.mesh(new THREE.BoxGeometry(6.6,2.6,.12),this.mat(0x303842),V(-7.2,3,-8.85));
     for(let i=0;i<7;i++)this.mesh(new THREE.BoxGeometry(.08,.8,.08),this.mat(i%2?0xe3b038:0xb9483d),V(-9.4+i*.72,3.1,-8.74),V(0,0,(i-.3)*.08));
+    // shelf above the bench: paint cans + small boxes
+    this.mesh(new THREE.BoxGeometry(6.6,.08,.55),this.mat(0x4a5058),V(-7.2,4.4,-8.7));
+    for(let i=0;i<5;i++)this.mesh(new THREE.CylinderGeometry(.16,.16,.36,8),this.mat([0xb8bcc4,0x8a3636,0x365e8a,0x8a8452,0x4a6a3a][i]),V(-9.4+i*1.1,4.62,-8.7));
     this.mesh(new THREE.CylinderGeometry(.7,.7,1.8,8),this.mat(0x9b2b34),V(8.7,.9,-9),V(0,0,Math.PI/2));
+    this.mesh(new THREE.CylinderGeometry(.32,.32,.1,10),this.mat(0x22262b),V(8.7,1.9,-9));
     // Desk + chunky computer.
     this.mesh(new THREE.BoxGeometry(4,.25,2),this.mat(0x4b3d32),V(7.5,1.05,-10.2));
     for(const x of [6,9])this.mesh(new THREE.BoxGeometry(.18,2,.18),this.mat(0x242a31),V(x,1,-10.2));
     this.mesh(new THREE.BoxGeometry(1.9,1.5,1.25),this.mat(0x9d998b),V(7.5,2,-10.55));
     this.pcScreen=this.mesh(new THREE.PlaneGeometry(1.5,1),new THREE.MeshBasicMaterial({color:0x39d6e8}),V(7.5,2.08,-9.91),V(0,0,0));
     this.mesh(new THREE.BoxGeometry(1.9,.12,.7),this.mat(0x9d998b),V(7.5,1.28,-9.55),V(.12,0,0));
+    // Steel shelving + boxed clutter: two units on the back wall, two on the
+    // left wall, one right — instanced crates/tires/drums keep it cheap.
+    this.buildShelving();
     // Delivery area paint and sign.
-    const zone=this.mesh(new THREE.PlaneGeometry(6,5),new THREE.MeshBasicMaterial({color:0xe7b941,transparent:true,opacity:.15,side:THREE.DoubleSide}),V(-7.2,.015,10.3),V(-Math.PI/2,0,0));
+    this.mesh(new THREE.PlaneGeometry(6,5),new THREE.MeshBasicMaterial({color:0xe7b941,transparent:true,opacity:.15,side:THREE.DoubleSide}),V(-7.2,.015,10.3),V(-Math.PI/2,0,0));
     const edge=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(6,.03,5)),new THREE.LineBasicMaterial({color:0xe8c14a}));edge.position.set(-7.2,.03,10.3);this.root.add(edge);
     this.addSign('DELIVERY / 配達',V(-10.68,4,9.8),Math.PI/2,0xe9b947);
     this.addSign('WANGAN WORKS',V(-10.68,5,-2),Math.PI/2,0xe7e9e2);
+    this.addSign('禁煙 NO SMOKING',V(10.68,4.4,2),-Math.PI/2,0xd84848);
+    // Posters (low-res prints) on the walls.
+    if(this.tex){
+      const poster=(t,pos,ry)=>{const m=this.mesh(new THREE.PlaneGeometry(1.5,2),new THREE.MeshLambertMaterial({map:t}),pos,V(0,ry,0));return m;};
+      poster(this.tex.posterTires,V(-10.79,3.4,-5.5),Math.PI/2);
+      poster(this.tex.posterNight,V(-10.79,3.6,3.2),Math.PI/2);
+      poster(this.tex.posterSafety,V(4.2,3.6,-13.79),0);
+    }
     this.parkedGroup=new THREE.Group();this.parkedGroup.position.set(0,.05,0);this.root.add(this.parkedGroup);
     this.carryAnchor=new THREE.Group();this.carryAnchor.position.set(.45,-.45,-1);this.camera.add(this.carryAnchor);this.scene.add(this.camera);
+  }
+
+  buildShelving(){
+    const shelfUnits=[
+      {x:-1.4,z:-13.35,ry:0},{x:2.4,z:-13.35,ry:0},
+      {x:-10.45,z:-2.5,ry:Math.PI/2},{x:-10.45,z:3.6,ry:Math.PI/2},
+      {x:10.45,z:6.8,ry:-Math.PI/2},
+    ];
+    const frameMat=this.mat(0x37507a),plankMat=this.mat(0x555c66);
+    for(const u of shelfUnits){
+      const g=new THREE.Group();g.position.set(u.x,0,u.z);g.rotation.y=u.ry;this.root.add(g);
+      for(const px of [-1.35,1.35])for(const pz of [-.28,.28]){
+        const post=new THREE.Mesh(new THREE.BoxGeometry(.07,2.3,.07),frameMat);post.position.set(px,1.15,pz);g.add(post);
+      }
+      for(const py of [.4,1.15,1.9]){
+        const plank=new THREE.Mesh(new THREE.BoxGeometry(2.8,.06,.66),plankMat);plank.position.set(0,py,0);g.add(plank);
+      }
+    }
+    // Instanced crates on shelves + floor stacks by the delivery zone.
+    const crateMat=this.tex?new THREE.MeshLambertMaterial({map:this.tex.crate}):this.mat(0xa77a43);
+    const crates=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),crateMat,34);
+    const tmpM=new THREE.Matrix4(),tmpQ=new THREE.Quaternion(),tmpS=new THREE.Vector3(),tmpP=new THREE.Vector3();
+    let ci=0;const seed=(n)=>{const x=Math.sin(n*127.1)*43758.5453;return x-Math.floor(x);};
+    const crateAt=(x,y,z,ry,s)=>{if(ci>=34)return;tmpQ.setFromAxisAngle(V(0,1,0),ry);tmpS.setScalar(s);tmpS.y=s*.78;tmpP.set(x,y,z);tmpM.compose(tmpP,tmpQ,tmpS);crates.setMatrixAt(ci,tmpM);ci+=1;};
+    for(const [ui,u] of shelfUnits.entries()){
+      const along=u.ry===0?V(1,0,0):V(0,0,u.ry>0?-1:1);
+      for(const py of [.47,1.22,1.97]){
+        const n=1+Math.floor(seed(ui*7+py*13)*3);
+        for(let i=0;i<n;i+=1){
+          const off=(i-(n-1)/2)*.92+(seed(ui*31+i*17+py)*0.2-0.1);
+          crateAt(u.x+along.x*off,py+.3,u.z+along.z*off,seed(ui*11+i)*0.5-0.25,.62+seed(ui+i*3)*.24);
+        }
+      }
+    }
+    crateAt(-9.3,.42,7.4,.2,.84);crateAt(-9.3,1.2,7.5,.5,.7);crateAt(-8.3,.4,6.6,-.3,.76);
+    crates.instanceMatrix.needsUpdate=true;this.root.add(crates);
+    // Instanced tires: two floor stacks + shelf row.
+    const tires=new THREE.InstancedMesh(new THREE.CylinderGeometry(.34,.34,.23,10),this.mat(0x0c0e10),14);
+    let ti=0;const tireAt=(x,y,z)=>{if(ti>=14)return;tmpQ.identity();tmpS.setScalar(1);tmpP.set(x,y,z);tmpM.compose(tmpP,tmpQ,tmpS);tires.setMatrixAt(ti,tmpM);ti+=1;};
+    for(let i=0;i<4;i+=1)tireAt(9.7,.14+i*.24,3.2);
+    for(let i=0;i<3;i+=1)tireAt(9.1,.14+i*.24,4.1);
+    for(let i=0;i<3;i+=1)tireAt(-10.45,2.32,-2.9+i*.75);
+    tires.instanceMatrix.needsUpdate=true;this.root.add(tires);
+    // Drums in the back-right corner.
+    for(const [i,c] of [0x365e8a,0x8a3636,0x7a7d82].entries()){
+      this.mesh(new THREE.CylinderGeometry(.31,.31,.95,8),this.mat(c),V(9.6+((i%2)*-.75),.48,-12.6+i*.7));
+    }
   }
 
   addSign(text,pos,ry=0,color=0xffffff){
