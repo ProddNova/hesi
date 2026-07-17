@@ -15,7 +15,11 @@ index.html
         -> viewport.js
            -> navigation/fly-camera-controller.js
         -> world-adapter.js
+           -> world/entity-discovery.js
+           -> world/stable-id.js
+           -> world/world-metadata.js
         -> entity-registry.js
+        -> interaction/selection-manager.js
 ```
 
 ## Responsibilities
@@ -53,10 +57,25 @@ with `demo-fallback` strategy and an unavoidable warning banner.
 
 ### `entity-registry.js`
 
-Pure foundational state with no Three.js import. It enforces the entity and
-layer contracts, rejects duplicate IDs, indexes high-level entities, applies
-layer visibility, emits change notifications, and clears without disposing
+Pure state with no Three.js import. It enforces the full entity/layer contract,
+rejects duplicate IDs, searches identity fields, applies layer visibility and
+locking, emits change notifications, and clears without disposing
 adapter-owned objects.
+
+### Semantic discovery and selection
+
+`world/entity-discovery.js` combines authored route/service/tunnel metadata,
+analytic wall/collision records, deterministic chunk/material batches, direct
+landmarks, and selected repeated instances. Generated instance IDs use the
+nearest real route when reliable plus a deterministic traversal counter, e.g.
+`lamp:wangan-0:0042`; chunk/material IDs remain structural when no finer source
+identity exists. Two independent `HighwayMap` builds are asserted to produce
+identical complete ID sequences and layer counts.
+
+`interaction/selection-manager.js` raycasts real world geometry and resolves
+raw child or instanced hits back to those semantic entities. It rejects hidden,
+locked, and editor-helper hits, cycles overlap candidates, owns the selection
+Box3 helper, synchronizes hierarchy/inspector state, and frames selected bounds.
 
 ## Ownership and cleanup
 

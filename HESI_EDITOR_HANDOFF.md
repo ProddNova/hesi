@@ -2,38 +2,38 @@
 
 Branch: `kimi/hesi-world-editor-foundation`
 
-Latest checkpoint commit: this commit — `Load real HESI world in editor`
+Latest completed commit: `5a7dafab28cda5b8a3cc500b2f7472ca946468ef`
+
+Checkpoint commit being created: `Add real world entity inspection`
 
 ## Completed
 
-- Default real `HighwayMap` loading with explicit demo/fallback distinction.
-- World bounds, origin, scale, inverse coordinate conversion, inventory, and
-  actual Tatsumi/spawn/map/full-world navigation presets.
-- Dedicated fly/no-clip controller, orbit/fly continuity, speeds, pointer lock,
-  camera-driven chunks, progress/error UX, and cleanup.
+- Checkpoint 1 real loading/navigation remains green.
+- Deterministic semantic discovery populates all required categories without
+  triangle/vertex/internal-helper hierarchy pollution.
+- Stable route-aware/generated IDs are identical across two independent builds.
+- Search, layer visibility/locking, hierarchy and viewport selection, instance
+  resolution, overlap cycling, highlight/focus, synchronized reveal, and the
+  detailed inspector work on the real map.
 
 ## Files changed
 
-- `tools/hesi-editor/src/{editor-app,viewport,world-adapter}.js`
-- `tools/hesi-editor/src/navigation/fly-camera-controller.js`
-- `tools/hesi-editor/src/ui/editor-shell.js`
-- `tools/hesi-editor/src/entity-registry.js`
-- `tools/hesi-editor/{styles.css,server.mjs,README.md,ARCHITECTURE.md}`
-- editor unit/server/smoke tests
-- `HESI_EDITOR_STATUS.md`, `HESI_EDITOR_HANDOFF.md`
+- `src/world/{entity-discovery,stable-id,world-metadata}.js`
+- `src/interaction/selection-manager.js`
+- registry, adapter, app, shell, styles, smoke/unit tests, and documentation
 
 ## Tests and screenshots
 
-- `npm --prefix tools/hesi-editor test` — PASS (8/8)
-- In-app Chromium real-world load, fly switch, metadata, and console audit — PASS
-- `tools/hesi-editor/test/smoke/artifacts/checkpoint-1-real-map-navigation.png`
+- `npm --prefix tools/hesi-editor test` — PASS
+- real-browser hierarchy/viewport selection and hidden-layer filtering — PASS
+- `test/smoke/artifacts/checkpoint-2-real-lamp-selection.png`
 
 ## Known bugs
 
-None in the completed checkpoint. Semantic selection/editing is intentionally
-the next checkpoint, not claimed here.
+None in completed checkpoint behavior. Generated batch granularity is a
+documented runtime-source limitation, not mislabeled per-object semantics.
 
 ## Exact next checkpoint
 
-Implement meaningful deterministic entity discovery and synchronized viewport /
-hierarchy selection with search, filtering, locking, highlight, and inspector.
+Implement transform/edit actions and compact command history, including safe
+per-instance matrix overrides and persistent-asset-reference duplication.

@@ -45,9 +45,12 @@ try {
     children: window.hesiEditor.adapter.group.children.length,
     warning: document.querySelector('[data-testid="world-warning"]')?.hidden,
     game: Boolean(window.shutoko),
+    entities: window.hesiEditor.registry.list().length,
+    layers: window.hesiEditor.registry.layers(),
   }));
-  if (state.checkpoint !== 1 || state.strategy !== 'real' || !state.real) throw new Error(`Real adapter did not load: ${JSON.stringify(state)}`);
+  if (state.checkpoint !== 2 || state.strategy !== 'real' || !state.real) throw new Error(`Real adapter did not load: ${JSON.stringify(state)}`);
   if (state.routes < 60 || state.chunks < 1 || state.children < 1) throw new Error(`Real world inventory is incomplete: ${JSON.stringify(state)}`);
+  if (state.entities < 10000 || state.layers.some((layer) => layer.count < 1)) throw new Error(`Semantic registry is incomplete: ${JSON.stringify(state)}`);
   if (!state.warning) throw new Error('Demo/fallback warning is visible in real mode');
   if (state.game) throw new Error('Production gameplay booted inside the editor');
 
@@ -62,7 +65,15 @@ try {
   await page.getByRole('button', { name: 'Orbit', exact: true }).click();
   await page.selectOption('.preset-select', 'tatsumi-pa');
   await page.waitForTimeout(800);
-  await page.screenshot({ path: path.join(OUT, 'checkpoint-1-real-map-navigation.png'), fullPage: true });
+  await page.getByTestId('hierarchy-search').fill('lamp:wangan-0:0042');
+  await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
+  if (await page.getByTestId('selected-entity-id').textContent() !== 'lamp:wangan-0:0042') throw new Error('Hierarchy and inspector selection are not synchronized');
+  await page.getByRole('button', { name: 'Focus selected', exact: true }).click();
+  await page.locator('[data-layer="Lamps"]').uncheck();
+  if (await page.getByTestId('selected-entity-id').count()) throw new Error('Hidden selected entity remained selected');
+  await page.locator('[data-layer="Lamps"]').check();
+  await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
+  await page.screenshot({ path: path.join(OUT, 'checkpoint-2-real-lamp-selection.png'), fullPage: true });
 
   const demo = await browser.newPage({ viewport: { width: 1100, height: 760 } });
   await demo.goto(`${BASE}/editor?world=demo`, { waitUntil: 'domcontentloaded' });
@@ -77,8 +88,8 @@ try {
   });
   if (disposed.entities !== 0 || disposed.canvasPresent) throw new Error('Editor disposal left live registry or canvas state');
   if (errors.length) throw new Error(`Browser console errors: ${errors.join(' | ')}`);
-  console.log(`PASS real map default (${state.routes} routes / ${state.chunks} chunks), fly/orbit navigation, explicit demo, disposal`);
-  console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-1-real-map-navigation.png')}`);
+  console.log(`PASS real map default (${state.entities} semantic entities), fly/orbit navigation, selection/filtering, explicit demo, disposal`);
+  console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-2-real-lamp-selection.png')}`);
 } finally {
   await browser?.close();
   child.kill();

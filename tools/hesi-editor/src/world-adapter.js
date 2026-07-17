@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { discoverHesiEntities } from './world/entity-discovery.js';
 
 const EARTH_RADIUS_METRES = 6371000;
 
@@ -84,6 +85,8 @@ function makeRepresentativeWorld(onProgress, { fallbackError = null } = {}) {
     entity('pillars:representative-network', 'support-system', 'Pillars', 'Representative supports', pillars),
     entity('props:representative-dressing', 'prop-collection', 'Props', 'Representative props', props),
   ];
+  const demoPickIndex = new WeakMap();
+  entities.forEach((demoEntity) => demoEntity.object3D?.traverse((object) => demoPickIndex.set(object, demoEntity)));
   return {
     group: world,
     entities,
@@ -102,6 +105,11 @@ function makeRepresentativeWorld(onProgress, { fallbackError = null } = {}) {
     },
     presets,
     getPreset(id) { return presets.get(id) || null; },
+    resolveSelection(object) {
+      let current = object;
+      while (current) { if (demoPickIndex.has(current)) return demoPickIndex.get(current); current = current.parent; }
+      return null;
+    },
     setChunkMode() {},
     updateForCamera() {},
     dispose() { disposeObject(world); },
@@ -132,6 +140,9 @@ async function makeFullWorld(onProgress) {
   const bounds = new THREE.Box3().setFromObject(map.group);
   chunks.forEach((chunk, index) => { chunk.group.visible = savedVisibility[index]; });
   map.update(map.initialSpawn?.position, 0);
+  onProgress('Discovering deterministic semantic world entities');
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const discovery = discoverHesiEntities(map);
 
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
@@ -191,7 +202,7 @@ async function makeFullWorld(onProgress) {
   return {
     map,
     group: map.group,
-    entities: [entity('world:current-hesi-map', 'generated-world', 'Roads', 'Current generated HESI world', map.group, 'js/map.js')],
+    entities: discovery.entities,
     strategy: 'real',
     label: 'REAL HESI WORLD',
     isRealWorld: true,
@@ -201,6 +212,8 @@ async function makeFullWorld(onProgress) {
     metadata,
     presets,
     getPreset(id) { return presets.get(id) || null; },
+    resolveSelection: discovery.resolveSelection,
+    discovery,
     setChunkMode,
     updateForCamera(position, timeSeconds) { if (chunkMode === 'nearby') map.update(position, timeSeconds); },
     dispose() { map.dispose(); },

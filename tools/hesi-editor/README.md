@@ -62,7 +62,14 @@ available on Windows.
   metadata/control tabs, and status bar
 - loading overlay and dismissible visible error overlay
 - fourteen semantic target layers with visibility toggles
-- high-level entity registry with stable IDs
+- deterministic semantic registry (routes, services, road/marking/rail/barrier
+  batches, individual lamps/supports, buildings, signs, tunnels, terrain,
+  lighting, and analytic collision records)
+- hierarchy search across ID, name, and type; layer visibility and selection
+  locking; expandable groups with bounded rendering for large layers
+- synchronized hierarchy and viewport selection, overlapping-hit cycling,
+  selection bounds, `F`/Focus selected framing, and a detailed truthful
+  identity/transform/world/rendering/collision/optimization inspector
 - explicit demo adapter and safe real-world fallback state
 
 ## Tests

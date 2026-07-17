@@ -38,11 +38,23 @@ test('layer visibility affects loaded objects and clear restores original visibi
   registry.register(props);
   registry.setLayerVisibility('Roads', false);
   assert.equal(roads.object3D.visible, false);
-  assert.equal(props.object3D.visible, true, 'registration follows current visible layer state');
+  assert.equal(props.object3D.visible, false, 'registration preserves generator-owned visibility');
   assert.equal(registry.toggleLayerVisibility('Roads'), true);
   assert.equal(roads.object3D.visible, true);
   registry.clear();
   assert.equal(roads.object3D.visible, true);
   assert.equal(props.object3D.visible, false);
   assert.equal(registry.list().length, 0);
+});
+
+test('search filters by id, name, and type while layer locking remains explicit', () => {
+  const registry = createEntityRegistry();
+  registry.register({ ...makeEntity('lamp:wangan-0:0042', 'Lamps'), name: 'Highway lamp 0042', type: 'highway-lamp' });
+  registry.register({ ...makeEntity('road:wangan-0', 'Roads'), name: 'Wangan Bayshore', type: 'road-route' });
+  assert.equal(registry.search('0042')[0].id, 'lamp:wangan-0:0042');
+  assert.equal(registry.search('bayshore')[0].id, 'road:wangan-0');
+  assert.equal(registry.search('highway-lamp')[0].layer, 'Lamps');
+  assert.equal(registry.isLayerLocked('Lamps'), false);
+  assert.equal(registry.toggleLayerLocked('Lamps'), true);
+  assert.equal(registry.isLayerLocked('Lamps'), true);
 });

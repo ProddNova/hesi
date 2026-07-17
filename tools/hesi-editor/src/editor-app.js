@@ -2,6 +2,7 @@ import { createEntityRegistry } from './entity-registry.js';
 import { createViewport } from './viewport.js';
 import { loadWorld } from './world-adapter.js';
 import { createEditorShell } from './ui/editor-shell.js';
+import { SelectionManager } from './interaction/selection-manager.js';
 
 export async function createEditorApp(root) {
   if (!root) throw new Error('Editor root element is missing');
@@ -14,6 +15,7 @@ export async function createEditorApp(root) {
     onCamera: (position) => shell.setCamera(position),
   });
   let adapter = null;
+  let selection = null;
   let disposed = false;
   let gridVisible = true;
   let axesVisible = false;
@@ -30,10 +32,11 @@ export async function createEditorApp(root) {
     return applied;
   };
 
-  const unsubscribeRegistry = registry.subscribe(() => shell.renderRegistry(registry));
+  let unsubscribeRegistry = () => {};
   shell.renderRegistry(registry);
   shell.onToolbar('reset-camera', () => applyPreset('initial-spawn'));
   shell.onToolbar('focus-world', () => applyPreset('entire-world'));
+  shell.onToolbar('focus-selected', () => selection?.focusSelected());
   shell.onToolbar('nav-orbit', () => viewport.setNavigationMode('orbit'));
   shell.onToolbar('nav-fly', () => viewport.setNavigationMode('fly'));
   for (const speed of ['slow', 'normal', 'fast']) {
@@ -50,6 +53,8 @@ export async function createEditorApp(root) {
     shell.setToggle('toggle-axes', axesVisible);
   });
   shell.onPreset(applyPreset);
+  shell.onEntitySelect((id) => selection?.select(id, { source: 'hierarchy' }));
+  shell.onInspectLocked((enabled) => selection?.setInspectLocked(enabled));
 
   const onKeyDown = (event) => {
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
@@ -76,7 +81,17 @@ export async function createEditorApp(root) {
     }
     viewport.setWorldGroup(adapter.group, (position, time) => adapter.updateForCamera(position, time));
     for (const worldEntity of adapter.entities) registry.register(worldEntity);
+    unsubscribeRegistry = registry.subscribe((change) => {
+      if (change.type === 'layer-visibility' && selection?.selected?.layer === change.layer && !change.visible) selection.clear('hidden-layer');
+      shell.renderRegistry(registry);
+    });
+    shell.renderRegistry(registry);
     shell.setAdapter(adapter);
+    selection = new SelectionManager({
+      viewport, registry, adapter,
+      onChange: (entity) => shell.setSelection(entity),
+      onStatus: (message) => shell.setStatus(message),
+    });
     shell.showWorldWarning(adapter.warning);
     applyPreset(adapter.presets.has('tatsumi-pa') ? 'tatsumi-pa' : 'initial-spawn');
     shell.setLoading(false);
@@ -95,6 +110,7 @@ export async function createEditorApp(root) {
     disposed = true;
     window.removeEventListener('keydown', onKeyDown);
     unsubscribeRegistry();
+    selection?.dispose();
     registry.clear();
     viewport.setWorldGroup(null);
     adapter?.dispose();
@@ -104,10 +120,11 @@ export async function createEditorApp(root) {
   window.addEventListener('beforeunload', dispose, { once: true });
 
   return {
-    checkpoint: 1,
+    checkpoint: 2,
     registry,
     viewport,
     shell,
+    get selection() { return selection; },
     get adapter() { return adapter; },
     applyPreset,
     showError(message) { shell.showError(message instanceof Error ? message : new Error(String(message))); },
