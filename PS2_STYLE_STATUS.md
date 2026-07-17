@@ -174,7 +174,22 @@ Slice shots: `PS2-*-slice.png` vs `PS2-*-baseline.png`. Draw calls 177
 - All interaction points/clearances untouched (PC, exit, delivery zone,
   car footprint, walk clamps).
 
-## CHECKPOINT 6 — HUD/UI (pending)
+## CHECKPOINT 6 — HUD/UI (complete)
+
+styles.css only (no markup/logic changes):
+- All HUD panels flattened to the era language: opaque steel-gradient
+  panels with hard 1 px borders + bevel top edge, accent side bars; every
+  glow/box-shadow removed, text shadows are hard 2-3 px offsets.
+- Numerals switched from thin monospace to chunky italic condensed
+  display type: speed, gear, score, combo, bank, RPM readout.
+- Segmented bars (repeating-gradient LED look) for tach, combo and fuel;
+  tach gains a frame + scanline segmentation; gear gets a framed box.
+- Cluster gets an angled-corner opaque panel; minimap gets a border;
+  prompt/toasts flattened; phone bezel squared (35→14 px radius);
+  PC brand no longer wraps onto its subtitle; new ≤1200 px scale step so
+  the opaque cluster never collides with the score stack.
+- PC market overlay kept as the auction-sheet look (period-correct)
+  with consistency fixes.
 
 ## CHECKPOINT 7 — PERF + CONSISTENCY (pending)
 
