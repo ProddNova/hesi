@@ -130,11 +130,18 @@ then softened one pixel — "pixelated, then lightly blurred".
 Slice shots: `PS2-*-slice.png` vs `PS2-*-baseline.png`. Draw calls 177
 (baseline 182), textures 20 (13).
 
-## CHECKPOINT 3 — WORLD FOUNDATION (next)
+## CHECKPOINT 3 — WORLD FOUNDATION (complete)
 
-Remaining global surfaces: service-area slabs in use at PAs, garage
-exterior, sign backs, ground slabs, container/fence usage, tiling checks
-across C1/K1/ramps at speed.
+- Service-area decks: slab body keeps dark fascia sides; the walkable top
+  is now a world-UV bucket quad with metre-tiled slab concrete (Daikoku /
+  Tatsumi lots read as real PA surface, not one stretched texture).
+- Garage exterior + konbini buildings: horizontal-band siding texture
+  (stretch-safe on instanced unit boxes). Roller-shutter slat texture on
+  the workshop door.
+- Containers: corrugated pixel siding × brightened instance tints.
+- Gas canopy dimmed; broadcast tower toned down.
+- Verified across Wangan/C1/K1/tunnel/PA views (`PS2-*-foundation.png`),
+  draw calls 181 (baseline 182).
 
 ## CHECKPOINT 4 — CITY DENSITY + PROPS (pending)
 

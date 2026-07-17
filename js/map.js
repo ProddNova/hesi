@@ -372,17 +372,17 @@ export class HighwayMap {
       neon: basic(0xffffff),
       shed: lambert(0x1a1d24),
       crane: lambert(0x233042),
-      container: lambert(0x54331f),
+      container: tiled('container', 0x54331f),
       water: lambert(0x061019, { transparent: true, opacity: 0.9 }),
       ground: lambert(0x080a11),
-      towerWhite: lambert(0xb8bcc4),
+      towerWhite: lambert(0x9aa0aa),
       cable: basic(0x9aa3ad),
       cableLight: basic(0xcfe6ff),
-      garage: lambert(0x222632),
-      shutter: lambert(0x6e7379),
+      garage: tiled('siding', 0x222632),
+      shutter: tiled('shutter', 0x6e7379),
       vending: basic(0x8ad9ff),
       konbini: basic(0xd8ffe9),
-      canopy: basic(0xfff2c9),
+      canopy: basic(0xd8d0b4),
       fence: lambert(0x30343b),
       cushion: basic(0xe0b52f),
       parkedBody: lambert(0xffffff),
@@ -6937,14 +6937,29 @@ export class HighwayMap {
       const packed = area.density === 'packed';
       const carCount = packed ? 34 : area.density === 'medium' ? 12 : 8;
 
-      // deck slab (roadside PAs float at deck level; Daikoku sits on the ground)
+      // deck slab (roadside PAs float at deck level; Daikoku sits on the
+      // ground). The body box only shows its dark fascia sides; the walkable
+      // top is a bucket quad so it gets metre-tiled service concrete instead
+      // of one texture stretched over the whole lot.
       const slabCenter = area.center.clone();
-      slabCenter.y -= 0.55;
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(area.width, 1.1, area.length), this.materials.roadService);
+      slabCenter.y -= 0.56;
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(area.width, 1.1, area.length), this.materials.concreteDark);
       slab.position.copy(slabCenter);
       slab.quaternion.copy(orientation); // local +Z (length) runs along the lot tangent
       slab.name = `${area.name} deck`;
       this._addChunkMesh(slab, slabCenter);
+      {
+        const topY = slabCenter.y + 0.56;
+        const corner = (alongSign, acrossSign) => {
+          const point = area.center.clone()
+            .addScaledVector(area.tangent, alongSign * area.length * 0.5)
+            .addScaledVector(area.normal, acrossSign * area.width * 0.5);
+          point.y = topY;
+          return point;
+        };
+        this._pushQuad(this._bucket(area.center, 'roadService'),
+          corner(1, 1), corner(-1, 1), corner(-1, -1), corner(1, -1));
+      }
 
       // support pillars when elevated; a lot straddling live carriageways
       // (the Tatsumi deck) supplies its own offsets so no column stands in
@@ -7155,7 +7170,7 @@ export class HighwayMap {
 
       const shutterPos = lotAnchor.clone().addScaledVector(frontNormal, 0.8);
       shutterPos.y = area.elevation + 3.45;
-      this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:vending');
+      this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:shutter');
       const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', 17, 3.25, true);
       const signPos = lotAnchor.clone().addScaledVector(frontNormal, 0.45);
       signPos.y = area.elevation + 8.5;
@@ -7540,7 +7555,8 @@ export class HighwayMap {
         const setback = 40 + random() * 120;
         const base = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback));
         if (this._distanceToRouteXZ(base) > wangan.halfWidth + 16) {
-          const containerColors = [0x54331f, 0x1f4654, 0x5a1f24, 0x2e4a1f, 0x4a3d1f];
+          // brighter tints: the corrugated map multiplies them back down
+          const containerColors = [0xb06a3e, 0x3f8ea8, 0xb04a52, 0x5c9a4a, 0x9a8452];
           const yaw = yawQuaternion(center.baseTangent);
           for (let row = 0; row < 2 + Math.floor(random() * 3); row += 1) {
             for (let level = 0; level < 1 + Math.floor(random() * 3); level += 1) {

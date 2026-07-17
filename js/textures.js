@@ -218,6 +218,44 @@ const slabPixel = (random, { base = 0.32, texels = 32, slab = 16, levels = 4 } =
   return finishTexture(canvas);
 };
 
+/**
+ * Warehouse/garage exterior siding: horizontal corrugation bands with a
+ * dark plinth and sparse vertical joints. Horizontal features only, so the
+ * one unit-box UV stretch over a large building face stays invisible.
+ */
+const sidingPixel = (random, { base = 0.24 } = {}) => {
+  const canvas = pixelTile(32, 32, 128, 128, (set) => {
+    for (let y = 0; y < 32; y += 1) {
+      const rib = y % 3 === 0 ? 0.045 : y % 3 === 2 ? -0.05 : 0;
+      const plinth = y > 27 ? -0.09 : 0;
+      const cap = y < 2 ? -0.06 : 0;
+      for (let x = 0; x < 32; x += 1) {
+        let value = base + rib + plinth + cap;
+        if (x % 16 === 0) value -= 0.05;
+        value += (Math.round((random() - 0.5) * 2) * 0.018);
+        set(x, y, grey(value));
+      }
+    }
+  });
+  return finishTexture(canvas);
+};
+
+/** Roller-shutter door: chunky horizontal slats, mid warm grey. */
+const shutterPixel = (random, { base = 0.42 } = {}) => {
+  const canvas = pixelTile(16, 32, 64, 128, (set) => {
+    for (let y = 0; y < 32; y += 1) {
+      const slat = y % 4;
+      const tone = slat === 0 ? 0.06 : slat === 3 ? -0.08 : 0;
+      for (let x = 0; x < 16; x += 1) {
+        let value = base + tone + (Math.round((random() - 0.5) * 2) * 0.014);
+        if (x === 0 || x === 15) value -= 0.1;
+        set(x, y, grey(value, 0.35));
+      }
+    }
+  });
+  return finishTexture(canvas);
+};
+
 /** Corrugated container/industrial siding at texel resolution. */
 const containerPixel = (random, { base = 0.62 } = {}) => {
   const canvas = pixelTile(32, 32, 64, 64, (set) => {
@@ -287,6 +325,8 @@ export function createWorldTextures(seed = 0x51a7c1, { asphaltStyle = null } = {
     pillar: pillarPixel(rng(0x6666)),
     tunnel: tunnelPixel(rng(0x7777)),
     container: containerPixel(rng(0x8888)),
+    siding: sidingPixel(rng(0xbbbb)),
+    shutter: shutterPixel(rng(0xcccc)),
     sky: skyGradientTexture(),
   };
 }
