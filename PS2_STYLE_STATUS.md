@@ -143,7 +143,22 @@ Slice shots: `PS2-*-slice.png` vs `PS2-*-baseline.png`. Draw calls 177
 - Verified across Wangan/C1/K1/tunnel/PA views (`PS2-*-foundation.png`),
   draw calls 181 (baseline 182).
 
-## CHECKPOINT 4 — CITY DENSITY + PROPS (pending)
+## CHECKPOINT 4 — CITY DENSITY + PROPS (complete)
+
+- Shared prop language (`_emitParkedCar/Truck/Forklift/PalletStack/Drums`):
+  every prop is a few instanced primitives on shared materials. New unit
+  geometries: raked car glasshouse, 8-sided drum.
+- Parked cars everywhere get body + glasshouse + four wheel blocks;
+  Daikoku adds a five-truck row (corrugated cargo boxes), forklift,
+  pallet stacks and drums.
+- Port container yards get working aprons: trucks, forklifts, pallets,
+  drums beside the stacks.
+- K1: shed density up (skip 0.26→0.18), loading aprons with clutter at
+  shed fronts, second backdrop row of apartment blocks.
+- Wangan: mid-distance apartment/office silhouettes on the land side;
+  two new skyline clusters (Oi wharf, Shinagawa bank).
+- Draw calls 203 (baseline 182) — the removed giant light decals offset
+  most of the prop cost. Probes pass.
 
 ## CHECKPOINT 5 — GARAGE (pending)
 

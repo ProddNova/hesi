@@ -386,7 +386,9 @@ export class HighwayMap {
       fence: lambert(0x30343b),
       cushion: basic(0xe0b52f),
       parkedBody: lambert(0xffffff),
-      parkedGlass: lambert(0x0e1620),
+      parkedGlass: lambert(0x10161f),
+      tire: lambert(0x0a0c0e),
+      pallet: lambert(0x6a5233),
       marker: basic(0x57e3ff, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
       billboardGlow: basic(0xffffff),
       signGreen: basic(0x0c604e, { side: THREE.DoubleSide }),
@@ -446,6 +448,33 @@ export class HighwayMap {
     this._ownedTextures.add(texture);
     this._chevTex = texture;
     return texture;
+  }
+
+  /**
+   * Car glasshouse: a unit-cube trapezoid prism with raked windscreen and
+   * rear glass. Instanced over every parked car so the cabin reads as a
+   * real DLO silhouette instead of a floating box.
+   */
+  _cabinGeometry() {
+    const xB = 0.5;
+    const xT = 0.42;
+    const zFB = -0.5;
+    const zRB = 0.5;
+    const zFT = -0.16;
+    const zRT = 0.44;
+    const positions = [];
+    const quad = (a, b, c, d) => positions.push(...a, ...b, ...c, ...a, ...c, ...d);
+    // windscreen (front, -z), rear glass, roof, two sides
+    quad([-xB, -0.5, zFB], [-xT, 0.5, zFT], [xT, 0.5, zFT], [xB, -0.5, zFB]);
+    quad([xB, -0.5, zRB], [xT, 0.5, zRT], [-xT, 0.5, zRT], [-xB, -0.5, zRB]);
+    quad([-xT, 0.5, zFT], [-xT, 0.5, zRT], [xT, 0.5, zRT], [xT, 0.5, zFT]);
+    quad([-xB, -0.5, zFB], [-xB, -0.5, zRB], [-xT, 0.5, zRT], [-xT, 0.5, zFT]);
+    quad([xB, -0.5, zFB], [xT, 0.5, zFT], [xT, 0.5, zRT], [xB, -0.5, zRB]);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    return geometry;
   }
 
   /** Paired tunnel jet fans: two ducts + ceiling mount, one instanced geometry. */
@@ -4534,6 +4563,7 @@ export class HighwayMap {
     this._unitGeometries = {
       box: unitBox, plane: unitPlane, pool: unitPool,
       lamppost: this._lampGeometry(), jetfan: this._jetFanGeometry(),
+      cabin: this._cabinGeometry(), drum: new THREE.CylinderGeometry(0.5, 0.5, 1, 8),
     };
     const identityQuat = new THREE.Quaternion();
     for (const [key, types] of this._chunkInstances) {
@@ -6929,6 +6959,99 @@ export class HighwayMap {
   // Service area dressing
   // ------------------------------------------------------------------
 
+  // ------------------------------------------------------------------
+  // Shared PS2 prop language: every prop is a handful of instanced
+  // primitives (shared geometry + shared materials, per-instance tints),
+  // so a dressed lot costs the same draw calls as an empty one.
+  // ------------------------------------------------------------------
+
+  /** Local-frame offset applied through the prop's yaw quaternion. */
+  _propOffset(base, quaternion, x, y, z) {
+    const offset = TMP_A.set(x, y, z).applyQuaternion(quaternion);
+    return vec(base.x + offset.x, base.y + offset.y, base.z + offset.z);
+  }
+
+  /** Parked passenger car: tinted body, raked glasshouse, four wheel blocks. */
+  _emitParkedCar(ground, quaternion, color, { width = 1.72, length = 4.1 } = {}) {
+    const body = ground.clone();
+    body.y += 0.55;
+    this._instance(body, vec(width, 0.6, length), quaternion, color, 'box:parkedBody');
+    const cabin = this._propOffset(ground, quaternion, 0, 0, length * 0.045);
+    cabin.y = ground.y + 1.09;
+    this._instance(cabin, vec(width * 0.86, 0.5, length * 0.5), quaternion, null, 'cabin:parkedGlass');
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const wheel = this._propOffset(ground, quaternion, sx * width * 0.45, 0, sz * length * 0.32);
+        wheel.y = ground.y + 0.26;
+        this._instance(wheel, vec(0.22, 0.5, 0.62), quaternion, null, 'box:tire');
+      }
+    }
+  }
+
+  /** Parked box truck: cab + corrugated cargo box + wheel blocks. */
+  _emitParkedTruck(ground, quaternion, cabColor, boxTint) {
+    const cab = this._propOffset(ground, quaternion, 0, 0, -2.85);
+    cab.y = ground.y + 1.25;
+    this._instance(cab, vec(2.05, 1.7, 1.5), quaternion, cabColor, 'box:parkedBody');
+    const glass = this._propOffset(ground, quaternion, 0, 0, -3.1);
+    glass.y = ground.y + 2.05;
+    this._instance(glass, vec(1.85, 0.5, 0.9), quaternion, null, 'cabin:parkedGlass');
+    const cargo = this._propOffset(ground, quaternion, 0, 0, 0.65);
+    cargo.y = ground.y + 1.72;
+    this._instance(cargo, vec(2.25, 2.3, 5.4), quaternion, boxTint, 'box:container');
+    for (const sx of [-1, 1]) {
+      for (const z of [-2.7, 0.4, 2.6]) {
+        const wheel = this._propOffset(ground, quaternion, sx * 0.92, 0, z);
+        wheel.y = ground.y + 0.33;
+        this._instance(wheel, vec(0.28, 0.64, 0.72), quaternion, null, 'box:tire');
+      }
+    }
+  }
+
+  /** Forklift: stubby tinted body, twin mast rails, fork plate, roof guard. */
+  _emitForklift(ground, quaternion) {
+    const body = ground.clone();
+    body.y += 0.62;
+    this._instance(body, vec(1.05, 0.8, 1.55), quaternion, 0xd8942e, 'box:parkedBody');
+    const roof = this._propOffset(ground, quaternion, 0, 0, 0.15);
+    roof.y = ground.y + 1.62;
+    this._instance(roof, vec(0.95, 0.07, 0.95), quaternion, 0x3a3d42, 'box:parkedBody');
+    for (const sx of [-0.32, 0.32]) {
+      const rail = this._propOffset(ground, quaternion, sx, 0, -0.92);
+      rail.y = ground.y + 0.95;
+      this._instance(rail, vec(0.09, 1.7, 0.09), quaternion, null, 'box:railMetal');
+    }
+    const fork = this._propOffset(ground, quaternion, 0, 0, -1.25);
+    fork.y = ground.y + 0.08;
+    this._instance(fork, vec(0.85, 0.06, 0.75), quaternion, 0x555a61, 'box:parkedBody');
+  }
+
+  /** Pallet stack: a few slightly-skewed slats. */
+  _emitPalletStack(ground, quaternion, random, layers = null) {
+    const count = layers ?? (1 + Math.floor(random() * 3));
+    for (let i = 0; i < count; i += 1) {
+      const jitter = new THREE.Quaternion().setFromAxisAngle(UP, (random() - 0.5) * 0.24);
+      const pallet = ground.clone();
+      pallet.y += 0.09 + i * 0.16;
+      this._instance(pallet, vec(1.1, 0.14, 1.1), quaternion.clone().multiply(jitter), null, 'box:pallet');
+    }
+  }
+
+  /** Drum cluster: 2-4 tinted 8-sided barrels. */
+  _emitDrums(ground, random, count = null) {
+    const drums = count ?? (2 + Math.floor(random() * 3));
+    const tints = [0x365e8a, 0x8a3636, 0x7a7d82, 0x4a6a3a];
+    for (let i = 0; i < drums; i += 1) {
+      const angle = random() * Math.PI * 2;
+      const radius = i === 0 ? 0 : 0.45 + random() * 0.4;
+      const drum = ground.clone();
+      drum.x += Math.cos(angle) * radius;
+      drum.z += Math.sin(angle) * radius;
+      drum.y += 0.45;
+      this._instance(drum, vec(0.56, 0.9, 0.56), null, tints[Math.floor(random() * tints.length)], 'drum:parkedBody');
+    }
+  }
+
   _buildServiceAreaDressing() {
     const random = mulberry32(this.seed ^ 0x9e3779b9);
     const carColors = [0xb3324a, 0x3a68b6, 0xcfcfd4, 0x18191d, 0xd8a63a, 0x74306e, 0x2d7a52, 0x8a2f24];
@@ -7054,25 +7177,54 @@ export class HighwayMap {
         }
       }
 
-      // parked static cars
+      // parked static cars (shared prop language: body + glasshouse + wheels)
       for (let i = 0; i < carCount && stallSlots.length; i += 1) {
         const slotIndex = Math.floor(random() * stallSlots.length);
         const slot = stallSlots.splice(slotIndex, 1)[0];
         const color = carColors[Math.floor(random() * carColors.length)];
-        const position = area.center.clone()
+        const ground = area.center.clone()
           .addScaledVector(area.tangent, slot.along)
           .addScaledVector(area.normal, slot.across);
-        position.y = area.elevation + 0.55;
+        ground.y = area.elevation;
         const yaw = orientation.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, (random() < 0.5 ? 0 : Math.PI) + (random() - 0.5) * 0.14));
-        this._instance(position, vec(1.72, 0.6, 4.1), yaw, color, 'box:parkedBody');
-        const cabin = position.clone(); cabin.y += 0.5;
-        this._instance(cabin, vec(1.5, 0.42, 2.0), yaw, null, 'box:parkedGlass');
+        this._emitParkedCar(ground, yaw, color, { length: 3.9 + random() * 0.5 });
         if (packed && random() < 0.3) {
           // open hood
-          const hood = position.clone(); hood.y += 0.62;
+          const hood = ground.clone(); hood.y += 1.17;
           const hoodQuat = yaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(vec(1, 0, 0), -0.85));
           this._instance(hood, vec(1.5, 0.06, 1.1), hoodQuat, color, 'box:parkedBody');
         }
+      }
+
+      // truck row + working clutter on the packed lot (Daikoku): box trucks
+      // nose-in along the outer edge, a forklift and pallets by the shop.
+      if (packed) {
+        const truckTints = [0x8f9298, 0xb06a3e, 0x3f8ea8, 0x9a8452];
+        for (let i = 0; i < 5; i += 1) {
+          const ground = area.center.clone()
+            .addScaledVector(area.tangent, -area.length * 0.34 + i * 9.5)
+            .addScaledVector(area.normal, -area.width * 0.395);
+          ground.y = area.elevation;
+          const yaw = orientation.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI * 0.5 + (random() - 0.5) * 0.1));
+          this._emitParkedTruck(ground, yaw, 0xcfd3d8, truckTints[Math.floor(random() * truckTints.length)]);
+        }
+        const forkGround = area.center.clone()
+          .addScaledVector(area.tangent, area.length * 0.05)
+          .addScaledVector(area.normal, area.width * 0.33);
+        forkGround.y = area.elevation;
+        this._emitForklift(forkGround, orientation.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, 2.2)));
+        for (let i = 0; i < 3; i += 1) {
+          const palletGround = area.center.clone()
+            .addScaledVector(area.tangent, area.length * 0.1 + i * 1.7)
+            .addScaledVector(area.normal, area.width * 0.36);
+          palletGround.y = area.elevation;
+          this._emitPalletStack(palletGround, orientation, random);
+        }
+        const drumGround = area.center.clone()
+          .addScaledVector(area.tangent, area.length * 0.16)
+          .addScaledVector(area.normal, area.width * 0.42);
+        drumGround.y = area.elevation;
+        this._emitDrums(drumGround, random);
       }
 
       // konbini building with glowing front
@@ -7496,7 +7648,9 @@ export class HighwayMap {
     }
     }
 
-    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers.
+    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers,
+    // working yard clutter at shed fronts, and a second backdrop row of
+    // apartment blocks so the corridor gaps stay filled.
     const k1 = this._groupChains('k1')[0];
     if (!k1) return;
     for (let distance = 0; distance < k1.length; distance += 56) {
@@ -7504,7 +7658,7 @@ export class HighwayMap {
       const normal = horizontalNormal(center.baseTangent);
       const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
       for (const side of [-1, 1]) {
-        if (random() < 0.26) continue;
+        if (random() < 0.18) continue;
         const setback = 24 + random() * 92;
         const width = 26 + random() * 42;
         const depth = 20 + random() * 30;
@@ -7512,16 +7666,42 @@ export class HighwayMap {
         const position = center.position.clone().addScaledVector(normal, side * (k1.halfWidth + setback + width * 0.5));
         const radius = Math.max(width, depth) * 0.6;
         if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+        const face = normal.clone().multiplyScalar(-side);
         this._buildStructure(random, position.x, position.z, heading + (random() < 0.3 ? Math.PI * 0.5 : 0),
-          random() < 0.72 ? 'shed' : 'warehouse', width, height, depth,
-          { face: normal.clone().multiplyScalar(-side) });
+          random() < 0.72 ? 'shed' : 'warehouse', width, height, depth, { face });
         this._recordFootprint(position.x, position.z, radius);
+        if (random() < 0.5) {
+          // loading apron in front of the shed: pallets / drums / a truck
+          const apron = position.clone().addScaledVector(face, width * 0.5 + 6);
+          apron.y = 0;
+          const apronYaw = yawQuaternion(face);
+          if (random() < 0.45) this._emitParkedTruck(apron, apronYaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI * 0.5)), 0xcfd3d8, 0x9a8452);
+          else if (random() < 0.5) this._emitForklift(apron, apronYaw);
+          const palletSpot = apron.clone().addScaledVector(center.baseTangent, 4 + random() * 3);
+          this._emitPalletStack(palletSpot, apronYaw, random);
+          if (random() < 0.5) this._emitDrums(palletSpot.clone().addScaledVector(face, 2.5), random);
+        }
         if (random() < 0.11) {
           const stackHeight = 34 + random() * 30;
           const stack = position.clone();
           stack.y = stackHeight * 0.5;
           this._instance(stack, vec(3.2, stackHeight, 3.2), null, null, 'box:concreteDark');
           this._instance(vec(position.x, stackHeight + 0.8, position.z), vec(1.1, 1.1, 1.1), null, null, 'box:redBlink');
+        }
+      }
+      // backdrop apartments behind the sheds (both sides, farther out)
+      if (random() < 0.5) {
+        const side = random() < 0.5 ? -1 : 1;
+        const setback = 150 + random() * 200;
+        const width = 24 + random() * 30;
+        const depth = 18 + random() * 22;
+        const height = 16 + Math.pow(random(), 1.5) * 42;
+        const position = center.position.clone().addScaledVector(normal, side * (k1.halfWidth + setback + width * 0.5));
+        const radius = Math.max(width, depth) * 0.6;
+        if (this._canPlaceBuilding(position.x, position.z, radius, 40)) {
+          this._buildStructure(random, position.x, position.z, heading + (random() - 0.5) * 0.2,
+            random() < 0.6 ? 'hotel' : 'slab', width, height, depth, {});
+          this._recordFootprint(position.x, position.z, radius);
         }
       }
     }
@@ -7551,7 +7731,7 @@ export class HighwayMap {
         }
       }
       if (random() < 0.35) {
-        // container stack rows
+        // container stack rows + working yard clutter beside them
         const setback = 40 + random() * 120;
         const base = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback));
         if (this._distanceToRouteXZ(base) > wangan.halfWidth + 16) {
@@ -7564,6 +7744,21 @@ export class HighwayMap {
               box.y = 1.3 + level * 2.6;
               this._instance(box, vec(2.9, 2.55, 12.2), yaw, containerColors[Math.floor(random() * containerColors.length)], 'box:container');
             }
+          }
+          const apron = base.clone().addScaledVector(center.baseTangent, 10 + random() * 6);
+          apron.y = 0;
+          if (random() < 0.6) {
+            this._emitParkedTruck(apron, yaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, (random() - 0.5) * 0.4)), 0xcfd3d8,
+              containerColors[Math.floor(random() * containerColors.length)]);
+          }
+          if (random() < 0.55) {
+            const forkSpot = apron.clone().addScaledVector(normal, landSide * 5);
+            this._emitForklift(forkSpot, yaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, random() * Math.PI)));
+          }
+          if (random() < 0.7) {
+            const palletSpot = apron.clone().addScaledVector(center.baseTangent, 4);
+            this._emitPalletStack(palletSpot, yaw, random);
+            if (random() < 0.5) this._emitDrums(palletSpot.clone().addScaledVector(normal, landSide * 2.4), random);
           }
         }
       }
@@ -7605,6 +7800,23 @@ export class HighwayMap {
           this._recordFootprint(position.x, position.z, radius);
         }
       }
+      // mid-distance apartment/office silhouettes so the land side keeps a
+      // lit horizon between the port yards (cheap merged facades)
+      if (random() < 0.42) {
+        const setback = 260 + random() * 320;
+        const width = 26 + random() * 34;
+        const depth = 20 + random() * 24;
+        const height = 18 + Math.pow(random(), 1.4) * 52;
+        const position = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback + width * 0.5));
+        const radius = Math.max(width, depth) * 0.6;
+        if (this._canPlaceBuilding(position.x, position.z, radius, 40)) {
+          const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+          const roll = random();
+          this._buildStructure(random, position.x, position.z, heading + (random() - 0.5) * 0.3,
+            roll < 0.45 ? 'hotel' : roll < 0.8 ? 'slab' : 'stepped', width, height, depth, {});
+          this._recordFootprint(position.x, position.z, radius);
+        }
+      }
     }
   }
 
@@ -7619,6 +7831,8 @@ export class HighwayMap {
       { ...at(35.6300, 139.7950), spread: 1200, count: 18, tall: 90, streak: [-1, -0.2] },  // Daiba east bank
       { ...at(35.4750, 139.6600), spread: 1400, count: 16, tall: 70, streak: [1, -0.1] },   // Yokohama shore behind Daikoku
       { ...at(35.6560, 139.8300), spread: 1500, count: 16, tall: 80, streak: [-0.2, -1] },  // Tatsumi postcard
+      { ...at(35.5850, 139.7550), spread: 1400, count: 14, tall: 60, streak: [1, -0.3] },   // Oi wharf mid-Bayshore
+      { ...at(35.6150, 139.7420), spread: 1100, count: 16, tall: 95, streak: [1, 0.1] },    // Shinagawa bank
     ];
     for (const cluster of clusters) {
       for (let i = 0; i < cluster.count; i += 1) {
