@@ -96,14 +96,45 @@ lighting** — explicitly NOT the previous neon/glow/decal direction.
   existing instanced types or new shared types (one mesh per chunk per type).
 - Low quality keeps hiding effect layers; texture sizes stay ≤256 px.
 
-## CHECKPOINT 2 — STYLE SLICE (next)
+## CHECKPOINT 2 — STYLE SLICE (complete)
 
-Prototype on the Wangan: tiled low-res asphalt with per-metre UVs, textured
-parapet/rail, concrete pillars, facade atlases with real wall tone, giant
-light pools removed (small dim pools remain), horizon haze, restrained
-sodium. Validate against references before global rollout.
+**Art direction locked: stylized pixel tiles, not realism.** After a course
+correction (first attempt had realistic cracks/patches — rejected), every
+world texture is now generated as a 16-32 texel grid with a posterized
+grey palette (tones spaced ±0.03-0.05 around the base), upscaled nearest
+then softened one pixel — "pixelated, then lightly blurred".
 
-## CHECKPOINT 3 — WORLD FOUNDATION (pending)
+- `js/textures.js` — shared tile set: asphalt, ramp asphalt, shoulder,
+  service slabs, barrier/wall concrete, pillar concrete, tunnel panels,
+  container siding, sky gradient. All 64-128 px canvases.
+- Asphalt candidates A (16 texels / 3 tones), B (24/4), C (32/5) rendered
+  in-game via `?asphaltStyle=` and compared with
+  `.devtests/ps2-texture-candidates.mjs` (shots `PS2-cand-*`).
+  **A chosen** — visible soft-edged texel blocks at driving distance,
+  exactly the coarse blocky brief; B/C read as smooth clouds. A is the
+  default; B/C remain selectable for reference.
+- World-projected metre UVs for merged geometry (`_assignWorldUVs` +
+  `WORLD_UV_TILES`): decks, fascia, parapets, medians, mouth surfaces and
+  tunnel walls all tile in world units with no per-site UV code.
+- Shoulder band: paler pixel-asphalt strip painted outside each edge line
+  through the same junction-zone suppression as the edge line itself
+  (excluded from marking instrumentation; A/B probe passes).
+- Facades: rewritten to wall-with-windows in the same pixel language
+  (drawn half-res, upscaled; posterized window palette; spandrels, seams,
+  balcony bands; no grime streaks).
+- Light decals restrained: pools 11×15.5 m @0.34 → 6.2×8.8 m @0.15,
+  streaks 30 m @0.26 → 19 m @0.11.
+- Horizon dome (gradient cylinder, 1 draw call) + slightly desaturated
+  night lights; night stays dark navy.
+
+Slice shots: `PS2-*-slice.png` vs `PS2-*-baseline.png`. Draw calls 177
+(baseline 182), textures 20 (13).
+
+## CHECKPOINT 3 — WORLD FOUNDATION (next)
+
+Remaining global surfaces: service-area slabs in use at PAs, garage
+exterior, sign backs, ground slabs, container/fence usage, tiling checks
+across C1/K1/ramps at speed.
 
 ## CHECKPOINT 4 — CITY DENSITY + PROPS (pending)
 
@@ -115,6 +146,6 @@ sodium. Validate against references before global rollout.
 
 ---
 
-**Status: Checkpoint 1 complete. Next action: implement the Wangan style
-slice (texture module + UV-mapped road emit + lighting restraint) and
-capture `PS2-*-slice.png` for comparison.**
+**Status: Checkpoint 2 complete — pixel-tile art direction validated on
+the slice (candidate A). Next action: propagate to remaining surfaces
+(Checkpoint 3), then density/props.**

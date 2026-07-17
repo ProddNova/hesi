@@ -77,10 +77,11 @@ class ShutokoNights {
   fallbackCar(){return{id:'koten-90',name:'Koten Maru 90',year:1988,starter:true,color:'#7d3037',price:85000,power:90,torque:128,mass:1040,drivetrain:'RWD',engineLayout:'I4',redline:6500,idleRPM:850,gearRatios:[3.35,1.95,1.29,.96,.78],finalDrive:4.1,tireGrip:1.02,brakeForce:10500,suspensionStiffness:1,fuelCapacity:45,dimensions:{length:4.25,width:1.67,height:1.32}};}
 
   setupLights(){
-    // PS2 night mood: dark blue-black sky, low ambient so emissive windows,
-    // lamps and light pools carry the scene instead of flat grey fill.
+    // PS2 night mood: dark near-black sky, restrained slightly-desaturated
+    // ambient so the baked texture detail carries the scene. The textures
+    // hold the tone; these lights only lift them to night-visible levels.
     this.roadScene.background=new THREE.Color(0x02050c);this.roadScene.fog=new THREE.FogExp2(0x07101c,.0015);
-    this.roadScene.add(new THREE.HemisphereLight(0x35476b,0x0c101c,1.35));this.roadScene.add(new THREE.AmbientLight(0x3c4a66,.5));const moon=new THREE.DirectionalLight(0x8da4c8,.85);moon.position.set(-200,300,-100);this.roadScene.add(moon);
+    this.roadScene.add(new THREE.HemisphereLight(0x3d4a66,0x0c101c,1.35));this.roadScene.add(new THREE.AmbientLight(0x444d61,.5));const moon=new THREE.DirectionalLight(0x97a3bd,.78);moon.position.set(-200,300,-100);this.roadScene.add(moon);
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
   buildWorld(){
