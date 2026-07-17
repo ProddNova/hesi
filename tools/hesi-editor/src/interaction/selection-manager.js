@@ -69,6 +69,8 @@ export class SelectionManager {
   canSelect(entity) {
     if (!entity || !this.registry.isLayerVisible(entity.layer)) return false;
     if (this.registry.isLayerLocked(entity.layer) && !this.inspectLocked) return false;
+    if (entity.metadata?.locked && !this.inspectLocked) return false;
+    if (entity.metadata?.disabled) return false;
     return true;
   }
 
@@ -106,7 +108,7 @@ export class SelectionManager {
   select(entityOrId, { source = 'api', overlap = 1, overlapIndex = 0 } = {}) {
     const entity = typeof entityOrId === 'string' ? this.registry.getById(entityOrId) : entityOrId;
     if (!this.canSelect(entity)) {
-      this.onStatus(entity ? `${entity.layer} is hidden or locked` : 'Entity not found');
+      this.onStatus(entity ? `${entity.layer} or entity is hidden, disabled, or locked` : 'Entity not found');
       return null;
     }
     this.selected = entity;

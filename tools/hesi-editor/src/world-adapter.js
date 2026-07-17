@@ -50,6 +50,8 @@ function makeRepresentativeWorld(onProgress, { fallbackError = null } = {}) {
   onProgress('Building explicit representative demo scene');
   const world = new THREE.Group();
   world.name = 'HESI representative world';
+  const editorObjectsGroup = new THREE.Group();
+  editorObjectsGroup.name = 'Editor placed objects';
   const asphalt = standard(0x171b21, { roughness: 0.92 });
   const concrete = standard(0x66707a);
   const metal = standard(0x8d9aa5, { roughness: 0.38, metalness: 0.68 });
@@ -87,6 +89,7 @@ function makeRepresentativeWorld(onProgress, { fallbackError = null } = {}) {
   ];
   const demoPickIndex = new WeakMap();
   entities.forEach((demoEntity) => demoEntity.object3D?.traverse((object) => demoPickIndex.set(object, demoEntity)));
+  world.add(editorObjectsGroup);
   return {
     group: world,
     entities,
@@ -109,6 +112,12 @@ function makeRepresentativeWorld(onProgress, { fallbackError = null } = {}) {
       let current = object;
       while (current) { if (demoPickIndex.has(current)) return demoPickIndex.get(current); current = current.parent; }
       return null;
+    },
+    editorObjectsGroup,
+    registerEditorEntity(editorEntity) {
+      editorEntity.object3D?.traverse((object) => demoPickIndex.set(object, editorEntity));
+      if (editorEntity.object3D) demoPickIndex.set(editorEntity.object3D, editorEntity);
+      return editorEntity;
     },
     setChunkMode() {},
     updateForCamera() {},
@@ -143,6 +152,9 @@ async function makeFullWorld(onProgress) {
   onProgress('Discovering deterministic semantic world entities');
   await new Promise((resolve) => requestAnimationFrame(resolve));
   const discovery = discoverHesiEntities(map);
+  const editorObjectsGroup = new THREE.Group();
+  editorObjectsGroup.name = 'Editor placed objects';
+  map.group.add(editorObjectsGroup);
 
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
@@ -214,6 +226,8 @@ async function makeFullWorld(onProgress) {
     getPreset(id) { return presets.get(id) || null; },
     resolveSelection: discovery.resolveSelection,
     discovery,
+    editorObjectsGroup,
+    registerEditorEntity: discovery.registerEditorEntity,
     setChunkMode,
     updateForCamera(position, timeSeconds) { if (chunkMode === 'nearby') map.update(position, timeSeconds); },
     dispose() { map.dispose(); },

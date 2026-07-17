@@ -112,6 +112,13 @@ export function createEntityRegistry({ layers = EDITOR_LAYERS } = {}) {
       emit({ type: 'entity-update', id, patch });
       return entity;
     },
+    unregister(id) {
+      const record = records.get(id);
+      if (!record) return null;
+      records.delete(id);
+      emit({ type: 'unregister', id, layer: record.entity.layer });
+      return record.entity;
+    },
     clear() {
       originalVisibility.forEach((visible, object) => { object.visible = visible; });
       originalVisibility.clear();

@@ -18,8 +18,14 @@ index.html
            -> world/entity-discovery.js
            -> world/stable-id.js
            -> world/world-metadata.js
+           -> world/asset-registry.js
         -> entity-registry.js
         -> interaction/selection-manager.js
+        -> interaction/transform-manager.js
+           -> interaction/entity-transform.js
+        -> interaction/edit-actions.js
+        -> interaction/command-history.js
+        -> overrides/world-project-state.js
 ```
 
 ## Responsibilities
@@ -77,11 +83,37 @@ raw child or instanced hits back to those semantic entities. It rejects hidden,
 locked, and editor-helper hits, cycles overlap candidates, owns the selection
 Box3 helper, synchronizes hierarchy/inspector state, and frames selected bounds.
 
+### Editing, commands, and overrides
+
+`interaction/transform-manager.js` owns Three.js `TransformControls`, mode,
+space, axes, snapping, numeric transform application, and drag boundaries. A
+gizmo drag is applied live but committed as exactly one command on mouse-up.
+
+`interaction/entity-transform.js` is the rendering mutation boundary. Direct
+and placed objects use ordinary transforms. Individually discovered generated
+instances compute an absolute delta from their immutable source matrix and
+apply that delta only to the matching `InstancedMesh` slot. Composite lamp
+components retain their source-relative layout. Disable/restore uses reversible
+zero-scale instance matrices rather than editing generator geometry.
+
+`interaction/edit-actions.js` implements entity actions as reversible commands.
+`interaction/command-history.js` stores compact closures and a saved index; it
+does not snapshot the generated world. `overrides/world-project-state.js` holds
+only declarative entity overrides and editor-owned placed-object records.
+
+`world/asset-registry.js` extracts eligible repeated assets from generated
+instances. Duplicates share source geometry/material references and create an
+editor-owned group under the adapter's `editorObjectsGroup`; project records
+contain an asset ID and transform, never geometry.
+
 ## Ownership and cleanup
 
 - The adapter owns world geometry/material disposal.
-- The viewport owns renderer, controls, helpers, ResizeObserver, and animation
+- The viewport owns renderer, navigation controls, helpers, ResizeObserver, and animation
   frame disposal.
+- The transform manager owns TransformControls and temporary instance proxies.
+- The adapter owns the editor placed-object scene group; the asset registry owns
+  only reusable references.
 - The registry owns references and layer state only.
 - The shell owns DOM nodes only.
 - `editor-app.js` defines disposal order and makes it idempotent.
@@ -91,14 +123,8 @@ or visibility changes behind.
 
 ## Extension points
 
-Later checkpoints add services beside the registry instead of expanding the
-adapter into a monolith:
-
-- selection state and raycasting service
-- transform command service and Three.js TransformControls
-- declarative override schema/store/serializer
-- inspector bindings that emit commands rather than mutating directly
-
-Material catalogs, road-specific editing, persistence/export, and AI commands
-remain later modules. The archived `CONTRACTS_PHASE1_PROVISIONAL.md` is useful
-research for those phases, but it is not binding.
+Later checkpoints add persistence/validation/recovery, debug overlays, and
+asset-browser services beside these modules instead of expanding the adapter
+into a monolith. Material catalogs, road-specific editing, export integration,
+and AI commands remain later modules. The archived
+`CONTRACTS_PHASE1_PROVISIONAL.md` is useful research, but it is not binding.

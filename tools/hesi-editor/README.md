@@ -45,7 +45,7 @@ Then open <http://localhost:8080>. This is only a convenience alias for the
 existing `python -m http.server 8080` flow. `start-game.bat` also remains
 available on Windows.
 
-## Navigation and current checkpoint
+## Navigation and editing
 
 - real HESI world generation with live chunk streaming
 - orbit and dedicated no-clip fly cameras
@@ -70,7 +70,24 @@ available on Windows.
 - synchronized hierarchy and viewport selection, overlapping-hit cycling,
   selection bounds, `F`/Focus selected framing, and a detailed truthful
   identity/transform/world/rendering/collision/optimization inspector
+- Three.js TransformControls for move/rotate/scale with world/local space,
+  per-axis constraints, translation/rotation/scale snapping, and live inspector
+  feedback
+- numeric position/rotation/scale editing, reset, and copy/paste transforms
+- generated-instance-safe matrix overrides: editing one repeated lamp/support
+  leaves neighboring occurrences untouched; composite lamp parts move together
+- entity hide/show, lock/unlock, generated disable/restore, placed-object
+  delete/rename, isolate/exit, reveal all, copy ID, and reset overrides
+- reusable-asset-reference duplication into editor-owned placed objects; shared
+  geometry/material resources are never serialized into project state
+- compact command history with one entry per gizmo drag, clear Undo/Redo labels,
+  keyboard shortcuts, and an explicit saved/unsaved indicator
 - explicit demo adapter and safe real-world fallback state
+
+Editing shortcuts in Orbit mode are `W` move, `E` rotate, `R` scale, and `X`
+world/local. `Delete` disables a generated entity or deletes a placed object;
+`Ctrl+D` duplicates a supported reusable asset; `Ctrl+Z` undoes; and
+`Ctrl+Shift+Z` or `Ctrl+Y` redoes. Fly mode retains its navigation bindings.
 
 ## Tests
 
@@ -79,10 +96,11 @@ npm --prefix tools/hesi-editor test
 npm --prefix tools/hesi-editor run test:smoke
 ```
 
-The first command runs registry/adapter tests plus server and production
-isolation checks. The smoke command launches Chromium, verifies the default real
-world, fly/orbit switching, explicit demo mode, and disposal, then captures
-checkpoint evidence under `test/smoke/artifacts/`.
+The first command runs registry/adapter/edit-command/per-instance override tests
+plus server and production isolation checks. The smoke command launches
+Chromium, verifies the default real world, fly/orbit switching, real lamp
+editing, declarative asset duplication, undo/redo, explicit demo mode, and
+disposal, then captures checkpoint evidence under `test/smoke/artifacts/`.
 
 If Chromium is not installed for the editor-local Playwright version, run:
 
@@ -90,7 +108,6 @@ If Chromium is not installed for the editor-local Playwright version, run:
 npm --prefix tools/hesi-editor exec playwright install chromium
 ```
 
-The semantic registry, selection, inspector, editing, persistence, debug, and
-asset-placement systems are delivered in subsequent MVP checkpoints. The
-separate Asset & Tile Editor (modeling, UVs, textures, reusable road/tunnel
-modules) is intentionally out of scope here.
+Persistence/recovery, debug overlays, and asset-browser workflows are delivered
+in subsequent MVP checkpoints. The separate Asset & Tile Editor (modeling, UVs,
+textures, reusable road/tunnel modules) is intentionally out of scope here.

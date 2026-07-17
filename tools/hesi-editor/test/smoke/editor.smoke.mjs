@@ -48,7 +48,7 @@ try {
     entities: window.hesiEditor.registry.list().length,
     layers: window.hesiEditor.registry.layers(),
   }));
-  if (state.checkpoint !== 2 || state.strategy !== 'real' || !state.real) throw new Error(`Real adapter did not load: ${JSON.stringify(state)}`);
+  if (state.checkpoint !== 3 || state.strategy !== 'real' || !state.real) throw new Error(`Real adapter did not load: ${JSON.stringify(state)}`);
   if (state.routes < 60 || state.chunks < 1 || state.children < 1) throw new Error(`Real world inventory is incomplete: ${JSON.stringify(state)}`);
   if (state.entities < 10000 || state.layers.some((layer) => layer.count < 1)) throw new Error(`Semantic registry is incomplete: ${JSON.stringify(state)}`);
   if (!state.warning) throw new Error('Demo/fallback warning is visible in real mode');
@@ -73,7 +73,41 @@ try {
   if (await page.getByTestId('selected-entity-id').count()) throw new Error('Hidden selected entity remained selected');
   await page.locator('[data-layer="Lamps"]').check();
   await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
-  await page.screenshot({ path: path.join(OUT, 'checkpoint-2-real-lamp-selection.png'), fullPage: true });
+  const originalX = await page.getByRole('spinbutton', { name: 'Position X' }).inputValue();
+  await page.getByRole('spinbutton', { name: 'Position X' }).fill(String(Number(originalX) + 6));
+  await page.getByRole('button', { name: 'Apply numeric transform', exact: true }).click();
+  await page.waitForTimeout(300);
+  const transformed = await page.evaluate(() => ({
+    position: window.hesiEditor.selection.selected.object3D.position.toArray(),
+    override: window.hesiEditor.projectState.getOverride('lamp:wangan-0:0042'),
+    history: window.hesiEditor.history.state(),
+    gizmoAttached: Boolean(window.hesiEditor.transformManager.control.object),
+  }));
+  if (Math.abs(transformed.position[0] - (Number(originalX) + 6)) > 0.01 || !transformed.override?.transform) throw new Error(`Numeric transform was not stored: ${JSON.stringify(transformed)}`);
+  if (!transformed.history.canUndo || !transformed.gizmoAttached) throw new Error(`Transform controls/history are not live: ${JSON.stringify(transformed)}`);
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Disable generated', exact: true }).click();
+  if (!await page.evaluate(() => window.hesiEditor.selection.selected.metadata.disabled)) throw new Error('Generated lamp was not disabled non-destructively');
+  await page.getByRole('button', { name: 'Show / Restore', exact: true }).click();
+  await page.getByRole('button', { name: 'Duplicate reference', exact: true }).click();
+  const duplicated = await page.evaluate(() => {
+    const placed = window.hesiEditor.selection.selected;
+    const source = window.hesiEditor.registry.getById('lamp:wangan-0:0042');
+    const json = JSON.stringify(window.hesiEditor.projectState.toJSON());
+    return {
+      id: placed.id,
+      assetId: placed.assetId,
+      placedCount: window.hesiEditor.projectState.toJSON().placedObjects.length,
+      sharedGeometry: placed.object3D.children[0].geometry === source.metadata.instanceComponents[0].mesh.geometry,
+      declarative: !/geometry|vertices|attributes/.test(json),
+    };
+  });
+  if (!duplicated.id.startsWith('placed:') || duplicated.placedCount !== 1 || !duplicated.sharedGeometry || !duplicated.declarative) throw new Error(`Duplicate is not a declarative shared asset reference: ${JSON.stringify(duplicated)}`);
+  await page.keyboard.press('Control+Z');
+  if (await page.evaluate(() => window.hesiEditor.projectState.toJSON().placedObjects.length) !== 0) throw new Error('Undo did not remove duplicated placed object');
+  await page.keyboard.press('Control+Shift+Z');
+  await page.getByRole('button', { name: 'Focus selected', exact: true }).click();
+  await page.screenshot({ path: path.join(OUT, 'checkpoint-3-real-lamp-editing.png'), fullPage: true });
 
   const demo = await browser.newPage({ viewport: { width: 1100, height: 760 } });
   await demo.goto(`${BASE}/editor?world=demo`, { waitUntil: 'domcontentloaded' });
@@ -88,8 +122,8 @@ try {
   });
   if (disposed.entities !== 0 || disposed.canvasPresent) throw new Error('Editor disposal left live registry or canvas state');
   if (errors.length) throw new Error(`Browser console errors: ${errors.join(' | ')}`);
-  console.log(`PASS real map default (${state.entities} semantic entities), fly/orbit navigation, selection/filtering, explicit demo, disposal`);
-  console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-2-real-lamp-selection.png')}`);
+  console.log(`PASS real map default (${state.entities} semantic entities), fly/orbit, transform overrides, undo/redo, declarative duplication, explicit demo, disposal`);
+  console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-3-real-lamp-editing.png')}`);
 } finally {
   await browser?.close();
   child.kill();

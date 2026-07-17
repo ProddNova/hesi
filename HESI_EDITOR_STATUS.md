@@ -4,48 +4,54 @@ Date: 2026-07-17
 
 Branch: `kimi/hesi-world-editor-foundation`
 
-Checkpoint: **2 of 5 — real entity inspection complete**
+Checkpoint: **3 of 5 — interactive world editing complete**
 
 ## Delivered through this checkpoint
 
-- real map default, explicit demo/fallback, bounds/origin/conversion/inventory
-- no-clip fly + orbit navigation and real metadata-driven presets
-- 13,579 browser-discovered semantic records across all 14 required layers
-- authored route groups/routes/services/tunnel spans and analytic collision data
-- deterministic chunk/material road, marking, rail, barrier, building, sign,
-  prop, terrain, garage, and lighting entities
-- individually addressable generated lamps and structural supports, including
-  stable `lamp:wangan-0:0042`
-- deterministic structural/route-aware IDs; no random generated-core UUIDs
-- hierarchy search by ID/name/type, bounded expandable groups, layer counts,
-  visibility, locking, and explicit inspect-locked mode
-- hierarchy and viewport selection, raw-child/instance-to-semantic resolution,
-  overlap cycling, helper exclusion, selection bounds, focus, and synchronized
-  inspector/reveal
-- truthful detailed identity, transform, world/GPS, rendering, collision, and
-  optimization metadata
+- checkpoint 1 real-map loading/navigation and checkpoint 2 semantic discovery,
+  hierarchy, selection, and truthful inspection remain green
+- TransformControls move/rotate/scale with local/world space, axis constraints,
+  translation/rotation/scale snap, live feedback, and numeric transforms
+- stable per-instance generated overrides; a lamp's pole, lens, pool, and streak
+  move coherently without changing neighboring instances
+- hide/show, lock/unlock, generated disable/restore, placed delete/rename,
+  duplicate, isolate/exit, reveal all, reset overrides, copy ID, and transform
+  copy/paste actions
+- generated duplicates become editor-owned placed objects referencing reusable
+  asset IDs and sharing runtime geometry/materials
+- declarative in-memory project document contains transforms, visibility,
+  locking, names, and placed asset references—never triangle data
+- compact command history, one entry per gizmo drag, undo/redo toolbar labels,
+  keyboard shortcuts, redo-branch truncation, and saved/unsaved tracking
+- Orbit editing shortcuts do not steal W/E from Fly navigation
 
 ## Evidence
 
-- `npm --prefix tools/hesi-editor test`: 7 unit + 3 server tests pass
-- independent real `HighwayMap` build test compares every ID and layer count
-- real browser hierarchy selection: `lamp:wangan-0:0042`
-- real browser viewport selection: `road-surface:n14-n41-roadalt-chunk-14-41-roadalt-13`
-- real browser layer-hide test cleared selection and excluded the hidden layer
-- screenshot: `tools/hesi-editor/test/smoke/artifacts/checkpoint-2-real-lamp-selection.png`
-- in-app browser console warning/error audit: empty
+- `npm --prefix tools/hesi-editor test`: 13 unit + 3 server tests pass
+- generated-instance test moves one occurrence plus an alias component, proves a
+  neighboring occurrence is unchanged, and exercises disable/restore
+- asset test proves placed geometry is shared by reference and project JSON has
+  no geometry/material/vertex payload
+- real Chromium acceptance on stable `lamp:wangan-0:0042`: numeric move,
+  move/rotate/scale toolbar, local/world, snap, axes, disable/restore,
+  duplicate, delete/undo, lock/unlock, rename, copy/paste transform,
+  isolate/exit, and reveal all
+- real duplicate `placed:0001` appeared at the edited source occurrence plus a
+  2 m offset with `hesi:lamppost:concrete`
+- screenshot: `world-editor-mvp/checkpoint-3-real-lamp-editing.png`
 
 ## Truthful current limitations (next checkpoints)
 
-- route metadata and analytic collision rows are selectable in the hierarchy
-  but have no fake render object or visual bounds
-- merged generated systems are grouped at deterministic chunk/material level
-  because the runtime intentionally discards finer source geometry ownership
-- transforms, actions, undo/redo, persistence, debug overlays, and asset
-  placement remain mandatory next-checkpoint work
+- project state is intentionally in memory until checkpoint 4 adds validated
+  save/load, atomic disk writes, autosave, recovery, and recent-project UX
+- route metadata and analytic collision rows remain semantic-only because the
+  runtime exposes no honest render object for them
+- merged generated systems remain deterministic chunk/material batches when the
+  runtime discards finer source ownership
+- debug overlays and full asset-browser workflows remain checkpoint 5 work
 
 ## Exact next checkpoint
 
-Checkpoint 3: TransformControls, numeric transforms, hide/lock/disable/restore,
-duplicate/delete/rename/isolate/reset actions, reusable asset references, and
-compact command-based undo/redo.
+Checkpoint 4: versioned project schema/validation, save/open/save-as, atomic
+disk I/O, autosave and crash recovery, recent projects, reference repair, and
+round-trip tests against real stable IDs.

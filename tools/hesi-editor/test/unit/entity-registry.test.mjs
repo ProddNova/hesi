@@ -58,3 +58,13 @@ test('search filters by id, name, and type while layer locking remains explicit'
   assert.equal(registry.toggleLayerLocked('Lamps'), true);
   assert.equal(registry.isLayerLocked('Lamps'), true);
 });
+
+test('unregister supports undoable editor-owned entity lifecycles', () => {
+  const registry = createEntityRegistry();
+  const entity = registry.register(makeEntity('placed:0001', 'Props'));
+  assert.equal(registry.unregister(entity.id), entity);
+  assert.equal(registry.has(entity.id), false);
+  registry.register(entity);
+  assert.equal(registry.getById(entity.id).id, entity.id);
+  assert.equal(registry.getById(entity.id).object3D, entity.object3D);
+});

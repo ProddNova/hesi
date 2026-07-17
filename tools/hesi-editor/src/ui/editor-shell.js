@@ -37,6 +37,14 @@ export function createEditorShell(root) {
     button('Entire world', 'focus-world', { title: 'Frame the complete generated world' }),
     button('Focus selected', 'focus-selected', { title: 'Frame the selected semantic entity (F)' }),
     element('span', 'toolbar-divider'),
+    button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
+    button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
+    element('span', 'toolbar-divider'),
+    button('Move', 'transform-translate', { pressed: true, title: 'Translate selected (W in Orbit mode)' }),
+    button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected (E in Orbit mode)' }),
+    button('Scale', 'transform-scale', { pressed: false, title: 'Scale selected (R in Orbit mode)' }),
+    button('World', 'transform-space', { pressed: true, title: 'Toggle world/local transform space (X)' }),
+    element('span', 'toolbar-divider'),
     button('Orbit', 'nav-orbit', { pressed: true, title: 'Orbit around a target' }),
     button('Fly', 'nav-fly', { pressed: false, title: 'No-clip free-flight camera' }),
     element('span', 'toolbar-divider'),
@@ -54,7 +62,9 @@ export function createEditorShell(root) {
   toolbar.append(element('span', 'toolbar-spacer'), presetSelect);
   const adapterChip = element('span', 'adapter-chip', 'WORLD: LOADING');
   adapterChip.dataset.testid = 'world-mode';
-  toolbar.append(adapterChip);
+  const dirtyChip = element('span', 'dirty-chip', 'SAVED');
+  dirtyChip.dataset.testid = 'dirty-state';
+  toolbar.append(adapterChip, dirtyChip);
 
   const workspace = element('main', 'editor-workspace');
   const left = element('aside', 'panel panel-left');
@@ -102,10 +112,12 @@ export function createEditorShell(root) {
   const tabs = element('div', 'tabs');
   const worldTab = element('button', 'tab-button active', 'World');
   const controlsTab = element('button', 'tab-button', 'Controls');
-  worldTab.type = controlsTab.type = 'button';
+  const editTab = element('button', 'tab-button', 'Edit');
+  worldTab.type = controlsTab.type = editTab.type = 'button';
   worldTab.dataset.tab = 'world';
   controlsTab.dataset.tab = 'controls';
-  tabs.append(worldTab, controlsTab);
+  editTab.dataset.tab = 'edit';
+  tabs.append(worldTab, editTab, controlsTab);
   const bottomCaption = element('small', '', 'Loading metadata');
   bottomHeader.append(tabs, bottomCaption);
   const bottomContent = element('div', 'panel-content');
@@ -148,11 +160,82 @@ export function createEditorShell(root) {
   let selectedEntity = null;
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
+  let actionHandler = () => {};
+  let transformState = { mode: 'translate', space: 'world', axes: { x: true, y: true, z: true }, translateSnap: null, rotateSnapDegrees: null, scaleSnap: null, attached: false };
+  let historyState = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null, dirty: false };
   let currentTab = 'world';
+  const triggerAction = (action, detail = null) => actionHandler(action, detail);
+  const editButton = (label, action, title = '') => {
+    const node = button(label, action, { title });
+    node.addEventListener('click', () => triggerAction(action));
+    return node;
+  };
   const renderBottom = () => {
     worldTab.classList.toggle('active', currentTab === 'world');
     controlsTab.classList.toggle('active', currentTab === 'controls');
+    editTab.classList.toggle('active', currentTab === 'edit');
     bottomContent.innerHTML = '';
+    if (currentTab === 'edit') {
+      const panel = element('div', 'edit-panel');
+      const actions = element('div', 'edit-actions');
+      actions.append(
+        editButton(selectedEntity?.metadata?.disabled ? 'Show / Restore' : selectedEntity?.generated ? 'Disable generated' : 'Hide placed', 'toggle-visibility'),
+        editButton(selectedEntity?.metadata?.locked ? 'Unlock' : 'Lock', 'toggle-lock'),
+        editButton('Duplicate reference', 'duplicate'),
+        editButton(selectedEntity?.generated ? 'Disable (Delete)' : 'Delete placed', 'delete'),
+        editButton('Isolate', 'isolate'),
+        editButton('Exit isolate', 'exit-isolate'),
+        editButton('Reveal all', 'reveal-all'),
+        editButton('Reset overrides', 'reset-overrides'),
+        editButton('Copy transform', 'copy-transform'),
+        editButton('Paste transform', 'paste-transform'),
+        editButton('Copy ID', 'copy-id'),
+      );
+      const settings = element('div', 'edit-settings');
+      const makeNumber = (label, value, action) => {
+        const row = element('label', 'edit-setting');
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.step = 'any';
+        input.value = value ?? '';
+        input.placeholder = 'Off';
+        input.addEventListener('change', () => triggerAction(action, input.value === '' ? null : Number(input.value)));
+        row.append(element('span', '', label), input);
+        return row;
+      };
+      settings.append(
+        makeNumber('Move snap (m)', transformState.translateSnap, 'snap-translate'),
+        makeNumber('Rotate snap (°)', transformState.rotateSnapDegrees, 'snap-rotate'),
+        makeNumber('Scale snap', transformState.scaleSnap, 'snap-scale'),
+      );
+      const axesRow = element('div', 'axis-settings');
+      ['x', 'y', 'z'].forEach((axis) => {
+        const label = element('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = transformState.axes[axis];
+        input.addEventListener('change', () => triggerAction('axis-toggle', { axis, enabled: input.checked }));
+        label.append(input, document.createTextNode(axis.toUpperCase()));
+        axesRow.append(label);
+      });
+      settings.append(axesRow);
+      const renameRow = element('div', 'rename-row');
+      const renameInput = document.createElement('input');
+      renameInput.type = 'text';
+      renameInput.value = selectedEntity?.name || '';
+      renameInput.placeholder = 'Selected entity name';
+      const rename = button('Rename', 'rename');
+      rename.addEventListener('click', () => triggerAction('rename', renameInput.value));
+      renameRow.append(renameInput, rename);
+      settings.append(renameRow);
+      const summary = element('div', 'edit-summary', selectedEntity
+        ? `${selectedEntity.id} · ${selectedEntity.editable ? 'editable' : 'read-only'} · ${selectedEntity.assetId || 'no reusable asset'}`
+        : 'Select a world entity to edit. Generated changes are stored as overrides.');
+      panel.append(actions, settings, summary);
+      bottomContent.append(panel);
+      return;
+    }
     if (currentTab === 'controls') {
       const reference = element('div', 'control-reference');
       [
@@ -161,7 +244,9 @@ export function createEditorShell(root) {
         ['Speed', 'Mouse wheel · Slow / Normal / Fast · Shift boosts'],
         ['Orbit', 'Left drag rotate · right drag pan · wheel zoom'],
         ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world'],
-        ['Global', 'Home frames entire world · F will focus selection'],
+        ['Editing', 'W move · E rotate · R scale (Orbit) · X local/world · Delete · Ctrl+D'],
+        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo'],
+        ['Global', 'Home frames entire world · F focuses selection'],
       ].forEach(([key, value]) => {
         const card = element('div', 'asset-card');
         card.append(element('b', '', key), element('small', '', value));
@@ -228,6 +313,34 @@ export function createEditorShell(root) {
       property(transform, 'Scale', object ? transformText(object.scale.toArray()) : 'Unavailable');
       property(transform, 'Bounds', dimensions ? `${number(dimensions.x)} × ${number(dimensions.y)} × ${number(dimensions.z)} m` : 'Unavailable');
       property(transform, 'Override', metadata.hasOverride ? 'Yes' : 'No');
+      if (object && entity.editable) {
+        const numeric = element('div', 'numeric-transform');
+        const fields = {};
+        const addVector = (key, label, values, step) => {
+          const row = element('div', 'numeric-vector');
+          row.append(element('span', '', label));
+          fields[key] = [];
+          ['X', 'Y', 'Z'].forEach((axis, index) => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = step;
+            input.value = String(Number(values[index].toFixed(4)));
+            input.setAttribute('aria-label', `${label} ${axis}`);
+            fields[key].push(input);
+            row.append(input);
+          });
+          numeric.append(row);
+        };
+        addVector('position', 'Position', object.position.toArray(), '0.1');
+        addVector('rotationDegrees', 'Rotation °', object.rotation.toArray().slice(0, 3).map((value) => value * 180 / Math.PI), '1');
+        addVector('scale', 'Scale', object.scale.toArray(), '0.05');
+        const apply = button('Apply numeric transform', 'numeric-transform');
+        apply.addEventListener('click', () => triggerAction('numeric-transform', Object.fromEntries(
+          Object.entries(fields).map(([key, inputs]) => [key, inputs.map((input) => Number(input.value))]),
+        )));
+        numeric.append(apply);
+        transform.append(numeric);
+      }
 
       const world = element('section', 'inspector-section');
       world.append(element('h3', '', 'World information'));
@@ -381,8 +494,34 @@ export function createEditorShell(root) {
     onPreset(handler) { presetSelect.addEventListener('preset-selected', (event) => handler(event.detail)); },
     onEntitySelect(handler) { entitySelectHandler = handler; },
     onInspectLocked(handler) { inspectLockedHandler = handler; },
+    onAction(handler) { actionHandler = handler; },
     setToggle(action, pressed) {
       toolbar.querySelector(`[data-action="${action}"]`)?.setAttribute('aria-pressed', String(Boolean(pressed)));
+    },
+    setHistory(state) {
+      historyState = { ...historyState, ...state };
+      const undo = toolbar.querySelector('[data-action="undo"]');
+      const redo = toolbar.querySelector('[data-action="redo"]');
+      undo.disabled = !historyState.canUndo;
+      redo.disabled = !historyState.canRedo;
+      undo.textContent = 'Undo';
+      redo.textContent = 'Redo';
+      undo.title = historyState.undoLabel ? `Undo: ${historyState.undoLabel}` : 'Nothing to undo';
+      redo.title = historyState.redoLabel ? `Redo: ${historyState.redoLabel}` : 'Nothing to redo';
+      dirtyChip.textContent = historyState.dirty ? 'UNSAVED' : 'SAVED';
+      dirtyChip.classList.toggle('dirty', historyState.dirty);
+    },
+    setTransformState(state) {
+      transformState = { ...transformState, ...state, axes: { ...transformState.axes, ...(state.axes || {}) } };
+      for (const mode of ['translate', 'rotate', 'scale']) this.setToggle(`transform-${mode}`, transformState.mode === mode);
+      this.setToggle('transform-space', transformState.space === 'world');
+      const space = toolbar.querySelector('[data-action="transform-space"]');
+      if (space) space.textContent = transformState.space === 'world' ? 'World' : 'Local';
+      if (currentTab === 'edit') renderBottom();
+    },
+    setDirty(dirty) {
+      dirtyChip.textContent = dirty ? 'UNSAVED' : 'SAVED';
+      dirtyChip.classList.toggle('dirty', Boolean(dirty));
     },
     setLoading(show, message = 'Preparing viewport') {
       loadingOverlay.hidden = !show;
@@ -421,7 +560,9 @@ export function createEditorShell(root) {
       if (registryRef) renderRegistryImpl(registryRef);
       const selectedRow = entity ? entityTree.querySelector(`[data-entity-id="${CSS.escape(entity.id)}"]`) : null;
       selectedRow?.scrollIntoView?.({ block: 'nearest' });
+      if (currentTab === 'edit') renderBottom();
     },
+    refreshInspector() { renderInspector(); },
     setNavigation({ mode, speed, speedPreset, pointerLocked }) {
       viewportLabel.textContent = `${mode.toUpperCase()} · ${Math.round(speed)} M/S${pointerLocked ? ' · POINTER LOCKED' : ''}`;
       this.setToggle('nav-orbit', mode === 'orbit');

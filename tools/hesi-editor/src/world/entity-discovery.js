@@ -225,6 +225,7 @@ export function discoverHesiEntities(map) {
 
       for (let instanceIndex = 0; instanceIndex < object.count; instanceIndex += 1) {
         const proxy = makeInstanceProxy(object, instanceIndex, `${info.label} ${instanceIndex + 1}`);
+        const sourceWorldMatrix = instanceWorldMatrix(object, instanceIndex).toArray();
         const route = routeContext(map, proxy.position);
         const context = route.routeId || `chunk-${cid}`;
         const counterKey = `${info.kind}:${context}`;
@@ -240,6 +241,8 @@ export function discoverHesiEntities(map) {
             routeId: route.routeId, routeName: route.routeName, routeDistance: route.routeDistance,
             distanceFromRoute: route.worldDistance, chunk: chunk.key, instanceType: materialKey,
             instanceIndex, instanceMesh: object, static: true, instanced: true, instanceEligible: true,
+            sourceWorldMatrix,
+            instanceComponents: [{ mesh: object, instanceIndex, sourceWorldMatrix }],
             sourceKind: 'INSTANCE', collisionAvailable: false,
             render: objectRenderMetadata(object, { instance: true, repeatedAssetCount: object.count }),
             sourceTransform: sourceTransform(proxy),
@@ -254,6 +257,11 @@ export function discoverHesiEntities(map) {
       lampEntities.forEach((entity, instanceIndex) => {
         if (!entity) return;
         entity.visibilityObjects.push(mesh);
+        entity.metadata.instanceComponents.push({
+          mesh,
+          instanceIndex,
+          sourceWorldMatrix: instanceWorldMatrix(mesh, instanceIndex).toArray(),
+        });
         registerPick(pickIndex, mesh, entity, instanceIndex);
       });
     }
@@ -287,6 +295,12 @@ export function discoverHesiEntities(map) {
     }
     return null;
   };
+  const registerEditorEntity = (entity) => {
+    if (!entity?.object3D) return entity;
+    registerPick(pickIndex, entity.object3D, entity);
+    entity.object3D.traverse?.((child) => registerPick(pickIndex, child, entity));
+    return entity;
+  };
   const layerCounts = Object.fromEntries(entities.reduce((counts, entity) => counts.set(entity.layer, (counts.get(entity.layer) || 0) + 1), new Map()));
-  return { entities, resolveSelection, layerCounts, pickIndex };
+  return { entities, resolveSelection, registerEditorEntity, layerCounts, pickIndex };
 }
