@@ -20,7 +20,7 @@ export class FlyCameraController {
 
     this._onKeyDown = (event) => {
       if (!this.enabled || this.blocked || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight'].includes(event.code)) {
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight'].includes(event.code)) {
         this.keys.add(event.code);
         event.preventDefault();
       }
@@ -101,8 +101,8 @@ export class FlyCameraController {
     if (this.keys.has('KeyS')) this._move.sub(this._forward);
     if (this.keys.has('KeyD')) this._move.add(this._right);
     if (this.keys.has('KeyA')) this._move.sub(this._right);
-    if (this.keys.has('KeyE')) this._move.y += 1;
-    if (this.keys.has('KeyQ')) this._move.y -= 1;
+    if (this.keys.has('KeyE') || this.keys.has('Space')) this._move.y += 1;
+    if (this.keys.has('KeyQ') || this.keys.has('ControlLeft') || this.keys.has('ControlRight')) this._move.y -= 1;
     if (this._move.lengthSq()) {
       const boost = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') ? 4 : 1;
       this.camera.position.addScaledVector(this._move.normalize(), this.speed * boost * deltaSeconds);

@@ -69,10 +69,12 @@ try {
   await page.getByTestId('hierarchy-search').fill('lamp:wangan-0:0042');
   await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
   if (await page.getByTestId('selected-entity-id').textContent() !== 'lamp:wangan-0:0042') throw new Error('Hierarchy and inspector selection are not synchronized');
-  await page.getByRole('button', { name: 'Focus selected', exact: true }).click();
+  await page.getByRole('button', { name: 'Focus', exact: true }).click();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.locator('[data-layer="Lamps"]').uncheck();
   if (await page.getByTestId('selected-entity-id').count()) throw new Error('Hidden selected entity remained selected');
   await page.locator('[data-layer="Lamps"]').check();
+  await page.getByRole('button', { name: 'Hierarchy', exact: true }).click();
   await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
   const originalX = await page.getByRole('spinbutton', { name: 'Position X' }).inputValue();
   await page.getByRole('spinbutton', { name: 'Position X' }).fill(String(Number(originalX) + 6));
@@ -87,10 +89,10 @@ try {
   if (Math.abs(transformed.position[0] - (Number(originalX) + 6)) > 0.01 || !transformed.override?.transform) throw new Error(`Numeric transform was not stored: ${JSON.stringify(transformed)}`);
   if (!transformed.history.canUndo || !transformed.gizmoAttached) throw new Error(`Transform controls/history are not live: ${JSON.stringify(transformed)}`);
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
-  await page.getByRole('button', { name: 'Disable generated', exact: true }).click();
+  await page.getByRole('button', { name: 'Disable', exact: true }).click();
   if (!await page.evaluate(() => window.hesiEditor.selection.selected.metadata.disabled)) throw new Error('Generated lamp was not disabled non-destructively');
-  await page.getByRole('button', { name: 'Show / Restore', exact: true }).click();
-  await page.getByRole('button', { name: 'Duplicate reference', exact: true }).click();
+  await page.getByRole('button', { name: 'Re-enable', exact: true }).click();
+  await page.getByRole('button', { name: 'Duplicate', exact: true }).click();
   const duplicated = await page.evaluate(() => {
     const placed = window.hesiEditor.selection.selected;
     const source = window.hesiEditor.registry.getById('lamp:wangan-0:0042');
@@ -107,7 +109,7 @@ try {
   await page.keyboard.press('Control+Z');
   if (await page.evaluate(() => window.hesiEditor.projectState.toJSON().placedObjects.length) !== 0) throw new Error('Undo did not remove duplicated placed object');
   await page.keyboard.press('Control+Shift+Z');
-  await page.getByRole('button', { name: 'Focus selected', exact: true }).click();
+  await page.getByRole('button', { name: 'Focus', exact: true }).click();
   await page.screenshot({ path: path.join(OUT, 'checkpoint-3-real-lamp-editing.png'), fullPage: true });
   await page.locator('[data-action="save-project"]').click();
   await page.waitForFunction(() => window.hesiEditor.history.dirty === false);

@@ -77,24 +77,44 @@ export class EditActions {
       applyEntityTransform(placed, transform);
       placed.metadata.initialTransform = clone(transform);
     }
+    return this._addPlacedEntity(placed, `Duplicate ${source.name}`,
+      `Created ${placed.name} as ${placed.id} · shared asset ${placed.assetId}`);
+  }
+
+  placeAsset(assetId, position) {
+    const sourceId = this.assetRegistry.sourceEntityId(assetId);
+    const source = sourceId ? this.registry.getById(sourceId) : assetId;
+    if (!source) return this._status(`Asset source is unavailable: ${assetId}`);
+    let placed;
+    try {
+      placed = this.assetRegistry.createPlacedEntity(source, { position });
+    } catch (error) {
+      return this._status(`Cannot place asset: ${error.message}`);
+    }
+    const label = this.assetRegistry.get(assetId)?.label || placed.name;
+    return this._addPlacedEntity(placed, `Place ${label}`,
+      `Placed ${placed.name} at ${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}`);
+  }
+
+  _addPlacedEntity(placed, commandLabel, doneMessage) {
     const record = this.assetRegistry.recordFor(placed);
     const add = () => {
       if (!placed.object3D.parent) this.adapter.editorObjectsGroup.add(placed.object3D);
       if (!this.registry.has(placed.id)) this.registry.register(placed);
       this.adapter.registerEditorEntity(placed);
       if (!this.projectState.getPlaced(placed.id)) this.projectState.addPlaced(record);
-      this.selection.select(placed, { source: 'duplicate' });
+      this.selection.select(placed, { source: 'place' });
       this.onChange(placed);
     };
     const remove = () => {
-      if (this.selection.selected?.id === placed.id) this.selection.clear('undo-duplicate');
+      if (this.selection.selected?.id === placed.id) this.selection.clear('undo-place');
       this.registry.unregister(placed.id);
       placed.object3D.removeFromParent();
       this.projectState.removePlaced(placed.id);
       this.onChange(null);
     };
-    this.history.execute({ label: `Duplicate ${source.name}`, redo: add, undo: remove });
-    this._status(`Created ${placed.name} as ${placed.id} · shared asset ${placed.assetId}`);
+    this.history.execute({ label: commandLabel, redo: add, undo: remove });
+    this._status(doneMessage);
     return placed;
   }
 

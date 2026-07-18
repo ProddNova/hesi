@@ -104,7 +104,17 @@ const server = createServer(async (req, res) => {
     if (path === PROJECT_ENDPOINT) {
       if (req.method === 'GET' || req.method === 'HEAD') {
         const target = projectFile(requestUrl.searchParams.get('path'));
-        const text = await readFile(target.file, 'utf8');
+        let text;
+        try {
+          text = await readFile(target.file, 'utf8');
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          // "No project saved yet" is a normal state, not an error: answer 204 so
+          // the browser does not log a console error for a routine startup probe.
+          res.writeHead(204);
+          res.end();
+          return;
+        }
         const details = await stat(target.file);
         const document = parseProjectDocument(text);
         sendJson(res, 200, { ok: true, path: target.normalized, modifiedMs: details.mtimeMs, document }, req.method);

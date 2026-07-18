@@ -117,7 +117,7 @@ export class ProjectPersistence {
   async read(path) {
     const normalized = normalizeProjectPath(path);
     const response = await fetch(`/__hesi_editor_project?path=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
-    if (response.status === 404) return null;
+    if (response.status === 404 || response.status === 204) return null;
     return responseJson(response);
   }
 
@@ -168,7 +168,7 @@ export class ProjectPersistence {
       }
       for (const placed of document.placedObjects) {
         const sourceId = this.assetRegistry.sourceEntityId(placed.assetId);
-        const source = this.registry.getById(sourceId);
+        const source = sourceId ? this.registry.getById(sourceId) : placed.assetId;
         if (!source) throw new Error(`Reusable asset source is unavailable: ${placed.assetId}`);
         const entity = this.assetRegistry.createPlacedEntity(source, { id: placed.id, name: placed.name || placed.id });
         const transform = toInternalTransform(placed.transform);

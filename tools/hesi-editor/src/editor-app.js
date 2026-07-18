@@ -6,6 +6,8 @@ import { SelectionManager } from './interaction/selection-manager.js';
 import { CommandHistory } from './interaction/command-history.js';
 import { TransformManager } from './interaction/transform-manager.js';
 import { EditActions } from './interaction/edit-actions.js';
+import { PlacementController } from './interaction/placement-controller.js';
+import { CollisionOverlay } from './debug/collision-overlay.js';
 import { WorldProjectState } from './overrides/world-project-state.js';
 import { AssetRegistry } from './world/asset-registry.js';
 import { ProjectPersistence } from './overrides/project-persistence.js';
@@ -26,9 +28,10 @@ export async function createEditorApp(root) {
   let editActions = null;
   let assetRegistry = null;
   let persistence = null;
+  let placement = null;
   let disposed = false;
-  let gridVisible = true;
-  let axesVisible = false;
+  const collisionOverlay = new CollisionOverlay({ viewport });
+  const viewFlags = { grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
   const projectState = new WorldProjectState();
   const history = new CommandHistory({ onChange: (state) => shell.setHistory(state) });
   const runProjectTask = (task) => Promise.resolve().then(task).catch((error) => {
@@ -36,6 +39,8 @@ export async function createEditorApp(root) {
     shell.showError(error, 'Project operation failed');
     return null;
   });
+  const syncViewState = () => shell.setViewState({ ...viewport.viewState(), ...viewFlags });
+  syncViewState();
 
   const applyPreset = (id) => {
     const preset = adapter?.getPreset(id);
@@ -51,13 +56,14 @@ export async function createEditorApp(root) {
 
   let unsubscribeRegistry = () => {};
   shell.renderRegistry(registry);
-  shell.onToolbar('reset-camera', () => applyPreset('initial-spawn'));
-  shell.onToolbar('focus-world', () => applyPreset('entire-world'));
   shell.onToolbar('focus-selected', () => selection?.focusSelected());
   shell.onToolbar('undo', () => history.undo());
   shell.onToolbar('redo', () => history.redo());
   shell.onToolbar('save-project', () => persistence && runProjectTask(() => persistence.save()));
-  shell.onToolbar('show-project', () => shell.showTab('project'));
+  shell.onToolbar('add-object', () => {
+    shell.showTab('assets');
+    shell.setStatus('Choose an asset below, then click a surface in the world to place it · Esc cancels');
+  });
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));
@@ -67,20 +73,37 @@ export async function createEditorApp(root) {
   for (const speed of ['slow', 'normal', 'fast']) {
     shell.onToolbar(`speed-${speed}`, () => viewport.setFlySpeedPreset(speed));
   }
-  shell.onToolbar('toggle-grid', () => {
-    gridVisible = !gridVisible;
-    viewport.setGridVisible(gridVisible);
-    shell.setToggle('toggle-grid', gridVisible);
-  });
-  shell.onToolbar('toggle-axes', () => {
-    axesVisible = !axesVisible;
-    viewport.setAxesVisible(axesVisible);
-    shell.setToggle('toggle-axes', axesVisible);
-  });
   shell.onPreset(applyPreset);
   shell.onEntitySelect((id) => selection?.select(id, { source: 'hierarchy' }));
   shell.onInspectLocked((enabled) => selection?.setInspectLocked(enabled));
   shell.onAction((action, detail) => {
+    const viewActions = {
+      'lighting-mode': () => {
+        viewport.setLightingMode(detail);
+        shell.setStatus(detail === 'game' ? 'Game lighting (night)' : 'Inspection lighting (editor only)');
+        syncViewState();
+      },
+      exposure: () => { viewport.setExposure(detail); syncViewState(); },
+      'fog-full': () => { viewport.setFogFull(detail); syncViewState(); },
+      'toggle-grid': () => { viewFlags.grid = Boolean(detail); viewport.setGridVisible(viewFlags.grid); syncViewState(); },
+      'toggle-axes': () => { viewFlags.axes = Boolean(detail); viewport.setAxesVisible(viewFlags.axes); syncViewState(); },
+      'debug-bounds': () => { viewFlags.debugBounds = Boolean(detail); selection?.setDebugOptions({ bounds: viewFlags.debugBounds }); syncViewState(); },
+      'debug-pivot': () => { viewFlags.debugPivot = Boolean(detail); selection?.setDebugOptions({ pivot: viewFlags.debugPivot }); syncViewState(); },
+      'debug-collision': () => {
+        const wanted = Boolean(detail);
+        const applied = collisionOverlay.setVisible(wanted, adapter);
+        viewFlags.debugCollision = applied && wanted;
+        if (wanted && !applied) shell.setStatus('Collision walls are available only with the real world loaded');
+        else shell.setStatus(wanted ? 'Collision walls overlay on (debug)' : 'Collision walls overlay off');
+        syncViewState();
+      },
+      'place-asset': () => {
+        if (!placement || !assetRegistry) return;
+        const entry = assetRegistry.catalog().find((item) => item.id === detail);
+        placement.begin(detail, entry?.label || detail);
+      },
+    };
+    if (viewActions[action]) { viewActions[action](); return; }
     if (!editActions || !transformManager) return;
     const actions = {
       'toggle-visibility': () => editActions.toggleVisibility(),
@@ -121,6 +144,14 @@ export async function createEditorApp(root) {
     if (commandKey && event.code === 'KeyY') { event.preventDefault(); history.redo(); return; }
     if (commandKey && event.code === 'KeyS') { event.preventDefault(); if (persistence) runProjectTask(() => persistence.save()); return; }
     if (commandKey && event.code === 'KeyD') { event.preventDefault(); editActions?.duplicate(); return; }
+    if (event.code === 'KeyL' && !commandKey) {
+      event.preventDefault();
+      const next = viewport.viewState().lightingMode === 'inspection' ? 'game' : 'inspection';
+      viewport.setLightingMode(next);
+      shell.setStatus(next === 'game' ? 'Game lighting (night)' : 'Inspection lighting (editor only)');
+      syncViewState();
+      return;
+    }
     if (event.code === 'Delete') { event.preventDefault(); editActions?.deleteSelected(); return; }
     if (event.code === 'KeyX') {
       event.preventDefault();
@@ -187,6 +218,13 @@ export async function createEditorApp(root) {
       },
       onStatus: (message) => shell.setStatus(message),
     });
+    placement = new PlacementController({
+      viewport, adapter, editActions, transformManager,
+      onChange: (active, label) => shell.setPlacement(active, label),
+      onStatus: (message) => shell.setStatus(message),
+    });
+    shell.setAssets(assetRegistry.catalog());
+    syncViewState();
     persistence = new ProjectPersistence({
       projectState, registry, assetRegistry, adapter, selection, transformManager, history,
       onStatus: (message) => shell.setStatus(message),
@@ -218,6 +256,8 @@ export async function createEditorApp(root) {
     disposed = true;
     window.removeEventListener('keydown', onKeyDown);
     unsubscribeRegistry();
+    placement?.dispose();
+    collisionOverlay.dispose();
     editActions?.exitIsolation();
     persistence?.dispose();
     transformManager?.dispose();
@@ -242,6 +282,7 @@ export async function createEditorApp(root) {
     get assetRegistry() { return assetRegistry; },
     get persistence() { return persistence; },
     get selection() { return selection; },
+    get placement() { return placement; },
     get adapter() { return adapter; },
     applyPreset,
     showError(message) { shell.showError(message instanceof Error ? message : new Error(String(message))); },

@@ -22,6 +22,15 @@ function property(section, label, value, testid = '') {
   section.append(row);
 }
 
+function inspectorSection(title, open = false) {
+  const details = element('details', 'inspector-section');
+  if (open) details.open = true;
+  details.append(element('summary', '', title));
+  const body = element('div', 'inspector-section-body');
+  details.append(body);
+  return { details, body };
+}
+
 const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : 'Unavailable';
 
 export function createEditorShell(root) {
@@ -29,39 +38,116 @@ export function createEditorShell(root) {
   const shell = element('div', 'editor-shell');
   const toolbar = element('header', 'toolbar');
   const brand = element('div', 'brand');
-  brand.append(element('strong', '', 'HESI // WORLD EDITOR'), element('span', '', 'Real-map MVP'));
+  brand.append(element('strong', '', 'HESI // WORLD EDITOR'));
   toolbar.append(
     brand,
+    button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
     element('span', 'toolbar-divider'),
-    button('Start view', 'reset-camera', { title: 'Return to the initial real-world preset' }),
-    button('Entire world', 'focus-world', { title: 'Frame the complete generated world' }),
-    button('Focus selected', 'focus-selected', { title: 'Frame the selected semantic entity (F)' }),
+    button('Move', 'transform-translate', { pressed: true, title: 'Move selected object (W)' }),
+    button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected object (E)' }),
+    button('Scale', 'transform-scale', { pressed: false, title: 'Scale selected object (R)' }),
+    button('World', 'transform-space', { pressed: true, title: 'Toggle world/local gizmo space (X)' }),
     element('span', 'toolbar-divider'),
     button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
     button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
     button('Save', 'save-project', { title: 'Save the current project to disk (Ctrl+S)' }),
-    button('Project', 'show-project', { title: 'Open project save/load controls' }),
     element('span', 'toolbar-divider'),
-    button('Move', 'transform-translate', { pressed: true, title: 'Translate selected (W in Orbit mode)' }),
-    button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected (E in Orbit mode)' }),
-    button('Scale', 'transform-scale', { pressed: false, title: 'Scale selected (R in Orbit mode)' }),
-    button('World', 'transform-space', { pressed: true, title: 'Toggle world/local transform space (X)' }),
-    element('span', 'toolbar-divider'),
-    button('Orbit', 'nav-orbit', { pressed: true, title: 'Orbit around a target' }),
-    button('Fly', 'nav-fly', { pressed: false, title: 'No-clip free-flight camera' }),
-    element('span', 'toolbar-divider'),
-    button('Slow', 'speed-slow', { pressed: false }),
-    button('Normal', 'speed-normal', { pressed: true }),
-    button('Fast', 'speed-fast', { pressed: false }),
-    element('span', 'toolbar-divider'),
-    button('Grid', 'toggle-grid', { pressed: true }),
-    button('Axes', 'toggle-axes', { pressed: false }),
+    button('Focus', 'focus-selected', { title: 'Frame the selected object (F)' }),
   );
+  toolbar.querySelector('[data-action="add-object"]').classList.add('primary');
   const presetSelect = document.createElement('select');
   presetSelect.className = 'preset-select';
-  presetSelect.title = 'Camera navigation presets';
+  presetSelect.title = 'Camera location presets';
   presetSelect.setAttribute('aria-label', 'Camera preset');
-  toolbar.append(element('span', 'toolbar-spacer'), presetSelect);
+  toolbar.append(presetSelect, element('span', 'toolbar-divider'));
+  toolbar.append(
+    button('Orbit', 'nav-orbit', { pressed: true, title: 'Orbit around a target' }),
+    button('Fly', 'nav-fly', { pressed: false, title: 'No-clip free-flight camera' }),
+  );
+  const speedGroup = element('span', 'nav-speeds');
+  speedGroup.hidden = true;
+  speedGroup.append(
+    button('Slow', 'speed-slow', { pressed: false, title: 'Fly speed: slow' }),
+    button('Normal', 'speed-normal', { pressed: true, title: 'Fly speed: normal' }),
+    button('Fast', 'speed-fast', { pressed: false, title: 'Fly speed: fast' }),
+  );
+  toolbar.append(speedGroup, element('span', 'toolbar-divider'));
+
+  const viewButton = element('button', 'tool-button', 'View ▾');
+  viewButton.type = 'button';
+  viewButton.dataset.action = 'view-menu';
+  viewButton.title = 'Lighting, helpers, and debug tools';
+  viewButton.setAttribute('aria-expanded', 'false');
+  toolbar.append(viewButton);
+
+  const viewState = { lightingMode: 'inspection', exposure: 1.45, fogFull: false, grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
+  const viewMenu = element('div', 'view-menu');
+  viewMenu.hidden = true;
+  const viewRow = (label, control) => {
+    const row = element('label', 'view-row');
+    row.append(element('span', '', label), control);
+    viewMenu.append(row);
+    return control;
+  };
+  const lightingWrap = element('div', 'segmented');
+  const lightingInspection = element('button', 'seg-button', 'Inspection');
+  const lightingGame = element('button', 'seg-button', 'Game');
+  for (const seg of [lightingInspection, lightingGame]) {
+    seg.type = 'button';
+    seg.setAttribute('role', 'radio');
+    lightingWrap.append(seg);
+  }
+  lightingInspection.title = 'Bright neutral editor lighting (L)';
+  lightingGame.title = 'Original night game lighting (L)';
+  viewMenu.append(element('div', 'view-caption', 'Lighting'));
+  viewMenu.append(lightingWrap);
+  const exposure = document.createElement('input');
+  exposure.type = 'range';
+  exposure.min = '0.5';
+  exposure.max = '2.2';
+  exposure.step = '0.05';
+  exposure.dataset.testid = 'exposure-slider';
+  viewRow('Exposure', exposure);
+  const fogFull = document.createElement('input');
+  fogFull.type = 'checkbox';
+  fogFull.dataset.testid = 'fog-toggle';
+  viewRow('Full night fog', fogFull);
+  viewMenu.append(element('div', 'view-caption', 'Helpers'));
+  const gridToggle = document.createElement('input');
+  gridToggle.type = 'checkbox';
+  gridToggle.dataset.testid = 'grid-toggle';
+  viewRow('Grid', gridToggle);
+  const axesToggle = document.createElement('input');
+  axesToggle.type = 'checkbox';
+  viewRow('Origin axes', axesToggle);
+  viewMenu.append(element('div', 'view-caption', 'Debug tools'));
+  const debugBounds = document.createElement('input');
+  debugBounds.type = 'checkbox';
+  debugBounds.dataset.testid = 'debug-bounds';
+  viewRow('Selection bounds box', debugBounds);
+  const debugPivot = document.createElement('input');
+  debugPivot.type = 'checkbox';
+  debugPivot.dataset.testid = 'debug-pivot';
+  viewRow('Selection pivot', debugPivot);
+  const debugCollision = document.createElement('input');
+  debugCollision.type = 'checkbox';
+  debugCollision.dataset.testid = 'debug-collision';
+  viewRow('Collision walls', debugCollision);
+  toolbar.append(viewMenu);
+
+  const syncViewMenu = () => {
+    lightingInspection.setAttribute('aria-checked', String(viewState.lightingMode === 'inspection'));
+    lightingGame.setAttribute('aria-checked', String(viewState.lightingMode === 'game'));
+    exposure.value = String(viewState.exposure);
+    fogFull.checked = viewState.fogFull;
+    gridToggle.checked = viewState.grid;
+    axesToggle.checked = viewState.axes;
+    debugBounds.checked = viewState.debugBounds;
+    debugPivot.checked = viewState.debugPivot;
+    debugCollision.checked = viewState.debugCollision;
+  };
+
+  toolbar.append(element('span', 'toolbar-spacer'));
   const adapterChip = element('span', 'adapter-chip', 'WORLD: LOADING');
   adapterChip.dataset.testid = 'world-mode';
   const dirtyChip = element('span', 'dirty-chip', 'SAVED');
@@ -71,10 +157,15 @@ export function createEditorShell(root) {
   const workspace = element('main', 'editor-workspace');
   const left = element('aside', 'panel panel-left');
   const leftHeader = element('div', 'panel-header');
-  leftHeader.append(element('h2', '', 'Hierarchy / Layers'));
+  leftHeader.append(element('h2', '', 'Scene'));
   const entityCount = element('small', '', '0 entities');
   leftHeader.append(entityCount);
-  const hierarchyContent = element('div', 'panel-content');
+  const sceneTabs = element('div', 'scene-tabs');
+  const hierarchyTab = element('button', 'scene-tab active', 'Hierarchy');
+  const layersTab = element('button', 'scene-tab', 'Layers');
+  hierarchyTab.type = layersTab.type = 'button';
+  sceneTabs.append(hierarchyTab, layersTab);
+  const hierarchyPane = element('div', 'panel-content hierarchy-pane');
   const hierarchyTools = element('div', 'hierarchy-tools');
   const hierarchySearch = document.createElement('input');
   hierarchySearch.type = 'search';
@@ -86,10 +177,20 @@ export function createEditorShell(root) {
   inspectLocked.type = 'checkbox';
   inspectLockedLabel.append(inspectLocked, element('span', '', 'Inspect locked'));
   hierarchyTools.append(hierarchySearch, inspectLockedLabel);
-  const layerContent = element('div', 'layer-content');
   const entityTree = element('div', 'entity-tree');
-  hierarchyContent.append(hierarchyTools, layerContent, entityTree);
-  left.append(leftHeader, hierarchyContent);
+  hierarchyPane.append(hierarchyTools, entityTree);
+  const layersPane = element('div', 'panel-content layers-pane');
+  layersPane.hidden = true;
+  const layerContent = element('div', 'layer-content');
+  layersPane.append(layerContent);
+  sceneTabs.addEventListener('click', (event) => {
+    const showLayers = event.target === layersTab;
+    hierarchyTab.classList.toggle('active', !showLayers);
+    layersTab.classList.toggle('active', showLayers);
+    hierarchyPane.hidden = showLayers;
+    layersPane.hidden = !showLayers;
+  });
+  left.append(leftHeader, sceneTabs, hierarchyPane, layersPane);
 
   const viewportWrap = element('section', 'viewport-wrap');
   const viewportHost = element('div', 'viewport-host');
@@ -102,12 +203,15 @@ export function createEditorShell(root) {
   const projectNotice = element('div', 'project-notice');
   projectNotice.hidden = true;
   projectNotice.dataset.testid = 'project-notice';
-  viewportWrap.append(viewportHost, viewportLabel, worldWarning, projectNotice);
+  const placementHint = element('div', 'placement-hint');
+  placementHint.hidden = true;
+  placementHint.dataset.testid = 'placement-hint';
+  viewportWrap.append(viewportHost, viewportLabel, worldWarning, projectNotice, placementHint);
 
   const right = element('aside', 'panel panel-right');
   const rightHeader = element('div', 'panel-header');
-  const inspectorTitle = element('h2', '', 'World Inspector');
-  const inspectorCaption = element('small', '', 'Live metadata');
+  const inspectorTitle = element('h2', '', 'Inspector');
+  const inspectorCaption = element('small', '', 'Nothing selected');
   rightHeader.append(inspectorTitle, inspectorCaption);
   const inspectorContent = element('div', 'panel-content');
   right.append(rightHeader, inspectorContent);
@@ -115,16 +219,18 @@ export function createEditorShell(root) {
   const bottom = element('section', 'panel panel-bottom');
   const bottomHeader = element('div', 'panel-header');
   const tabs = element('div', 'tabs');
-  const worldTab = element('button', 'tab-button active', 'World');
-  const controlsTab = element('button', 'tab-button', 'Controls');
+  const assetsTab = element('button', 'tab-button active', 'Assets');
   const editTab = element('button', 'tab-button', 'Edit');
   const projectTab = element('button', 'tab-button', 'Project');
-  worldTab.type = controlsTab.type = editTab.type = projectTab.type = 'button';
-  worldTab.dataset.tab = 'world';
-  controlsTab.dataset.tab = 'controls';
+  const worldTab = element('button', 'tab-button', 'World');
+  const helpTab = element('button', 'tab-button', 'Help');
+  assetsTab.type = editTab.type = projectTab.type = worldTab.type = helpTab.type = 'button';
+  assetsTab.dataset.tab = 'assets';
   editTab.dataset.tab = 'edit';
   projectTab.dataset.tab = 'project';
-  tabs.append(worldTab, editTab, projectTab, controlsTab);
+  worldTab.dataset.tab = 'world';
+  helpTab.dataset.tab = 'help';
+  tabs.append(assetsTab, editTab, projectTab, worldTab, helpTab);
   const bottomCaption = element('small', '', 'Loading metadata');
   bottomHeader.append(tabs, bottomCaption);
   const bottomContent = element('div', 'panel-content');
@@ -165,25 +271,71 @@ export function createEditorShell(root) {
   let adapter = null;
   let registryRef = null;
   let selectedEntity = null;
+  let assetEntries = [];
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
   let actionHandler = () => {};
   let transformState = { mode: 'translate', space: 'world', axes: { x: true, y: true, z: true }, translateSnap: null, rotateSnapDegrees: null, scaleSnap: null, attached: false };
   let historyState = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null, dirty: false };
   let projectInfo = { name: 'HESI Main World', path: 'data/editor/hesi-world-project.json', recent: [], autosavePath: '' };
-  let currentTab = 'world';
+  let currentTab = 'assets';
   const triggerAction = (action, detail = null) => actionHandler(action, detail);
   const editButton = (label, action, title = '') => {
     const node = button(label, action, { title });
     node.addEventListener('click', () => triggerAction(action));
     return node;
   };
+
+  lightingInspection.addEventListener('click', () => triggerAction('lighting-mode', 'inspection'));
+  lightingGame.addEventListener('click', () => triggerAction('lighting-mode', 'game'));
+  exposure.addEventListener('input', () => triggerAction('exposure', Number(exposure.value)));
+  fogFull.addEventListener('change', () => triggerAction('fog-full', fogFull.checked));
+  gridToggle.addEventListener('change', () => triggerAction('toggle-grid', gridToggle.checked));
+  axesToggle.addEventListener('change', () => triggerAction('toggle-axes', axesToggle.checked));
+  debugBounds.addEventListener('change', () => triggerAction('debug-bounds', debugBounds.checked));
+  debugPivot.addEventListener('change', () => triggerAction('debug-pivot', debugPivot.checked));
+  debugCollision.addEventListener('change', () => triggerAction('debug-collision', debugCollision.checked));
+  const closeViewMenu = () => { viewMenu.hidden = true; viewButton.setAttribute('aria-expanded', 'false'); };
+  viewButton.addEventListener('click', () => {
+    viewMenu.hidden = !viewMenu.hidden;
+    viewButton.setAttribute('aria-expanded', String(!viewMenu.hidden));
+  });
+  window.addEventListener('pointerdown', (event) => {
+    if (!viewMenu.hidden && !viewMenu.contains(event.target) && event.target !== viewButton) closeViewMenu();
+  });
+
+  const renderAssets = () => {
+    const panel = element('div', 'assets-panel');
+    panel.append(element('p', 'assets-hint', 'Pick an asset, then click a surface in the world to place it. Escape cancels placement.'));
+    const grid = element('div', 'asset-grid');
+    for (const entry of assetEntries) {
+      const card = element('div', 'asset-card');
+      card.append(element('b', '', entry.label), element('small', '', entry.description));
+      const footer = element('div', 'asset-card-footer');
+      footer.append(element('span', `asset-kind ${entry.kind}`, entry.kind === 'primitive' ? 'Primitive' : 'World asset'));
+      const place = button('Place', 'place-asset', { title: `Place a new ${entry.label}` });
+      place.dataset.testid = `place-${entry.id}`;
+      place.addEventListener('click', () => triggerAction('place-asset', entry.id));
+      footer.append(place);
+      card.append(footer);
+      grid.append(card);
+    }
+    if (!assetEntries.length) grid.append(element('p', 'assets-empty', 'Assets are available once the world has loaded.'));
+    panel.append(grid);
+    return panel;
+  };
+
   const renderBottom = () => {
-    worldTab.classList.toggle('active', currentTab === 'world');
-    controlsTab.classList.toggle('active', currentTab === 'controls');
+    assetsTab.classList.toggle('active', currentTab === 'assets');
     editTab.classList.toggle('active', currentTab === 'edit');
     projectTab.classList.toggle('active', currentTab === 'project');
+    worldTab.classList.toggle('active', currentTab === 'world');
+    helpTab.classList.toggle('active', currentTab === 'help');
     bottomContent.innerHTML = '';
+    if (currentTab === 'assets') {
+      bottomContent.append(renderAssets());
+      return;
+    }
     if (currentTab === 'project') {
       const panel = element('div', 'project-panel');
       const fields = element('div', 'project-fields');
@@ -235,19 +387,43 @@ export function createEditorShell(root) {
     }
     if (currentTab === 'edit') {
       const panel = element('div', 'edit-panel');
-      const actions = element('div', 'edit-actions');
-      actions.append(
-        editButton(selectedEntity?.metadata?.disabled ? 'Show / Restore' : selectedEntity?.generated ? 'Disable generated' : 'Hide placed', 'toggle-visibility'),
-        editButton(selectedEntity?.metadata?.locked ? 'Unlock' : 'Lock', 'toggle-lock'),
-        editButton('Duplicate reference', 'duplicate'),
-        editButton(selectedEntity?.generated ? 'Disable (Delete)' : 'Delete placed', 'delete'),
-        editButton('Isolate', 'isolate'),
+      const group = (title) => {
+        const fieldset = element('fieldset', 'edit-group');
+        fieldset.append(element('legend', '', title));
+        return fieldset;
+      };
+      const selectionGroup = group('Selection');
+      const generated = selectedEntity?.generated;
+      const disabled = selectedEntity?.metadata?.disabled;
+      const hidden = !selectedEntity?.object3D?.visible;
+      selectionGroup.append(
+        editButton(generated ? (disabled ? 'Re-enable' : 'Disable') : (hidden ? 'Show' : 'Hide'), 'toggle-visibility',
+          generated ? 'Disable/restore this generated object (non-destructive)' : 'Hide/show this placed object'),
+        editButton(selectedEntity?.metadata?.locked ? 'Unlock' : 'Lock', 'toggle-lock', 'Prevent or allow selection and edits'),
+        editButton('Duplicate', 'duplicate', 'Duplicate this asset as a new placed object (Ctrl+D)'),
+        editButton('Delete', 'delete', generated ? 'Disable this generated object (Del)' : 'Remove this placed object (Del)'),
+      );
+      const renameRow = element('div', 'rename-row');
+      const renameInput = document.createElement('input');
+      renameInput.type = 'text';
+      renameInput.value = selectedEntity?.name || '';
+      renameInput.placeholder = 'Selected object name';
+      renameInput.setAttribute('aria-label', 'Selected object name');
+      const rename = button('Rename', 'rename');
+      rename.addEventListener('click', () => triggerAction('rename', renameInput.value));
+      renameRow.append(renameInput, rename);
+      selectionGroup.append(renameRow);
+      const viewGroup = group('View');
+      viewGroup.append(
+        editButton('Isolate', 'isolate', 'Hide everything except the selected object'),
         editButton('Exit isolate', 'exit-isolate'),
-        editButton('Reveal all', 'reveal-all'),
-        editButton('Reset overrides', 'reset-overrides'),
+        editButton('Reveal all', 'reveal-all', 'Show all layers and re-enable hidden objects'),
+        editButton('Copy ID', 'copy-id'),
+      );
+      const transformGroup = group('Transform');
+      transformGroup.append(
         editButton('Copy transform', 'copy-transform'),
         editButton('Paste transform', 'paste-transform'),
-        editButton('Copy ID', 'copy-id'),
       );
       const settings = element('div', 'edit-settings');
       const makeNumber = (label, value, action) => {
@@ -268,6 +444,7 @@ export function createEditorShell(root) {
         makeNumber('Scale snap', transformState.scaleSnap, 'snap-scale'),
       );
       const axesRow = element('div', 'axis-settings');
+      axesRow.append(element('span', '', 'Gizmo axes:'));
       ['x', 'y', 'z'].forEach((axis) => {
         const label = element('label');
         const input = document.createElement('input');
@@ -278,33 +455,27 @@ export function createEditorShell(root) {
         axesRow.append(label);
       });
       settings.append(axesRow);
-      const renameRow = element('div', 'rename-row');
-      const renameInput = document.createElement('input');
-      renameInput.type = 'text';
-      renameInput.value = selectedEntity?.name || '';
-      renameInput.placeholder = 'Selected entity name';
-      const rename = button('Rename', 'rename');
-      rename.addEventListener('click', () => triggerAction('rename', renameInput.value));
-      renameRow.append(renameInput, rename);
-      settings.append(renameRow);
+      transformGroup.append(settings);
+      const resetGroup = group('Reset');
+      resetGroup.append(editButton('Reset overrides', 'reset-overrides', 'Restore the generated state of the selected object'));
       const summary = element('div', 'edit-summary', selectedEntity
         ? `${selectedEntity.id} · ${selectedEntity.editable ? 'editable' : 'read-only'} · ${selectedEntity.assetId || 'no reusable asset'}`
-        : 'Select a world entity to edit. Generated changes are stored as overrides.');
-      panel.append(actions, settings, summary);
+        : 'Nothing selected. Click an object in the viewport or in the Scene hierarchy.');
+      panel.append(selectionGroup, viewGroup, transformGroup, resetGroup, summary);
       bottomContent.append(panel);
       return;
     }
-    if (currentTab === 'controls') {
+    if (currentTab === 'help') {
       const reference = element('div', 'control-reference');
       [
-        ['Fly look', 'Click viewport · mouse · Esc releases pointer'],
-        ['Move', 'W A S D · Q down · E up'],
-        ['Speed', 'Mouse wheel · Slow / Normal / Fast · Shift boosts'],
-        ['Orbit', 'Left drag rotate · right drag pan · wheel zoom'],
-        ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world'],
-        ['Editing', 'W move · E rotate · R scale (Orbit) · X local/world · Delete · Ctrl+D'],
-        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo'],
-        ['Global', 'Home frames entire world · F focuses selection'],
+        ['Select', 'Click an object in the viewport · click again to cycle overlapping hits · Esc clears'],
+        ['Camera', 'Orbit: drag / wheel · Fly: click viewport, then WASD + Q/E, wheel speed, Shift boost'],
+        ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
+        ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],
+        ['Add Object', '+ Add Object → pick an asset → click a surface to place · Esc cancels placement'],
+        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save project'],
+        ['View', 'L toggles inspection/game lighting · View menu: exposure, fog, grid, axes, debug tools'],
+        ['Debug tools', 'View menu → selection bounds box, pivot axes, analytic collision walls'],
       ].forEach(([key, value]) => {
         const card = element('div', 'asset-card');
         card.append(element('b', '', key), element('small', '', value));
@@ -349,28 +520,24 @@ export function createEditorShell(root) {
       const bounds = entity.getWorldBounds?.();
       const dimensions = bounds && !bounds.isEmpty() ? bounds.getSize(bounds.min.clone()) : null;
       const gps = worldPosition && adapter?.metadata?.worldToGps ? adapter.metadata.worldToGps(worldPosition) : null;
-      inspectorTitle.textContent = 'Entity Inspector';
-      inspectorCaption.textContent = entity.editable ? 'Editable' : 'Read-only';
-      const identity = element('section', 'inspector-section');
-      identity.append(element('h3', '', 'Identity'));
-      property(identity, 'ID', entity.id, 'selected-entity-id');
-      property(identity, 'Name', entity.name);
-      property(identity, 'Type', entity.type);
-      property(identity, 'Layer', entity.layer);
-      property(identity, 'Source', entity.source);
-      property(identity, 'Kind', entity.generated ? (metadata.sourceKind || 'Generated') : 'Editor-created INSTANCE');
-      property(identity, 'Editable', entity.editable ? 'Yes' : 'No');
-      property(identity, 'Asset/template', entity.assetId || 'Unavailable');
-      property(identity, 'Parent', entity.parentId || 'None');
+      inspectorTitle.textContent = 'Inspector';
+      inspectorCaption.textContent = entity.editable ? `${entity.name} · editable` : `${entity.name} · read-only`;
+      const identity = inspectorSection('Summary', true);
+      property(identity.body, 'Name', entity.name);
+      property(identity.body, 'ID', entity.id, 'selected-entity-id');
+      property(identity.body, 'Type', entity.type);
+      property(identity.body, 'Layer', entity.layer);
+      property(identity.body, 'Source', entity.source);
+      property(identity.body, 'Kind', entity.generated ? (metadata.sourceKind || 'Generated') : 'Placed object');
+      property(identity.body, 'Editable', entity.editable ? 'Yes' : 'No');
+      property(identity.body, 'Asset', entity.assetId || 'Unavailable');
 
-      const transform = element('section', 'inspector-section');
-      transform.append(element('h3', '', 'Transform and bounds'));
-      property(transform, 'Local position', object ? transformText(object.position.toArray()) : 'Unavailable: semantic metadata entity');
-      property(transform, 'World position', worldPosition ? transformText(worldPosition.toArray()) : 'Unavailable');
-      property(transform, 'Rotation', object ? `${transformText(object.rotation.toArray().slice(0, 3).map((value) => value * 180 / Math.PI), 2)}°` : 'Unavailable');
-      property(transform, 'Scale', object ? transformText(object.scale.toArray()) : 'Unavailable');
-      property(transform, 'Bounds', dimensions ? `${number(dimensions.x)} × ${number(dimensions.y)} × ${number(dimensions.z)} m` : 'Unavailable');
-      property(transform, 'Override', metadata.hasOverride ? 'Yes' : 'No');
+      const transform = inspectorSection('Transform', true);
+      property(transform.body, 'Local position', object ? transformText(object.position.toArray()) : 'Unavailable: semantic metadata entity');
+      property(transform.body, 'Rotation', object ? `${transformText(object.rotation.toArray().slice(0, 3).map((value) => value * 180 / Math.PI), 2)}°` : 'Unavailable');
+      property(transform.body, 'Scale', object ? transformText(object.scale.toArray()) : 'Unavailable');
+      property(transform.body, 'Bounds', dimensions ? `${number(dimensions.x)} × ${number(dimensions.y)} × ${number(dimensions.z)} m` : 'Unavailable');
+      property(transform.body, 'Override', metadata.hasOverride ? 'Yes' : 'No');
       if (object && entity.editable) {
         const numeric = element('div', 'numeric-transform');
         const fields = {};
@@ -397,69 +564,63 @@ export function createEditorShell(root) {
           Object.entries(fields).map(([key, inputs]) => [key, inputs.map((input) => Number(input.value))]),
         )));
         numeric.append(apply);
-        transform.append(numeric);
+        transform.body.append(numeric);
       }
 
-      const world = element('section', 'inspector-section');
-      world.append(element('h3', '', 'World information'));
-      property(world, 'Route', metadata.routeId || 'Unavailable');
-      property(world, 'Along route', Number.isFinite(metadata.routeDistance) ? `${metadata.routeDistance.toFixed(1)} m` : 'Unavailable');
-      property(world, 'Service area', metadata.serviceAreaId || 'Unavailable');
-      property(world, 'Chunk', metadata.chunk || 'Unavailable');
-      property(world, 'Map origin', adapter?.metadata?.mapOrigin ? `${adapter.metadata.mapOrigin.lat.toFixed(6)}, ${adapter.metadata.mapOrigin.lon.toFixed(6)}` : 'Unavailable');
-      property(world, 'GPS', gps ? `${gps.lat.toFixed(6)}, ${gps.lon.toFixed(6)}` : 'GPS unavailable for this semantic entity');
+      const world = inspectorSection('World');
+      property(world.body, 'Route', metadata.routeId || 'Unavailable');
+      property(world.body, 'Along route', Number.isFinite(metadata.routeDistance) ? `${metadata.routeDistance.toFixed(1)} m` : 'Unavailable');
+      property(world.body, 'Service area', metadata.serviceAreaId || 'Unavailable');
+      property(world.body, 'Chunk', metadata.chunk || 'Unavailable');
+      property(world.body, 'Map origin', adapter?.metadata?.mapOrigin ? `${adapter.metadata.mapOrigin.lat.toFixed(6)}, ${adapter.metadata.mapOrigin.lon.toFixed(6)}` : 'Unavailable');
+      property(world.body, 'GPS', gps ? `${gps.lat.toFixed(6)}, ${gps.lon.toFixed(6)}` : 'GPS unavailable for this entity');
 
-      const rendering = element('section', 'inspector-section');
-      rendering.append(element('h3', '', 'Rendering'));
-      property(rendering, 'Meshes', String(render.meshCount ?? 0));
-      property(rendering, 'Triangles', Number.isFinite(render.triangleCount) ? render.triangleCount.toLocaleString() : 'Unavailable');
-      property(rendering, 'Materials', render.materialNames?.join(', ') || 'Unavailable');
-      property(rendering, 'Textures', render.textureReferences?.join(', ') || 'None exposed');
-      property(rendering, 'Render order', String(render.renderOrder ?? 'Unavailable'));
-      property(rendering, 'Shadows', render.castShadow || render.receiveShadow ? `cast ${Boolean(render.castShadow)} / receive ${Boolean(render.receiveShadow)}` : 'Disabled');
-      property(rendering, 'LOD', render.lod || 'Unavailable');
+      const rendering = inspectorSection('Rendering');
+      property(rendering.body, 'Meshes', String(render.meshCount ?? 0));
+      property(rendering.body, 'Triangles', Number.isFinite(render.triangleCount) ? render.triangleCount.toLocaleString() : 'Unavailable');
+      property(rendering.body, 'Materials', render.materialNames?.join(', ') || 'Unavailable');
+      property(rendering.body, 'Textures', render.textureReferences?.join(', ') || 'None exposed');
+      property(rendering.body, 'Render order', String(render.renderOrder ?? 'Unavailable'));
+      property(rendering.body, 'Shadows', render.castShadow || render.receiveShadow ? `cast ${Boolean(render.castShadow)} / receive ${Boolean(render.receiveShadow)}` : 'Disabled');
+      property(rendering.body, 'LOD', render.lod || 'Unavailable');
 
-      const physics = element('section', 'inspector-section');
-      physics.append(element('h3', '', 'Physics and collision'));
-      property(physics, 'Available', metadata.collisionAvailable ? 'Yes' : 'No authored collision for this entity');
-      property(physics, 'Source', metadata.collisionSource || 'Unavailable');
-      property(physics, 'Type', metadata.collisionType || 'Unavailable');
-      property(physics, 'Enabled', metadata.collisionAvailable ? 'Runtime analytic system' : 'Unavailable');
-      property(physics, 'Mismatch', metadata.collisionAvailable && entity.editable ? 'Transform overrides do not rewrite analytic runtime collision' : 'None detected / unavailable');
+      const physics = inspectorSection('Physics & collision');
+      property(physics.body, 'Available', metadata.collisionAvailable ? 'Yes' : 'No authored collision for this entity');
+      property(physics.body, 'Source', metadata.collisionSource || 'Unavailable');
+      property(physics.body, 'Type', metadata.collisionType || 'Unavailable');
+      property(physics.body, 'Note', metadata.collisionAvailable && entity.editable ? 'Transform overrides do not rewrite analytic runtime collision' : 'None detected / unavailable');
 
-      const optimization = element('section', 'inspector-section');
-      optimization.append(element('h3', '', 'Optimization'));
-      property(optimization, 'Classification', metadata.static === false ? 'Dynamic' : 'Static');
-      property(optimization, 'Instanced', metadata.instanced ? 'Yes' : 'No');
-      property(optimization, 'Repeated count', String(render.repeatedAssetCount ?? metadata.instanceCount ?? 'Unavailable'));
-      property(optimization, 'Reusable asset', entity.assetId ? 'Eligible' : 'Unavailable');
-      property(optimization, 'Draw calls', String(render.drawCallContribution ?? 'Unavailable'));
-      property(optimization, 'Geometry', render.geometryShared ? 'Shared' : 'Unique or unavailable');
-      property(optimization, 'Material', render.materialShared ? 'Shared' : 'Unique or unavailable');
-      inspectorContent.append(identity, transform, world, rendering, physics, optimization);
+      const optimization = inspectorSection('Optimization');
+      property(optimization.body, 'Classification', metadata.static === false ? 'Dynamic' : 'Static');
+      property(optimization.body, 'Instanced', metadata.instanced ? 'Yes' : 'No');
+      property(optimization.body, 'Repeated count', String(render.repeatedAssetCount ?? metadata.instanceCount ?? 'Unavailable'));
+      property(optimization.body, 'Reusable asset', entity.assetId ? 'Eligible' : 'Unavailable');
+      property(optimization.body, 'Draw calls', String(render.drawCallContribution ?? 'Unavailable'));
+      property(optimization.body, 'Geometry', render.geometryShared ? 'Shared' : 'Unique or unavailable');
+      property(optimization.body, 'Material', render.materialShared ? 'Shared' : 'Unique or unavailable');
+      inspectorContent.append(identity.details, transform.details, world.details, rendering.details, physics.details, optimization.details);
       return;
     }
-    inspectorTitle.textContent = 'World Inspector';
-    inspectorCaption.textContent = 'Live metadata';
+    inspectorTitle.textContent = 'Inspector';
+    inspectorCaption.textContent = 'Nothing selected';
+    const empty = element('div', 'inspector-empty');
+    empty.append(
+      element('p', '', 'Nothing selected.'),
+      element('p', '', 'Click an object in the viewport, or pick one from the Scene hierarchy on the left.'),
+      element('p', '', 'Use + Add Object to place new assets into the world.'),
+    );
+    inspectorContent.append(empty);
     const metadata = adapter?.metadata;
-    const identity = element('section', 'inspector-section');
-    identity.append(element('h3', '', 'World source'));
-    property(identity, 'Mode', adapter?.strategy || 'Pending', 'inspector-world-strategy');
-    property(identity, 'Label', adapter?.label || 'Pending');
-    property(identity, 'Generator', adapter?.isRealWorld ? 'js/map.js · HighwayMap' : 'Editor demo adapter');
-    const dimensions = element('section', 'inspector-section');
-    dimensions.append(element('h3', '', 'Bounds and origin'));
-    property(dimensions, 'Center', metadata?.worldCenter ? `${number(metadata.worldCenter.x)}, ${number(metadata.worldCenter.y)}, ${number(metadata.worldCenter.z)}` : null);
-    property(dimensions, 'Size', metadata?.worldSize ? `${number(metadata.worldSize.x)}, ${number(metadata.worldSize.y)}, ${number(metadata.worldSize.z)} m` : null);
-    property(dimensions, 'Origin', metadata?.mapOrigin ? `${metadata.mapOrigin.lat.toFixed(6)}, ${metadata.mapOrigin.lon.toFixed(6)}` : 'Unavailable');
-    property(dimensions, 'GPS conversion', metadata?.conversion || 'GPS unavailable: inverse OSM transformation not implemented');
-    const inventory = element('section', 'inspector-section');
-    inventory.append(element('h3', '', 'Generated inventory'));
-    property(inventory, 'Routes', metadata ? String(metadata.routeCount) : null, 'route-count');
-    property(inventory, 'Service areas', metadata ? String(metadata.serviceAreaCount ?? 'Unavailable') : null);
-    property(inventory, 'Junctions', metadata ? String(metadata.junctionCount ?? 'Unavailable') : null);
-    property(inventory, 'Chunks', metadata ? String(metadata.chunkCount ?? 'Unavailable') : null);
-    inspectorContent.append(identity, dimensions, inventory);
+    const identity = inspectorSection('World source');
+    property(identity.body, 'Mode', adapter?.strategy || 'Pending', 'inspector-world-strategy');
+    property(identity.body, 'Label', adapter?.label || 'Pending');
+    property(identity.body, 'Generator', adapter?.isRealWorld ? 'js/map.js · HighwayMap' : 'Editor demo adapter');
+    const inventory = inspectorSection('Generated inventory');
+    property(inventory.body, 'Routes', metadata ? String(metadata.routeCount) : null, 'route-count');
+    property(inventory.body, 'Service areas', metadata ? String(metadata.serviceAreaCount ?? 'Unavailable') : null);
+    property(inventory.body, 'Junctions', metadata ? String(metadata.junctionCount ?? 'Unavailable') : null);
+    property(inventory.body, 'Chunks', metadata ? String(metadata.chunkCount ?? 'Unavailable') : null);
+    inspectorContent.append(identity.details, inventory.details);
   };
   renderInspector();
 
@@ -522,7 +683,7 @@ export function createEditorShell(root) {
       const details = document.createElement('details');
       details.className = 'entity-layer-group';
       details.dataset.entityLayer = layer.name;
-      details.open = selectedEntity?.layer === layer.name || layer.name === 'Roads';
+      details.open = selectedEntity?.layer === layer.name;
       const summary = document.createElement('summary');
       summary.append(element('span', '', layer.name), element('small', '', layer.count.toLocaleString()));
       details.append(summary);
@@ -588,10 +749,22 @@ export function createEditorShell(root) {
       if (currentTab === 'project') renderBottom();
     },
     showTab(tab) {
-      if (!['world', 'edit', 'project', 'controls'].includes(tab)) return false;
+      if (!['assets', 'edit', 'project', 'world', 'help'].includes(tab)) return false;
       currentTab = tab;
       renderBottom();
       return true;
+    },
+    setAssets(entries) {
+      assetEntries = Array.isArray(entries) ? entries : [];
+      if (currentTab === 'assets') renderBottom();
+    },
+    setPlacement(active, label = '') {
+      placementHint.hidden = !active;
+      placementHint.textContent = active ? `Placing ${label} — click a surface to place · Esc to cancel` : '';
+    },
+    setViewState(next) {
+      Object.assign(viewState, next);
+      syncViewMenu();
     },
     setLoading(show, message = 'Preparing viewport') {
       loadingOverlay.hidden = !show;
@@ -639,6 +812,7 @@ export function createEditorShell(root) {
     refreshInspector() { renderInspector(); },
     setNavigation({ mode, speed, speedPreset, pointerLocked }) {
       viewportLabel.textContent = `${mode.toUpperCase()} · ${Math.round(speed)} M/S${pointerLocked ? ' · POINTER LOCKED' : ''}`;
+      speedGroup.hidden = mode !== 'fly';
       this.setToggle('nav-orbit', mode === 'orbit');
       this.setToggle('nav-fly', mode === 'fly');
       for (const preset of ['slow', 'normal', 'fast']) this.setToggle(`speed-${preset}`, speedPreset === preset);

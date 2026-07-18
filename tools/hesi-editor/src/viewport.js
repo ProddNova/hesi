@@ -5,6 +5,14 @@ import { FlyCameraController } from './navigation/fly-camera-controller.js';
 const DEFAULT_POSITION = new THREE.Vector3(105, 72, 118);
 const DEFAULT_TARGET = new THREE.Vector3(0, 7, 0);
 
+// Editor-only inspection lighting. The rig lives in the editor scene only; the
+// production game never creates it. `game` mode reproduces the original dark
+// night look exactly.
+const LIGHTING_MODES = {
+  inspection: { exposure: 1.45, fogDensity: 0.0001, rig: true, background: 0x0d141d },
+  game: { exposure: 1.08, fogDensity: 0.00055, rig: false, background: 0x03060b },
+};
+
 export function createViewport(host, { onStats = () => {}, onNavigation = () => {}, onCamera = () => {} } = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x03060b);
@@ -49,6 +57,32 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
   axes.userData.editorHelper = true;
   scene.add(axes);
   scene.add(new THREE.AmbientLight(0xb9d0e4, 0.34));
+
+  // Neutral inspection rig: hemisphere fill plus a directional key light so
+  // geometry is readable without touching the world's own night lighting.
+  const inspectionRig = new THREE.Group();
+  inspectionRig.name = 'Editor inspection lighting';
+  inspectionRig.userData.editorHelper = true;
+  const hemisphere = new THREE.HemisphereLight(0xd7e5f7, 0x474e5c, 1.55);
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.9);
+  keyLight.position.set(420, 1000, 260);
+  inspectionRig.add(hemisphere, keyLight);
+  scene.add(inspectionRig);
+
+  const view = {
+    lightingMode: 'inspection',
+    exposure: LIGHTING_MODES.inspection.exposure,
+    fogFull: false,
+  };
+  const applyViewState = () => {
+    const mode = LIGHTING_MODES[view.lightingMode] || LIGHTING_MODES.inspection;
+    inspectionRig.visible = mode.rig;
+    renderer.toneMappingExposure = view.exposure;
+    scene.background.setHex(mode.background);
+    scene.fog.color.setHex(mode.background);
+    scene.fog.density = view.fogFull ? LIGHTING_MODES.game.fogDensity : mode.fogDensity;
+  };
+  applyViewState();
 
   let worldGroup = null;
   let worldUpdater = null;
@@ -168,6 +202,26 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     },
     setGridVisible(visible) { grid.visible = Boolean(visible); },
     setAxesVisible(visible) { axes.visible = Boolean(visible); },
+    setLightingMode(mode) {
+      if (!LIGHTING_MODES[mode]) return false;
+      view.lightingMode = mode;
+      view.exposure = LIGHTING_MODES[mode].exposure;
+      view.fogFull = mode === 'game';
+      applyViewState();
+      return true;
+    },
+    setExposure(value) {
+      const exposure = Number(value);
+      if (!Number.isFinite(exposure)) return false;
+      view.exposure = THREE.MathUtils.clamp(exposure, 0.3, 2.5);
+      applyViewState();
+      return true;
+    },
+    setFogFull(full) {
+      view.fogFull = Boolean(full);
+      applyViewState();
+    },
+    viewState() { return { ...view }; },
     dispose() {
       if (disposed) return;
       disposed = true;

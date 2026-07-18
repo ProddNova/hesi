@@ -48,9 +48,12 @@ available on Windows.
 ## Navigation and editing
 
 - real HESI world generation with live chunk streaming
+- editor-only inspection lighting by default (bright neutral rig, softened fog)
+  with a one-key toggle to the original game night lighting (`L`), exposure
+  slider, and full-fog toggle under the View menu
 - orbit and dedicated no-clip fly cameras
-- fly controls: click viewport for mouse look, `W/A/S/D`, `Q/E`, `Shift`,
-  mouse wheel, and `Escape`
+- fly controls: click viewport for mouse look, `W/A/S/D`, `Space`/`Ctrl` (or
+  `Q/E`) down/up, `Shift`, mouse wheel, and `Escape`
 - slow, normal, and fast speed presets
 - metadata-driven Tatsumi PA, initial-spawn, map-center, and entire-world views
 - measured world bounds, origin, scale, route/service/junction/chunk counts,
@@ -67,9 +70,19 @@ available on Windows.
   lighting, and analytic collision records)
 - hierarchy search across ID, name, and type; layer visibility and selection
   locking; expandable groups with bounded rendering for large layers
-- synchronized hierarchy and viewport selection, overlapping-hit cycling,
-  selection bounds, `F`/Focus selected framing, and a detailed truthful
-  identity/transform/world/rendering/collision/optimization inspector
+- synchronized hierarchy and viewport selection, overlapping-hit cycling, a
+  precise highlight drawn on the entity's real geometry (translucent overlay
+  plus edge lines, no bounding box by default), `F`/Focus framing, and a
+  detailed truthful identity/transform/world/rendering/collision/optimization
+  inspector
+- optional debug helpers under the View menu: selection bounds box, selection
+  pivot axes, and a collision-walls wireframe overlay built from the world's
+  analytic wall segments
+- Add Object workflow: an asset catalog (world assets such as lamps, pillars,
+  guardrails, signs, canopy, konbini, vending machine, garage, plus editor-owned
+  box/cylinder/sphere primitives) with click-to-place raycast placement, Escape
+  to cancel, automatic selection of the new object, and undoable placement
+  commands that persist through save/reload
 - Three.js TransformControls for move/rotate/scale with world/local space,
   per-axis constraints, translation/rotation/scale snapping, and live inspector
   feedback
@@ -96,8 +109,9 @@ available on Windows.
 Editing shortcuts in Orbit mode are `W` move, `E` rotate, `R` scale, and `X`
 world/local. `Delete` disables a generated entity or deletes a placed object;
 `Ctrl+D` duplicates a supported reusable asset; `Ctrl+Z` undoes; and
-`Ctrl+Shift+Z` or `Ctrl+Y` redoes. Fly mode retains its navigation bindings.
-`Ctrl+S` saves the current project. The committed clean default is
+`Ctrl+Shift+Z` or `Ctrl+Y` redoes. Fly mode retains its navigation bindings
+(`Space` climbs, `Ctrl` descends). `Ctrl+S` saves the current project and `L`
+switches lighting mode. The committed clean default is
 `data/editor/hesi-world-project.json`; Save As paths are intentionally confined
 to `data/editor/*.json`.
 
@@ -120,6 +134,5 @@ If Chromium is not installed for the editor-local Playwright version, run:
 npm --prefix tools/hesi-editor exec playwright install chromium
 ```
 
-Debug overlays and the complete asset-browser workflow are delivered in the
-final MVP checkpoint. The separate Asset & Tile Editor (modeling, UVs, textures,
-reusable road/tunnel modules) is intentionally out of scope here.
+The separate Asset & Tile Editor (modeling, UVs, textures, reusable road/tunnel
+modules) is intentionally out of scope here.

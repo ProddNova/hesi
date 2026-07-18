@@ -24,7 +24,9 @@ index.html
         -> interaction/transform-manager.js
            -> interaction/entity-transform.js
         -> interaction/edit-actions.js
+        -> interaction/placement-controller.js
         -> interaction/command-history.js
+        -> debug/collision-overlay.js
         -> overrides/world-project-state.js
            -> overrides/override-schema.js
            -> overrides/project-persistence.js
@@ -82,8 +84,11 @@ identical complete ID sequences and layer counts.
 
 `interaction/selection-manager.js` raycasts real world geometry and resolves
 raw child or instanced hits back to those semantic entities. It rejects hidden,
-locked, and editor-helper hits, cycles overlap candidates, owns the selection
-Box3 helper, synchronizes hierarchy/inspector state, and frames selected bounds.
+locked, and editor-helper hits, cycles overlap candidates, and synchronizes
+hierarchy/inspector state. The default selection visual is a translucent cyan
+overlay cloned onto the entity's real geometry plus cached edge lines (decals,
+lamp glow effects, and oversized batches are excluded); the legacy bounding-box
+and pivot helpers remain available as opt-in debug aids from the View menu.
 
 ### Editing, commands, and overrides
 
@@ -98,15 +103,30 @@ apply that delta only to the matching `InstancedMesh` slot. Composite lamp
 components retain their source-relative layout. Disable/restore uses reversible
 zero-scale instance matrices rather than editing generator geometry.
 
-`interaction/edit-actions.js` implements entity actions as reversible commands.
+`interaction/edit-actions.js` implements entity actions as reversible commands,
+including `placeAsset`, which creates and auto-selects an editor-owned placed
+object. `interaction/placement-controller.js` runs the Add Object flow: it arms
+from the toolbar or an asset card, raycasts pointer position onto the adapter
+world group, places on click, cancels on `Escape`, and suspends the gizmo while
+armed. `debug/collision-overlay.js` lazily builds a `LineSegments` wireframe
+from the map's analytic `wallSegments` (bottom/top edges plus start posts) and
+is toggled from the View menu.
 `interaction/command-history.js` stores compact closures and a saved index; it
 does not snapshot the generated world. `overrides/world-project-state.js` holds
 only declarative entity overrides and editor-owned placed-object records.
 
 `world/asset-registry.js` extracts eligible repeated assets from generated
-instances. Duplicates share source geometry/material references and create an
-editor-owned group under the adapter's `editorObjectsGroup`; project records
+instances and also exposes the Add Object catalog: curated world assets (lamps,
+pillars, guardrails, signs, canopy, konbini, vending machine, garage) plus
+editor-owned box/cylinder/sphere primitives identified by `editor:primitive:*`
+asset IDs. Duplicates and placed objects share source geometry/material
+references and live under the adapter's `editorObjectsGroup`; project records
 contain an asset ID and transform, never geometry.
+
+`viewport.js` also owns the editor-only inspection lighting rig (hemisphere +
+directional lights, exposure/fog/background presets) with `inspection` as the
+default and `game` restoring the original night mood; none of it touches game
+code paths.
 
 ### Project persistence boundary
 
@@ -131,6 +151,8 @@ pre-overwrite `.bak`. DELETE is restricted to autosave recovery files.
 - The viewport owns renderer, navigation controls, helpers, ResizeObserver, and animation
   frame disposal.
 - The transform manager owns TransformControls and temporary instance proxies.
+- The placement controller owns its pointer/key listeners; the collision
+  overlay owns its lazily built line geometry.
 - The adapter owns the editor placed-object scene group; the asset registry owns
   only reusable references.
 - The registry owns references and layer state only.
@@ -142,8 +164,8 @@ or visibility changes behind.
 
 ## Extension points
 
-The final checkpoint adds debug overlays and asset-browser services beside
-these modules instead of expanding the adapter into a monolith. Material
-catalogs, road-specific editing, export integration, and AI commands remain
-later modules. The archived
+Debug overlays (collision walls) and the asset-browser/Add Object workflow are
+delivered as separate modules beside the ones above. Material catalogs,
+road-specific editing, export integration, and AI commands remain later
+modules. The archived
 `CONTRACTS_PHASE1_PROVISIONAL.md` is useful research, but it is not binding.
