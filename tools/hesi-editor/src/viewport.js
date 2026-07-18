@@ -46,12 +46,45 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
   });
   const fly = new FlyCameraController(camera, renderer.domElement, { onChange: emitNavigation });
 
-  const grid = new THREE.GridHelper(4000, 80, 0x3c6f79, 0x1c2a35);
+  // The world spans tens of kilometres, so a grid anchored at the origin is
+  // out of sight from most camera presets. Snap it to the camera in whole-cell
+  // steps each frame so it reads as an infinite ground grid. The lines are
+  // built from short chunks rather than single 4 km segments: some rasterizers
+  // (notably software WebGL) drop long clipped line segments entirely.
+  const GRID_HALF = 2000;
+  const GRID_CELL = 50;
+  const GRID_MAJOR_EVERY = 4;
+  const buildGridGeometry = (major) => {
+    const positions = [];
+    for (let line = -GRID_HALF; line <= GRID_HALF; line += GRID_CELL) {
+      const index = Math.abs(line / GRID_CELL);
+      if ((index % GRID_MAJOR_EVERY === 0) !== major) continue;
+      for (let chunk = -GRID_HALF; chunk < GRID_HALF; chunk += GRID_CELL) {
+        positions.push(line, 0, chunk, line, 0, chunk + GRID_CELL);
+        positions.push(chunk, 0, line, chunk + GRID_CELL, 0, line);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    return geometry;
+  };
+  const gridMaterial = (color, opacity) => new THREE.LineBasicMaterial({
+    color, transparent: true, opacity, toneMapped: false, depthWrite: false,
+  });
+  const gridMinor = new THREE.LineSegments(buildGridGeometry(false), gridMaterial(0x4c4c55, 0.5));
+  const gridMajor = new THREE.LineSegments(buildGridGeometry(true), gridMaterial(0x7c7c88, 0.55));
+  const grid = new THREE.Group();
+  grid.add(gridMinor, gridMajor);
   grid.position.y = -0.02;
-  grid.material.transparent = true;
-  grid.material.opacity = 0.42;
   grid.userData.editorHelper = true;
+  gridMinor.userData.editorHelper = true;
+  gridMajor.userData.editorHelper = true;
   scene.add(grid);
+  const followCameraGrid = () => {
+    grid.position.x = Math.round(camera.position.x / GRID_CELL) * GRID_CELL;
+    grid.position.z = Math.round(camera.position.z / GRID_CELL) * GRID_CELL;
+  };
+  followCameraGrid();
   const axes = new THREE.AxesHelper(100);
   axes.visible = false;
   axes.userData.editorHelper = true;
@@ -109,6 +142,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     previousFrame = now;
     if (navigationMode === 'orbit') orbit.update();
     else fly.update(delta);
+    followCameraGrid();
     worldUpdater?.(camera.position, now / 1000);
     onCamera(camera.position);
     renderer.render(scene, camera);
@@ -229,8 +263,10 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
       observer.disconnect();
       fly.dispose();
       orbit.dispose();
-      grid.geometry.dispose();
-      grid.material.dispose();
+      for (const lines of [gridMinor, gridMajor]) {
+        lines.geometry.dispose();
+        lines.material.dispose();
+      }
       axes.geometry.dispose();
       axes.material.dispose();
       renderer.dispose();

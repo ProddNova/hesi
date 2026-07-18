@@ -94,10 +94,10 @@ function makeRepresentativeWorld(onProgress, { fallbackError = null } = {}) {
     group: world,
     entities,
     strategy: fallbackError ? 'demo-fallback' : 'demo',
-    label: fallbackError ? 'DEMO FALLBACK' : 'Explicit demo world',
+    label: fallbackError ? 'Demo fallback' : 'Explicit demo world',
     isRealWorld: false,
     warning: fallbackError
-      ? `REAL HESI WORLD FAILED TO LOAD. This is the demo fallback, not production data. ${fallbackError.message || fallbackError}`
+      ? `Real HESI world failed to load. This is the demo fallback, not production data. ${fallbackError.message || fallbackError}`
       : 'Explicit demo mode requested with ?world=demo.',
     fallbackError,
     focusTarget: world,
@@ -216,7 +216,7 @@ async function makeFullWorld(onProgress) {
     group: map.group,
     entities: discovery.entities,
     strategy: 'real',
-    label: 'REAL HESI WORLD',
+    label: 'Real HESI world',
     isRealWorld: true,
     warning: null,
     focusTarget: bounds,

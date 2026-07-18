@@ -38,7 +38,7 @@ export function createEditorShell(root) {
   const shell = element('div', 'editor-shell');
   const toolbar = element('header', 'toolbar');
   const brand = element('div', 'brand');
-  brand.append(element('strong', '', 'HESI // WORLD EDITOR'));
+  brand.append(element('strong', '', 'HESI World Editor'));
   toolbar.append(
     brand,
     button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
@@ -148,13 +148,85 @@ export function createEditorShell(root) {
   };
 
   toolbar.append(element('span', 'toolbar-spacer'));
-  const adapterChip = element('span', 'adapter-chip', 'WORLD: LOADING');
+  const adapterChip = element('span', 'adapter-chip', 'World: loading');
   adapterChip.dataset.testid = 'world-mode';
-  const dirtyChip = element('span', 'dirty-chip', 'SAVED');
+  const dirtyChip = element('span', 'dirty-chip', 'Saved');
   dirtyChip.dataset.testid = 'dirty-state';
   toolbar.append(adapterChip, dirtyChip);
 
   const workspace = element('main', 'editor-workspace');
+
+  // Resizable tool panels: drag the splitters, double-click to reset.
+  const LAYOUT_STORAGE_KEY = 'hesi-editor.panel-layout.v1';
+  const layoutDefaults = { left: 260, right: 320, bottom: 220 };
+  const layoutLimits = { left: [180, 520], right: [230, 620], bottom: [130, 520] };
+  const panelLayout = { ...layoutDefaults };
+  try {
+    const stored = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || '{}');
+    for (const key of Object.keys(layoutDefaults)) {
+      if (Number.isFinite(stored?.[key])) panelLayout[key] = stored[key];
+    }
+  } catch { /* corrupted stored layout falls back to defaults */ }
+  const clampPanel = (key, value) => {
+    const [min, max] = layoutLimits[key];
+    const available = key === 'bottom'
+      ? window.innerHeight - 240
+      : window.innerWidth - (key === 'left' ? panelLayout.right : panelLayout.left) - 340;
+    return Math.round(Math.min(Math.max(value, min), Math.max(min, Math.min(max, available))));
+  };
+  const applyPanelLayout = () => {
+    for (const key of Object.keys(layoutDefaults)) panelLayout[key] = clampPanel(key, panelLayout[key]);
+    workspace.style.setProperty('--left-width', `${panelLayout.left}px`);
+    workspace.style.setProperty('--right-width', `${panelLayout.right}px`);
+    workspace.style.setProperty('--bottom-height', `${panelLayout.bottom}px`);
+  };
+  const savePanelLayout = () => {
+    try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(panelLayout)); } catch { /* storage unavailable */ }
+  };
+  const createSplitter = (key, className, horizontal) => {
+    const node = element('div', `splitter ${className} ${horizontal ? 'splitter-h' : 'splitter-v'}`);
+    node.setAttribute('role', 'separator');
+    node.setAttribute('aria-orientation', horizontal ? 'horizontal' : 'vertical');
+    node.title = 'Drag to resize · double-click to reset';
+    node.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      node.setPointerCapture(event.pointerId);
+      node.classList.add('dragging');
+      const start = horizontal ? event.clientY : event.clientX;
+      const initial = panelLayout[key];
+      const direction = key === 'left' ? 1 : -1;
+      const onMove = (moveEvent) => {
+        const delta = (horizontal ? moveEvent.clientY : moveEvent.clientX) - start;
+        panelLayout[key] = clampPanel(key, initial + direction * delta);
+        applyPanelLayout();
+      };
+      const finish = (endEvent) => {
+        node.classList.remove('dragging');
+        node.removeEventListener('pointermove', onMove);
+        node.removeEventListener('pointerup', finish);
+        node.removeEventListener('pointercancel', finish);
+        if (node.hasPointerCapture(endEvent.pointerId)) node.releasePointerCapture(endEvent.pointerId);
+        savePanelLayout();
+      };
+      node.addEventListener('pointermove', onMove);
+      node.addEventListener('pointerup', finish);
+      node.addEventListener('pointercancel', finish);
+    });
+    node.addEventListener('dblclick', () => {
+      panelLayout[key] = layoutDefaults[key];
+      applyPanelLayout();
+      savePanelLayout();
+    });
+    return node;
+  };
+  const splitterLeft = createSplitter('left', 'splitter-left', false);
+  const splitterRight = createSplitter('right', 'splitter-right', false);
+  const splitterBottom = createSplitter('bottom', 'splitter-bottom', true);
+  const onWorkspaceResize = () => applyPanelLayout();
+  window.addEventListener('resize', onWorkspaceResize);
+  applyPanelLayout();
+
   const left = element('aside', 'panel panel-left');
   const leftHeader = element('div', 'panel-header');
   leftHeader.append(element('h2', '', 'Scene'));
@@ -195,7 +267,7 @@ export function createEditorShell(root) {
   const viewportWrap = element('section', 'viewport-wrap');
   const viewportHost = element('div', 'viewport-host');
   viewportHost.dataset.testid = 'viewport';
-  const viewportLabel = element('div', 'viewport-label', 'ORBIT · 45 M/S');
+  const viewportLabel = element('div', 'viewport-label', 'Orbit · 45 m/s');
   viewportLabel.dataset.testid = 'navigation-state';
   const worldWarning = element('div', 'world-warning');
   worldWarning.hidden = true;
@@ -257,7 +329,7 @@ export function createEditorShell(root) {
   errorOverlay.append(errorCard);
   viewportWrap.append(loadingOverlay, errorOverlay);
 
-  workspace.append(left, viewportWrap, right, bottom);
+  workspace.append(left, splitterLeft, viewportWrap, splitterRight, right, splitterBottom, bottom);
   const status = element('footer', 'status-bar');
   const statusMessage = element('span', 'status-message', 'Starting editor');
   const statusCoordinates = element('span', '', 'XYZ --');
@@ -377,7 +449,7 @@ export function createEditorShell(root) {
       );
       const facts = element('div', 'project-summary');
       facts.append(
-        element('b', '', historyState.dirty ? 'UNSAVED CHANGES' : 'SAVED TO DISK'),
+        element('b', '', historyState.dirty ? 'Unsaved changes' : 'Saved to disk'),
         element('span', '', `Current: ${projectInfo.path}`),
         element('span', '', `Recovery: ${projectInfo.autosavePath || 'not configured'}`),
       );
@@ -657,7 +729,7 @@ export function createEditorShell(root) {
       checkbox.dataset.layer = layer.name;
       checkbox.addEventListener('change', () => registry.setLayerVisibility(layer.name, checkbox.checked));
       label.append(checkbox, element('span', '', layer.name));
-      const lock = element('button', `layer-lock${layer.locked ? ' locked' : ''}`, layer.locked ? 'LOCKED' : 'OPEN');
+      const lock = element('button', `layer-lock${layer.locked ? ' locked' : ''}`, layer.locked ? 'Locked' : 'Open');
       lock.type = 'button';
       lock.disabled = layer.count === 0;
       lock.dataset.lockLayer = layer.name;
@@ -727,7 +799,7 @@ export function createEditorShell(root) {
       redo.textContent = 'Redo';
       undo.title = historyState.undoLabel ? `Undo: ${historyState.undoLabel}` : 'Nothing to undo';
       redo.title = historyState.redoLabel ? `Redo: ${historyState.redoLabel}` : 'Nothing to redo';
-      dirtyChip.textContent = historyState.dirty ? 'UNSAVED' : 'SAVED';
+      dirtyChip.textContent = historyState.dirty ? 'Unsaved' : 'Saved';
       dirtyChip.classList.toggle('dirty', historyState.dirty);
       if (currentTab === 'project') renderBottom();
     },
@@ -740,7 +812,7 @@ export function createEditorShell(root) {
       if (currentTab === 'edit') renderBottom();
     },
     setDirty(dirty) {
-      dirtyChip.textContent = dirty ? 'UNSAVED' : 'SAVED';
+      dirtyChip.textContent = dirty ? 'Unsaved' : 'Saved';
       dirtyChip.classList.toggle('dirty', Boolean(dirty));
     },
     setProject(info) {
@@ -786,7 +858,7 @@ export function createEditorShell(root) {
     setStatus(message) { statusMessage.textContent = message; },
     setAdapter(nextAdapter) {
       adapter = nextAdapter;
-      adapterChip.textContent = `WORLD: ${adapter.label.toUpperCase()}`;
+      adapterChip.textContent = `World: ${adapter.label}`;
       adapterChip.classList.toggle('warning', !adapter.isRealWorld);
       adapterChip.title = adapter.warning || adapter.label;
       bottomCaption.textContent = adapter.isRealWorld ? 'Production generator metadata' : 'Non-production world';
@@ -811,7 +883,8 @@ export function createEditorShell(root) {
     },
     refreshInspector() { renderInspector(); },
     setNavigation({ mode, speed, speedPreset, pointerLocked }) {
-      viewportLabel.textContent = `${mode.toUpperCase()} · ${Math.round(speed)} M/S${pointerLocked ? ' · POINTER LOCKED' : ''}`;
+      const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
+      viewportLabel.textContent = `${modeLabel} · ${Math.round(speed)} m/s${pointerLocked ? ' · pointer locked' : ''}`;
       speedGroup.hidden = mode !== 'fly';
       this.setToggle('nav-orbit', mode === 'orbit');
       this.setToggle('nav-fly', mode === 'fly');
@@ -827,6 +900,9 @@ export function createEditorShell(root) {
     renderRegistry(registry) {
       renderRegistryImpl(registry);
     },
-    dispose() { root.innerHTML = ''; },
+    dispose() {
+      window.removeEventListener('resize', onWorkspaceResize);
+      root.innerHTML = '';
+    },
   };
 }
