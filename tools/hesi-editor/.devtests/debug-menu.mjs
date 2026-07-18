@@ -1,0 +1,21 @@
+import { chromium } from 'playwright';
+const BASE = process.env.BASE || 'http://127.0.0.1:8081';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
+await page.goto(`${BASE}/editor`, { waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'real', null, { timeout: 90000 });
+await page.waitForSelector('[data-testid="loading-overlay"]', { state: 'hidden' });
+const menuState = (label) => page.evaluate((l) => {
+  const menu = document.querySelector('.view-menu');
+  return `${l}: hidden=${menu.hidden} display=${getComputedStyle(menu).display}`;
+}, label).then(console.log);
+await menuState('initial');
+await page.getByRole('button', { name: 'View ▾', exact: true }).click();
+await menuState('after view click');
+await page.getByRole('radio', { name: 'Game' }).click();
+await menuState('after game radio');
+await page.getByRole('radio', { name: 'Inspection' }).click();
+await menuState('after inspection radio');
+const visible = await page.getByTestId('debug-bounds').isVisible();
+console.log('debug-bounds visible:', visible);
+await browser.close();

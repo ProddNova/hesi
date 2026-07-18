@@ -2,3 +2,9 @@ node_modules/
 .devtests/shots/
 tools/cache/
 tools/road-editor/backups/
+tools/hesi-editor/test/smoke/artifacts/
+data/editor/.test-*.json
+data/editor/.test-*.json.bak
+data/editor/*.autosave.json
+data/editor/*.autosave.json.bak
+data/editor/*.json.bak

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#070b12">
+  <meta name="description" content="Standalone real-map world editor for HESI.">
+  <title>HESI World Editor</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./node_modules/three/build/three.module.js",
+        "three/addons/": "./node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- The isolated editor shell is built at runtime and is never imported by the game. -->
+  <div id="app"></div>
+  <noscript>This editor requires JavaScript.</noscript>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
