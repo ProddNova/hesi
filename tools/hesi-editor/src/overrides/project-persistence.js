@@ -7,10 +7,15 @@ import {
   serializeProjectDocument,
   validateProjectDocument,
 } from './override-schema.js';
+import { buildSceneDocument } from './map-builder.js';
 
 const RECENTS_KEY = 'hesi-editor:recent-projects';
 const CURRENT_KEY = 'hesi-editor:current-project';
+const FALLBACK_SCENE = Object.freeze({ id: 'highway', projectPath: DEFAULT_PROJECT_PATH, buildPath: 'data/editor/hesi-world-build.json', projectName: 'HESI Main World' });
 const clone = (value) => value == null ? value : structuredClone(value);
+// The highway scene keeps the historical un-suffixed keys so existing local
+// editor state survives the multi-scene upgrade.
+const sceneKey = (base, sceneId) => sceneId === 'highway' ? base : `${base}:${sceneId}`;
 
 function normalizeProjectPath(value) {
   const path = String(value || '').trim().replace(/\\/g, '/').replace(/^\.\//, '');
@@ -50,10 +55,10 @@ async function responseJson(response) {
 }
 
 export class ProjectPersistence {
-  constructor({ projectState, registry, assetRegistry, adapter, selection, transformManager, history, onStatus = () => {}, onProjectChange = () => {}, onRecovery = () => {} }) {
-    Object.assign(this, { projectState, registry, assetRegistry, adapter, selection, transformManager, history, onStatus, onProjectChange, onRecovery });
-    this.currentPath = DEFAULT_PROJECT_PATH;
-    this.lastSavedDocument = blankProjectDocument();
+  constructor({ projectState, registry, assetRegistry, adapter, selection, transformManager, history, scene = FALLBACK_SCENE, onStatus = () => {}, onProjectChange = () => {}, onRecovery = () => {} }) {
+    Object.assign(this, { projectState, registry, assetRegistry, adapter, selection, transformManager, history, scene, onStatus, onProjectChange, onRecovery });
+    this.currentPath = scene.projectPath || DEFAULT_PROJECT_PATH;
+    this.lastSavedDocument = blankProjectDocument(scene.projectName);
     this.lastSavedModifiedMs = 0;
     this.autosaveTimer = null;
   }
@@ -61,15 +66,15 @@ export class ProjectPersistence {
   entityIds() { return new Set(this.registry.list().filter((entity) => entity.generated).map((entity) => entity.id)); }
 
   recentProjects() {
-    try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]').filter((item) => typeof item === 'string').slice(0, 8); }
+    try { return JSON.parse(localStorage.getItem(sceneKey(RECENTS_KEY, this.scene.id)) || '[]').filter((item) => typeof item === 'string').slice(0, 8); }
     catch { return []; }
   }
 
   remember(path) {
     const recent = [path, ...this.recentProjects().filter((item) => item !== path)].slice(0, 8);
     try {
-      localStorage.setItem(RECENTS_KEY, JSON.stringify(recent));
-      localStorage.setItem(CURRENT_KEY, path);
+      localStorage.setItem(sceneKey(RECENTS_KEY, this.scene.id), JSON.stringify(recent));
+      localStorage.setItem(sceneKey(CURRENT_KEY, this.scene.id), path);
     } catch { /* UI convenience state is allowed to fail without affecting disk persistence. */ }
     return recent;
   }
@@ -77,8 +82,8 @@ export class ProjectPersistence {
   initialPath() {
     const query = new URLSearchParams(window.location.search).get('project');
     if (query) return normalizeProjectPath(query);
-    try { return normalizeProjectPath(localStorage.getItem(CURRENT_KEY) || DEFAULT_PROJECT_PATH); }
-    catch { return DEFAULT_PROJECT_PATH; }
+    try { return normalizeProjectPath(localStorage.getItem(sceneKey(CURRENT_KEY, this.scene.id)) || this.currentPath); }
+    catch { return this.currentPath; }
   }
 
   toPersistedDocument() {
@@ -193,7 +198,7 @@ export class ProjectPersistence {
     if (!result) {
       if (!allowMissing) throw new Error(`Project file not found: ${normalized}`);
       this.currentPath = normalized;
-      this.lastSavedDocument = blankProjectDocument();
+      this.lastSavedDocument = blankProjectDocument(this.scene.projectName);
       this.applyDocument(this.lastSavedDocument, { resetHistory: true });
       this.history.markSaved();
       this.remember(normalized);
@@ -228,7 +233,28 @@ export class ProjectPersistence {
     return result.document;
   }
 
-  async save({ path = this.currentPath, name = null, markSaved = true } = {}) {
+  buildDocument(document = null) {
+    return buildSceneDocument({
+      sceneId: this.scene.id,
+      adapter: this.adapter,
+      registry: this.registry,
+      assetRegistry: this.assetRegistry,
+      projectDocument: document || this.toPersistedDocument(),
+      projectPath: this.currentPath,
+    });
+  }
+
+  async writeBuild(document = null) {
+    const build = this.buildDocument(document);
+    const result = await responseJson(await fetch('/__hesi_editor_build', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scene: this.scene.id, build }),
+    }));
+    return { ...result, operationCount: build.operations.length };
+  }
+
+  async save({ path = this.currentPath, name = null, markSaved = true, build = true } = {}) {
     const normalized = normalizeProjectPath(path);
     if (name?.trim()) this.projectState.updateProject({ name: name.trim() });
     const document = this.toPersistedDocument();
@@ -241,10 +267,70 @@ export class ProjectPersistence {
       this.history.markSaved();
       this.remember(normalized);
       await fetch(`/__hesi_editor_project?path=${encodeURIComponent(autosavePath(normalized))}`, { method: 'DELETE' }).catch(() => {});
-      this.onStatus(`Saved project to disk · ${normalized}${result.backup ? ` · backup ${result.backup}` : ''}`);
+      let buildNote = '';
+      if (build) {
+        // A failed build must never roll back the project save: report it and
+        // leave the previous build file untouched.
+        try {
+          const built = await this.writeBuild(document);
+          result.build = built;
+          buildNote = ` · built map ${built.path} (${built.operationCount} op${built.operationCount === 1 ? '' : 's'})`;
+        } catch (error) {
+          buildNote = ` · map build FAILED: ${error.message}`;
+        }
+      }
+      this.onStatus(`Saved project · ${normalized}${buildNote}`);
       this.onProjectChange(this.state());
     }
     return result;
+  }
+
+  async commit(message) {
+    const trimmed = String(message || '').trim();
+    if (!trimmed) throw new Error('Commit message is required');
+    await this.save();
+    const document = this.toPersistedDocument();
+    const payload = {
+      scene: this.scene.id,
+      message: trimmed,
+      projectPath: this.currentPath,
+      document,
+      build: this.buildDocument(document),
+    };
+    const result = await responseJson(await fetch('/__hesi_editor_commits', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }));
+    this.onStatus(`Committed map version · "${trimmed}" · ${result.commit.id}`);
+    this.onProjectChange(this.state());
+    return result.commit;
+  }
+
+  async listCommits() {
+    const result = await responseJson(await fetch(`/__hesi_editor_commits?scene=${encodeURIComponent(this.scene.id)}`, { cache: 'no-store' }));
+    return result.commits || [];
+  }
+
+  async restoreCommit(id) {
+    const payload = await responseJson(await fetch(`/__hesi_editor_commits/one?scene=${encodeURIComponent(this.scene.id)}&id=${encodeURIComponent(id)}`, { cache: 'no-store' }));
+    const before = this.toPersistedDocument();
+    const restored = canonicalizeProjectDocument(payload.document);
+    this.applyDocument(restored);
+    this.history.execute({
+      label: `Restore commit "${payload.meta?.message || id}"`,
+      redo: () => this.applyDocument(restored),
+      undo: () => this.applyDocument(before),
+    }, { alreadyApplied: true });
+    await this.save();
+    this.onStatus(`Restored commit · "${payload.meta?.message || id}" · map rebuilt`);
+    return payload.meta || { id };
+  }
+
+  async deleteCommit(id) {
+    await responseJson(await fetch(`/__hesi_editor_commits/one?scene=${encodeURIComponent(this.scene.id)}&id=${encodeURIComponent(id)}`, { method: 'DELETE' }));
+    this.onStatus(`Deleted commit · ${id}`);
+    return true;
   }
 
   async autosave() {

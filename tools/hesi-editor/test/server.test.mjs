@@ -34,6 +34,24 @@ after(async () => {
   await rm(new URL(`../../../${TEST_PROJECT}.bak`, import.meta.url), { force: true });
 });
 
+const sampleProjectDocument = (name) => ({
+  version: 1,
+  project: { name },
+  entityOverrides: { 'lamp:test:0001': { visible: false } },
+  placedObjects: [], groups: [], editorState: {},
+});
+
+const sampleBuild = (scene) => ({
+  version: 1,
+  scene,
+  generatedAt: new Date().toISOString(),
+  project: { name: 'Build test', path: TEST_PROJECT },
+  operations: [
+    { op: 'instance', mesh: 'chunk 0,0 lamppost:lampPost', index: 3, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 0, 2, 1] },
+    { op: 'place-primitive', primitive: 'box', name: 'Test box', position: [1, 2, 3], quaternion: [0, 0, 0, 1], scale: [1, 1, 1], visible: true },
+  ],
+});
+
 test('server starts and editor page resolves', async () => {
   const health = await fetch(`${BASE}/__hesi_editor_health`);
   assert.equal(health.status, 200);
@@ -86,4 +104,75 @@ test('project endpoint validates, saves, backs up, and reloads deterministic JSO
   });
   assert.equal(invalid.status, 400);
   assert.match((await invalid.json()).error, /data\/editor/);
+});
+
+test('build endpoint validates operations and writes the scene build file', async () => {
+  const put = await fetch(`${BASE}/__hesi_editor_build`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'garage', build: sampleBuild('garage') }),
+  });
+  assert.equal(put.status, 200);
+  const result = await put.json();
+  assert.equal(result.path, 'data/editor/garage-build.json');
+  assert.equal(result.operations, 2);
+  const written = JSON.parse(await readFile(new URL('../../../data/editor/garage-build.json', import.meta.url), 'utf8'));
+  assert.equal(written.scene, 'garage');
+  assert.equal(written.operations.length, 2);
+  const badScene = await fetch(`${BASE}/__hesi_editor_build`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'nope', build: sampleBuild('garage') }),
+  });
+  assert.equal(badScene.status, 400);
+  const badOp = sampleBuild('highway');
+  badOp.operations.push({ op: 'evil' });
+  const invalid = await fetch(`${BASE}/__hesi_editor_build`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'highway', build: badOp }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.match((await invalid.json()).error, /operations\[2\]/);
+  await rm(new URL('../../../data/editor/garage-build.json', import.meta.url), { force: true });
+  await rm(new URL('../../../data/editor/garage-build.json.bak', import.meta.url), { force: true });
+});
+
+test('commit endpoints snapshot, list, read, and delete map versions', async () => {
+  const create = await fetch(`${BASE}/__hesi_editor_commits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      scene: 'garage',
+      message: 'Test commit / versione di prova',
+      projectPath: TEST_PROJECT,
+      document: sampleProjectDocument('Commit test'),
+      build: sampleBuild('garage'),
+    }),
+  });
+  assert.equal(create.status, 200);
+  const { commit } = await create.json();
+  assert.equal(commit.scene, 'garage');
+  assert.equal(commit.message, 'Test commit / versione di prova');
+  assert.equal(commit.overrideCount, 1);
+  try {
+    const list = await fetch(`${BASE}/__hesi_editor_commits?scene=garage`);
+    assert.equal(list.status, 200);
+    const commits = (await list.json()).commits;
+    const found = commits.find((entry) => entry.id === commit.id);
+    assert.ok(found, 'created commit appears in the list');
+    assert.equal(found.hasBuild, true);
+    const one = await fetch(`${BASE}/__hesi_editor_commits/one?scene=garage&id=${encodeURIComponent(commit.id)}`);
+    assert.equal(one.status, 200);
+    const payload = await one.json();
+    assert.equal(payload.document.project.name, 'Commit test');
+    assert.equal(payload.build.operations.length, 2);
+    const missingMessage = await fetch(`${BASE}/__hesi_editor_commits`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scene: 'garage', message: '', projectPath: TEST_PROJECT, document: sampleProjectDocument('x') }),
+    });
+    assert.equal(missingMessage.status, 400);
+    const traversal = await fetch(`${BASE}/__hesi_editor_commits/one?scene=garage&id=..%2f..%2fsecrets`, { method: 'DELETE' });
+    assert.equal(traversal.status, 400);
+  } finally {
+    const remove = await fetch(`${BASE}/__hesi_editor_commits/one?scene=garage&id=${encodeURIComponent(commit.id)}`, { method: 'DELETE' });
+    assert.equal(remove.status, 200);
+  }
+  const listAfter = await fetch(`${BASE}/__hesi_editor_commits?scene=garage`);
+  const remaining = (await listAfter.json()).commits;
+  assert.ok(!remaining.some((entry) => entry.id === commit.id), 'deleted commit disappears from the list');
 });

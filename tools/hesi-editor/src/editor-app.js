@@ -11,11 +11,14 @@ import { CollisionOverlay } from './debug/collision-overlay.js';
 import { WorldProjectState } from './overrides/world-project-state.js';
 import { AssetRegistry } from './world/asset-registry.js';
 import { ProjectPersistence } from './overrides/project-persistence.js';
+import { getScene, sceneFromSearch } from './scenes/scene-registry.js';
 
 export async function createEditorApp(root) {
   if (!root) throw new Error('Editor root element is missing');
 
+  const scene = sceneFromSearch(window.location.search);
   const shell = createEditorShell(root);
+  shell.setScene(scene);
   const registry = createEntityRegistry();
   const viewport = createViewport(shell.viewportHost, {
     onStats: (stats) => shell.setStats(stats),
@@ -39,6 +42,19 @@ export async function createEditorApp(root) {
     shell.showError(error, 'Project operation failed');
     return null;
   });
+  const refreshCommits = async () => {
+    if (!persistence) return;
+    const commits = await persistence.listCommits();
+    shell.setCommits(commits);
+  };
+  const switchScene = (sceneId) => {
+    if (!getScene(sceneId) || sceneId === scene.id) return;
+    if (history.dirty && !window.confirm('You have unsaved changes in this scene. Switch anyway and discard them?')) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('scene', sceneId);
+    url.searchParams.delete('project');
+    window.location.href = url.toString();
+  };
   const syncViewState = () => shell.setViewState({ ...viewport.viewState(), ...viewFlags });
   syncViewState();
 
@@ -129,6 +145,21 @@ export async function createEditorApp(root) {
       'project-export': () => persistence.exportOverrides(),
       'project-reset-unsaved': () => runProjectTask(async () => { shell.showProjectNotice(''); await persistence.resetUnsaved(); }),
       'project-reset-all': () => persistence.resetAll(),
+      'project-commit': () => runProjectTask(async () => {
+        await persistence.commit(detail?.message);
+        await refreshCommits();
+      }),
+      'project-restore-commit': () => runProjectTask(async () => {
+        shell.showProjectNotice('');
+        await persistence.restoreCommit(detail);
+        await refreshCommits();
+      }),
+      'project-delete-commit': () => runProjectTask(async () => {
+        await persistence.deleteCommit(detail);
+        await refreshCommits();
+      }),
+      'project-refresh-commits': () => runProjectTask(refreshCommits),
+      'scene-switch': () => switchScene(detail),
     };
     actions[action]?.();
   });
@@ -174,6 +205,7 @@ export async function createEditorApp(root) {
   try {
     adapter = await loadWorld({
       mode,
+      scene: scene.id,
       onProgress(message) {
         shell.setLoading(true, message);
         shell.setStatus(message);
@@ -226,7 +258,7 @@ export async function createEditorApp(root) {
     shell.setAssets(assetRegistry.catalog());
     syncViewState();
     persistence = new ProjectPersistence({
-      projectState, registry, assetRegistry, adapter, selection, transformManager, history,
+      projectState, registry, assetRegistry, adapter, selection, transformManager, history, scene,
       onStatus: (message) => shell.setStatus(message),
       onProjectChange: (state) => shell.setProject(state),
       onRecovery: (message) => shell.showProjectNotice(message),
@@ -234,16 +266,19 @@ export async function createEditorApp(root) {
     shell.setTransformState(transformManager.state());
     shell.setLoading(true, 'Loading saved editor project');
     const initialProjectPath = mode === 'demo' && !params.has('project')
-      ? 'data/editor/hesi-world-project.json'
+      ? scene.projectPath
       : persistence.initialPath();
     await persistence.load(initialProjectPath, { allowMissing: true });
     persistence.startAutosave();
+    refreshCommits().catch((error) => shell.setStatus(`Commit list unavailable · ${error.message}`));
     shell.showWorldWarning(adapter.warning);
     applyPreset(adapter.presets.has('tatsumi-pa') ? 'tatsumi-pa' : 'initial-spawn');
     shell.setLoading(false);
-    shell.setStatus(adapter.isRealWorld
-      ? `Real HESI map ready · ${adapter.metadata.routeCount} routes · ${adapter.metadata.chunkCount} chunks`
-      : adapter.warning);
+    shell.setStatus(adapter.strategy === 'garage'
+      ? `Garage interior ready · ${adapter.entities.length} editable parts`
+      : (adapter.isRealWorld
+        ? `Real HESI map ready · ${adapter.metadata.routeCount} routes · ${adapter.metadata.chunkCount} chunks`
+        : adapter.warning));
   } catch (error) {
     shell.setLoading(false);
     shell.setStatus('World loading failed');

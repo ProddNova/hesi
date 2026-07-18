@@ -13,17 +13,22 @@
  * Port override:       HESI_EDITOR_PORT=8082 node tools/hesi-editor/server.mjs
  */
 import { createServer } from 'node:http';
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseProjectDocument, serializeProjectDocument } from './src/overrides/override-schema.js';
+import { parseProjectDocument, serializeProjectDocument, validateProjectDocument } from './src/overrides/override-schema.js';
+import { BUILD_PATHS, serializeBuildDocument } from './src/overrides/build-schema.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const PORT = Number(process.env.HESI_EDITOR_PORT) || 8081;
 const EDITOR_PATH = '/tools/hesi-editor/index.html';
 const PROJECT_ENDPOINT = '/__hesi_editor_project';
+const BUILD_ENDPOINT = '/__hesi_editor_build';
+const COMMITS_ENDPOINT = '/__hesi_editor_commits';
+const COMMITS_DIR = 'data/editor/commits';
 const MAX_PROJECT_BYTES = 2 * 1024 * 1024;
+const MAX_COMMITS_LISTED = 200;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -69,19 +74,20 @@ async function readJsonBody(req) {
   catch (error) { throw new Error(`Request JSON is invalid: ${error.message}`); }
 }
 
-async function saveProject(projectPath, document) {
-  const { normalized, file } = projectFile(projectPath);
-  const validated = parseProjectDocument(JSON.stringify(document));
-  const serialized = serializeProjectDocument(validated);
+// Full write into a temporary sibling, previous content copied to .bak, then an
+// atomic swap: a crash mid-save never leaves a truncated file behind.
+async function writeFileSafe(file, serialized, { backup = true } = {}) {
   await mkdir(dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}-${randomUUID()}.tmp`;
-  let backup = null;
-  try {
-    await stat(file);
-    backup = `${file}.bak`;
-    await copyFile(file, backup);
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+  let backedUp = false;
+  if (backup) {
+    try {
+      await stat(file);
+      await copyFile(file, `${file}.bak`);
+      backedUp = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
   }
   try {
     await writeFile(temporary, serialized, { encoding: 'utf8', flag: 'wx' });
@@ -94,7 +100,100 @@ async function saveProject(projectPath, document) {
   } finally {
     await rm(temporary, { force: true }).catch(() => {});
   }
-  return { path: normalized, bytes: Buffer.byteLength(serialized), backup: backup ? `${normalized}.bak` : null };
+  return backedUp;
+}
+
+async function saveProject(projectPath, document) {
+  const { normalized, file } = projectFile(projectPath);
+  const validated = parseProjectDocument(JSON.stringify(document));
+  const serialized = serializeProjectDocument(validated);
+  const backedUp = await writeFileSafe(file, serialized);
+  return { path: normalized, bytes: Buffer.byteLength(serialized), backup: backedUp ? `${normalized}.bak` : null };
+}
+
+async function saveBuild(scene, build) {
+  const targetPath = BUILD_PATHS[scene];
+  if (!targetPath) throw new Error(`Unknown build scene: ${scene}`);
+  const serialized = serializeBuildDocument(build);
+  const file = resolve(ROOT, targetPath);
+  await writeFileSafe(file, serialized);
+  return { path: targetPath, bytes: Buffer.byteLength(serialized), operations: build.operations.length };
+}
+
+// ---- Commit management: every commit snapshots one full project version ----
+
+function commitScene(scene) {
+  if (!Object.hasOwn(BUILD_PATHS, String(scene || ''))) throw new Error(`Commit scene must be one of ${Object.keys(BUILD_PATHS).join(', ')}`);
+  return String(scene);
+}
+
+function commitFile(scene, id) {
+  const normalizedScene = commitScene(scene);
+  const normalizedId = String(id || '');
+  if (!/^[a-z0-9][a-z0-9_-]{0,120}$/i.test(normalizedId)) throw new Error('Commit id contains unsupported characters');
+  return resolve(ROOT, COMMITS_DIR, normalizedScene, `${normalizedId}.json`);
+}
+
+function commitId(message) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '').replace('T', '-').slice(0, 15);
+  const slug = String(message || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+  return `${stamp}-${randomUUID().slice(0, 8)}${slug ? `-${slug}` : ''}`;
+}
+
+async function createCommit({ scene, message, projectPath, document, build = null }) {
+  const normalizedScene = commitScene(scene);
+  const trimmedMessage = String(message || '').trim();
+  if (!trimmedMessage || trimmedMessage.length > 400) throw new Error('Commit message must be 1-400 characters');
+  const validated = parseProjectDocument(JSON.stringify(document));
+  const { normalized } = projectFile(projectPath);
+  const id = commitId(trimmedMessage);
+  const meta = {
+    id,
+    scene: normalizedScene,
+    message: trimmedMessage,
+    createdAt: new Date().toISOString(),
+    projectPath: normalized,
+    projectName: validated.project.name,
+    overrideCount: Object.keys(validated.entityOverrides).length,
+    placedObjectCount: validated.placedObjects.length,
+  };
+  const payload = { meta, document: validated };
+  if (build) {
+    serializeBuildDocument(build); // validation only; the raw build travels with the commit
+    payload.build = build;
+  }
+  const serialized = `${JSON.stringify(payload, null, 2)}\n`;
+  await writeFileSafe(commitFile(normalizedScene, id), serialized, { backup: false });
+  return { ...meta, bytes: Buffer.byteLength(serialized) };
+}
+
+async function listCommits(scene) {
+  const normalizedScene = commitScene(scene);
+  const directory = resolve(ROOT, COMMITS_DIR, normalizedScene);
+  let names = [];
+  try { names = await readdir(directory); }
+  catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  const commits = [];
+  for (const name of names.filter((entry) => entry.endsWith('.json')).sort().reverse().slice(0, MAX_COMMITS_LISTED)) {
+    try {
+      const text = await readFile(resolve(directory, name), 'utf8');
+      const payload = JSON.parse(text);
+      if (!payload?.meta?.id) continue;
+      commits.push({ ...payload.meta, bytes: Buffer.byteLength(text), hasBuild: Boolean(payload.build) });
+    } catch { /* Unreadable snapshots are skipped rather than blocking the list. */ }
+  }
+  commits.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return commits;
+}
+
+async function readCommit(scene, id) {
+  const text = await readFile(commitFile(scene, id), 'utf8');
+  const payload = JSON.parse(text);
+  validateProjectDocument(payload.document);
+  return payload;
 }
 
 const server = createServer(async (req, res) => {
@@ -131,6 +230,47 @@ const server = createServer(async (req, res) => {
         if (!target.normalized.endsWith('.autosave.json')) throw new Error('Only autosave recovery files can be deleted through the editor endpoint');
         await rm(target.file, { force: true });
         sendJson(res, 200, { ok: true, path: target.normalized }, req.method);
+        return;
+      }
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);
+      return;
+    }
+    if (path === BUILD_ENDPOINT) {
+      if (req.method === 'PUT') {
+        const payload = await readJsonBody(req);
+        const result = await saveBuild(payload.scene, payload.build);
+        sendJson(res, 200, { ok: true, ...result }, req.method);
+        return;
+      }
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);
+      return;
+    }
+    if (path === COMMITS_ENDPOINT) {
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const commits = await listCommits(requestUrl.searchParams.get('scene'));
+        sendJson(res, 200, { ok: true, commits }, req.method);
+        return;
+      }
+      if (req.method === 'POST') {
+        const payload = await readJsonBody(req);
+        const commit = await createCommit(payload);
+        sendJson(res, 200, { ok: true, commit }, req.method);
+        return;
+      }
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);
+      return;
+    }
+    if (path === `${COMMITS_ENDPOINT}/one`) {
+      const scene = requestUrl.searchParams.get('scene');
+      const id = requestUrl.searchParams.get('id');
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const commit = await readCommit(scene, id);
+        sendJson(res, 200, { ok: true, ...commit }, req.method);
+        return;
+      }
+      if (req.method === 'DELETE') {
+        await rm(commitFile(scene, id), { force: true });
+        sendJson(res, 200, { ok: true, id }, req.method);
         return;
       }
       sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);

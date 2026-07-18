@@ -6,6 +6,7 @@ import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260713a';
+import { applyEditorBuilds } from './editor-map-patch.js?v=20260718a';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 
@@ -106,7 +107,11 @@ class ShutokoNights {
       isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),finishInstall:d=>this.finishInstall(d),
       prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
     });
-    this.garage.root.visible=false;this.roadScene.add(this.camera);this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
+    this.garage.root.visible=false;this.roadScene.add(this.camera);
+    // World-editor builds (data/editor/*-build.json): replay saved map edits on
+    // the freshly generated highway and garage. No build files -> no-op.
+    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e));
+    this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
   }
 
   setupUI(){
