@@ -3,7 +3,45 @@
   "project": {
     "name": "HESI Main World"
   },
-  "entityOverrides": {},
+  "entityOverrides": {
+    "generated-prop-batch:6-n7-unknown-tatsumi-pa-deck-6": {
+      "transform": {
+        "position": [
+          3646.5151,
+          57.24115,
+          -4056.63133
+        ],
+        "rotation": [
+          3.14159,
+          -1.18886,
+          3.14159
+        ],
+        "scale": [
+          1,
+          1,
+          1.05421
+        ]
+      }
+    },
+    "lamp:wangan-0:0648": {
+      "visible": false
+    },
+    "lamp:wangan-0:0649": {
+      "visible": false
+    },
+    "lamp:wangan-0:0650": {
+      "visible": false
+    },
+    "lamp:wangan-1:0643": {
+      "visible": false
+    },
+    "lamp:wangan-1:0644": {
+      "visible": false
+    },
+    "lamp:wangan-1:0645": {
+      "visible": false
+    }
+  },
   "placedObjects": [],
   "groups": [],
   "editorState": {}
