@@ -1,0 +1,183 @@
+import * as THREE from 'three';
+
+// Applies HESI world-editor builds to the running game.
+//
+// The editor (tools/hesi-editor) saves each scene as a resolved build file — a
+// flat list of operations addressed by stable names/indices — so the game can
+// replay edits on its freshly generated world without importing editor code.
+// Missing build files simply mean "no edits": the game runs untouched.
+
+const BUILD_URLS = Object.freeze({
+  highway: 'data/editor/hesi-world-build.json',
+  garage: 'data/editor/garage-build.json',
+});
+
+const PRIMITIVE_GEOMETRY = {
+  box: () => new THREE.BoxGeometry(1, 1, 1),
+  cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 24),
+  sphere: () => new THREE.SphereGeometry(0.5, 24, 16),
+};
+
+async function fetchBuild(scene) {
+  try {
+    const response = await fetch(BUILD_URLS[scene], { cache: 'no-store' });
+    if (!response.ok) return null;
+    const build = await response.json();
+    if (build?.version !== 1 || build.scene !== scene || !Array.isArray(build.operations)) {
+      console.warn(`[editor-map-patch] ignoring malformed build for scene ${scene}`);
+      return null;
+    }
+    return build;
+  } catch {
+    return null; // offline / file:// / no build yet — all normal
+  }
+}
+
+function applyTransformOp(object, op) {
+  object.position.fromArray(op.position);
+  object.quaternion.fromArray(op.quaternion).normalize();
+  object.scale.fromArray(op.scale);
+  object.visible = op.visible !== false;
+  object.updateMatrix?.();
+  object.updateMatrixWorld?.(true);
+}
+
+function primitiveMaterial() {
+  return new THREE.MeshStandardMaterial({ color: 0x9aa7b5, roughness: 0.72, metalness: 0.06, name: 'editor-primitive' });
+}
+
+function placedGroup(parent) {
+  let group = parent.children.find((child) => child.name === 'Editor placed objects');
+  if (!group) {
+    group = new THREE.Group();
+    group.name = 'Editor placed objects';
+    parent.add(group);
+  }
+  return group;
+}
+
+function buildPlacedObject(op, donorForMaterialKey) {
+  const root = new THREE.Group();
+  root.name = op.name || 'Editor placed object';
+  if (op.op === 'place-primitive') {
+    const geometry = PRIMITIVE_GEOMETRY[op.primitive]?.();
+    if (!geometry) return null;
+    root.add(new THREE.Mesh(geometry, primitiveMaterial()));
+  } else {
+    for (const component of op.components || []) {
+      const donor = donorForMaterialKey(component.materialKey);
+      if (!donor) return null; // never place half an asset
+      const mesh = new THREE.Mesh(donor.geometry, donor.material);
+      mesh.name = component.materialKey;
+      mesh.castShadow = donor.castShadow;
+      mesh.receiveShadow = donor.receiveShadow;
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.fromArray(component.matrix);
+      root.add(mesh);
+    }
+    if (!root.children.length) return null;
+  }
+  applyTransformOp(root, op);
+  return root;
+}
+
+export function applyHighwayBuild(map, build) {
+  const summary = { applied: 0, skipped: 0 };
+  if (!map?.group || !build) return summary;
+
+  // Index the generated world once: instanced meshes by exact bucket name, and
+  // every object by (name → ordered occurrence list). The editor computed its
+  // nameIndex values over the identical deterministic walk.
+  const instancedByName = new Map();
+  const objectsByName = new Map();
+  map.group.traverse((object) => {
+    if (object === map.group) return;
+    if (object.isInstancedMesh && !instancedByName.has(object.name)) instancedByName.set(object.name, object);
+    const name = object.name || '';
+    if (!objectsByName.has(name)) objectsByName.set(name, []);
+    objectsByName.get(name).push(object);
+  });
+  const donorForMaterialKey = (materialKey) => {
+    for (const [name, mesh] of instancedByName) {
+      if (new RegExp(`^chunk \\S+ ${materialKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`).test(name)) return mesh;
+    }
+    return null;
+  };
+
+  const touchedInstanced = new Set();
+  for (const op of build.operations) {
+    if (op.op === 'instance') {
+      const mesh = instancedByName.get(op.mesh);
+      if (!mesh || !Number.isInteger(op.index) || op.index >= mesh.count) { summary.skipped += 1; continue; }
+      mesh.setMatrixAt(op.index, new THREE.Matrix4().fromArray(op.matrix));
+      touchedInstanced.add(mesh);
+      summary.applied += 1;
+      continue;
+    }
+    if (op.op === 'object') {
+      const target = objectsByName.get(op.name || '')?.[op.nameIndex];
+      if (!target) { summary.skipped += 1; continue; }
+      applyTransformOp(target, op);
+      summary.applied += 1;
+      continue;
+    }
+    if (op.op === 'place' || op.op === 'place-primitive') {
+      const placed = buildPlacedObject(op, donorForMaterialKey);
+      if (!placed) { summary.skipped += 1; continue; }
+      placedGroup(map.group).add(placed);
+      summary.applied += 1;
+      continue;
+    }
+    summary.skipped += 1;
+  }
+  for (const mesh of touchedInstanced) {
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingBox?.();
+    mesh.computeBoundingSphere?.();
+  }
+  return summary;
+}
+
+export function applyGarageBuild(garageRoot, build) {
+  const summary = { applied: 0, skipped: 0 };
+  if (!garageRoot || !build) return summary;
+  // Garage children are addressed by build-order index, so this must run right
+  // after GarageSystem.build() and before deliveries/cars mutate the root.
+  const children = [...garageRoot.children];
+  for (const op of build.operations) {
+    if (op.op === 'garage-object') {
+      const target = children[op.childIndex];
+      if (!target) { summary.skipped += 1; continue; }
+      applyTransformOp(target, op);
+      summary.applied += 1;
+      continue;
+    }
+    if (op.op === 'place-primitive') {
+      const placed = buildPlacedObject(op, () => null);
+      if (!placed) { summary.skipped += 1; continue; }
+      placedGroup(garageRoot).add(placed);
+      summary.applied += 1;
+      continue;
+    }
+    summary.skipped += 1;
+  }
+  return summary;
+}
+
+export async function applyEditorBuilds({ map = null, garageRoot = null } = {}) {
+  const summary = { applied: 0, skipped: 0, scenes: [] };
+  const merge = (scene, partial) => {
+    summary.applied += partial.applied;
+    summary.skipped += partial.skipped;
+    if (partial.applied || partial.skipped) summary.scenes.push({ scene, ...partial });
+  };
+  if (map) {
+    const build = await fetchBuild('highway');
+    if (build) merge('highway', applyHighwayBuild(map, build));
+  }
+  if (garageRoot) {
+    const build = await fetchBuild('garage');
+    if (build) merge('garage', applyGarageBuild(garageRoot, build));
+  }
+  return summary;
+}

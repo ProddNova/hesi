@@ -1,3 +1,5 @@
+import { sceneList } from '../scenes/scene-registry.js';
+
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -39,8 +41,30 @@ export function createEditorShell(root) {
   const toolbar = element('header', 'toolbar');
   const brand = element('div', 'brand');
   brand.append(element('strong', '', 'HESI World Editor'));
+  const brandScene = element('small', 'brand-scene', '');
+  brand.append(brandScene);
+
+  // Scene switcher: the editor edits one scene at a time (highway map or the
+  // garage interior); switching reloads the page with the scene's own project.
+  const sceneSwitch = element('div', 'segmented scene-switch');
+  sceneSwitch.setAttribute('role', 'radiogroup');
+  sceneSwitch.setAttribute('aria-label', 'Editable scene');
+  const sceneButtons = new Map();
+  for (const entry of sceneList()) {
+    const seg = element('button', 'seg-button', entry.label);
+    seg.type = 'button';
+    seg.setAttribute('role', 'radio');
+    seg.setAttribute('aria-checked', 'false');
+    seg.title = `${entry.description} · project ${entry.projectPath}`;
+    seg.dataset.testid = `scene-${entry.id}`;
+    sceneButtons.set(entry.id, seg);
+    sceneSwitch.append(seg);
+  }
+
   toolbar.append(
     brand,
+    sceneSwitch,
+    element('span', 'toolbar-divider'),
     button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
     element('span', 'toolbar-divider'),
     button('Move', 'transform-translate', { pressed: true, title: 'Move selected object (W)' }),
@@ -50,11 +74,13 @@ export function createEditorShell(root) {
     element('span', 'toolbar-divider'),
     button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
     button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
-    button('Save', 'save-project', { title: 'Save the current project to disk (Ctrl+S)' }),
+    button('Save', 'save-project', { title: 'Save the project AND build the map the game loads (Ctrl+S)' }),
+    button('Commit', 'commit-project', { title: 'Snapshot the current map as a named version (Project tab)' }),
     element('span', 'toolbar-divider'),
     button('Focus', 'focus-selected', { title: 'Frame the selected object (F)' }),
   );
   toolbar.querySelector('[data-action="add-object"]').classList.add('primary');
+  toolbar.querySelector('[data-action="save-project"]').classList.add('accent');
   const presetSelect = document.createElement('select');
   presetSelect.className = 'preset-select';
   presetSelect.title = 'Camera location presets';
@@ -278,7 +304,14 @@ export function createEditorShell(root) {
   const placementHint = element('div', 'placement-hint');
   placementHint.hidden = true;
   placementHint.dataset.testid = 'placement-hint';
-  viewportWrap.append(viewportHost, viewportLabel, worldWarning, projectNotice, placementHint);
+  // First-person crosshair: shown in fly mode so the view centre is readable,
+  // solid while the pointer is locked (mouse-look active).
+  const crosshair = element('div', 'viewport-crosshair');
+  crosshair.hidden = true;
+  crosshair.dataset.testid = 'fly-crosshair';
+  crosshair.setAttribute('aria-hidden', 'true');
+  crosshair.append(element('span', 'crosshair-dot'));
+  viewportWrap.append(viewportHost, viewportLabel, worldWarning, projectNotice, placementHint, crosshair);
 
   const right = element('aside', 'panel panel-right');
   const rightHeader = element('div', 'panel-header');
@@ -351,11 +384,89 @@ export function createEditorShell(root) {
   let historyState = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null, dirty: false };
   let projectInfo = { name: 'HESI Main World', path: 'data/editor/hesi-world-project.json', recent: [], autosavePath: '' };
   let currentTab = 'assets';
+  let currentScene = null;
+  let commitList = [];
+  let commitsLoaded = false;
   const triggerAction = (action, detail = null) => actionHandler(action, detail);
   const editButton = (label, action, title = '') => {
     const node = button(label, action, { title });
     node.addEventListener('click', () => triggerAction(action));
     return node;
+  };
+
+  for (const [sceneId, seg] of sceneButtons) seg.addEventListener('click', () => triggerAction('scene-switch', sceneId));
+  toolbar.querySelector('[data-action="commit-project"]').addEventListener('click', () => {
+    currentTab = 'project';
+    renderBottom();
+    triggerAction('project-refresh-commits');
+    bottomContent.querySelector('[data-testid="commit-message"]')?.focus();
+  });
+
+  const formatCommitDate = (iso) => {
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? (iso || '') : date.toLocaleString();
+  };
+  const renderCommitsPanel = () => {
+    const panel = element('div', 'commits-panel');
+    const head = element('div', 'commits-head');
+    head.append(
+      element('h3', '', 'Map versions'),
+      element('small', '', commitsLoaded ? `${commitList.length} commit${commitList.length === 1 ? '' : 's'} · data/editor/commits/${currentScene?.id || ''}` : 'Loading commits'),
+    );
+    const refresh = button('Refresh', 'project-refresh-commits', { title: 'Reload the commit list from disk' });
+    refresh.addEventListener('click', () => triggerAction('project-refresh-commits'));
+    head.append(refresh);
+    panel.append(head);
+    const create = element('div', 'commit-create');
+    const message = document.createElement('input');
+    message.type = 'text';
+    message.placeholder = 'Describe this version, e.g. "extra lamps at Tatsumi PA"';
+    message.maxLength = 400;
+    message.dataset.testid = 'commit-message';
+    message.setAttribute('aria-label', 'Commit message');
+    const commitButton = button('Commit version', 'project-commit', { title: 'Save the project, build the map, and snapshot this version to disk' });
+    commitButton.classList.add('accent');
+    const submit = () => {
+      if (!message.value.trim()) { message.focus(); return; }
+      triggerAction('project-commit', { message: message.value });
+      message.value = '';
+    };
+    commitButton.addEventListener('click', submit);
+    message.addEventListener('keydown', (event) => { if (event.key === 'Enter') submit(); });
+    create.append(message, commitButton);
+    panel.append(create);
+    const list = element('div', 'commit-list');
+    list.dataset.testid = 'commit-list';
+    if (commitsLoaded && !commitList.length) {
+      list.append(element('p', 'commits-empty', 'No commits yet. A commit is a full snapshot of the current map version; use them to keep and restore every saved state.'));
+    }
+    for (const commit of commitList) {
+      const row = element('div', 'commit-row');
+      const info = element('div', 'commit-info');
+      info.append(element('b', '', commit.message || commit.id));
+      const overrides = commit.overrideCount ?? 0;
+      const placed = commit.placedObjectCount ?? 0;
+      info.append(element('small', '', `${formatCommitDate(commit.createdAt)} · ${overrides} override${overrides === 1 ? '' : 's'} · ${placed} placed object${placed === 1 ? '' : 's'} · ${commit.id}`));
+      const rowActions = element('div', 'commit-actions');
+      const restore = button('Restore', 'project-restore-commit', { title: 'Load this version, then save and rebuild the map' });
+      restore.addEventListener('click', () => {
+        if (window.confirm(`Restore "${commit.message}"?\n\nThe current map state will be replaced (undoable), saved, and rebuilt.`)) {
+          triggerAction('project-restore-commit', commit.id);
+        }
+      });
+      const remove = button('Delete', 'project-delete-commit', { title: 'Delete this snapshot from disk' });
+      remove.classList.add('danger');
+      remove.addEventListener('click', () => {
+        if (window.confirm(`Delete commit "${commit.message}"?\n\nThe snapshot file is removed permanently.`)) {
+          triggerAction('project-delete-commit', commit.id);
+        }
+      });
+      rowActions.append(restore, remove);
+      row.append(info, rowActions);
+      list.append(row);
+    }
+    panel.append(list);
+    return panel;
   };
 
   lightingInspection.addEventListener('click', () => triggerAction('lighting-mode', 'inspection'));
@@ -451,9 +562,10 @@ export function createEditorShell(root) {
       facts.append(
         element('b', '', historyState.dirty ? 'Unsaved changes' : 'Saved to disk'),
         element('span', '', `Current: ${projectInfo.path}`),
+        element('span', '', `Built map: ${currentScene?.buildPath || 'n/a'} (applied by the game at startup)`),
         element('span', '', `Recovery: ${projectInfo.autosavePath || 'not configured'}`),
       );
-      panel.append(fields, actions, facts);
+      panel.append(fields, actions, facts, renderCommitsPanel());
       bottomContent.append(panel);
       return;
     }
@@ -545,7 +657,11 @@ export function createEditorShell(root) {
         ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
         ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],
         ['Add Object', '+ Add Object → pick an asset → click a surface to place · Esc cancels placement'],
-        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save project'],
+        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save project + build map'],
+        ['Save & Build', 'Save writes the project AND the built map file the game applies at startup'],
+        ['Commits', 'Project tab → Commit version snapshots the map · Restore brings any version back'],
+        ['Scenes', 'Toolbar switcher: Highway (real map) or Garage (interior) · each has its own project'],
+        ['Fly crosshair', 'Fly mode shows a first-person crosshair; it locks solid while mouse-look is active'],
         ['View', 'L toggles inspection/game lighting · View menu: exposure, fog, grid, axes, debug tools'],
         ['Debug tools', 'View menu → selection bounds box, pivot axes, analytic collision walls'],
       ].forEach(([key, value]) => {
@@ -576,7 +692,10 @@ export function createEditorShell(root) {
   renderBottom();
   tabs.addEventListener('click', (event) => {
     const tab = event.target.closest('[data-tab]')?.dataset.tab;
-    if (tab) { currentTab = tab; renderBottom(); }
+    if (!tab) return;
+    currentTab = tab;
+    renderBottom();
+    if (tab === 'project') triggerAction('project-refresh-commits');
   });
 
   const transformText = (values, digits = 3) => values?.map((value) => number(value, digits)).join(', ') || 'Unavailable';
@@ -886,9 +1005,22 @@ export function createEditorShell(root) {
       const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
       viewportLabel.textContent = `${modeLabel} · ${Math.round(speed)} m/s${pointerLocked ? ' · pointer locked' : ''}`;
       speedGroup.hidden = mode !== 'fly';
+      crosshair.hidden = mode !== 'fly';
+      crosshair.classList.toggle('locked', Boolean(pointerLocked));
       this.setToggle('nav-orbit', mode === 'orbit');
       this.setToggle('nav-fly', mode === 'fly');
       for (const preset of ['slow', 'normal', 'fast']) this.setToggle(`speed-${preset}`, speedPreset === preset);
+    },
+    setScene(scene) {
+      currentScene = scene || null;
+      brandScene.textContent = scene?.label ? `Scene · ${scene.label}` : '';
+      for (const [sceneId, seg] of sceneButtons) seg.setAttribute('aria-checked', String(sceneId === scene?.id));
+      if (currentTab === 'project') renderBottom();
+    },
+    setCommits(list) {
+      commitList = Array.isArray(list) ? list : [];
+      commitsLoaded = true;
+      if (currentTab === 'project') renderBottom();
     },
     setCamera(position) {
       statusCoordinates.textContent = `XYZ ${position.x.toFixed(1)} / ${position.y.toFixed(1)} / ${position.z.toFixed(1)}`;

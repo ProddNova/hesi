@@ -33,6 +33,36 @@ is available only through <http://localhost:8081/editor?world=demo> or as a
 prominently labelled fallback after a real load failure. The editor never
 silently presents demo geometry as the production map.
 
+## Scenes
+
+The editor edits one scene at a time; switch with the Highway / Garage
+toolbar control (or `?scene=garage`). Each scene owns its own project and
+built-map file:
+
+| Scene   | What it edits                          | Project file                          | Build file                          |
+| ------- | -------------------------------------- | ------------------------------------- | ----------------------------------- |
+| Highway | Real Shutoko map (`js/map.js`)         | `data/editor/hesi-world-project.json` | `data/editor/hesi-world-build.json` |
+| Garage  | Garage interior (`js/garage.js`)       | `data/editor/garage-project.json`     | `data/editor/garage-build.json`     |
+
+## Save builds the map
+
+Save (`Ctrl+S`) now does two things: it writes the project JSON as before,
+and it *builds* the map — resolving every override and placed object into a
+flat operations file (the build file above). The game fetches the build
+files at startup through `js/editor-map-patch.js` and replays them onto the
+freshly generated highway and garage, so saved edits appear in the actual
+game without the game ever importing editor code. Missing build files are a
+no-op.
+
+## Commits (map versions)
+
+The Project tab has a **Map versions** panel (also reachable with the
+toolbar Commit button). *Commit version* saves + builds, then snapshots the
+full project document and its build under
+`data/editor/commits/<scene>/<id>.json`, so every version of the map is
+kept. *Restore* loads any snapshot back (undoable), saves it, and rebuilds
+the map; *Delete* removes a snapshot from disk.
+
 ## Run the game
 
 The normal game start remains unchanged:
@@ -54,6 +84,7 @@ available on Windows.
 - orbit and dedicated no-clip fly cameras
 - fly controls: click viewport for mouse look, `W/A/S/D`, `Space`/`Ctrl` (or
   `Q/E`) down/up, `Shift`, mouse wheel, and `Escape`
+- first-person crosshair in fly mode (solid while the pointer is locked)
 - slow, normal, and fast speed presets
 - metadata-driven Tatsumi PA, initial-spawn, map-center, and entire-world views
 - measured world bounds, origin, scale, route/service/junction/chunk counts,
