@@ -58,9 +58,15 @@ const local = (point) => ({
   v: (point.x - area.center.x) * area.normal.x + (point.z - area.center.z) * area.normal.z,
 });
 
-// --- deck is compact ----------------------------------------------------------
-check(area.length <= 120, `deck still ${area.length.toFixed(0)} m long`);
-check(area.width >= 18, `deck only ${area.width.toFixed(0)} m wide`);
+// --- deck matches the real strip ----------------------------------------------
+// The real Tatsumi No.1 PA is a ~190 m elevated strip; the deck is trimmed
+// to that length around the OSM lot centroid.
+check(area.length >= 170 && area.length <= 212, `deck ${area.length.toFixed(0)} m long (real strip is ~190 m)`);
+check(area.width >= 22, `deck only ${area.width.toFixed(0)} m wide`);
+check(Number.isFinite(area.rampSideSign) && Math.abs(area.rampSideSign) === 1,
+  `rampSideSign missing (${area.rampSideSign})`);
+check(area.tatsumiPlan && area.tatsumiPlan.truckDepth >= 7.5 && area.tatsumiPlan.truckDepth <= 11.5,
+  `tatsumiPlan missing or implausible (${JSON.stringify(area.tatsumiPlan || null)})`);
 
 // --- 1. active garage on a bare platform --------------------------------------
 const garageAreas = map.serviceAreas.filter((candidate) => candidate.hasGarage);
@@ -249,6 +255,28 @@ check(map.trafficLanes.every((lane) => lane.direction === 1),
   'traffic lanes with direction != +1 exist');
 check(map.trafficLanes.every((lane) => !`${lane.routeId}`.includes('tatsumi')),
   'traffic routes onto a Tatsumi connector');
+// Traffic never enters the lot: no traffic lane centreline passes inside
+// the deck rectangle (with margin) anywhere near deck height. The flanking
+// ramps must stay outside the fence, not just outside the slab.
+{
+  let laneInLot = 0;
+  let laneMargin = Infinity;
+  for (const lane of map.trafficLanes) {
+    const laneRoute = map.routes.get(lane.routeId);
+    if (!laneRoute) continue;
+    for (let s = 0; s < laneRoute.length; s += 2) {
+      const sample = map.sampleLane(laneRoute.id, s, lane.laneIndex ?? lane.lane ?? 0, lane.direction ?? 1);
+      if (Math.abs(sample.position.y - area.elevation) > 5) continue;
+      const l = local(sample.position);
+      const du = Math.abs(l.u) - area.length * 0.5;
+      const dv = Math.abs(l.v) - area.width * 0.5;
+      if (du < 0 && dv < 1.5) laneInLot += 1;
+      if (du < 0) laneMargin = Math.min(laneMargin, dv);
+    }
+  }
+  check(laneInLot === 0,
+    `${laneInLot} traffic-lane stations inside the lot fence line (closest ${laneMargin.toFixed(2)} m)`);
+}
 const laneSample = map.sampleLane('wangan_0', 8000, 0, 1);
 const laneTangent = map._sampleCenter('wangan_0', 8000, 1).tangent;
 check(laneSample.tangent.dot(laneTangent) > 0.99, 'lane sampling does not face the route tangent');

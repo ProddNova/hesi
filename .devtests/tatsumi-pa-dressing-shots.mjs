@@ -5,11 +5,12 @@
  * service-area record, so before/after runs frame identical spots.
  *
  *  1. lot-overview    — low oblique down the whole lot from the entry end.
- *  2. stall-row       — the aisle-side stall row with backed-in cars.
- *  3. toilets-vending — toilet block, walkway, vending row, smoking corner.
- *  4. ring-forecourt  — the garage ENTER ring kept clear of stalls.
- *  5. entry-signage   — PA name + P signs as the entry lane sees them.
- *  6. exit-signage    — EXIT sign and the last stalls at the exit end.
+ *  2. stall-row       — the far-side perpendicular stalls with backed-in cars.
+ *  3. truck-row       — the 17-stall large-vehicle diagonal row (ramp side).
+ *  4. toilets-vending — toilet block, walkway, vending row, smoking corner.
+ *  5. ring-forecourt  — the garage ENTER ring in the entry gore.
+ *  6. entry-signage   — PA name + P signs as the entry lane sees them.
+ *  7. exit-signage    — EXIT sign and the exit wedge zebra.
  *
  * Run: CHROMIUM_PATH=... node .devtests/tatsumi-pa-dressing-shots.mjs [suffix] [--case=name]
  * Writes .devtests/shots/DRESS-<case>[-suffix].png
@@ -95,36 +96,40 @@ const place = async (spec) => {
   await page.waitForTimeout(900);
 };
 
-// The live deck's aisle sits on the negative-v side; mirror the cameras if
-// a future re-fit flips it.
-const aisleSign = await page.evaluate(() => {
+// The live deck's large-vehicle row backs onto the ramp_8 side; mirror the
+// cameras if a future re-fit flips it.
+const rampSign = await page.evaluate(() => {
   const area = window.shutoko.map.serviceAreas.find((candidate) => candidate.id === 'tatsumi_pa');
-  return Math.sign(area?.aisleV ?? -1) || -1;
+  return area?.rampSideSign ?? (Math.sign(area?.aisleV ?? -1) || -1);
 });
-const v = (value) => value * -aisleSign; // positive = far side of the aisle
+const v = (value) => value * -rampSign; // positive = far side (small stalls, toilets)
 
 if (want('lot-overview')) {
-  await place({ u: -78, v: v(-2), up: 16, yaw: 0.06, pitch: -0.22 });
+  await place({ u: -112, v: v(1), up: 20, yaw: 0.04, pitch: -0.2 });
   await shoot('lot-overview');
 }
 if (want('stall-row')) {
-  await place({ u: -18, v: v(-1), up: 4.2, yaw: -0.62 * aisleSign, pitch: -0.16 });
+  await place({ u: -30, v: v(-1), up: 4.2, yaw: 0.62 * rampSign, pitch: -0.16 });
   await shoot('stall-row');
 }
+if (want('truck-row')) {
+  await place({ u: -12, v: v(3), up: 5.5, yaw: -0.75 * rampSign, pitch: -0.15 });
+  await shoot('truck-row');
+}
 if (want('toilets-vending')) {
-  await place({ u: 8, v: v(-2), up: 5, yaw: 0.72 * aisleSign, pitch: -0.12 });
+  await place({ u: 12, v: v(-2), up: 5, yaw: 0.55 * rampSign, pitch: -0.12 });
   await shoot('toilets-vending');
 }
 if (want('ring-forecourt')) {
-  await place({ u: -44, v: v(-4), up: 6, yaw: -0.36 * aisleSign, pitch: -0.2 });
+  await place({ u: -62, v: v(0), up: 6, yaw: 0.4 * rampSign - Math.PI, pitch: -0.2 });
   await shoot('ring-forecourt');
 }
 if (want('entry-signage')) {
-  await place({ u: -74, v: v(-3.2), up: 2.2, yaw: 0, pitch: -0.02 });
+  await place({ u: -108, v: v(0), up: 2.6, yaw: 0, pitch: -0.02 });
   await shoot('entry-signage');
 }
 if (want('exit-signage')) {
-  await place({ u: 26, v: v(-3.2), up: 2.4, yaw: 0, pitch: -0.03 });
+  await place({ u: 58, v: v(-2), up: 2.6, yaw: 0, pitch: -0.03 });
   await shoot('exit-signage');
 }
 
