@@ -86,6 +86,17 @@ try {
     throw new Error(`Draft/game actions are not explicit: ${JSON.stringify(saveLabels)}`);
   }
 
+  // Playwright auto-scrolls toolbar buttons into view; on viewports narrower
+  // than the toolbar that shifts the whole #app container sideways, and any
+  // canvas screen-space math afterwards would click outside the real canvas.
+  // The editor chrome is never meant to scroll, so zero stray offsets before
+  // every coordinate-dependent interaction.
+  const resetViewportScroll = () => page.evaluate(() => {
+    for (const container of [document.getElementById('app'), document.documentElement, document.body]) {
+      if (container) { container.scrollLeft = 0; container.scrollTop = 0; }
+    }
+  });
+
   await page.getByRole('button', { name: 'Fly', exact: true }).click();
   const before = await page.evaluate(() => window.hesiEditor.viewport.camera.position.toArray());
   await page.keyboard.down('KeyW');
@@ -100,6 +111,7 @@ try {
 
   // A rendered road surface is a merged chunk mesh, but clicking it must
   // resolve to the nearest semantic route and activate orange curve editing.
+  await resetViewportScroll();
   const roadPickPoint = await page.evaluate(() => {
     const app = window.hesiEditor;
     const selection = app.selection;
@@ -178,6 +190,7 @@ try {
     const staleIndex = routes.findIndex((route) => route.id === 'tatsumi_pa_exit');
     if (staleIndex >= 0) routes.splice(staleIndex, 1);
   });
+  await resetViewportScroll();
   const syntheticBaseline = await page.evaluate(() => {
     const app = window.hesiEditor;
     const controller = app.roadEdit;
@@ -275,6 +288,7 @@ try {
     throw new Error(`Synthetic route Save Draft payload is invalid: ${JSON.stringify(savedSynthetic)}`);
   }
 
+  await resetViewportScroll();
   const addTarget = await page.evaluate(() => {
     const app = window.hesiEditor;
     const controller = app.roadEdit;
@@ -459,7 +473,9 @@ try {
   }));
   if (Math.abs(transformed.position[0] - (Number(originalX) + 6)) > 0.01 || !transformed.override?.transform) throw new Error(`Numeric transform was not stored: ${JSON.stringify(transformed)}`);
   if (!transformed.history.canUndo || !transformed.gizmoAttached) throw new Error(`Transform controls/history are not live: ${JSON.stringify(transformed)}`);
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  // The bottom-panel tab, not an asset card's per-asset "Edit" button (saved
+  // custom assets add one each and would make a role/name lookup ambiguous).
+  await page.locator('.tab-button[data-tab="edit"]').click();
   await page.getByRole('button', { name: 'Disable', exact: true }).click();
   if (!await page.evaluate(() => window.hesiEditor.selection.selected.metadata.disabled)) throw new Error('Generated lamp was not disabled non-destructively');
   await page.getByRole('button', { name: 'Re-enable', exact: true }).click();
