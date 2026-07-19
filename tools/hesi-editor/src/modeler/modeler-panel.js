@@ -197,7 +197,7 @@ export class ModelerPanel {
     this.uploadTextureButton = button('Upload image…', 'tool-button', 'Add an image to the texture library');
     right.append(this.uploadTextureButton);
     right.append(element('h3', '', 'World textures'));
-    right.append(element('p', 'modeler-help', 'Replace the repeated textures of the generated map — the road asphalt image tiles along every segment.'));
+    right.append(element('p', 'modeler-help', 'Replace the repeated textures of the generated map — the road asphalt image tiles at one fixed scale across every road surface.'));
     this.worldTextureList = element('div', 'modeler-world-textures');
     right.append(this.worldTextureList);
 

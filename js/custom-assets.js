@@ -17,10 +17,11 @@ export const CUSTOM_ASSET_ID_PATTERN = /^custom:[a-z0-9][a-z0-9_-]{0,80}$/i;
 export const CUSTOM_TEXTURE_ID_PATTERN = /^tex:[a-z0-9][a-z0-9_-]{0,80}$/i;
 
 // Generated-map materials that accept a repeated texture override. Every key
-// exists in HighwayMap._createMaterials(); road surfaces tile one image per
-// generated quad, which is exactly the PS1-era repeat the map is built from.
+// exists in HighwayMap._createMaterials(); road surfaces carry world-anchored
+// UVs (see applyWorldSurfaceUVs in js/map.js) so one image repeat covers a
+// fixed number of metres of asphalt everywhere.
 export const WORLD_TEXTURE_SLOTS = Object.freeze({
-  road: { label: 'Road asphalt', description: 'Main highway surface (repeated per road segment)' },
+  road: { label: 'Road asphalt', description: 'Main highway surface (tiled at one fixed world scale)' },
   roadAlt: { label: 'Road asphalt (alt)', description: 'Alternate asphalt used by some routes' },
   roadService: { label: 'Service area asphalt', description: 'Parking-area surface at Tatsumi/Shibaura PA' },
   concrete: { label: 'Concrete', description: 'Concrete walls and structures' },
