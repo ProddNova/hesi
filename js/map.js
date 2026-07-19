@@ -1838,9 +1838,12 @@ export class HighwayMap {
       }
       const gate = deckPoint(length * 0.5 - 2, aisleV);
       gate.y = gateY;
+      // The lane strip forms only PAST the last stalls/furniture (the smoking
+      // corner ends ~L/2-51): the aisle itself belongs to the lot, so the
+      // exit lane begins at the end of the parking, not at mid-deck.
       const points = [
-        onDeck(8, aisleV),
-        onDeck(length * 0.5 - 26, aisleV),
+        onDeck(length * 0.5 - 49, aisleV),
+        onDeck(length * 0.5 - 24, aisleV),
         gate,
         ...descentPoints(gate, joinPoint, 'from'),
         joinPoint,
@@ -1925,8 +1928,10 @@ export class HighwayMap {
         offB,
         ...descent,
         gate,
-        onDeck(-length * 0.5 + 26, aisleV),
-        onDeck(-8, aisleV),
+        // The entry lane ends where the parking begins (the truck row starts
+        // at -L/2+14): past that the aisle is the lot's own pavement.
+        onDeck(-length * 0.5 + 8, aisleV),
+        onDeck(-length * 0.5 + 14, aisleV),
       ];
       const entryRoute = registerConnector('tatsumi_pa_entry', 'Tatsumi PA entry', points,
         { kind: 'diverge', hostStation: entryStart });
@@ -6972,7 +6977,31 @@ export class HighwayMap {
         if (area.length * 0.5 > cursor + 0.5) runs.push([cursor, area.length * 0.5]);
         return runs;
       };
-      const fenceY = area.elevation + 0.6;
+      // Shutoko-style parapet instead of the old dark fence slab: light
+      // concrete base wall + rounded coping + twin steel-pipe rail on short
+      // posts — the classic 首都高 elevated-deck barrier. Same footprint as
+      // the old rail, visual only (edge collision stays the analytic lot).
+      const acrossOrientation = yawQuaternion(area.normal);
+      const parapet = (center, alongDir, runLength, quaternion) => {
+        const wall = center.clone();
+        wall.y = area.elevation + 0.41;
+        this._instance(wall, vec(0.34, 0.82, runLength), quaternion, null, 'box:barrier');
+        const coping = center.clone();
+        coping.y = area.elevation + 0.87;
+        this._instance(coping, vec(0.44, 0.1, runLength), quaternion, null, 'box:concrete');
+        for (const pipeY of [1.08, 1.3]) {
+          const pipe = center.clone();
+          pipe.y = area.elevation + pipeY;
+          this._instance(pipe, vec(0.09, 0.09, runLength), quaternion, null, 'box:railMetal');
+        }
+        const bays = Math.max(1, Math.round(runLength / 4));
+        for (let i = 0; i <= bays; i += 1) {
+          const along = runLength * (i / bays - 0.5) * 0.99;
+          const post = center.clone().addScaledVector(alongDir, along);
+          post.y = area.elevation + 1.12;
+          this._instance(post, vec(0.08, 0.52, 0.14), quaternion, null, 'box:railMetal');
+        }
+      };
       for (const side of [-1, 1]) {
         for (const [runFrom, runTo] of sideRuns(side)) {
           const runCenter = (runFrom + runTo) * 0.5;
@@ -6982,30 +7011,44 @@ export class HighwayMap {
             .addScaledVector(area.normal, side * (area.width * 0.5 - 0.28));
           kerb.y = area.elevation + 0.09;
           this._instance(kerb, vec(0.5, 0.18, runLength), orientation, 0x8f959e, 'box:parkedBody');
-          const rail = area.center.clone()
+          const railCenter = area.center.clone()
             .addScaledVector(area.tangent, runCenter)
             .addScaledVector(area.normal, side * (area.width * 0.5 - 0.3));
-          rail.y = fenceY;
-          this._instance(rail, vec(0.3, 1.2, runLength), orientation, null, 'box:fence');
-          // end posts so the opening reads as intentional, not a missing rail
+          parapet(railCenter, area.tangent, runLength, orientation);
+          // end blocks so an opening reads as intentional, not a missing rail
           for (const [endU, isOpeningEnd] of [[runFrom, runFrom > -area.length * 0.5 + 1], [runTo, runTo < area.length * 0.5 - 1]]) {
             if (!isOpeningEnd) continue;
             const post = area.center.clone()
               .addScaledVector(area.tangent, endU)
               .addScaledVector(area.normal, side * (area.width * 0.5 - 0.3));
-            post.y = fenceY;
-            this._instance(post, vec(0.42, 1.3, 0.42), orientation, null, 'box:fence');
+            post.y = area.elevation + 0.7;
+            this._instance(post, vec(0.42, 1.4, 0.42), orientation, null, 'box:barrier');
           }
         }
       }
+      // Deck-end parapets. A deck whose connectors pass through the END
+      // gates (the Tatsumi lot) gets the wall split around the aisle gate;
+      // legacy lots keep the outward-half wall only (their access lane
+      // crosses the ends on the road side).
+      const endGate = area.entryRouteId || area.exitRouteId
+        ? { from: (area.aisleV ?? 0) - 4.8, to: (area.aisleV ?? 0) + 4.8 }
+        : null;
       for (const endSide of [-1, 1]) {
-        // One rail on the outward half only: the access lane crosses the lot
-        // ends on the road side, so that side stays open.
-        const rail = area.center.clone()
-          .addScaledVector(area.tangent, endSide * (area.length * 0.5 - 0.3))
-          .addScaledVector(area.normal, area.width * 0.26);
-        rail.y = fenceY;
-        this._instance(rail, vec(area.width * 0.44, 1.2, 0.3), orientation, null, 'box:fence');
+        const endRuns = [];
+        if (endGate) {
+          const vMin = -area.width * 0.5 + 0.5;
+          const vMax = area.width * 0.5 - 0.5;
+          if (endGate.from > vMin + 1) endRuns.push([vMin, endGate.from]);
+          if (vMax > endGate.to + 1) endRuns.push([endGate.to, vMax]);
+        } else {
+          endRuns.push([area.width * 0.04, area.width * 0.48]);
+        }
+        for (const [vFrom, vTo] of endRuns) {
+          const center = area.center.clone()
+            .addScaledVector(area.tangent, endSide * (area.length * 0.5 - 0.3))
+            .addScaledVector(area.normal, (vFrom + vTo) * 0.5);
+          parapet(center, area.normal, vTo - vFrom, acrossOrientation);
+        }
       }
 
       // Internal dressing (stalls, parked cars, buildings, vending, lamps,
@@ -7187,7 +7230,11 @@ export class HighwayMap {
     const truckQ = yawQuaternion(truckAxis);
     const truckU0 = -halfL + 14;
     const truckBack = (u) => at(u, R * (halfW - 0.45));
-    const divLen = (plan.truckDepth - 0.4) * Math.SQRT2;
+    // Dividers run from the back kerb and STOP just short of the painted
+    // aisle-edge line: the full-depth length used to poke ~0.5 m past it,
+    // so every divider visibly crossed the long edge line from above.
+    const divDepth = Math.abs(R * (halfW - 0.45) - (aisleEdge(R) + R * 0.6)) - 0.35;
+    const divLen = Math.max(2, divDepth) * Math.SQRT2;
     for (let i = 0; i <= TRUCK_COUNT; i += 1) {
       const centre = truckBack(truckU0 + i * TRUCK_PITCH).addScaledVector(truckAxis, -divLen * 0.5);
       centre.y = area.elevation + 0.03;

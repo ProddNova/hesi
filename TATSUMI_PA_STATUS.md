@@ -100,6 +100,31 @@ banned by the placement probe (§6) as before.
   `DRESS-lot-overview/stall-row/truck-row/toilets-vending/ring-forecourt/
   entry-signage/exit-signage` — via the two updated shot scripts.
 
+## 2026-07 line/barrier refinements
+
+- **Truck stall dividers no longer cross the aisle-edge line**: divider
+  length now derives from the kerb-to-line depth (stops 0.35 m short)
+  instead of the full truck depth (`_buildTatsumiPaDressing`). The line
+  audit (`.devtests/tatsumi-pa-line-audit.mjs`, new) reports only the 4
+  intentional arrow-head pairs as crossing segments.
+- **Connector strips hug the parking**: the exit lane's on-deck leg now
+  begins past the last furniture (u = L/2−49, the smoking corner) instead
+  of mid-deck (u = 8), and the entry lane ends where the truck row starts
+  (u = −L/2+14) instead of running to u = −8 — the two strips no longer
+  overlap along the whole aisle (`_defineTatsumiDeck` §8).
+- **Shutoko-style parapet** replaces the dark fence slab on every PA
+  perimeter: concrete base wall + coping + twin steel-pipe rail on posts
+  (`box:barrier`/`box:concrete`/`box:railMetal`), with the deck-end walls
+  split around the aisle gate on decks whose connectors pass through the
+  ends. The old `box:fence` perimeter slabs are gone (the editor build's
+  fence-hide ops now simply no-op where the mesh no longer exists).
+- New QA scripts: `.devtests/tatsumi-pa-topdown-shots.mjs` (PLAN-* close
+  plan/barrier shots) and `.devtests/tatsumi-pa-line-audit.mjs`.
+- Verification: tatsumi flow/placement/pa-access, guardrail, road-surface,
+  merge-marking, marking-orientation, ab-marking-clipping, lateral-junction
+  probes PASS; junction-finishing FAIL(27) and e2e 39/41 / dev-map 30/31
+  identical to the pre-existing baseline.
+
 ## Remaining / debt
 
 - The real lot is a wedge that tapers into the gores; the deck rectangle

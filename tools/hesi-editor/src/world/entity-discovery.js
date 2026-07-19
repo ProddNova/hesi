@@ -67,6 +67,12 @@ function registerPick(index, object, entity, instanceIndex = null) {
 }
 
 function routeContext(map, position, maxDistance = 800) {
+  // Far from every route bucket, getNearestRoute falls back to a full scan
+  // of every polyline — with tens of thousands of individual instances that
+  // fallback dominates discovery time, so skip the lookup outright there.
+  if (typeof map._candidateRoutes === 'function' && map._candidateRoutes(position).size === 0) {
+    return { routeId: null, routeName: null, routeDistance: null, worldDistance: null };
+  }
   const nearest = map.getNearestRoute?.(position, { maxDistance });
   if (!nearest) return { routeId: null, routeName: null, routeDistance: null, worldDistance: null };
   return {
@@ -97,12 +103,17 @@ function instanceKind(type, proxy) {
   if ((material === 'concreteDark' || material === 'concrete') && pillarShape) {
     return { individual: true, kind: 'pillar', layer: 'Pillars', type: 'structural-support', label: 'Concrete support' };
   }
-  if (material === 'barrier' || material === 'fence') return { individual: false, kind: 'barrier', layer: 'Barriers', type: 'barrier-instance-batch', label: 'Barrier instances' };
-  if (material === 'marking' || material === 'amber') return { individual: false, kind: 'marking', layer: 'Road Markings', type: 'marking-instance-batch', label: 'Marking instances' };
-  if (material === 'railMetal' || geometry === 'jetfan' || material.includes('tunnel')) return { individual: false, kind: 'tunnel', layer: 'Tunnels', type: 'tunnel-fixture-batch', label: 'Tunnel fixtures' };
-  if (material === 'exitGreen' || material === 'chevron') return { individual: false, kind: 'sign', layer: 'Signs', type: 'sign-instance-batch', label: 'Sign fixtures' };
+  // Every instanced piece is exposed as its own editable entity — no more
+  // per-chunk "instance batch" groups: each barrier block, marking line,
+  // rail, sign and prop can be selected and moved on its own. Lamp glow
+  // components stay aliased to their lamppost so a lamp still moves as one
+  // physical asset.
+  if (material === 'barrier' || material === 'fence') return { individual: true, kind: 'barrier', layer: 'Barriers', type: 'barrier-piece', label: 'Barrier piece' };
+  if (material === 'marking' || material === 'amber') return { individual: true, kind: 'marking', layer: 'Road Markings', type: 'marking-line', label: 'Marking line' };
+  if (material === 'railMetal' || geometry === 'jetfan' || material.includes('tunnel')) return { individual: true, kind: 'tunnel', layer: 'Tunnels', type: 'tunnel-fixture', label: 'Tunnel fixture' };
+  if (material === 'exitGreen' || material === 'chevron') return { individual: true, kind: 'sign', layer: 'Signs', type: 'sign-fixture', label: 'Sign fixture' };
   if (material === 'lampSodium' || material === 'lightPool' || material === 'lightStreak') return { individual: false, aliasLamp: true, kind: 'lamp', layer: 'Lamps', type: 'lamp-component-batch', label: 'Lamp components' };
-  return { individual: false, kind: 'prop', layer: 'Props', type: 'prop-instance-batch', label: 'Prop instances' };
+  return { individual: true, kind: 'prop', layer: 'Props', type: 'prop-piece', label: 'Prop' };
 }
 
 export function discoverHesiEntities(map) {
