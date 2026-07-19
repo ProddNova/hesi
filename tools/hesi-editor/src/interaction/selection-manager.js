@@ -30,6 +30,7 @@ export class SelectionManager {
     this.onChange = onChange;
     this.onStatus = onStatus;
     this.selected = null;
+    this.selectedEntities = [];
     this.inspectLocked = false;
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -78,7 +79,7 @@ export class SelectionManager {
       const travel = Math.hypot(event.clientX - this._down.x, event.clientY - this._down.y);
       this._down = null;
       if (travel > 4 || document.pointerLockElement === this.viewport.canvas) return;
-      this.pick(event.clientX, event.clientY);
+      this.pick(event.clientX, event.clientY, { additive: event.shiftKey });
     };
     this._onKeyDown = (event) => {
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
@@ -108,7 +109,7 @@ export class SelectionManager {
     return true;
   }
 
-  pick(clientX, clientY) {
+  pick(clientX, clientY, { additive = false } = {}) {
     const rect = this.viewport.canvas.getBoundingClientRect();
     this.pointer.set(
       ((clientX - rect.left) / rect.width) * 2 - 1,
@@ -126,9 +127,13 @@ export class SelectionManager {
       candidates.push(entity);
     }
     if (!candidates.length) {
-      this.clear('viewport');
-      this.onStatus('No selectable object under pointer');
+      // Shift+click on empty space keeps the current multi-selection.
+      if (!additive) this.clear('viewport');
+      else this.onStatus('No selectable object under pointer');
       return null;
+    }
+    if (additive) {
+      return this.select(candidates[0], { source: 'viewport', additive: true, overlap: candidates.length, overlapIndex: 0 });
     }
     const now = Date.now();
     const sameSpot = Math.hypot(clientX - this._lastPick.x, clientY - this._lastPick.y) < 6 && now - this._lastPick.at < 900;
@@ -139,33 +144,66 @@ export class SelectionManager {
     return this.select(candidates[index], { source: 'viewport', overlap: candidates.length, overlapIndex: index });
   }
 
-  select(entityOrId, { source = 'api', overlap = 1, overlapIndex = 0 } = {}) {
+  select(entityOrId, { source = 'api', additive = false, overlap = 1, overlapIndex = 0 } = {}) {
     const entity = typeof entityOrId === 'string' ? this.registry.getById(entityOrId) : entityOrId;
     if (!this.canSelect(entity)) {
       this.onStatus(entity ? `${entity.layer} or entity is hidden, disabled, or locked` : 'Entity not found');
       return null;
     }
-    this.selected = entity;
+    if (additive) {
+      const existing = this.selectedEntities.findIndex((item) => item.id === entity.id);
+      if (existing >= 0) {
+        this.selectedEntities.splice(existing, 1);
+        if (this.selected?.id === entity.id) this.selected = this.selectedEntities[this.selectedEntities.length - 1] || null;
+      } else {
+        this.selectedEntities.push(entity);
+        this.selected = entity;
+      }
+    } else {
+      this.selectedEntities = [entity];
+      this.selected = entity;
+    }
     this._rebuildHighlight();
     this.refreshHighlight();
-    this.onChange(entity, { source });
-    this.onStatus(`Selected ${entity.name} · ${entity.id}${overlap > 1 ? ` · hit ${overlapIndex + 1}/${overlap}` : ''}`);
-    return entity;
+    const count = this.selectedEntities.length;
+    this.onChange(this.selected, { source, selectedCount: count });
+    this.onStatus(count > 1
+      ? `${count} objects selected · primary ${this.selected?.name || 'none'} · delete/duplicate/visibility/lock apply to all`
+      : count === 1
+        ? `Selected ${this.selected.name} · ${this.selected.id}${overlap > 1 ? ` · hit ${overlapIndex + 1}/${overlap}` : ''}`
+        : 'Selection cleared');
+    return this.selected;
+  }
+
+  removeFromSelection(entityOrId, source = 'api') {
+    const id = typeof entityOrId === 'string' ? entityOrId : entityOrId?.id;
+    const index = this.selectedEntities.findIndex((item) => item.id === id);
+    if (index < 0) return false;
+    this.selectedEntities.splice(index, 1);
+    if (this.selected?.id === id) this.selected = this.selectedEntities[this.selectedEntities.length - 1] || null;
+    this._rebuildHighlight();
+    this.refreshHighlight();
+    this.onChange(this.selected, { source, selectedCount: this.selectedEntities.length });
+    return true;
   }
 
   clear(source = 'api') {
-    if (!this.selected) return;
+    if (!this.selected && !this.selectedEntities.length) return;
     this.selected = null;
+    this.selectedEntities = [];
     this.highlightGroup.visible = false;
     this.boundsHelper.visible = false;
     this.pivotHelper.visible = false;
-    this.onChange(null, { source });
+    this.onChange(null, { source, selectedCount: 0 });
   }
 
   getSelectedBounds() {
-    if (!this.selected) return new THREE.Box3();
-    const box = this.selected.getWorldBounds?.() || (this.selected.object3D ? new THREE.Box3().setFromObject(this.selected.object3D) : new THREE.Box3());
-    return box?.clone?.() || new THREE.Box3();
+    const box = new THREE.Box3();
+    for (const entity of this.selectedEntities) {
+      const entityBox = entity.getWorldBounds?.() || (entity.object3D ? new THREE.Box3().setFromObject(entity.object3D) : null);
+      if (entityBox && !entityBox.isEmpty()) box.union(entityBox);
+    }
+    return box;
   }
 
   _edgesFor(geometry) {
@@ -202,7 +240,11 @@ export class SelectionManager {
       child.removeFromParent();
     }
     this._overlaySources = [];
-    const entity = this.selected;
+    for (const entity of this.selectedEntities) this._addEntityHighlight(entity);
+    this.highlightGroup.visible = this.highlightGroup.children.length > 0;
+  }
+
+  _addEntityHighlight(entity) {
     if (!entity) return;
     const components = entity.metadata?.instanceComponents || [];
     const usesInstancedBatchOverlay = !components.length && entity.object3D?.isInstancedMesh;
@@ -239,12 +281,11 @@ export class SelectionManager {
     for (const mesh of meshes.slice(0, MAX_OVERLAY_COMPONENTS)) {
       this._addOverlay(mesh.geometry, { kind: 'object', object: mesh });
     }
-    this.highlightGroup.visible = this.highlightGroup.children.length > 0;
   }
 
   refreshHighlight() {
     const entity = this.selected;
-    if (!entity) {
+    if (!this.selectedEntities.length) {
       this.highlightGroup.visible = false;
       this.boundsHelper.visible = false;
       this.pivotHelper.visible = false;
@@ -272,7 +313,7 @@ export class SelectionManager {
       this.boundsHelper.box.copy(box);
       this.boundsHelper.updateMatrixWorld(true);
     }
-    const showPivot = this.debug.pivot && entity.object3D;
+    const showPivot = this.debug.pivot && entity?.object3D;
     this.pivotHelper.visible = Boolean(showPivot);
     if (showPivot) {
       this.pivotHelper.position.copy(entity.object3D.getWorldPosition(new THREE.Vector3()));

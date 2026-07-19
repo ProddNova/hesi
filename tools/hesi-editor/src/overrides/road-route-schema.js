@@ -1,0 +1,127 @@
+const SOURCE_PATH = 'data/editor/road-route-overrides.json';
+const PRODUCTION_JSON_PATH = 'data/routes-smoothed.json';
+const PRODUCTION_MODULE_PATH = 'data/routes-smoothed.js';
+const MAX_ROUTES = 512;
+const MAX_POINTS_PER_ROUTE = 20000;
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function finiteNumber(value, label) {
+  if (!Number.isFinite(value)) throw new TypeError(`${label} must be a finite number`);
+  const rounded = Math.round((value + Number.EPSILON) * 100000) / 100000;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function canonicalPoints(points, label) {
+  if (!Array.isArray(points) || points.length < 2) throw new TypeError(`${label} must contain at least 2 points`);
+  if (points.length > MAX_POINTS_PER_ROUTE) throw new TypeError(`${label} exceeds ${MAX_POINTS_PER_ROUTE} points`);
+  return points.map((point, index) => {
+    if (!Array.isArray(point) || point.length !== 3) throw new TypeError(`${label}[${index}] must be an [x, y, z] triple`);
+    return point.map((value, axis) => finiteNumber(value, `${label}[${index}][${axis}]`));
+  });
+}
+
+function samePoint(a, b) {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+export function validateProductionRouteDocument(document) {
+  if (!isRecord(document) || !Array.isArray(document.routes)) {
+    throw new TypeError('Production route document must be an object with a routes array');
+  }
+  if (!document.routes.length || document.routes.length > MAX_ROUTES) {
+    throw new TypeError(`Production route document must contain 1-${MAX_ROUTES} routes`);
+  }
+  const ids = new Set();
+  for (const route of document.routes) {
+    if (!isRecord(route) || typeof route.id !== 'string' || !route.id.trim()) throw new TypeError('Every production route needs a non-empty string id');
+    if (ids.has(route.id)) throw new TypeError(`Duplicate production route id: ${route.id}`);
+    ids.add(route.id);
+    canonicalPoints(route.points, `Production route ${route.id}.points`);
+  }
+  return document;
+}
+
+export function blankRoadRouteOverrides() {
+  return { version: 1, source: PRODUCTION_JSON_PATH, routes: {} };
+}
+
+export function canonicalizeRoadRouteOverrides(document, { production = null } = {}) {
+  if (!isRecord(document)) throw new TypeError('Road route overrides must be an object');
+  if (document.version !== 1) throw new TypeError('Road route overrides version must be 1');
+  if (document.source !== PRODUCTION_JSON_PATH) throw new TypeError(`Road route overrides source must be ${PRODUCTION_JSON_PATH}`);
+  if (!isRecord(document.routes)) throw new TypeError('Road route overrides routes must be an object keyed by route id');
+  const productionRoutes = production
+    ? new Map(validateProductionRouteDocument(production).routes.map((route) => [route.id, route]))
+    : null;
+  const ids = Object.keys(document.routes).sort();
+  if (ids.length > MAX_ROUTES) throw new TypeError(`Road route overrides exceed ${MAX_ROUTES} routes`);
+  const routes = {};
+  for (const id of ids) {
+    if (!id.trim()) throw new TypeError('Road route override id cannot be empty');
+    if (productionRoutes && !productionRoutes.has(id)) throw new TypeError(`Road route override references unknown production route: ${id}`);
+    const entry = document.routes[id];
+    if (!isRecord(entry)) throw new TypeError(`Road route override ${id} must be an object`);
+    const points = canonicalPoints(entry.points, `Road route override ${id}.points`);
+    if (productionRoutes) {
+      const reference = productionRoutes.get(id).points;
+      const referenceEndpoints = canonicalPoints([reference[0], reference.at(-1)], `Production route ${id} endpoints`);
+      if (!samePoint(points[0], referenceEndpoints[0]) || !samePoint(points.at(-1), referenceEndpoints[1])) {
+        throw new TypeError(`Road route override ${id} cannot move or remove production route endpoints`);
+      }
+    }
+    routes[id] = { points };
+  }
+  return { version: 1, source: PRODUCTION_JSON_PATH, routes };
+}
+
+export function mergeRoadRouteUpdates(previous, updates, production) {
+  const base = canonicalizeRoadRouteOverrides(previous || blankRoadRouteOverrides(), { production });
+  if (!Array.isArray(updates) || !updates.length) throw new TypeError('Road route save requires at least one route update');
+  const seen = new Set();
+  const routes = { ...base.routes };
+  const productionIds = new Set(validateProductionRouteDocument(production).routes.map((route) => route.id));
+  for (const update of updates) {
+    if (!isRecord(update) || typeof update.id !== 'string' || !update.id.trim()) throw new TypeError('Every road route update needs a non-empty string id');
+    if (seen.has(update.id)) throw new TypeError(`Duplicate road route update: ${update.id}`);
+    if (!productionIds.has(update.id)) throw new TypeError(`Road route update references unknown production route: ${update.id}`);
+    seen.add(update.id);
+    routes[update.id] = { points: canonicalPoints(update.points, `Road route update ${update.id}.points`) };
+  }
+  return canonicalizeRoadRouteOverrides({ ...base, routes }, { production });
+}
+
+export function applyRoadRouteOverrides(production, overrides) {
+  validateProductionRouteDocument(production);
+  const source = canonicalizeRoadRouteOverrides(overrides, { production });
+  const output = structuredClone(production);
+  const byId = new Map(output.routes.map((route) => [route.id, route]));
+  for (const [id, entry] of Object.entries(source.routes)) byId.get(id).points = structuredClone(entry.points);
+  output.meta = isRecord(output.meta) ? output.meta : {};
+  output.meta.editorRoadOverrides = { source: SOURCE_PATH, routes: Object.keys(source.routes).sort() };
+  return output;
+}
+
+export function serializeRoadRouteOverrides(document, options = {}) {
+  return `${JSON.stringify(canonicalizeRoadRouteOverrides(document, options), null, 2)}\n`;
+}
+
+export function serializeProductionRoutes(document) {
+  validateProductionRouteDocument(document);
+  return JSON.stringify(document);
+}
+
+export function productionRouteModuleSource(json) {
+  return '// GENERATED by tools/build-smoothed-routes.mjs from data/routes.json — do not edit by hand.\n'
+    + '// Offline-faired centrelines (XZ only). Raw OSM data lives in data/routes.js.\n'
+    + '// Data © OpenStreetMap contributors, ODbL 1.0.\n'
+    + `export default ${json};\n`;
+}
+
+export const ROAD_ROUTE_PATHS = Object.freeze({
+  source: SOURCE_PATH,
+  productionJson: PRODUCTION_JSON_PATH,
+  productionModule: PRODUCTION_MODULE_PATH,
+});

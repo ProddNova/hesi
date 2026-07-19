@@ -1,13 +1,30 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 
 const ROOT = new URL('../../../', import.meta.url);
 const PORT = 9100 + (process.pid % 500);
 const BASE = `http://127.0.0.1:${PORT}`;
 let child;
 const TEST_PROJECT = `data/editor/.test-project-${PORT}.json`;
+const ROUTE_FILES = [
+  new URL('../../../data/editor/road-route-overrides.json', import.meta.url),
+  new URL('../../../data/editor/road-route-overrides.json.bak', import.meta.url),
+  new URL('../../../data/routes-smoothed.json', import.meta.url),
+  new URL('../../../data/routes-smoothed.json.bak', import.meta.url),
+  new URL('../../../data/routes-smoothed.js', import.meta.url),
+  new URL('../../../data/routes-smoothed.js.bak', import.meta.url),
+];
+
+async function snapshotOptional(file) {
+  try { return await readFile(file); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+async function restoreOptional(file, snapshot) {
+  if (snapshot == null) await rm(file, { force: true });
+  else await writeFile(file, snapshot);
+}
 
 before(async () => {
   child = spawn(process.execPath, ['tools/hesi-editor/server.mjs'], {
@@ -130,6 +147,56 @@ test('build endpoint validates operations and writes the scene build file', asyn
   assert.match((await invalid.json()).error, /operations\[2\]/);
   await rm(new URL('../../../data/editor/garage-build.json', import.meta.url), { force: true });
   await rm(new URL('../../../data/editor/garage-build.json.bak', import.meta.url), { force: true });
+});
+
+test('road route endpoint saves isolated source updates, rejects malformed data, and publishes only named routes', async () => {
+  const snapshots = await Promise.all(ROUTE_FILES.map(snapshotOptional));
+  try {
+    await rm(ROUTE_FILES[0], { force: true });
+    await rm(ROUTE_FILES[1], { force: true });
+    const productionBeforeText = await readFile(ROUTE_FILES[2], 'utf8');
+    const moduleBeforeText = await readFile(ROUTE_FILES[4], 'utf8');
+    const productionBefore = JSON.parse(productionBeforeText);
+    const target = structuredClone(productionBefore.routes[0]);
+    const pointIndex = Math.floor(target.points.length / 2);
+    target.points[pointIndex][0] += 0.25;
+
+    const save = await fetch(`${BASE}/__hesi_editor_routes`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ updates: [{ id: target.id, points: target.points }] }),
+    });
+    assert.equal(save.status, 200);
+    const saved = await save.json();
+    assert.equal(saved.path, 'data/editor/road-route-overrides.json');
+    assert.deepEqual(saved.routes, [target.id]);
+    assert.equal(await readFile(ROUTE_FILES[2], 'utf8'), productionBeforeText, 'Save leaves production JSON untouched');
+    assert.equal(await readFile(ROUTE_FILES[4], 'utf8'), moduleBeforeText, 'Save leaves the game module untouched');
+
+    const read = await fetch(`${BASE}/__hesi_editor_routes`);
+    const readPayload = await read.json();
+    assert.equal(readPayload.document.routes[target.id].points[pointIndex][0], target.points[pointIndex][0]);
+
+    const malformed = await fetch(`${BASE}/__hesi_editor_routes`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ updates: [{ id: target.id, points: [[null, 0, 0], [1, 0, 1]] }] }),
+    });
+    assert.equal(malformed.status, 400);
+    assert.match((await malformed.json()).error, /finite number/);
+
+    const publish = await fetch(`${BASE}/__hesi_editor_routes`, { method: 'POST' });
+    assert.equal(publish.status, 200);
+    const published = await publish.json();
+    assert.equal(published.modulePath, 'data/routes-smoothed.js');
+    const productionAfter = JSON.parse(await readFile(ROUTE_FILES[2], 'utf8'));
+    assert.equal(productionAfter.routes[0].points[pointIndex][0], target.points[pointIndex][0]);
+    assert.deepEqual(productionAfter.routes[1], productionBefore.routes[1], 'an unrelated route is byte-for-byte equivalent as JSON data');
+    assert.deepEqual(productionAfter.meta.editorRoadOverrides.routes, [target.id]);
+    assert.match(await readFile(ROUTE_FILES[4], 'utf8'), new RegExp(`editorRoadOverrides.*${target.id}`));
+  } finally {
+    await Promise.all(ROUTE_FILES.map((file, index) => restoreOptional(file, snapshots[index])));
+  }
 });
 
 test('commit endpoints snapshot, list, read, and delete map versions', async () => {

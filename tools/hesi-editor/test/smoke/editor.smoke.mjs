@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -9,7 +9,19 @@ const OUT = path.join(ROOT, 'tools', 'hesi-editor', 'test', 'smoke', 'artifacts'
 const PORT = 9600 + (process.pid % 300);
 const BASE = `http://127.0.0.1:${PORT}`;
 const PROJECT_PATH = 'data/editor/.test-smoke-project.json';
+const BUILD_PATH = path.join(ROOT, 'data', 'editor', 'hesi-world-build.json');
+const BUILD_BACKUP_PATH = `${BUILD_PATH}.bak`;
 await mkdir(OUT, { recursive: true });
+
+const snapshotFile = async (file) => {
+  try { return await readFile(file); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+};
+const restoreFile = async (file, snapshot) => {
+  if (snapshot == null) await rm(file, { force: true });
+  else await writeFile(file, snapshot);
+};
+const buildSnapshot = await snapshotFile(BUILD_PATH);
+const buildBackupSnapshot = await snapshotFile(BUILD_BACKUP_PATH);
 
 const child = spawn(process.execPath, ['tools/hesi-editor/server.mjs'], {
   cwd: ROOT,
@@ -76,6 +88,69 @@ try {
   await page.locator('[data-layer="Lamps"]').check();
   await page.getByRole('button', { name: 'Hierarchy', exact: true }).click();
   await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
+
+  // Exercise the real TransformManager against a generated lamp. Dispatching
+  // the same TransformControls lifecycle as a gizmo drag lets us assert the
+  // local opposite face stays fixed on two axes, plus browser-level undo/redo
+  // and inspector coherence, without depending on OS mouse acceleration.
+  await page.getByRole('button', { name: 'Scale', exact: true }).click();
+  const scaleRealLampAxis = (axis, component, factor) => page.evaluate(({ axis, component, factor }) => {
+    const manager = window.hesiEditor.transformManager;
+    const entity = window.hesiEditor.selection.selected;
+    const object = entity.object3D;
+    const bounds = manager._makeScaleAnchor(entity);
+    const Vector3 = object.position.constructor;
+    const localAnchor = new Vector3().fromArray(bounds.localMin);
+    const beforeAnchor = object.localToWorld(localAnchor.clone()).toArray();
+    const beforeTransform = {
+      position: object.position.toArray(),
+      scale: object.scale.toArray(),
+    };
+    manager.control.axis = axis;
+    manager.control.dispatchEvent({ type: 'mouseDown' });
+    object.scale.setComponent(component, object.scale.getComponent(component) * factor);
+    manager.control.dispatchEvent({ type: 'objectChange' });
+    const afterAnchor = object.localToWorld(localAnchor.clone()).toArray();
+    const afterTransform = {
+      position: object.position.toArray(),
+      scale: object.scale.toArray(),
+    };
+    manager.control.dispatchEvent({ type: 'mouseUp' });
+    return {
+      anchorDrift: Math.hypot(...afterAnchor.map((value, index) => value - beforeAnchor[index])),
+      beforeTransform,
+      afterTransform,
+    };
+  }, { axis, component, factor });
+  const xScale = await scaleRealLampAxis('X', 0, 1.4);
+  const yScale = await scaleRealLampAxis('Y', 1, 1.25);
+  if (xScale.anchorDrift > 0.02 || yScale.anchorDrift > 0.02) {
+    throw new Error(`One-sided scale anchor drifted: ${JSON.stringify({ xScale, yScale })}`);
+  }
+  if (Math.abs(xScale.afterTransform.scale[0] - xScale.beforeTransform.scale[0]) < 0.01
+    || Math.abs(yScale.afterTransform.scale[1] - yScale.beforeTransform.scale[1]) < 0.01) {
+    throw new Error(`Scale handles did not extend the grabbed sides: ${JSON.stringify({ xScale, yScale })}`);
+  }
+  const scaleInspector = await page.evaluate(() => ({
+    x: Number(document.querySelector('[aria-label="Scale X"]')?.value),
+    y: Number(document.querySelector('[aria-label="Scale Y"]')?.value),
+    object: window.hesiEditor.selection.selected.object3D.scale.toArray(),
+  }));
+  if (Math.abs(scaleInspector.x - scaleInspector.object[0]) > 0.001 || Math.abs(scaleInspector.y - scaleInspector.object[1]) > 0.001) {
+    throw new Error(`Numeric scale inspector is stale: ${JSON.stringify(scaleInspector)}`);
+  }
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  const afterScaleUndo = await page.evaluate(() => window.hesiEditor.selection.selected.object3D.scale.toArray());
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  const afterScaleRedo = await page.evaluate(() => window.hesiEditor.selection.selected.object3D.scale.toArray());
+  if (Math.abs(afterScaleUndo[1] - yScale.beforeTransform.scale[1]) > 0.001
+    || Math.abs(afterScaleRedo[1] - yScale.afterTransform.scale[1]) > 0.001) {
+    throw new Error(`Scale undo/redo is incoherent: ${JSON.stringify({ afterScaleUndo, afterScaleRedo, yScale })}`);
+  }
+  // Leave the smoke project clean before its existing numeric-translate path.
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.getByRole('button', { name: 'Move', exact: true }).click();
   const originalX = await page.getByRole('spinbutton', { name: 'Position X' }).inputValue();
   await page.getByRole('spinbutton', { name: 'Position X' }).fill(String(Number(originalX) + 6));
   await page.getByRole('button', { name: 'Apply numeric transform', exact: true }).click();
@@ -130,10 +205,16 @@ try {
   await page.screenshot({ path: path.join(OUT, 'checkpoint-4-project-persistence.png'), fullPage: true });
 
   const demo = await browser.newPage({ viewport: { width: 1100, height: 760 } });
-  await demo.goto(`${BASE}/editor?world=demo&project=${encodeURIComponent('data/editor/hesi-world-project.json')}`, { waitUntil: 'domcontentloaded' });
+  await demo.goto(`${BASE}/editor?world=demo`, { waitUntil: 'domcontentloaded' });
   await demo.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'demo', null, { timeout: 20000 });
-  const demoState = await demo.evaluate(() => ({ strategy: window.hesiEditor.adapter.strategy, real: window.hesiEditor.adapter.isRealWorld }));
-  if (demoState.strategy !== 'demo' || demoState.real) throw new Error(`Explicit demo mode failed: ${JSON.stringify(demoState)}`);
+  const demoState = await demo.evaluate(() => ({
+    strategy: window.hesiEditor.adapter.strategy,
+    real: window.hesiEditor.adapter.isRealWorld,
+    project: window.hesiEditor.persistence.currentPath,
+  }));
+  if (demoState.strategy !== 'demo' || demoState.real || demoState.project !== 'data/editor/demo-highway-project.json') {
+    throw new Error(`Explicit demo mode failed: ${JSON.stringify(demoState)}`);
+  }
   await demo.close();
 
   const disposed = await page.evaluate(() => {
@@ -150,4 +231,6 @@ try {
   await rm(path.join(ROOT, PROJECT_PATH), { force: true });
   await rm(path.join(ROOT, `${PROJECT_PATH}.bak`), { force: true });
   await rm(path.join(ROOT, PROJECT_PATH.replace(/\.json$/i, '.autosave.json')), { force: true });
+  await restoreFile(BUILD_PATH, buildSnapshot);
+  await restoreFile(BUILD_BACKUP_PATH, buildBackupSnapshot);
 }

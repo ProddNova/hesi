@@ -75,6 +75,7 @@ export function createEditorShell(root) {
     button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
     button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
     button('Save', 'save-project', { title: 'Save the project AND build the map the game loads (Ctrl+S)' }),
+    button('Rebuild Map', 'rebuild-world', { title: 'Save and publish road curves to the production route assets, then reload' }),
     button('Commit', 'commit-project', { title: 'Snapshot the current map as a named version (Project tab)' }),
     element('span', 'toolbar-divider'),
     button('Focus', 'focus-selected', { title: 'Frame the selected object (F)' }),
@@ -376,6 +377,7 @@ export function createEditorShell(root) {
   let adapter = null;
   let registryRef = null;
   let selectedEntity = null;
+  let selectedIds = null;
   let assetEntries = [];
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
@@ -652,7 +654,8 @@ export function createEditorShell(root) {
     if (currentTab === 'help') {
       const reference = element('div', 'control-reference');
       [
-        ['Select', 'Click an object in the viewport · click again to cycle overlapping hits · Esc clears'],
+        ['Select', 'Click an object in the viewport · click again to cycle overlapping hits · Shift+click adds/removes objects · Esc clears'],
+        ['Roads', 'Select a road in the hierarchy → drag its centreline points · double-click the line inserts · Del removes · Save stores source · Rebuild Map publishes'],
         ['Camera', 'Orbit: drag / wheel · Fly: click viewport, then WASD + Q/E, wheel speed, Shift boost'],
         ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
         ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],
@@ -714,6 +717,7 @@ export function createEditorShell(root) {
       inspectorTitle.textContent = 'Inspector';
       inspectorCaption.textContent = entity.editable ? `${entity.name} · editable` : `${entity.name} · read-only`;
       const identity = inspectorSection('Summary', true);
+      if (selectedIds?.size > 1) property(identity.body, 'Multi-selection', `${selectedIds.size} objects · delete/duplicate/visibility/lock apply to all`);
       property(identity.body, 'Name', entity.name);
       property(identity.body, 'ID', entity.id, 'selected-entity-id');
       property(identity.body, 'Type', entity.type);
@@ -822,13 +826,13 @@ export function createEditorShell(root) {
   inspectLocked.addEventListener('change', () => inspectLockedHandler(inspectLocked.checked));
 
   const entityRow = (item) => {
-    const row = element('button', `entity-row${selectedEntity?.id === item.id ? ' selected' : ''}`);
+    const row = element('button', `entity-row${(selectedIds ? selectedIds.has(item.id) : selectedEntity?.id === item.id) ? ' selected' : ''}`);
     row.type = 'button';
     row.textContent = item.name;
     row.title = `${item.id} / ${item.type} / ${item.editable ? 'editable' : 'read-only'}`;
     row.dataset.entityId = item.id;
     row.append(element('small', '', item.id));
-    row.addEventListener('click', () => entitySelectHandler(item.id));
+    row.addEventListener('click', (event) => entitySelectHandler(item.id, { additive: event.shiftKey }));
     return row;
   };
 
@@ -992,8 +996,9 @@ export function createEditorShell(root) {
       renderInspector();
       renderBottom();
     },
-    setSelection(entity) {
+    setSelection(entity, { ids = null } = {}) {
       selectedEntity = entity || null;
+      selectedIds = Array.isArray(ids) && ids.length ? new Set(ids) : (entity ? new Set([entity.id]) : null);
       renderInspector();
       if (registryRef) renderRegistryImpl(registryRef);
       const selectedRow = entity ? entityTree.querySelector(`[data-entity-id="${CSS.escape(entity.id)}"]`) : null;
