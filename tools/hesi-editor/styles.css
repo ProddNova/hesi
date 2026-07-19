@@ -164,6 +164,16 @@ input, select { accent-color: var(--accent); }
   background: var(--surface-input);
 }
 
+.grid-snap-step {
+  height: 26px;
+  margin: 0 3px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-input);
+}
+
 /* Workspace grid: three resizable tool panels around the viewport. */
 .editor-workspace {
   --left-width: 260px;

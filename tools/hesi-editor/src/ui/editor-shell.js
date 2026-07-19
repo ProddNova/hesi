@@ -1,4 +1,5 @@
 import { sceneList } from '../scenes/scene-registry.js';
+import { GRID_SNAP_STEPS } from '../interaction/grid-snap.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -61,6 +62,12 @@ export function createEditorShell(root) {
     sceneSwitch.append(seg);
   }
 
+  const gridSnapStepSelect = document.createElement('select');
+  gridSnapStepSelect.className = 'grid-snap-step';
+  gridSnapStepSelect.title = 'Grid step in meters';
+  gridSnapStepSelect.setAttribute('aria-label', 'Grid snap step in meters');
+  gridSnapStepSelect.dataset.testid = 'grid-snap-step';
+  for (const step of GRID_SNAP_STEPS) gridSnapStepSelect.add(new Option(`${step} m`, String(step)));
   toolbar.append(
     brand,
     sceneSwitch,
@@ -72,6 +79,8 @@ export function createEditorShell(root) {
     button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected object (E)' }),
     button('Scale', 'transform-scale', { pressed: false, title: 'Scale selected object (R)' }),
     button('World', 'transform-space', { pressed: true, title: 'Toggle world/local gizmo space (X)' }),
+    button('Snap', 'grid-snap', { pressed: false, title: 'Snap to grid (G): gizmo moves, placed assets, and road points land on clean steps · 15° rotations' }),
+    gridSnapStepSelect,
     element('span', 'toolbar-divider'),
     button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
     button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
@@ -483,6 +492,7 @@ export function createEditorShell(root) {
     return panel;
   };
 
+  gridSnapStepSelect.addEventListener('change', () => triggerAction('grid-snap-step', Number(gridSnapStepSelect.value)));
   lightingInspection.addEventListener('click', () => triggerAction('lighting-mode', 'inspection'));
   lightingGame.addEventListener('click', () => triggerAction('lighting-mode', 'game'));
   exposure.addEventListener('input', () => triggerAction('exposure', Number(exposure.value)));
@@ -695,6 +705,7 @@ export function createEditorShell(root) {
         ['Assemble', 'Shift+click multiple map objects (sign + pole, barriers, ...) → Edit tab → Assemble into object → one placeable asset'],
         ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
         ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],
+        ['Grid snap', 'G or the toolbar Snap button · gizmo moves, placed assets, and road points land on the chosen grid step · 15° rotations'],
         ['Add Object', '+ Add Object → pick an asset → click a surface to place · Esc cancels placement'],
         ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S saves the editor draft only'],
         ['Draft vs Game', 'Save Draft saves locally and rebuilds the editor map with your road edits · Apply to Game performs the one final production update'],
@@ -972,6 +983,10 @@ export function createEditorShell(root) {
     setDirty(dirty) {
       historyState.dirty = Boolean(dirty);
       syncSaveState();
+    },
+    setGridSnap({ enabled, step } = {}) {
+      this.setToggle('grid-snap', enabled);
+      if (Number(step) > 0) gridSnapStepSelect.value = String(step);
     },
     setPublishState(state = {}) {
       if ('roadDirty' in state) roadDraftDirty = Boolean(state.roadDirty);

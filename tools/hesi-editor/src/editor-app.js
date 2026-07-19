@@ -4,6 +4,7 @@ import { loadWorld } from './world-adapter.js';
 import { createEditorShell } from './ui/editor-shell.js';
 import { SelectionManager } from './interaction/selection-manager.js';
 import { CommandHistory } from './interaction/command-history.js';
+import { GridSnap, GRID_SNAP_ROTATE_DEGREES } from './interaction/grid-snap.js';
 import { TransformManager } from './interaction/transform-manager.js';
 import { EditActions } from './interaction/edit-actions.js';
 import { PlacementController } from './interaction/placement-controller.js';
@@ -161,6 +162,18 @@ export async function createEditorApp(root) {
   const syncViewState = () => shell.setViewState({ ...viewport.viewState(), ...viewFlags });
   syncViewState();
 
+  // One grid-snap state for every position-producing interaction: the gizmo,
+  // click-to-place placement, and road point edits all follow this toggle.
+  const gridSnap = new GridSnap({
+    onChange: (state) => {
+      shell.setGridSnap(state);
+      transformManager?.setSnaps(gridSnap.gizmoSnaps());
+      shell.setStatus(state.enabled
+        ? `Grid snap on · ${state.step} m grid · ${GRID_SNAP_ROTATE_DEGREES}° rotations`
+        : 'Grid snap off');
+    },
+  });
+
   const applyPreset = (id) => {
     const preset = adapter?.getPreset(id);
     if (!preset) {
@@ -195,6 +208,7 @@ export async function createEditorApp(root) {
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));
   shell.onToolbar('transform-space', () => transformManager?.setSpace(transformManager.space === 'world' ? 'local' : 'world'));
+  shell.onToolbar('grid-snap', () => gridSnap.toggle());
   shell.onToolbar('nav-orbit', () => viewport.setNavigationMode('orbit'));
   shell.onToolbar('nav-fly', () => viewport.setNavigationMode('fly'));
   for (const speed of ['slow', 'normal', 'fast']) {
@@ -212,6 +226,7 @@ export async function createEditorApp(root) {
       },
       exposure: () => { viewport.setExposure(detail); syncViewState(); },
       'fog-full': () => { viewport.setFogFull(detail); syncViewState(); },
+      'grid-snap-step': () => gridSnap.setStep(detail),
       'toggle-grid': () => { viewFlags.grid = Boolean(detail); viewport.setGridVisible(viewFlags.grid); syncViewState(); },
       'toggle-axes': () => { viewFlags.axes = Boolean(detail); viewport.setAxesVisible(viewFlags.axes); syncViewState(); },
       'debug-bounds': () => { viewFlags.debugBounds = Boolean(detail); selection?.setDebugOptions({ bounds: viewFlags.debugBounds }); syncViewState(); },
@@ -345,6 +360,11 @@ export async function createEditorApp(root) {
       if (transformManager) transformManager.setSpace(transformManager.space === 'world' ? 'local' : 'world');
       return;
     }
+    if (event.code === 'KeyG' && !commandKey) {
+      event.preventDefault();
+      gridSnap.toggle();
+      return;
+    }
     if (viewport.navigationMode === 'orbit' && !commandKey) {
       const modes = { KeyW: 'translate', KeyE: 'rotate', KeyR: 'scale' };
       if (modes[event.code]) { event.preventDefault(); transformManager?.setMode(modes[event.code]); return; }
@@ -437,7 +457,7 @@ export async function createEditorApp(root) {
       onStatus: (message) => shell.setStatus(message),
     });
     placement = new PlacementController({
-      viewport, adapter, editActions, transformManager,
+      viewport, adapter, editActions, transformManager, gridSnap,
       onChange: (active, label) => shell.setPlacement(active, label),
       onStatus: (message) => shell.setStatus(message),
     });
@@ -447,13 +467,17 @@ export async function createEditorApp(root) {
       syncPublishState();
     }
     roadEdit = new RoadEditController({
-      viewport, history, selection, adapter,
+      viewport, history, selection, adapter, gridSnap,
       onStatus: (message) => shell.setStatus(message),
       onDirty: (_routeId, dirty = true) => {
         roadDraftDirty = Boolean(dirty);
         syncPublishState();
       },
     });
+    // Initial snap-state synchronisation: the gizmo and shell were created
+    // after the grid-snap state existed, so push the current state once.
+    transformManager.setSnaps(gridSnap.gizmoSnaps());
+    shell.setGridSnap(gridSnap.state());
     modeler = new ModelerPanel({
       host: shell.root,
       store: customAssetStore,
@@ -543,6 +567,7 @@ export async function createEditorApp(root) {
     shell,
     history,
     projectState,
+    gridSnap,
     get transformManager() { return transformManager; },
     get editActions() { return editActions; },
     get assetRegistry() { return assetRegistry; },

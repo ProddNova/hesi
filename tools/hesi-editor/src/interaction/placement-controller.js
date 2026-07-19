@@ -17,11 +17,12 @@ function isActuallyVisible(object) {
  * pre-empt viewport selection, orbit controls, and the transform gizmo.
  */
 export class PlacementController {
-  constructor({ viewport, adapter, editActions, transformManager, onChange = () => {}, onStatus = () => {} }) {
+  constructor({ viewport, adapter, editActions, transformManager, gridSnap = null, onChange = () => {}, onStatus = () => {} }) {
     this.viewport = viewport;
     this.adapter = adapter;
     this.editActions = editActions;
     this.transformManager = transformManager;
+    this.gridSnap = gridSnap;
     this.onChange = onChange;
     this.onStatus = onStatus;
     this.pending = null;
@@ -92,7 +93,9 @@ export class PlacementController {
       return;
     }
     const { assetId } = this.pending;
-    const placed = this.editActions.placeAsset(assetId, hit.point.clone());
+    // Grid snap applies in plan view only: the clicked surface keeps the height.
+    const point = this.gridSnap ? this.gridSnap.snapPosition(hit.point.clone()) : hit.point.clone();
+    const placed = this.editActions.placeAsset(assetId, point);
     if (placed) this._end();
   }
 
