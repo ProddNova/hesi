@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BUILD_SCHEMA_VERSION, validateBuildDocument } from './build-schema.js';
+import { BUILD_SCHEMA_VERSION, buildDraftSignature, validateBuildDocument } from './build-schema.js';
 
 /**
  * Resolves a saved project document against the live world into a flat build
@@ -140,7 +140,11 @@ export function buildSceneDocument({ sceneId, adapter, registry, assetRegistry, 
     version: BUILD_SCHEMA_VERSION,
     scene: sceneId,
     generatedAt: new Date().toISOString(),
-    project: { name: projectDocument.project.name, path: projectPath },
+    project: {
+      name: projectDocument.project.name,
+      path: projectPath,
+      draftSignature: buildDraftSignature(projectDocument),
+    },
     operations,
   };
   validateBuildDocument(document);

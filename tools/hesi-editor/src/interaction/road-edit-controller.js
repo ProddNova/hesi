@@ -12,15 +12,16 @@ const HANDLE_CAP = 60;
 const REFRESH_INTERVAL_MS = 250;
 const HANDLE_SURFACE_LIFT = 0.28;
 const LINE_SURFACE_LIFT = 0.16;
-const PREVIEW_SURFACE_LIFT = 0.06;
-const STATUS_HINT = 'Road edit · drag points · right-click orange road adds · right-click point removes · Save, then Rebuild Map applies the final road';
+const PREVIEW_SURFACE_LIFT = 0.08;
+const MARKING_SURFACE_LIFT = 0.12;
+const STATUS_HINT = 'Road draft · realistic asphalt preview is live · drag points · right-click road adds · right-click point removes · Save Draft keeps the game unchanged';
 
 /**
  * Road centreline curve edit mode. While a road-route entity is selected this
- * controller overlays the route's centreline polyline with draggable point
- * handles. Edits mutate the shared ROUTE_DATA module (the same object graph
- * js/map.js builds the world from), so the change applies to the next map
- * rebuild; persistence to disk goes through src/overrides/route-persistence.js.
+ * controller overlays the route with a full-width draft surface, markings,
+ * centreline, and draggable point handles. Committed interactions update the
+ * editor's runtime route/collision preview immediately; draft persistence and
+ * the explicit production publish remain separate operations.
  *
  * All listeners run on `window` in the capture phase so they pre-empt viewport
  * selection, orbit controls, and the editor's entity Delete binding while a
@@ -50,19 +51,27 @@ export class RoadEditController {
     this.group = null;
     this.line = null;
     this.previewMesh = null;
+    this.previewMarkings = null;
     this.handles = [];
     this._handleKey = '';
     this._routeDataPromise = null;
     this._activateToken = null;
     this._refreshTimer = null;
+    this._previewRefreshFrame = null;
     this._disposed = false;
     this._handleGeometry = new THREE.SphereGeometry(HANDLE_RADIUS, 12, 10);
     this._handleMaterial = new THREE.MeshBasicMaterial({ color: HANDLE_COLOR, depthTest: false, toneMapped: false });
     this._activeHandleMaterial = new THREE.MeshBasicMaterial({ color: ACTIVE_HANDLE_COLOR, depthTest: false, toneMapped: false });
-    this._previewMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff8a18, transparent: true, opacity: 0.28, side: THREE.DoubleSide,
-      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3,
-      polygonOffsetUnits: -3, toneMapped: false,
+    this._previewMaterial = new THREE.MeshLambertMaterial({
+      color: 0x171a23, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    });
+    this._previewEdgeMaterial = new THREE.LineBasicMaterial({ color: 0xd8d6bf, depthTest: false, toneMapped: false });
+    this._previewLaneMaterial = new THREE.LineDashedMaterial({
+      color: 0xd8d6bf, dashSize: 6, gapSize: 8, depthTest: false, toneMapped: false,
+    });
+    this._previewDraftMaterial = new THREE.LineBasicMaterial({
+      color: LINE_COLOR, transparent: true, opacity: 0.92, depthTest: false, toneMapped: false,
     });
 
     this._onPointerDown = (event) => {
@@ -111,6 +120,12 @@ export class RoadEditController {
       }
       position.needsUpdate = true;
       this.line.geometry.computeBoundingSphere();
+      if (this._previewRefreshFrame == null) {
+        this._previewRefreshFrame = requestAnimationFrame(() => {
+          this._previewRefreshFrame = null;
+          this._refreshPreview();
+        });
+      }
     };
     this._onPointerUp = (event) => {
       if (!this.active || !this.drag) return;
@@ -130,7 +145,7 @@ export class RoadEditController {
         undo: () => { movePoint(route, index, before); this._afterRouteMutation(); },
       });
       this._markDirty(route.id);
-      this.onStatus('Road trajectory updated · orange surface and collision preview are live · Rebuild Map publishes the final asphalt');
+      this.onStatus('Road draft updated · realistic asphalt/collision preview is live · Save Draft keeps it out of the game · Apply to Game publishes it');
     };
     this._onDblClick = (event) => {
       if (!this.active || event.target !== this.viewport.canvas || !this.line) return;
@@ -191,7 +206,11 @@ export class RoadEditController {
     }));
   }
 
-  clearDirty() { this.dirty.clear(); this.dirtyRoutes.clear(); }
+  clearDirty() {
+    this.dirty.clear();
+    this.dirtyRoutes.clear();
+    this.onDirty(null, false);
+  }
 
   /** Activates curve editing for road-route entities; deactivates otherwise. */
   setActiveEntity(entity) {
@@ -209,7 +228,7 @@ export class RoadEditController {
   _markDirty(routeId) {
     this.dirty.add(routeId);
     this.dirtyRoutes.set(routeId, { route: this.route, synthetic: this.synthetic });
-    this.onDirty(routeId);
+    this.onDirty(routeId, true);
   }
 
   _loadRouteData() {
@@ -230,7 +249,7 @@ export class RoadEditController {
       undo: () => { deletePoint(route, index + 1); this._afterRouteMutation(); },
     });
     this._markDirty(route.id);
-    this.onStatus('Road point added · live surface/collision preview updated · Rebuild Map publishes it');
+    this.onStatus('Road draft point added · realistic preview updated · Save Draft keeps the game unchanged');
     return true;
   }
 
@@ -253,7 +272,7 @@ export class RoadEditController {
       undo: () => { route.points.splice(index, 0, [...snapshot]); this._afterRouteMutation(); },
     });
     this._markDirty(route.id);
-    this.onStatus('Road point removed · live surface/collision preview updated · Rebuild Map publishes it');
+    this.onStatus('Road draft point removed · realistic preview updated · Save Draft keeps the game unchanged');
     return true;
   }
 
@@ -261,8 +280,13 @@ export class RoadEditController {
     return [point[0], point[1] + this.yOffset, point[2]];
   }
 
-  _worldPointArrays() {
-    return this.route.points.map((point) => this._worldPoint(point));
+  _worldPointArrays({ includeDrag = false } = {}) {
+    return this.route.points.map((point, index) => {
+      if (includeDrag && this.drag?.index === index) {
+        return [this.drag.mesh.position.x, point[1] + this.yOffset, this.drag.mesh.position.z];
+      }
+      return this._worldPoint(point);
+    });
   }
 
   _runtimePointArrays() {
@@ -354,11 +378,15 @@ export class RoadEditController {
     this.previewMesh.renderOrder = 9998;
     this.previewMesh.userData.editorHelper = true;
     this.previewMesh.frustumCulled = false;
+    this.previewMarkings = new THREE.Group();
+    this.previewMarkings.name = `road-marking-preview:${this.route.id}`;
+    this.previewMarkings.renderOrder = 9999;
+    this.previewMarkings.userData.editorHelper = true;
     this.line = new THREE.Line(new THREE.BufferGeometry(), material);
     this.line.renderOrder = 10000;
     this.line.userData.editorHelper = true;
     this.line.frustumCulled = false;
-    group.add(this.previewMesh, this.line);
+    group.add(this.previewMesh, this.previewMarkings, this.line);
     this.group = group;
     this.viewport.scene.add(group);
     this._refreshPreview();
@@ -373,9 +401,14 @@ export class RoadEditController {
       this.line.material.dispose();
     }
     this.previewMesh?.geometry.dispose();
+    if (this.previewMarkings) {
+      for (const marking of this.previewMarkings.children) marking.geometry?.dispose();
+      this.previewMarkings.clear();
+    }
     this.group = null;
     this.line = null;
     this.previewMesh = null;
+    this.previewMarkings = null;
     this.handles = [];
     this._handleKey = '';
   }
@@ -403,7 +436,7 @@ export class RoadEditController {
 
   _refreshPreview() {
     if (!this.previewMesh || this.route.points.length < 2) return;
-    const points = this._worldPointArrays().map((point) => new THREE.Vector3().fromArray(point));
+    const points = this._worldPointArrays({ includeDrag: true }).map((point) => new THREE.Vector3().fromArray(point));
     const curve = new THREE.CatmullRomCurve3(points, Boolean(this.route.closed), 'centripetal');
     curve.arcLengthDivisions = Math.max(80, points.length * 4);
     curve.updateArcLengths();
@@ -412,6 +445,7 @@ export class RoadEditController {
     const halfWidth = Math.max(2.5, (this.runtimeRoute?.roadWidth || 7) * 0.5);
     const positions = [];
     const indices = [];
+    const frames = [];
     const center = new THREE.Vector3();
     const tangent = new THREE.Vector3();
     const normal = new THREE.Vector3();
@@ -420,9 +454,18 @@ export class RoadEditController {
       curve.getPointAt(u, center);
       curve.getTangentAt(u, tangent).normalize();
       normal.set(-tangent.z, 0, tangent.x).normalize();
+      const runtimeDistance = this.synthetic
+        ? u * (this.runtimeRoute?.length || length)
+        : (1 - u) * (this.runtimeRoute?.length || length);
+      const runtimeBank = this.runtimeRoute
+        ? (this.adapter?.map?._bankAt?.(this.runtimeRoute, runtimeDistance) || 0)
+        : 0;
+      const bank = runtimeBank * (this.synthetic ? 1 : -1);
+      const crossSlope = Math.tan(bank);
+      frames.push({ center: center.clone(), normal: normal.clone(), crossSlope });
       positions.push(
-        center.x + normal.x * halfWidth, center.y + PREVIEW_SURFACE_LIFT, center.z + normal.z * halfWidth,
-        center.x - normal.x * halfWidth, center.y + PREVIEW_SURFACE_LIFT, center.z - normal.z * halfWidth,
+        center.x + normal.x * halfWidth, center.y + crossSlope * halfWidth + PREVIEW_SURFACE_LIFT, center.z + normal.z * halfWidth,
+        center.x - normal.x * halfWidth, center.y - crossSlope * halfWidth + PREVIEW_SURFACE_LIFT, center.z - normal.z * halfWidth,
       );
       if (index < segments) {
         const base = index * 2;
@@ -436,6 +479,34 @@ export class RoadEditController {
     geometry.computeBoundingSphere();
     this.previewMesh.geometry.dispose();
     this.previewMesh.geometry = geometry;
+
+    for (const marking of this.previewMarkings.children) marking.geometry.dispose();
+    this.previewMarkings.clear();
+    const lineAt = (lateral, material, name, dashed = false) => {
+      const linePoints = frames.map((frame) => new THREE.Vector3(
+        frame.center.x + frame.normal.x * lateral,
+        frame.center.y + frame.crossSlope * lateral + MARKING_SURFACE_LIFT,
+        frame.center.z + frame.normal.z * lateral,
+      ));
+      const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+      const marking = new THREE.Line(lineGeometry, material);
+      marking.name = name;
+      marking.frustumCulled = false;
+      marking.userData.editorHelper = true;
+      if (dashed) marking.computeLineDistances();
+      this.previewMarkings.add(marking);
+    };
+    const lanes = Math.max(1, this.runtimeRoute?.lanes || 1);
+    const laneWidth = this.runtimeRoute?.laneWidth || 3.6;
+    const laneSpan = lanes * laneWidth;
+    lineAt(-laneSpan * 0.5, this._previewEdgeMaterial, 'preview left edge line');
+    lineAt(laneSpan * 0.5, this._previewEdgeMaterial, 'preview right edge line');
+    for (let divider = 1; divider < lanes; divider += 1) {
+      const lateral = -laneSpan * 0.5 + divider * laneWidth;
+      lineAt(lateral, this._previewLaneMaterial, `preview lane divider ${divider}`, true);
+    }
+    lineAt(-halfWidth, this._previewDraftMaterial, 'draft left asphalt edge');
+    lineAt(halfWidth, this._previewDraftMaterial, 'draft right asphalt edge');
   }
 
   _handleIndices() {
@@ -496,6 +567,10 @@ export class RoadEditController {
     this._handleMaterial.dispose();
     this._activeHandleMaterial.dispose();
     this._previewMaterial.dispose();
+    this._previewEdgeMaterial.dispose();
+    this._previewLaneMaterial.dispose();
+    this._previewDraftMaterial.dispose();
+    if (this._previewRefreshFrame != null) cancelAnimationFrame(this._previewRefreshFrame);
     window.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
     window.removeEventListener('pointermove', this._onPointerMove, { capture: true });
     window.removeEventListener('pointerup', this._onPointerUp, { capture: true });

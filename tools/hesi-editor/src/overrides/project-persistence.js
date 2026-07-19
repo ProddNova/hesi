@@ -244,6 +244,25 @@ export class ProjectPersistence {
     });
   }
 
+  /** True when the playable game's generated operations match this draft. */
+  async gameBuildMatches(document = null) {
+    const expected = this.buildDocument(document);
+    const response = await fetch(`/${this.scene.buildPath}`, { cache: 'no-store' });
+    if (response.status === 404) return expected.operations.length === 0;
+    if (!response.ok) return false;
+    const current = await response.json().catch(() => null);
+    const sameBuild = Boolean(current)
+      && current.version === expected.version
+      && current.scene === expected.scene
+      && current.project?.path === expected.project?.path;
+    if (!sameBuild) return false;
+    if (current.project?.draftSignature && expected.project?.draftSignature) {
+      return current.project.draftSignature === expected.project.draftSignature;
+    }
+    // Compatibility with builds written before draft signatures existed.
+    return JSON.stringify(current.operations) === JSON.stringify(expected.operations);
+  }
+
   async writeBuild(document = null) {
     const build = this.buildDocument(document);
     const result = await responseJson(await fetch('/__hesi_editor_build', {
@@ -288,7 +307,7 @@ export class ProjectPersistence {
   async commit(message) {
     const trimmed = String(message || '').trim();
     if (!trimmed) throw new Error('Commit message is required');
-    await this.save();
+    await this.save({ build: false });
     const document = this.toPersistedDocument();
     const payload = {
       scene: this.scene.id,
@@ -302,7 +321,7 @@ export class ProjectPersistence {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     }));
-    this.onStatus(`Committed map version · "${trimmed}" · ${result.commit.id}`);
+    this.onStatus(`Committed draft version · "${trimmed}" · ${result.commit.id} · playable game unchanged`);
     this.onProjectChange(this.state());
     return result.commit;
   }
@@ -322,8 +341,8 @@ export class ProjectPersistence {
       redo: () => this.applyDocument(restored),
       undo: () => this.applyDocument(before),
     }, { alreadyApplied: true });
-    await this.save();
-    this.onStatus(`Restored commit · "${payload.meta?.message || id}" · map rebuilt`);
+    await this.save({ build: false });
+    this.onStatus(`Restored draft · "${payload.meta?.message || id}" · use Apply to Game when ready`);
     return payload.meta || { id };
   }
 

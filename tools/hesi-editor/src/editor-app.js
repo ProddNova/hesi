@@ -40,7 +40,24 @@ export async function createEditorApp(root) {
   const collisionOverlay = new CollisionOverlay({ viewport });
   const viewFlags = { grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
   const projectState = new WorldProjectState();
-  const history = new CommandHistory({ onChange: (state) => shell.setHistory(state) });
+  let latestHistoryState = { index: 0, dirty: false };
+  let gameAppliedHistoryIndex = 0;
+  let roadDraftDirty = false;
+  let roadPublishPending = false;
+  let projectBuildPending = false;
+  let savedRoadRouteCount = 0;
+  const syncPublishState = () => shell.setPublishState({
+    roadDirty: roadDraftDirty,
+    gamePending: roadDraftDirty || roadPublishPending || projectBuildPending
+      || latestHistoryState.index !== gameAppliedHistoryIndex,
+  });
+  const history = new CommandHistory({
+    onChange: (state) => {
+      latestHistoryState = state;
+      shell.setHistory(state);
+      syncPublishState();
+    },
+  });
   const runProjectTask = (task) => Promise.resolve().then(task).catch((error) => {
     shell.setStatus(`Project operation failed · ${error.message}`);
     shell.showError(error, 'Project operation failed');
@@ -53,11 +70,36 @@ export async function createEditorApp(root) {
     shell.setStatus(`Saving ${updates.length} changed road route${updates.length === 1 ? '' : 's'}`);
     const result = await routePersistence.save(updates);
     roadEdit.clearDirty();
+    roadDraftDirty = false;
+    roadPublishPending = true;
+    savedRoadRouteCount = result.routes?.length || savedRoadRouteCount;
+    syncPublishState();
     return result;
   };
-  const saveWorkspace = async (options = {}) => {
+  const saveDraftWorkspace = async (options = {}) => {
     await saveRoadEdits();
-    return persistence.save(options);
+    const result = await persistence.save({ ...options, build: false });
+    // The history index already tracks edited project geometry. Only refresh
+    // the loaded baseline comparison when the draft is at that same index
+    // (notably Save As, which changes the target path without adding history).
+    if (latestHistoryState.index === gameAppliedHistoryIndex) {
+      projectBuildPending = !(await persistence.gameBuildMatches());
+    }
+    syncPublishState();
+    shell.setStatus('Draft saved · editor project and road source updated · playable game unchanged');
+    return result;
+  };
+  const applyWorkspaceToGame = async () => {
+    await saveRoadEdits();
+    await persistence.save({ build: false });
+    if (savedRoadRouteCount) await routePersistence.publish();
+    await persistence.writeBuild();
+    gameAppliedHistoryIndex = history.state().index;
+    roadDraftDirty = false;
+    roadPublishPending = false;
+    projectBuildPending = false;
+    syncPublishState();
+    shell.setStatus('Applied draft to playable game · production routes and map operations updated');
   };
   const refreshCommits = async () => {
     if (!persistence) return;
@@ -66,7 +108,7 @@ export async function createEditorApp(root) {
   };
   const switchScene = (sceneId) => {
     if (!getScene(sceneId) || sceneId === scene.id) return;
-    if (history.dirty && !window.confirm('You have unsaved changes in this scene. Switch anyway and discard them?')) return;
+    if ((history.dirty || roadEdit?.hasDirty()) && !window.confirm('You have unsaved draft changes in this scene. Switch anyway and discard them?')) return;
     const url = new URL(window.location.href);
     url.searchParams.set('scene', sceneId);
     url.searchParams.delete('project');
@@ -92,10 +134,9 @@ export async function createEditorApp(root) {
   shell.onToolbar('focus-selected', () => selection?.focusSelected());
   shell.onToolbar('undo', () => history.undo());
   shell.onToolbar('redo', () => history.redo());
-  shell.onToolbar('save-project', () => persistence && runProjectTask(() => saveWorkspace()));
+  shell.onToolbar('save-project', () => persistence && runProjectTask(() => saveDraftWorkspace()));
   shell.onToolbar('rebuild-world', () => runProjectTask(async () => {
-    await saveWorkspace();
-    await routePersistence.publish();
+    await applyWorkspaceToGame();
     const url = new URL(window.location.href);
     const selectedId = selection?.selected?.id;
     if (selectedId) url.searchParams.set('select', selectedId);
@@ -165,9 +206,15 @@ export async function createEditorApp(root) {
       'snap-rotate': () => transformManager.setSnaps({ rotateDegrees: detail }),
       'snap-scale': () => transformManager.setSnaps({ scale: detail }),
       'axis-toggle': () => transformManager.setAxes({ ...transformManager.axes, [detail.axis]: detail.enabled }),
-      'project-save': () => runProjectTask(() => saveWorkspace({ name: detail.name })),
-      'project-save-as': () => runProjectTask(() => saveWorkspace({ path: detail.path, name: detail.name })),
-      'project-load': () => runProjectTask(async () => { shell.showProjectNotice(''); await persistence.load(detail.path); }),
+      'project-save': () => runProjectTask(() => saveDraftWorkspace({ name: detail.name })),
+      'project-save-as': () => runProjectTask(() => saveDraftWorkspace({ path: detail.path, name: detail.name })),
+      'project-load': () => runProjectTask(async () => {
+        shell.showProjectNotice('');
+        await persistence.load(detail.path);
+        gameAppliedHistoryIndex = history.state().index;
+        projectBuildPending = !(await persistence.gameBuildMatches());
+        syncPublishState();
+      }),
       'project-export': () => persistence.exportOverrides(),
       'project-reset-unsaved': () => runProjectTask(async () => { shell.showProjectNotice(''); await persistence.resetUnsaved(); }),
       'project-reset-all': () => persistence.resetAll(),
@@ -207,7 +254,7 @@ export async function createEditorApp(root) {
       return;
     }
     if (commandKey && event.code === 'KeyY') { event.preventDefault(); history.redo(); return; }
-    if (commandKey && event.code === 'KeyS') { event.preventDefault(); if (persistence) runProjectTask(() => saveWorkspace()); return; }
+    if (commandKey && event.code === 'KeyS') { event.preventDefault(); if (persistence) runProjectTask(() => saveDraftWorkspace()); return; }
     if (commandKey && event.code === 'KeyD') { event.preventDefault(); editActions?.duplicate(); return; }
     if (event.code === 'KeyL' && !commandKey) {
       event.preventDefault();
@@ -294,7 +341,10 @@ export async function createEditorApp(root) {
       onStatus: (message) => shell.setStatus(message),
     });
     try {
-      await routePersistence.loadIntoModule(adapter.map);
+      const routeLoad = await routePersistence.loadIntoModule(adapter.map);
+      savedRoadRouteCount = routeLoad.routes.length;
+      roadPublishPending = routeLoad.pending;
+      syncPublishState();
     } catch (error) {
       shell.setStatus(`Saved road routes unavailable · ${error.message}`);
       shell.showError(error, 'Saved road routes unavailable');
@@ -302,6 +352,10 @@ export async function createEditorApp(root) {
     roadEdit = new RoadEditController({
       viewport, history, selection, adapter,
       onStatus: (message) => shell.setStatus(message),
+      onDirty: (_routeId, dirty = true) => {
+        roadDraftDirty = Boolean(dirty);
+        syncPublishState();
+      },
     });
     shell.setAssets(assetRegistry.catalog());
     syncViewState();
@@ -317,11 +371,14 @@ export async function createEditorApp(root) {
       ? `data/editor/demo-${scene.id}-project.json`
       : persistence.initialPath();
     await persistence.load(initialProjectPath, { allowMissing: true });
+    gameAppliedHistoryIndex = history.state().index;
+    projectBuildPending = !(await persistence.gameBuildMatches());
+    syncPublishState();
     persistence.startAutosave();
     refreshCommits().catch((error) => shell.setStatus(`Commit list unavailable · ${error.message}`));
     shell.showWorldWarning(adapter.warning);
     applyPreset(adapter.presets.has('tatsumi-pa') ? 'tatsumi-pa' : 'initial-spawn');
-    // Restore the pre-rebuild selection (Rebuild Map reloads with ?select=).
+    // Restore the pre-publish selection (Apply to Game reloads with ?select=).
     const reselectId = params.get('select');
     if (reselectId) selection.select(reselectId, { source: 'rebuild' });
     shell.setLoading(false);

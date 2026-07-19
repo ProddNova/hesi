@@ -48,34 +48,44 @@ built-map file:
 | Highway | Real Shutoko map (`js/map.js`)         | `data/editor/hesi-world-project.json` | `data/editor/hesi-world-build.json` |
 | Garage  | Garage interior (`js/garage.js`)       | `data/editor/garage-project.json`     | `data/editor/garage-build.json`     |
 
-## Save and rebuild the map
+## Draft and playable game
 
-Save (`Ctrl+S`) writes the project JSON and *builds* its map operations file —
-resolving every entity override and placed object into the build file above.
-The game fetches these build files at startup through
-`js/editor-map-patch.js` and replays them onto the freshly generated highway
-and garage. Missing build files are a no-op, and the game never imports editor
-code.
+The editor now has two deliberately separate operations:
 
-Road curves have an additional explicit publish step:
+- **Save Draft** (`Ctrl+S`) saves the editor project and road source only. It
+  never changes the playable game, so experimental layouts can be saved and
+  reopened safely.
+- **Apply to Game** performs the one final production update: it saves the
+  draft, validates and publishes road curves, writes the scene build file, and
+  reloads the editor. The game reads those generated files at startup.
+
+The toolbar badges distinguish `Draft: Unsaved/Saved` from
+`Game: Current/Update pending`. The game fetches scene build files through
+`js/editor-map-patch.js`; missing build files are a no-op, and the game never
+imports editor code.
+
+For road curves:
 
 1. Click a rendered asphalt surface or the Tatsumi PA deck (the editor gives
    the nearest road route priority over markings and props), or select a road
-   route in the hierarchy. Orange controls are placed on the runtime road and
-   collision elevation. Drag a point, right-click the orange road preview to
+   route in the hierarchy. The editor draws an opaque, road-width asphalt
+   preview with edge lines, dashed lane dividers, and orange draft edges at the
+   runtime collision elevation. Drag a point, right-click the draft road to
    add a point, or right-click an interior point to remove it. Double-click to
    add and `Delete`/`Backspace` to remove remain available as shortcuts.
-2. Press **Save**. Changed routes are stored deterministically in
+2. Press **Save Draft** as often as needed. Changed routes are stored
+   deterministically in
    `data/editor/road-route-overrides.json`; production route files are not
    changed yet. Saved curve edits reload into the editor automatically.
-3. Press **Rebuild Map**. The saved point arrays are validated and merged into
+3. Press **Apply to Game** once when the draft is final. The saved point arrays
+   are validated and merged into
    `data/routes-smoothed.json` and `data/routes-smoothed.js`, without replacing
    unrelated routes or metadata. Reload the game to use the rebuilt roads.
 
-While editing, the wide translucent orange strip and analytic collision curve
-update immediately so the changed trajectory is visible. The merged asphalt,
-markings, barriers, and chunk meshes are regenerated only by **Rebuild Map**;
-that command publishes the source and reloads the editor with the final road.
+While editing, the realistic local asphalt preview and analytic collision curve
+update immediately, including during a point drag. The original merged chunk
+asphalt may remain visible beside a large experimental deviation; markings,
+barriers, and chunk meshes become definitive only after **Apply to Game**.
 Runtime-generated access lanes such as `tatsumi_pa_entry` and
 `tatsumi_pa_exit` are saved separately and published as validated synthetic
 route metadata.
@@ -85,17 +95,18 @@ The road editor changes the existing smoothed centreline in XZ only: elevation
 not edit lanes, widths, junction topology, markings, barriers, or tunnels, and
 does not recalculate distance-based metadata. Keep edits local and away from
 junction boundaries. If the normal raw-route smoothing pipeline later
-regenerates `data/routes-smoothed.*`, press **Rebuild Map** again to reapply
+regenerates `data/routes-smoothed.*`, press **Apply to Game** again to reapply
 the saved editor source.
 
 ## Commits (map versions)
 
 The Project tab has a **Map versions** panel (also reachable with the
-toolbar Commit button). *Commit version* saves + builds, then snapshots the
-full project document and its build under
+toolbar Commit button). *Commit draft version* saves and snapshots the full
+project document plus its candidate build under
 `data/editor/commits/<scene>/<id>.json`, so every version of the map is
-kept. *Restore* loads any snapshot back (undoable), saves it, and rebuilds
-the map; *Delete* removes a snapshot from disk.
+kept without changing the playable game. *Restore Draft* loads and saves any
+snapshot back; **Apply to Game** remains the only production action. *Delete*
+removes a snapshot from disk.
 
 ## Run the game
 
@@ -167,7 +178,7 @@ available on Windows.
 - versioned project files under `data/editor/` with deterministic JSON,
   finite-number/reference/duplicate validation, five-decimal rounding, and no
   executable code or embedded geometry
-- Save, Save As, Load, Export Overrides, Reset Unsaved Changes, Reset Selected
+- Save Draft, Save Draft As, Load, Export Overrides, Reset Unsaved Changes, Reset Selected
   Override, and undoable Reset All Overrides controls
 - safe server-side writes through a project-only endpoint: a temporary sibling
   is fully written before replacement and the previous file is copied to `.bak`
@@ -175,8 +186,8 @@ available on Windows.
   30-second disk autosaves, and explicit newer-autosave recovery/discard UX
 - explicit demo adapter and safe real-world fallback state
 - road-centreline editing with bounded nearby control handles, protected route
-  endpoints, undo/redo, reloadable source saves, and an explicit production
-  rebuild step
+  endpoints, undo/redo, a realistic asphalt/lane preview, reloadable draft
+  saves, and one explicit Apply to Game production step
 
 Editing shortcuts in Orbit mode are `W` move, `E` rotate, `R` scale, and `X`
 world/local. `Delete` disables a generated entity or deletes a placed object;
@@ -184,8 +195,9 @@ world/local. `Delete` disables a generated entity or deletes a placed object;
 `Ctrl+Shift+Z` or `Ctrl+Y` redoes. Fly mode retains its navigation bindings
 (`Space` climbs, `Ctrl` descends), including simultaneous `Ctrl+W/A/S/D`
 movement without triggering editor shortcuts. `Shift`-click adds or toggles
-selection; an unmodified click replaces it. `Ctrl+S` saves the current project
-and pending road source, while **Rebuild Map** publishes saved road curves. `L`
+selection; an unmodified click replaces it. `Ctrl+S` saves the editor draft
+without touching game files, while **Apply to Game** publishes the final draft.
+`L`
 switches lighting mode. The committed clean default is
 `data/editor/hesi-world-project.json`; Save As paths are intentionally confined
 to `data/editor/*.json`.

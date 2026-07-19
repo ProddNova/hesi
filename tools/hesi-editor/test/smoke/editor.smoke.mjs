@@ -13,6 +13,10 @@ const BUILD_PATH = path.join(ROOT, 'data', 'editor', 'hesi-world-build.json');
 const BUILD_BACKUP_PATH = `${BUILD_PATH}.bak`;
 const ROAD_SOURCE_PATH = path.join(ROOT, 'data', 'editor', 'road-route-overrides.json');
 const ROAD_SOURCE_BACKUP_PATH = `${ROAD_SOURCE_PATH}.bak`;
+const ROUTE_JSON_PATH = path.join(ROOT, 'data', 'routes-smoothed.json');
+const ROUTE_JSON_BACKUP_PATH = `${ROUTE_JSON_PATH}.bak`;
+const ROUTE_MODULE_PATH = path.join(ROOT, 'data', 'routes-smoothed.js');
+const ROUTE_MODULE_BACKUP_PATH = `${ROUTE_MODULE_PATH}.bak`;
 await mkdir(OUT, { recursive: true });
 
 const snapshotFile = async (file) => {
@@ -26,6 +30,10 @@ const buildSnapshot = await snapshotFile(BUILD_PATH);
 const buildBackupSnapshot = await snapshotFile(BUILD_BACKUP_PATH);
 const roadSourceSnapshot = await snapshotFile(ROAD_SOURCE_PATH);
 const roadSourceBackupSnapshot = await snapshotFile(ROAD_SOURCE_BACKUP_PATH);
+const routeJsonSnapshot = await snapshotFile(ROUTE_JSON_PATH);
+const routeJsonBackupSnapshot = await snapshotFile(ROUTE_JSON_BACKUP_PATH);
+const routeModuleSnapshot = await snapshotFile(ROUTE_MODULE_PATH);
+const routeModuleBackupSnapshot = await snapshotFile(ROUTE_MODULE_BACKUP_PATH);
 
 const child = spawn(process.execPath, ['tools/hesi-editor/server.mjs'], {
   cwd: ROOT,
@@ -70,6 +78,13 @@ try {
   if (state.entities < 10000 || state.layers.some((layer) => layer.count < 1)) throw new Error(`Semantic registry is incomplete: ${JSON.stringify(state)}`);
   if (!state.warning) throw new Error('Demo/fallback warning is visible in real mode');
   if (state.game) throw new Error('Production gameplay booted inside the editor');
+  const saveLabels = await page.evaluate(() => ({
+    draft: document.querySelector('[data-action="save-project"]')?.textContent,
+    apply: document.querySelector('[data-action="rebuild-world"]')?.textContent,
+  }));
+  if (saveLabels.draft !== 'Save Draft' || saveLabels.apply !== 'Apply to Game') {
+    throw new Error(`Draft/game actions are not explicit: ${JSON.stringify(saveLabels)}`);
+  }
 
   await page.getByRole('button', { name: 'Fly', exact: true }).click();
   const before = await page.evaluate(() => window.hesiEditor.viewport.camera.position.toArray());
@@ -123,6 +138,9 @@ try {
     return {
       handleCount: controller.handles.length,
       previewVertices: controller.previewMesh?.geometry?.getAttribute('position')?.count || 0,
+      previewColor: controller.previewMesh?.material?.color?.getHexString?.() || '',
+      markingCount: controller.previewMarkings?.children?.length || 0,
+      draftEdgeCount: controller.previewMarkings?.children?.filter((child) => child.name.startsWith('draft ')).length || 0,
       yOffset: controller.yOffset,
       alignmentError: handle && sourcePoint
         ? Math.abs(handle.position.y - (sourcePoint[1] + controller.yOffset + 0.28))
@@ -130,8 +148,10 @@ try {
     };
   });
   if (!alignedRoadControls.handleCount || alignedRoadControls.previewVertices < 4
+    || alignedRoadControls.previewColor !== '171a23' || alignedRoadControls.markingCount < 4
+    || alignedRoadControls.draftEdgeCount !== 2
     || alignedRoadControls.alignmentError > 0.001) {
-    throw new Error(`Road controls are not aligned with the live road preview: ${JSON.stringify(alignedRoadControls)}`);
+    throw new Error(`Road controls/realistic asphalt preview are incomplete: ${JSON.stringify(alignedRoadControls)}`);
   }
 
   // Runtime-generated Tatsumi connectors must expose the same editing UX as
@@ -352,17 +372,39 @@ try {
   await page.keyboard.press('Control+Shift+Z');
   await page.getByRole('button', { name: 'Focus', exact: true }).click();
   await page.screenshot({ path: path.join(OUT, 'checkpoint-3-real-lamp-editing.png'), fullPage: true });
+  const buildBeforeDraft = await snapshotFile(BUILD_PATH);
   await page.locator('[data-action="save-project"]').click();
   await page.waitForFunction(() => window.hesiEditor.history.dirty === false);
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  const buildAfterDraft = await snapshotFile(BUILD_PATH);
+  if (buildBeforeDraft == null ? buildAfterDraft != null : !buildBeforeDraft.equals(buildAfterDraft)) {
+    throw new Error('Save Draft changed the playable game build file');
+  }
+  const draftBadges = await page.evaluate(() => ({
+    draft: document.querySelector('[data-testid="dirty-state"]')?.textContent,
+    game: document.querySelector('[data-testid="publish-state"]')?.textContent,
+  }));
+  if (draftBadges.draft !== 'Draft: Saved' || draftBadges.game !== 'Game: Update pending') {
+    throw new Error(`Draft/game badges are incoherent after Save Draft: ${JSON.stringify(draftBadges)}`);
+  }
+  const appliedNavigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+  await page.locator('[data-action="rebuild-world"]').click();
+  await appliedNavigation;
   await page.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'real' && window.hesiEditor.registry.has('placed:0001'), null, { timeout: 60000 });
+  const buildAfterApply = await snapshotFile(BUILD_PATH);
+  if (buildAfterApply == null || (buildBeforeDraft != null && buildBeforeDraft.equals(buildAfterApply))) {
+    throw new Error('Apply to Game did not update the playable game build file');
+  }
   const persisted = await page.evaluate(() => ({
     checkpoint: window.hesiEditor.checkpoint,
     path: window.hesiEditor.persistence.currentPath,
     placed: window.hesiEditor.projectState.toJSON().placedObjects.length,
     lampX: window.hesiEditor.registry.getById('lamp:wangan-0:0042').object3D.position.x,
+    draftState: document.querySelector('[data-testid="dirty-state"]')?.textContent,
+    gameState: document.querySelector('[data-testid="publish-state"]')?.textContent,
   }));
-  if (persisted.checkpoint !== 4 || persisted.path !== PROJECT_PATH || persisted.placed !== 1 || Math.abs(persisted.lampX - (Number(originalX) + 6)) > 0.01) {
+  if (persisted.checkpoint !== 4 || persisted.path !== PROJECT_PATH || persisted.placed !== 1
+    || Math.abs(persisted.lampX - (Number(originalX) + 6)) > 0.01
+    || persisted.draftState !== 'Draft: Saved' || persisted.gameState !== 'Game: Current') {
     throw new Error(`Disk project did not survive browser reload: ${JSON.stringify(persisted)}`);
   }
   await page.getByTestId('hierarchy-search').fill('placed:0001');
@@ -402,4 +444,8 @@ try {
   await restoreFile(BUILD_BACKUP_PATH, buildBackupSnapshot);
   await restoreFile(ROAD_SOURCE_PATH, roadSourceSnapshot);
   await restoreFile(ROAD_SOURCE_BACKUP_PATH, roadSourceBackupSnapshot);
+  await restoreFile(ROUTE_JSON_PATH, routeJsonSnapshot);
+  await restoreFile(ROUTE_JSON_BACKUP_PATH, routeJsonBackupSnapshot);
+  await restoreFile(ROUTE_MODULE_PATH, routeModuleSnapshot);
+  await restoreFile(ROUTE_MODULE_BACKUP_PATH, routeModuleBackupSnapshot);
 }
