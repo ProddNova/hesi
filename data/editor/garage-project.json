@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "project": {
+    "name": "HESI Garage Interior"
+  },
+  "entityOverrides": {
+    "garage-part:0010": {
+      "visible": false
+    },
+    "garage-part:0011": {
+      "visible": false
+    },
+    "garage-part:0012": {
+      "visible": false
+    },
+    "garage-part:0013": {
+      "visible": false
+    },
+    "garage-part:0014": {
+      "visible": false
+    },
+    "garage-part:0015": {
+      "visible": false
+    },
+    "garage-part:0016": {
+      "visible": false
+    },
+    "garage-part:0017": {
+      "visible": false
+    },
+    "garage-part:0018": {
+      "visible": false
+    },
+    "garage-part:0019": {
+      "visible": false
+    },
+    "garage-part:0020": {
+      "visible": false
+    },
+    "garage-part:0021": {
+      "visible": false
+    },
+    "garage-part:0022": {
+      "visible": false
+    },
+    "garage-part:0023": {
+      "visible": false
+    },
+    "garage-part:0024": {
+      "visible": false
+    },
+    "garage-part:0025": {
+      "visible": false
+    },
+    "garage-part:0055": {
+      "transform": {
+        "position": [
+          0.04057,
+          2.48265,
+          13.48
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.71831,
+          2.25695,
+          1
+        ]
+      }
+    },
+    "garage-part:0056": {
+      "visible": false
+    },
+    "garage-part:0057": {
+      "visible": false
+    },
+    "garage-part:0058": {
+      "visible": false
+    },
+    "garage-part:0059": {
+      "visible": false
+    },
+    "garage-part:0060": {
+      "visible": false
+    },
+    "garage-part:0061": {
+      "visible": false
+    },
+    "garage-part:0062": {
+      "visible": false
+    },
+    "garage-part:0063": {
+      "visible": false
+    },
+    "garage-part:0064": {
+      "visible": false
+    },
+    "garage-part:0065": {
+      "visible": false
+    },
+    "garage-part:0066": {
+      "visible": false
+    },
+    "garage-part:0067": {
+      "visible": false
+    },
+    "garage-part:0068": {
+      "visible": false
+    },
+    "garage-part:0069": {
+      "visible": false
+    },
+    "garage-part:0070": {
+      "visible": false
+    },
+    "garage-part:0071": {
+      "visible": false
+    },
+    "garage-part:0072": {
+      "visible": false
+    },
+    "garage-part:0073": {
+      "visible": false
+    },
+    "garage-part:0077": {
+      "visible": false
+    }
+  },
+  "placedObjects": [],
+  "groups": [],
+  "editorState": {}
+}

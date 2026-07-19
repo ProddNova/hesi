@@ -1,0 +1,768 @@
+{
+  "version": 1,
+  "scene": "garage",
+  "generatedAt": "2026-07-19T21:46:18.501Z",
+  "project": {
+    "draftSignature": "fnv1a32:d35076e2",
+    "name": "HESI Garage Interior",
+    "path": "data/editor/garage-project.json"
+  },
+  "operations": [
+    {
+      "childIndex": 9,
+      "op": "garage-object",
+      "position": [
+        0,
+        5.1,
+        -13.55
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 10,
+      "op": "garage-object",
+      "position": [
+        0,
+        5.1,
+        13.55
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 11,
+      "op": "garage-object",
+      "position": [
+        -10.77,
+        1.15,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 12,
+      "op": "garage-object",
+      "position": [
+        -10.77,
+        6.4,
+        -11
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 13,
+      "op": "garage-object",
+      "position": [
+        -10.77,
+        6.4,
+        -7
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 14,
+      "op": "garage-object",
+      "position": [
+        -10.77,
+        6.4,
+        -3
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 15,
+      "op": "garage-object",
+      "position": [
+        -10.77,
+        6.4,
+        1
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 16,
+      "op": "garage-object",
+      "position": [
+        -10.77,
+        6.4,
+        5
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 17,
+      "op": "garage-object",
+      "position": [
+        -10.77,
+        6.4,
+        9
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 18,
+      "op": "garage-object",
+      "position": [
+        10.77,
+        1.15,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 19,
+      "op": "garage-object",
+      "position": [
+        10.77,
+        6.4,
+        -11
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 20,
+      "op": "garage-object",
+      "position": [
+        10.77,
+        6.4,
+        -7
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 21,
+      "op": "garage-object",
+      "position": [
+        10.77,
+        6.4,
+        -3
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 22,
+      "op": "garage-object",
+      "position": [
+        10.77,
+        6.4,
+        1
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 23,
+      "op": "garage-object",
+      "position": [
+        10.77,
+        6.4,
+        5
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 24,
+      "op": "garage-object",
+      "position": [
+        10.77,
+        6.4,
+        9
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 54,
+      "op": "garage-object",
+      "position": [
+        0.04057,
+        2.48265,
+        13.48
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1.71831,
+        2.25695,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "childIndex": 55,
+      "op": "garage-object",
+      "position": [
+        -7.2,
+        1.1,
+        -8
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 56,
+      "op": "garage-object",
+      "position": [
+        -9.8,
+        1,
+        -8
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 57,
+      "op": "garage-object",
+      "position": [
+        -4.6,
+        1,
+        -8
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 58,
+      "op": "garage-object",
+      "position": [
+        -7.2,
+        3,
+        -8.85
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 59,
+      "op": "garage-object",
+      "position": [
+        -9.4,
+        3.1,
+        -8.74
+      ],
+      "quaternion": [
+        0,
+        0,
+        -0.012,
+        0.99993
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 60,
+      "op": "garage-object",
+      "position": [
+        -8.68,
+        3.1,
+        -8.74
+      ],
+      "quaternion": [
+        0,
+        0,
+        0.028,
+        0.99961
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 61,
+      "op": "garage-object",
+      "position": [
+        -7.96,
+        3.1,
+        -8.74
+      ],
+      "quaternion": [
+        0,
+        0,
+        0.06795,
+        0.99769
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 62,
+      "op": "garage-object",
+      "position": [
+        -7.24,
+        3.1,
+        -8.74
+      ],
+      "quaternion": [
+        0,
+        0,
+        0.10779,
+        0.99417
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 63,
+      "op": "garage-object",
+      "position": [
+        -6.52,
+        3.1,
+        -8.74
+      ],
+      "quaternion": [
+        0,
+        0,
+        0.14746,
+        0.98907
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 64,
+      "op": "garage-object",
+      "position": [
+        -5.8,
+        3.1,
+        -8.74
+      ],
+      "quaternion": [
+        0,
+        0,
+        0.18689,
+        0.98238
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 65,
+      "op": "garage-object",
+      "position": [
+        -5.08,
+        3.1,
+        -8.74
+      ],
+      "quaternion": [
+        0,
+        0,
+        0.22603,
+        0.97412
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 66,
+      "op": "garage-object",
+      "position": [
+        8.7,
+        0.9,
+        -9
+      ],
+      "quaternion": [
+        0,
+        0,
+        0.70711,
+        0.70711
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 67,
+      "op": "garage-object",
+      "position": [
+        7.5,
+        1.05,
+        -10.2
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 68,
+      "op": "garage-object",
+      "position": [
+        6,
+        1,
+        -10.2
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 69,
+      "op": "garage-object",
+      "position": [
+        9,
+        1,
+        -10.2
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 70,
+      "op": "garage-object",
+      "position": [
+        7.5,
+        2,
+        -10.55
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 71,
+      "op": "garage-object",
+      "position": [
+        7.5,
+        2.08,
+        -9.91
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 72,
+      "op": "garage-object",
+      "position": [
+        7.5,
+        1.28,
+        -9.55
+      ],
+      "quaternion": [
+        0.05996,
+        0,
+        0,
+        0.9982
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 76,
+      "op": "garage-object",
+      "position": [
+        -10.68,
+        5,
+        -2
+      ],
+      "quaternion": [
+        0,
+        0.70711,
+        0,
+        0.70711
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    }
+  ]
+}
