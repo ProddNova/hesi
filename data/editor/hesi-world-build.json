@@ -1,13 +1,57 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-19T12:37:48.297Z",
+  "generatedAt": "2026-07-19T13:36:02.534Z",
   "project": {
-    "draftSignature": "fnv1a32:14bfd5ef",
+    "draftSignature": "fnv1a32:16988f9f",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
   "operations": [
+    {
+      "name": "chunk 5,-7 box:fence",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "name": "chunk 6,-7 box:fence",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
     {
       "name": "Tatsumi PA deck",
       "nameIndex": 0,
@@ -29,6 +73,98 @@
         1.05421
       ],
       "visible": true
+    },
+    {
+      "index": 12,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3700.41797,
+        48.77328,
+        -4031.81836,
+        1
+      ],
+      "mesh": "chunk 6,-7 lamppost:concrete",
+      "op": "instance"
+    },
+    {
+      "index": 12,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3699.57788,
+        58.03328,
+        -4029.69873,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:lampSodium",
+      "op": "instance"
+    },
+    {
+      "index": 12,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3699.32007,
+        48.83358,
+        -4029.04785,
+        1
+      ],
+      "mesh": "chunk 6,-7 pool:lightPool",
+      "op": "instance"
+    },
+    {
+      "index": 12,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3699.46729,
+        48.86354,
+        -4029.41968,
+        1
+      ],
+      "mesh": "chunk 6,-7 pool:lightStreak",
+      "op": "instance"
     },
     {
       "index": 13,
