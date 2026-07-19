@@ -57,6 +57,11 @@ export class WorldProjectState {
     const index = this.document.placedObjects.findIndex((item) => item.id === id);
     if (index < 0) return null;
     const [record] = this.document.placedObjects.splice(index, 1);
+    // Placed entities temporarily use the override store while edit commands
+    // are being undone/redone, but their persisted state lives entirely in
+    // placedObjects. Never leave an orphan override behind after deletion:
+    // project validation correctly treats it as an unknown generated entity.
+    delete this.document.entityOverrides[id];
     this._emit({ type: 'placed-remove', id });
     return clone(record);
   }

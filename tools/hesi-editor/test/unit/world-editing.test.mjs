@@ -80,3 +80,14 @@ test('project state clones override and placed records at its boundary', () => {
   state.removePlaced('placed:0001');
   assert.equal(state.toJSON().placedObjects.length, 0);
 });
+
+test('removing a placed object also removes its transient entity override', () => {
+  const state = new WorldProjectState();
+  state.addPlaced({ id: 'placed:0002', assetId: 'hesi:lamp', transform: { position: [0, 0, 0] } });
+  state.replaceOverride('placed:0002', { name: 'Edited lamp' });
+
+  state.removePlaced('placed:0002');
+
+  assert.equal(state.getPlaced('placed:0002'), null);
+  assert.equal(state.getOverride('placed:0002'), null);
+});

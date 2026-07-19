@@ -155,6 +155,7 @@ export class EditActions {
 
   _deletePlaced(entity) {
     const record = this.projectState.getPlaced(entity.id) || this.assetRegistry.recordFor(entity);
+    const override = this.projectState.getOverride(entity.id);
     const remove = () => {
       this.selection.removeFromSelection?.(entity.id, 'delete');
       this.registry.unregister(entity.id);
@@ -167,6 +168,7 @@ export class EditActions {
       if (!this.registry.has(entity.id)) this.registry.register(entity);
       this.adapter.registerEditorEntity(entity);
       if (!this.projectState.getPlaced(entity.id)) this.projectState.addPlaced(record);
+      this.projectState.replaceOverride(entity.id, override);
       this.selection.select(entity, { source: 'undo-delete', additive: true });
       this.onChange(entity);
     };
