@@ -109,7 +109,9 @@ full-screen modeling section that is always available inside the editor:
 - **Faces mode**: click any face of a part and attach an image to it —
   making a bin means uploading the photos of its top, bottom, and sides;
   textures use nearest filtering for the PSX look, and one uploaded image can
-  be reused across faces and objects
+  be reused across faces and objects. Each face can use **Stretch** or
+  **Fit & crop** (aspect-preserving, automatically clipped by the current face
+  silhouette), plus independent horizontal and vertical flips
 - **Vertices mode**: drag welded vertex handles to deform primitives into
   hand-made low-poly shapes (offsets are saved with the object); **+ Vertices**
   (or the *Vertex detail* field) subdivides a part for more editable vertices
@@ -131,6 +133,11 @@ full-screen modeling section that is always available inside the editor:
 - **World textures**: replace the repeated textures of the generated map —
   road asphalt (tiled per road segment), alternate/service asphalt, concrete,
   barriers, buildings, and tunnel walls — with uploaded images
+
+- **Map Inspector face textures**: select a rendered wall, floor, placed box,
+  or other non-instanced object and assign/upload an image per exposed face
+  directly from the right sidebar; these assignments are persisted in the
+  scene project and replayed by the playable-game build
 
 Saved objects land in `data/editor/custom-assets.json` (textures embedded as
 data URLs) through the dev server's `/__hesi_editor_assets` endpoint, join the

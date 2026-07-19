@@ -46,7 +46,6 @@ export class CustomAssetStore {
   async save() {
     const errors = customAssetsDocumentErrors(this.document);
     if (errors.length) throw new Error(`Custom assets are invalid: ${errors[0]}`);
-    this._pruneUnusedTextures();
     const result = await responseJson(await fetch('/__hesi_editor_assets', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -124,18 +123,4 @@ export class CustomAssetStore {
     this.dirty = true;
   }
 
-  /** Drops uploaded textures that nothing references any more before saving. */
-  _pruneUnusedTextures() {
-    const used = new Set(Object.values(this.document.worldTextures || {}));
-    for (const asset of Object.values(this.document.assets)) {
-      for (const part of asset.parts || []) {
-        for (const style of Object.values(part.faces || {})) {
-          if (style.texture) used.add(style.texture);
-        }
-      }
-    }
-    for (const id of Object.keys(this.document.textures)) {
-      if (!used.has(id)) delete this.document.textures[id];
-    }
-  }
 }

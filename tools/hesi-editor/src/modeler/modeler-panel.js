@@ -49,8 +49,8 @@ function blankDefinition(id) {
  * asset — and the playable game rebuilds them from the same saved document.
  */
 export class ModelerPanel {
-  constructor({ host, store, assetRegistry, onStatus = () => {}, onAssetsChanged = () => {}, onWorldTexturesChanged = () => {}, isAssetInUse = () => false, onOpenChange = () => {} }) {
-    Object.assign(this, { store, assetRegistry, onStatus, onAssetsChanged, onWorldTexturesChanged, isAssetInUse, onOpenChange });
+  constructor({ host, store, assetRegistry, onStatus = () => {}, onAssetsChanged = () => {}, onTexturesChanged = () => {}, onWorldTexturesChanged = () => {}, isAssetInUse = () => false, onOpenChange = () => {} }) {
+    Object.assign(this, { store, assetRegistry, onStatus, onAssetsChanged, onTexturesChanged, onWorldTexturesChanged, isAssetInUse, onOpenChange });
     this.openState = false;
     this.definition = null;
     this.editingExisting = false;
@@ -298,6 +298,7 @@ export class ModelerPanel {
     this.uploadTextureButton.addEventListener('click', () => this._pickImage((textureId) => {
       this._markDirty({ history: false });
       this._renderTextures();
+      this.onTexturesChanged();
       this.onStatus(`Added texture ${textureId} to the library`);
     }));
 
@@ -758,6 +759,41 @@ export class ModelerPanel {
       });
       row.append(allFaces);
       this.inspector.append(row);
+      if (textureRecord) {
+        const options = element('div', 'modeler-face-options');
+        const fitLabel = element('label');
+        fitLabel.append(element('span', '', 'Image fit'));
+        const fit = document.createElement('select');
+        fit.setAttribute('aria-label', `${faceName} image fit`);
+        fit.add(new Option('Stretch', 'stretch'));
+        fit.add(new Option('Fit & crop', 'cover'));
+        fit.value = style.fit === 'cover' ? 'cover' : 'stretch';
+        fit.addEventListener('change', () => {
+          part.faces[faceName] = { ...style, fit: fit.value };
+          this._markDirty();
+          this._rebuildObject();
+          this._renderInspector();
+        });
+        fitLabel.append(fit);
+        const flipX = button('Flip H', `tool-button small${style.flipX ? ' active' : ''}`, 'Flip this face texture horizontally');
+        flipX.setAttribute('aria-pressed', String(Boolean(style.flipX)));
+        flipX.addEventListener('click', () => {
+          part.faces[faceName] = { ...style, flipX: !style.flipX };
+          this._markDirty();
+          this._rebuildObject();
+          this._renderInspector();
+        });
+        const flipY = button('Flip V', `tool-button small${style.flipY ? ' active' : ''}`, 'Flip this face texture vertically');
+        flipY.setAttribute('aria-pressed', String(Boolean(style.flipY)));
+        flipY.addEventListener('click', () => {
+          part.faces[faceName] = { ...style, flipY: !style.flipY };
+          this._markDirty();
+          this._rebuildObject();
+          this._renderInspector();
+        });
+        options.append(fitLabel, flipX, flipY);
+        this.inspector.append(options);
+      }
     }
   }
 
@@ -1194,6 +1230,7 @@ export class ModelerPanel {
       this._rebuildObject();
       this._renderInspector();
       this._renderTextures();
+      this.onTexturesChanged();
     };
     if (!textures.length) { this._pickImage(useTexture); return; }
     // Tiny chooser: reuse an uploaded image or add a new one.
@@ -1229,6 +1266,7 @@ export class ModelerPanel {
       try {
         const textureId = await this.store.addTextureFile(file);
         this._renderTextures();
+        this.onTexturesChanged();
         onReady(textureId);
       } catch (error) {
         this.onStatus(`Texture upload failed · ${error.message}`);

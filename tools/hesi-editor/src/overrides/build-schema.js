@@ -42,6 +42,19 @@ function validateTransformFields(op, path, errors) {
   finiteVector(op.quaternion, 4, `${path}.quaternion`, errors);
   finiteVector(op.scale, 3, `${path}.scale`, errors);
   if (op.visible !== undefined && typeof op.visible !== 'boolean') errors.push(`${path}.visible must be boolean`);
+  if (op.faceTextures !== undefined) validateFaceTextures(op.faceTextures, `${path}.faceTextures`, errors);
+}
+
+function validateFaceTextures(faceTextures, path, errors) {
+  if (!isRecord(faceTextures)) { errors.push(`${path} must be an object`); return; }
+  for (const [slot, style] of Object.entries(faceTextures)) {
+    const slotPath = `${path}.${slot}`;
+    if (!/^\d+:\d+$/.test(slot)) errors.push(`${slotPath} must use a meshIndex:materialIndex key`);
+    if (!isRecord(style)) { errors.push(`${slotPath} must be an object`); continue; }
+    if (typeof style.texture !== 'string' || !/^tex:[a-z0-9][a-z0-9_-]{0,80}$/i.test(style.texture)) errors.push(`${slotPath}.texture must be a texture id`);
+    if (style.fit !== undefined && !['stretch', 'cover'].includes(style.fit)) errors.push(`${slotPath}.fit must be stretch or cover`);
+    for (const key of ['flipX', 'flipY']) if (style[key] !== undefined && typeof style[key] !== 'boolean') errors.push(`${slotPath}.${key} must be boolean`);
+  }
 }
 
 const OPERATION_VALIDATORS = {

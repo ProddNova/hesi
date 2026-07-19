@@ -82,6 +82,7 @@ function highwayOperations({ adapter, registry, assetRegistry, projectDocument }
       nameIndex,
       ...(override.transform ? persistedTransformFields(override.transform) : liveTransformFields(object)),
       visible: overrideVisible(override),
+      ...(override.faceTextures && Object.keys(override.faceTextures).length ? { faceTextures: override.faceTextures } : {}),
     });
   }
   operations.push(...placedOperations({ assetRegistry, projectDocument }));
@@ -99,6 +100,7 @@ function garageOperations({ registry, assetRegistry, projectDocument }) {
       childIndex,
       ...(override.transform ? persistedTransformFields(override.transform) : liveTransformFields(entity.object3D)),
       visible: overrideVisible(override),
+      ...(override.faceTextures && Object.keys(override.faceTextures).length ? { faceTextures: override.faceTextures } : {}),
     });
   }
   operations.push(...placedOperations({ assetRegistry, projectDocument }));
@@ -114,6 +116,7 @@ function placedOperations({ assetRegistry, projectDocument }) {
       name: placed.name || placed.id,
       ...persistedTransformFields(placed.transform),
       visible: placed.visible !== false,
+      ...(placed.faceTextures && Object.keys(placed.faceTextures).length ? { faceTextures: placed.faceTextures } : {}),
     };
     if (asset.kind === 'primitive') {
       operations.push({ op: 'place-primitive', primitive: placed.assetId.split(':').pop(), ...base });

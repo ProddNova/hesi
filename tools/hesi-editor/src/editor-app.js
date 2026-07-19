@@ -18,6 +18,7 @@ import { getScene, sceneFromSearch } from './scenes/scene-registry.js';
 import { CustomAssetStore } from './world/custom-asset-store.js';
 import { assembleDefinitionFromEntities, registerCustomAssets } from './world/custom-asset-integration.js';
 import { ModelerPanel } from './modeler/modeler-panel.js';
+import { FaceTextureController } from './interaction/face-texture-controller.js';
 import { applyWorldTextureOverrides } from '/js/custom-assets.js';
 
 export async function createEditorApp(root) {
@@ -43,6 +44,7 @@ export async function createEditorApp(root) {
   let routePersistence = null;
   let customAssetStore = null;
   let modeler = null;
+  let faceTextureController = null;
   let disposed = false;
   const collisionOverlay = new CollisionOverlay({ viewport });
   const viewFlags = { grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
@@ -268,6 +270,11 @@ export async function createEditorApp(root) {
           shell.setStatus(error.message);
         }
       },
+      'face-texture-set': () => faceTextureController?.assignTexture(selection?.selected, detail.slotKey, detail.texture)
+        .catch((error) => shell.setStatus(`Texture assignment failed · ${error.message}`)),
+      'face-texture-style': () => faceTextureController?.setStyle(selection?.selected, detail.slotKey, detail.patch),
+      'face-texture-upload': () => faceTextureController?.assignFile(selection?.selected, detail.slotKey, detail.file)
+        .catch((error) => shell.setStatus(`Texture upload failed · ${error.message}`)),
     };
     if (viewActions[action]) { viewActions[action](); return; }
     if (!editActions || !transformManager) return;
@@ -427,13 +434,16 @@ export async function createEditorApp(root) {
     // Modeler-built custom assets join the shared catalog before the saved
     // project loads, so placed custom objects reconstruct on reload. Saved
     // world texture overrides (custom road asphalt, ...) apply to the live map.
-    customAssetStore = new CustomAssetStore({ onStatus: (message) => shell.setStatus(message) });
+    customAssetStore = new CustomAssetStore({
+      onStatus: (message) => shell.setStatus(message),
+    });
     try {
       shell.setLoading(true, 'Loading custom modeled assets');
       await customAssetStore.load();
       const registered = registerCustomAssets(assetRegistry, customAssetStore.document);
       if (registered) shell.setStatus(`Loaded ${registered} custom modeled asset${registered === 1 ? '' : 's'}`);
       if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
+      shell.setTextures(customAssetStore.textures());
     } catch (error) {
       shell.setStatus(`Custom assets unavailable · ${error.message}`);
     }
@@ -447,9 +457,19 @@ export async function createEditorApp(root) {
       onStatus: (message) => shell.setStatus(message),
       onDraggingChange: (dragging) => selection?.setPickingBlocked(dragging),
     });
+    faceTextureController = new FaceTextureController({
+      registry, projectState, history, store: customAssetStore,
+      onChange: (entity) => {
+        selection?.refreshHighlight();
+        shell.setSelection(selection?.selected || entity || null, { ids: selection?.selectedEntities?.map((item) => item.id) });
+      },
+      onTexturesChanged: () => shell.setTextures(customAssetStore.textures()),
+      onStatus: (message) => shell.setStatus(message),
+    });
     editActions = new EditActions({
       registry, adapter, assetRegistry, projectState, history, selection, transformManager,
       onChange: (entity) => {
+        faceTextureController?.syncEntity(entity);
         selection?.refreshHighlight();
         shell.setSelection(selection?.selected || entity || null, { ids: selection?.selectedEntities?.map((item) => item.id) });
         shell.setTransformState(transformManager.state());
@@ -484,6 +504,7 @@ export async function createEditorApp(root) {
       assetRegistry,
       onStatus: (message) => shell.setStatus(message),
       onAssetsChanged: () => shell.setAssets(assetRegistry.catalog()),
+      onTexturesChanged: () => shell.setTextures(customAssetStore.textures()),
       onWorldTexturesChanged: () => {
         if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
       },
@@ -493,7 +514,7 @@ export async function createEditorApp(root) {
     shell.setAssets(assetRegistry.catalog());
     syncViewState();
     persistence = new ProjectPersistence({
-      projectState, registry, assetRegistry, adapter, selection, transformManager, history, scene,
+      projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore, scene,
       onStatus: (message) => shell.setStatus(message),
       onProjectChange: (state) => shell.setProject(state),
       onRecovery: (message) => shell.showProjectNotice(message),

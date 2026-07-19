@@ -50,3 +50,19 @@ test('persisted Euler transforms round-trip through internal quaternions', () =>
   persisted.rotation.forEach((value, index) => assert.ok(Math.abs(value - roundTrip.rotation[index]) < 1e-8));
   assert.deepEqual(roundTrip.scale, persisted.scale);
 });
+
+test('project schema persists per-face texture styles and checks texture references', () => {
+  const document = blankProjectDocument('Textures');
+  document.entityOverrides.wall = {
+    faceTextures: { '0:4': { texture: 'tex:0001', fit: 'cover', flipX: true } },
+  };
+  assert.equal(validateProjectDocument(document, {
+    entityIds: new Set(['wall']), textureIds: new Set(['tex:0001']),
+  }), true);
+  const serialized = serializeProjectDocument(document);
+  assert.match(serialized, /"faceTextures"/);
+  assert.match(serialized, /"fit": "cover"/);
+  assert.throws(() => validateProjectDocument(document, {
+    entityIds: new Set(['wall']), textureIds: new Set(['tex:9999']),
+  }), /missing texture/);
+});

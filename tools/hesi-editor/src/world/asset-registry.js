@@ -270,6 +270,9 @@ export class AssetRegistry {
       transform: transformRecord(entity.object3D),
       visible: entity.object3D.visible,
       locked: Boolean(entity.metadata.locked),
+      ...(entity.metadata.faceTextures && Object.keys(entity.metadata.faceTextures).length
+        ? { faceTextures: structuredClone(entity.metadata.faceTextures) }
+        : {}),
     };
   }
 }

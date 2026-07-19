@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
+import { applyObjectFaceStyles, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
 
 // Applies HESI world-editor builds to the running game.
 //
@@ -119,6 +119,7 @@ function buildPlacedObject(op, donorForMaterialKey, customAssets = null) {
     if (!root.children.length) return null;
   }
   applyTransformOp(root, op);
+  applyObjectFaceStyles(root, op.faceTextures || {}, customAssets?.textures || {});
   return root;
 }
 
@@ -159,6 +160,7 @@ export function applyHighwayBuild(map, build, customAssets = null) {
       const target = objectsByName.get(op.name || '')?.[op.nameIndex];
       if (!target) { summary.skipped += 1; continue; }
       applyTransformOp(target, op);
+      applyObjectFaceStyles(target, op.faceTextures || {}, customAssets?.textures || {});
       summary.applied += 1;
       continue;
     }
@@ -190,6 +192,7 @@ export function applyGarageBuild(garageRoot, build, customAssets = null) {
       const target = children[op.childIndex];
       if (!target) { summary.skipped += 1; continue; }
       applyTransformOp(target, op);
+      applyObjectFaceStyles(target, op.faceTextures || {}, customAssets?.textures || {});
       summary.applied += 1;
       continue;
     }

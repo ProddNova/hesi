@@ -154,8 +154,17 @@ export function customAssetsDocumentErrors(document) {
         for (const [face, style] of Object.entries(part.faces || {})) {
           if (!partFaceNames(part).includes(face)) errors.push(`${path}.faces.${face} is not a face of ${part.kind}`);
           if (!isRecord(style)) errors.push(`${path}.faces.${face} must be an object`);
-          else if (style.texture !== undefined && style.texture !== null && !document.textures[style.texture]) {
-            errors.push(`${path}.faces.${face}.texture references missing texture ${style.texture}`);
+          else {
+            if (style.texture !== undefined && style.texture !== null && !document.textures[style.texture]) {
+              errors.push(`${path}.faces.${face}.texture references missing texture ${style.texture}`);
+            }
+            if (style.fit !== undefined && !['stretch', 'cover'].includes(style.fit)) {
+              errors.push(`${path}.faces.${face}.fit must be stretch or cover`);
+            }
+            for (const key of ['flipX', 'flipY']) {
+              if (style[key] !== undefined && typeof style[key] !== 'boolean') errors.push(`${path}.faces.${face}.${key} must be boolean`);
+            }
+            if (style.repeat !== undefined && !finiteVector(style.repeat, 2)) errors.push(`${path}.faces.${face}.repeat must contain 2 finite numbers`);
           }
         }
         if (part.vertexOffsets !== undefined) {
@@ -557,24 +566,97 @@ export function meshRemoveVertex(part, vertexIndex) {
 
 const textureCache = new Map();
 
-/** PSX-flavoured texture from a stored data URL: nearest filtering, sRGB, repeat wrap. */
-export function textureFromDataUrl(dataUrl, { repeat = null } = {}) {
-  const key = `${dataUrl}|${repeat ? repeat.join(',') : ''}`;
+/**
+ * UV transform used by face textures. `cover` preserves the image aspect and
+ * samples a centred sub-rectangle, so the mesh itself clips the excess when a
+ * rectangular face is reshaped into a triangle or another silhouette.
+ */
+export function faceTextureTransform({
+  fit = 'stretch', imageAspect = 1, surfaceAspect = 1, repeat = null, flipX = false, flipY = false,
+} = {}) {
+  const safeImageAspect = Number.isFinite(imageAspect) && imageAspect > 0 ? imageAspect : 1;
+  const safeSurfaceAspect = Number.isFinite(surfaceAspect) && surfaceAspect > 0 ? surfaceAspect : 1;
+  const scale = finiteVector(repeat, 2) ? [...repeat] : [1, 1];
+  const offset = [0, 0];
+  if (fit === 'cover') {
+    scale[0] = 1;
+    scale[1] = 1;
+    if (safeImageAspect > safeSurfaceAspect) scale[0] = safeSurfaceAspect / safeImageAspect;
+    else if (safeImageAspect < safeSurfaceAspect) scale[1] = safeImageAspect / safeSurfaceAspect;
+    offset[0] = (1 - scale[0]) * 0.5;
+    offset[1] = (1 - scale[1]) * 0.5;
+  }
+  if (flipX) { offset[0] += scale[0]; scale[0] *= -1; }
+  if (flipY) { offset[1] += scale[1]; scale[1] *= -1; }
+  return { repeat: scale, offset };
+}
+
+/** PSX-flavoured texture from a stored data URL, with per-face crop and flip. */
+export function textureFromDataUrl(dataUrl, {
+  repeat = null, fit = 'stretch', surfaceAspect = 1, flipX = false, flipY = false,
+} = {}) {
+  const key = JSON.stringify([dataUrl, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY)]);
   if (textureCache.has(key)) return textureCache.get(key);
   // Outside the browser (node tests) there is no image decoding: hand back a
   // bare texture object so material wiring stays testable.
-  const texture = typeof document === 'undefined' ? new THREE.Texture() : new THREE.TextureLoader().load(dataUrl);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestMipmapLinearFilter;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  if (repeat) texture.repeat.set(repeat[0], repeat[1]);
+  const configure = (texture) => {
+    const image = texture.image;
+    const width = image?.naturalWidth || image?.videoWidth || image?.width || 1;
+    const height = image?.naturalHeight || image?.videoHeight || image?.height || 1;
+    const transform = faceTextureTransform({ fit, imageAspect: width / Math.max(height, 1), surfaceAspect, repeat, flipX, flipY });
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestMipmapLinearFilter;
+    texture.wrapS = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+    texture.wrapT = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+    texture.repeat.set(...transform.repeat);
+    texture.offset.set(...transform.offset);
+    texture.needsUpdate = true;
+  };
+  const texture = typeof document === 'undefined'
+    ? new THREE.Texture()
+    : new THREE.TextureLoader().load(dataUrl, configure);
+  configure(texture);
   textureCache.set(key, texture);
   return texture;
 }
 
-function faceMaterial(part, faceName, texturesById) {
+function geometryMaterialAspect(geometry, materialIndex = 0, scale = [1, 1, 1]) {
+  const position = geometry?.getAttribute?.('position');
+  const uv = geometry?.getAttribute?.('uv');
+  if (!position || !uv) return 1;
+  const index = geometry.index;
+  const cornerCount = index ? index.count : position.count;
+  const groups = geometry.groups?.length ? geometry.groups : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+  let uLength = 0, vLength = 0, weightSum = 0;
+  const point = (corner) => {
+    const vertex = index ? index.getX(corner) : corner;
+    return new THREE.Vector3(position.getX(vertex) * Math.abs(scale[0] ?? 1), position.getY(vertex) * Math.abs(scale[1] ?? 1), position.getZ(vertex) * Math.abs(scale[2] ?? 1));
+  };
+  for (const group of groups.filter((entry) => (entry.materialIndex || 0) === materialIndex)) {
+    for (let corner = group.start; corner + 2 < group.start + group.count; corner += 3) {
+      const vertices = [corner, corner + 1, corner + 2].map((entry) => index ? index.getX(entry) : entry);
+      const p0 = point(corner), p1 = point(corner + 1), p2 = point(corner + 2);
+      const e1 = p1.sub(p0), e2 = p2.sub(p0);
+      const du1 = uv.getX(vertices[1]) - uv.getX(vertices[0]);
+      const dv1 = uv.getY(vertices[1]) - uv.getY(vertices[0]);
+      const du2 = uv.getX(vertices[2]) - uv.getX(vertices[0]);
+      const dv2 = uv.getY(vertices[2]) - uv.getY(vertices[0]);
+      const determinant = du1 * dv2 - du2 * dv1;
+      if (Math.abs(determinant) < 1e-8) continue;
+      const dPdu = e1.clone().multiplyScalar(dv2).addScaledVector(e2, -dv1).multiplyScalar(1 / determinant);
+      const dPdv = e1.clone().multiplyScalar(-du2).addScaledVector(e2, du1).multiplyScalar(1 / determinant);
+      const weight = Math.abs(determinant);
+      uLength += dPdu.length() * weight;
+      vLength += dPdv.length() * weight;
+      weightSum += weight;
+    }
+  }
+  if (!weightSum || vLength < 1e-8) return 1;
+  return Math.min(1000, Math.max(0.001, uLength / vLength));
+}
+
+function faceMaterial(part, faceName, texturesById, surfaceAspect = 1) {
   const style = part.faces?.[faceName] || {};
   const color = style.color || part.color || '#9aa7b5';
   const parameters = {
@@ -586,6 +668,10 @@ function faceMaterial(part, faceName, texturesById) {
   if (textureRecord?.dataUrl) {
     parameters.map = textureFromDataUrl(textureRecord.dataUrl, {
       repeat: finiteVector(style.repeat, 2) ? style.repeat : null,
+      fit: style.fit === 'cover' ? 'cover' : 'stretch',
+      surfaceAspect,
+      flipX: Boolean(style.flipX),
+      flipY: Boolean(style.flipY),
     });
     parameters.color = new THREE.Color('#ffffff');
   }
@@ -610,7 +696,9 @@ export function buildPartObject(part, texturesById, { resolveAssetPart = () => n
     const geometry = partGeometry(part);
     if (!geometry) return null;
     applyVertexOffsets(geometry, part.vertexOffsets);
-    const materials = partFaceNames(part).map((faceName) => faceMaterial(part, faceName, texturesById));
+    const materials = partFaceNames(part).map((faceName, materialIndex) => faceMaterial(
+      part, faceName, texturesById, geometryMaterialAspect(geometry, materialIndex, part.scale || [1, 1, 1]),
+    ));
     node = new THREE.Mesh(geometry, materials.length === 1 ? materials[0] : materials);
   }
   node.name = part.name || PART_KINDS[part.kind].label;
@@ -618,6 +706,106 @@ export function buildPartObject(part, texturesById, { resolveAssetPart = () => n
   if (finiteVector(part.rotation, 3)) node.rotation.set(part.rotation[0], part.rotation[1], part.rotation[2]);
   if (finiteVector(part.scale, 3)) node.scale.fromArray(part.scale);
   return node;
+}
+
+const GEOMETRY_FACE_NAMES = Object.freeze({
+  BoxGeometry: ['right', 'left', 'top', 'bottom', 'front', 'back'],
+  CylinderGeometry: ['side', 'top', 'bottom'],
+  ConeGeometry: ['side', 'bottom'],
+  PlaneGeometry: ['face'],
+  SphereGeometry: ['surface'],
+});
+
+function objectMeshes(root) {
+  const meshes = [];
+  root?.traverse?.((object) => { if (object.isMesh && !object.isInstancedMesh) meshes.push(object); });
+  if (root?.isMesh && !root.isInstancedMesh && !meshes.includes(root)) meshes.unshift(root);
+  return meshes;
+}
+
+function meshMaterialIndices(mesh) {
+  const fromGroups = [...new Set((mesh.geometry?.groups || []).map((group) => group.materialIndex || 0))];
+  if (fromGroups.length) return fromGroups.sort((a, b) => a - b);
+  if (Array.isArray(mesh.material)) return mesh.material.map((_, index) => index);
+  return [0];
+}
+
+/** Enumerates stable mesh/material face slots for the Map Editor inspector. */
+export function objectFaceSlots(root) {
+  const meshes = objectMeshes(root);
+  const slots = [];
+  meshes.forEach((mesh, meshIndex) => {
+    const indices = meshMaterialIndices(mesh);
+    const knownNames = GEOMETRY_FACE_NAMES[mesh.geometry?.type];
+    const meshLabel = mesh.name || mesh.geometry?.name || `Mesh ${meshIndex + 1}`;
+    const baseMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const materialIndex of indices) {
+      const material = baseMaterials[materialIndex] || baseMaterials[0] || null;
+      slots.push({
+        key: `${meshIndex}:${materialIndex}`,
+        meshIndex,
+        materialIndex,
+        mesh,
+        meshLabel,
+        faceName: knownNames?.[materialIndex] || material?.name || `face ${materialIndex + 1}`,
+        materialName: material?.name || material?.type || 'material',
+      });
+    }
+  });
+  return slots;
+}
+
+const FACE_MATERIAL_STATE = '__hesiFaceMaterialState';
+
+function restoreMeshFaceMaterials(mesh) {
+  const state = mesh.userData?.[FACE_MATERIAL_STATE];
+  if (!state) return;
+  const current = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const material of current) if (material && !state.materials.includes(material)) material.dispose?.();
+  mesh.material = state.wasArray ? state.materials : state.materials[0];
+  delete mesh.userData[FACE_MATERIAL_STATE];
+}
+
+/** Restores the generated/original materials after removing Map Editor styles. */
+export function clearObjectFaceStyles(root) {
+  for (const mesh of objectMeshes(root)) restoreMeshFaceMaterials(mesh);
+}
+
+/** Applies persisted Map Editor texture styles to individual material/face slots. */
+export function applyObjectFaceStyles(root, faceStyles = {}, texturesById = {}) {
+  const meshes = objectMeshes(root);
+  for (const mesh of meshes) restoreMeshFaceMaterials(mesh);
+  if (!isRecord(faceStyles) || !Object.keys(faceStyles).length) return 0;
+  root?.updateWorldMatrix?.(true, true);
+  let applied = 0;
+  meshes.forEach((mesh, meshIndex) => {
+    const entries = Object.entries(faceStyles).filter(([key, style]) => key.startsWith(`${meshIndex}:`) && isRecord(style) && style.texture);
+    if (!entries.length) return;
+    const base = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const wasArray = Array.isArray(mesh.material);
+    const maxIndex = Math.max(...meshMaterialIndices(mesh), ...entries.map(([key]) => Number(key.split(':')[1]) || 0));
+    const materials = Array.from({ length: maxIndex + 1 }, (_, index) => (base[index] || base[0])?.clone?.() || base[index] || base[0]);
+    mesh.userData[FACE_MATERIAL_STATE] = { materials: base, wasArray };
+    const worldScale = mesh.getWorldScale?.(new THREE.Vector3()) || new THREE.Vector3(1, 1, 1);
+    for (const [key, style] of entries) {
+      const materialIndex = Number(key.split(':')[1]);
+      const textureRecord = texturesById?.[style.texture];
+      const material = materials[materialIndex];
+      if (!material || !textureRecord?.dataUrl) continue;
+      material.map = textureFromDataUrl(textureRecord.dataUrl, {
+        repeat: finiteVector(style.repeat, 2) ? style.repeat : null,
+        fit: style.fit === 'cover' ? 'cover' : 'stretch',
+        surfaceAspect: geometryMaterialAspect(mesh.geometry, materialIndex, worldScale.toArray()),
+        flipX: Boolean(style.flipX),
+        flipY: Boolean(style.flipY),
+      });
+      material.color?.set?.('#ffffff');
+      material.needsUpdate = true;
+      applied += 1;
+    }
+    mesh.material = materials.length === 1 && !wasArray ? materials[0] : materials;
+  });
+  return applied;
 }
 
 /**

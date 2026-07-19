@@ -30,3 +30,20 @@ test('build schema accepts valid draft fingerprints and rejects malformed ones',
   build.project.draftSignature = 'not-a-signature';
   assert.throws(() => validateBuildDocument(build), BuildValidationError);
 });
+
+test('build operations validate persisted face texture styles', () => {
+  const build = {
+    version: 1,
+    scene: 'garage',
+    generatedAt: new Date(0).toISOString(),
+    project: { name: 'Garage textures', path: 'data/editor/garage-project.json' },
+    operations: [{
+      op: 'garage-object', childIndex: 0,
+      position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1], visible: true,
+      faceTextures: { '0:0': { texture: 'tex:0001', fit: 'cover', flipY: true } },
+    }],
+  };
+  assert.equal(validateBuildDocument(build), true);
+  build.operations[0].faceTextures['bad-slot'] = { texture: 'nope' };
+  assert.throws(() => validateBuildDocument(build), BuildValidationError);
+});

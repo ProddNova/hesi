@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import {
   PART_KINDS,
   WORLD_TEXTURE_SLOTS,
+  applyObjectFaceStyles,
   applyVertexOffsets,
   applyWorldTextureOverrides,
   blankCustomAssetsDocument,
   buildCustomAssetGroup,
   buildPartObject,
   customAssetsDocumentErrors,
+  faceTextureTransform,
+  clearObjectFaceStyles,
+  objectFaceSlots,
   partGeometry,
   weldedVertices,
 } from '../../../../js/custom-assets.js';
@@ -120,6 +124,45 @@ test('buildPartObject applies transforms and per-face materials', () => {
   assert.deepEqual(mesh.position.toArray(), [1, 2, 3]);
   assert.equal(mesh.material.length, 6);
   assert.equal(mesh.material[0].color.getHexString(), 'ff0000');
+});
+
+test('face texture cover preserves aspect, crops centrally, and flips per axis', () => {
+  assert.deepEqual(faceTextureTransform({ fit: 'cover', imageAspect: 2, surfaceAspect: 1 }), {
+    repeat: [0.5, 1], offset: [0.25, 0],
+  });
+  assert.deepEqual(faceTextureTransform({ fit: 'cover', imageAspect: 1, surfaceAspect: 2, flipX: true, flipY: true }), {
+    repeat: [-1, -0.5], offset: [1, 0.75],
+  });
+  assert.deepEqual(faceTextureTransform({ fit: 'stretch', flipX: true }), {
+    repeat: [-1, 1], offset: [1, 0],
+  });
+});
+
+test('Map Editor face slots split a box material and restore it cleanly', () => {
+  const original = new THREE.MeshLambertMaterial({ color: 0x334455, name: 'wall' });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1), original);
+  const slots = objectFaceSlots(box);
+  assert.deepEqual(slots.map((slot) => slot.faceName), ['right', 'left', 'top', 'bottom', 'front', 'back']);
+  assert.equal(applyObjectFaceStyles(box, {
+    '0:4': { texture: 'tex:0001', fit: 'cover', flipX: true },
+  }, { 'tex:0001': { dataUrl: PIXEL_PNG } }), 1);
+  assert.ok(Array.isArray(box.material));
+  assert.equal(box.material.length, 6);
+  assert.ok(box.material[4].map);
+  assert.equal(box.material[4].color.getHexString(), 'ffffff');
+  assert.equal(box.material[0].color.getHexString(), '334455');
+  clearObjectFaceStyles(box);
+  assert.equal(box.material, original);
+});
+
+test('custom asset face styles validate fit and flips', () => {
+  const document = validDocument();
+  document.assets['custom:0001'].parts[0].faces.top = { texture: 'tex:0001', fit: 'cover', flipX: true, flipY: false };
+  assert.deepEqual(customAssetsDocumentErrors(document), []);
+  document.assets['custom:0001'].parts[0].faces.top.fit = 'contain';
+  document.assets['custom:0001'].parts[0].faces.top.flipX = 'yes';
+  assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.fit')));
+  assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.flipX')));
 });
 
 test('buildCustomAssetGroup skips unresolvable assembled parts without throwing', () => {

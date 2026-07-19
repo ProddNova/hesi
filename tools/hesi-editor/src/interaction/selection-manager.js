@@ -137,6 +137,7 @@ export class SelectionManager {
 
   canSelect(entity) {
     if (!entity || !this.registry.isLayerVisible(entity.layer)) return false;
+    if (entity.metadata?.selectable === false) return false;
     if (this.registry.isLayerLocked(entity.layer) && !this.inspectLocked) return false;
     if (entity.metadata?.locked && !this.inspectLocked) return false;
     if (entity.metadata?.disabled) return false;

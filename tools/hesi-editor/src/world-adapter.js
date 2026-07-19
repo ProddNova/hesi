@@ -133,10 +133,13 @@ function classifyGarageChild(garage, object) {
   if (object === garage.pcScreen) return { layer: 'Props', type: 'garage-prop', label: 'Wangan Market PC screen', editable: true };
   if (object === garage.exitGlow) return { layer: 'Props', type: 'garage-prop', label: 'Exit glow', editable: true };
   if (object.isLight) return { layer: 'Lighting', type: 'garage-light', label: 'Garage light', editable: true };
-  if (object.type === 'GridHelper') return { layer: 'Terrain', type: 'garage-floor-grid', label: 'Floor grid', editable: false };
+  if (object.type === 'GridHelper') return { layer: 'Terrain', type: 'garage-floor-grid', label: 'Floor grid', editable: false, selectable: false };
   if (object.isLineSegments) return { layer: 'Props', type: 'garage-prop', label: 'Delivery zone edge', editable: true };
   if (object.isMesh && object.material?.map) return { layer: 'Signs', type: 'garage-sign', label: 'Garage sign', editable: true };
   const geometry = object.geometry?.type || '';
+  if (geometry.includes('Plane') && Math.abs(Math.abs(object.rotation?.x || 0) - Math.PI / 2) < 0.01 && Math.abs(object.position?.y || 0) < 0.1) {
+    return { layer: 'Terrain', type: 'garage-floor', label: 'Garage floor', editable: true };
+  }
   if (geometry.includes('Plane')) return { layer: 'Garage', type: 'garage-structure', label: 'Garage panel', editable: true };
   if (geometry.includes('Cylinder')) return { layer: 'Props', type: 'garage-prop', label: 'Garage drum', editable: true };
   return { layer: 'Garage', type: 'garage-structure', label: 'Garage block', editable: true };
@@ -190,12 +193,15 @@ async function makeGarageWorld(onProgress) {
         collisionAvailable: false,
         render: objectRenderMetadata(object),
         sourceTransform: sourceTransform(object),
+        selectable: info.selectable !== false,
         ...(info.note ? { editorNote: info.note } : {}),
       },
     };
     entities.push(entity);
-    object.traverse((child) => pickIndex.set(child, entity));
-    pickIndex.set(object, entity);
+    if (info.selectable !== false) {
+      object.traverse((child) => pickIndex.set(child, entity));
+      pickIndex.set(object, entity);
+    }
   });
   root.add(editorObjectsGroup);
 

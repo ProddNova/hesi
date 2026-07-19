@@ -95,6 +95,7 @@ export class EditActions {
   _duplicateOne(source) {
     if (!this.assetRegistry.supports(source)) return this._status(`Duplicate unavailable for ${source.name}: select an individual reusable generated asset`);
     const placed = this.assetRegistry.createPlacedEntity(source);
+    placed.metadata.faceTextures = clone(source.metadata?.faceTextures || {});
     if (!source.generated) {
       const transform = snapshotTransform(source.object3D);
       transform.position[0] += 2;
@@ -226,6 +227,7 @@ export class EditActions {
       visible: !entity.metadata.disabled,
       locked: Boolean(entity.metadata.locked),
       name: entity.name,
+      faceTextures: clone(entity.metadata.faceTextures || {}),
       override: this.projectState.getOverride(entity.id),
     };
     const originalName = entity.generated
@@ -237,17 +239,20 @@ export class EditActions {
       entity.metadata.disabled = !state.visible;
       entity.metadata.locked = state.locked;
       entity.metadata.hasOverride = Boolean(state.override);
+      entity.metadata.faceTextures = clone(state.faceTextures || {});
       entity.name = state.name;
       this.projectState.replaceOverride(entity.id, state.override);
       if (!entity.generated) this.projectState.updatePlaced(entity.id, {
         transform: clone(state.transform), visible: state.visible, locked: state.locked, name: state.name,
+        faceTextures: clone(state.faceTextures || {}),
       });
       this.registry.update(entity.id, { name: state.name, metadata: entity.metadata });
       this.transformManager.setSelection(entity);
       this.onChange(entity);
     };
-    const reset = { transform: afterTransform, visible: true, locked: false, name: originalName, override: null };
-    if (transformsEqual(before.transform, reset.transform) && before.visible && !before.locked && before.name === originalName && !before.override) return false;
+    const reset = { transform: afterTransform, visible: true, locked: false, name: originalName, faceTextures: {}, override: null };
+    if (transformsEqual(before.transform, reset.transform) && before.visible && !before.locked && before.name === originalName
+      && !before.override && !Object.keys(before.faceTextures || {}).length) return false;
     this.history.execute({ label: `Reset overrides · ${entity.name}`, redo: () => apply(reset), undo: () => apply(before) });
     return true;
   }

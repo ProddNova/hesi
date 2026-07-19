@@ -563,13 +563,63 @@ try {
   }
   await demo.close();
 
+  // Garage floor picking and the two new texture-editing surfaces: the Map
+  // Inspector exposes face slots, while the Modeler exposes crop + both flips.
+  const garage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const garageErrors = [];
+  garage.on('pageerror', (error) => garageErrors.push(String(error)));
+  garage.on('console', (message) => { if (message.type() === 'error') garageErrors.push(message.text()); });
+  await garage.goto(`${BASE}/editor?scene=garage&project=${encodeURIComponent('data/editor/garage-project.json')}`, { waitUntil: 'domcontentloaded' });
+  await garage.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'garage', null, { timeout: 30000 });
+  await garage.waitForSelector('[data-testid="loading-overlay"]', { state: 'hidden' });
+  const floorState = await garage.evaluate(() => {
+    const floor = window.hesiEditor.registry.list().find((entity) => entity.type === 'garage-floor');
+    if (!floor) return null;
+    window.hesiEditor.selection.select(floor.id, { source: 'smoke' });
+    return { id: floor.id, selected: window.hesiEditor.selection.selected?.id, editable: floor.editable };
+  });
+  if (!floorState || floorState.selected !== floorState.id || !floorState.editable) {
+    throw new Error(`Garage floor is not selectable/editable: ${JSON.stringify(floorState)}`);
+  }
+  await garage.waitForSelector('.face-texture-card');
+  const faceTextureSelect = garage.locator('.face-texture-card select').first();
+  const libraryTexture = await faceTextureSelect.locator('option').nth(1).getAttribute('value');
+  if (!libraryTexture) throw new Error('The shared texture library is empty in the Map Inspector');
+  await faceTextureSelect.selectOption(libraryTexture);
+  await garage.waitForFunction((textureId) => {
+    const floor = window.hesiEditor.registry.list().find((entity) => entity.type === 'garage-floor');
+    return floor?.metadata?.faceTextures?.['0:0']?.texture === textureId && Boolean(floor.object3D.material?.map);
+  }, libraryTexture);
+  await garage.locator('.face-texture-controls select').first().selectOption('cover');
+  await garage.getByRole('button', { name: 'Flip H', exact: true }).first().click();
+  await garage.waitForFunction(() => {
+    const style = window.hesiEditor.registry.list().find((entity) => entity.type === 'garage-floor')?.metadata?.faceTextures?.['0:0'];
+    return style?.fit === 'cover' && style?.flipX === true;
+  });
+  await garage.locator('[data-action="open-modeler"]').click();
+  await garage.waitForSelector('[data-testid="modeler-overlay"]:not([hidden])');
+  await garage.locator('.modeler-face-row button').filter({ hasText: 'Image' }).first().click();
+  await garage.waitForSelector('.modeler-chooser-item');
+  await garage.locator('.modeler-chooser-item').first().click();
+  await garage.waitForSelector('.modeler-face-options');
+  const textureControls = await garage.locator('.modeler-face-options').first().evaluate((node) => ({
+    fits: [...node.querySelectorAll('option')].map((option) => option.textContent),
+    buttons: [...node.querySelectorAll('button')].map((button) => button.textContent),
+  }));
+  if (!textureControls.fits.includes('Stretch') || !textureControls.fits.includes('Fit & crop')
+    || !textureControls.buttons.includes('Flip H') || !textureControls.buttons.includes('Flip V')) {
+    throw new Error(`Modeler texture controls are incomplete: ${JSON.stringify(textureControls)}`);
+  }
+  if (garageErrors.length) throw new Error(`Garage browser console errors: ${garageErrors.join(' | ')}`);
+  await garage.close();
+
   const disposed = await page.evaluate(() => {
     window.hesiEditor.dispose();
     return { entities: window.hesiEditor.registry.list().length, canvasPresent: Boolean(document.querySelector('[data-testid="editor-canvas"]')) };
   });
   if (disposed.entities !== 0 || disposed.canvasPresent) throw new Error('Editor disposal left live registry or canvas state');
   if (errors.length) throw new Error(`Browser console errors: ${errors.join(' | ')}`);
-  console.log(`PASS real map default (${state.entities} semantic entities), aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, explicit demo, disposal`);
+  console.log(`PASS real map default (${state.entities} semantic entities), aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, garage floor/face textures/modeler crop+flip, explicit demo, disposal`);
   console.log(`ROAD SCREENSHOT ${path.join(OUT, 'checkpoint-road-tatsumi-editing.png')}`);
   console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-3-real-lamp-editing.png')}`);
 } finally {

@@ -29,6 +29,20 @@ function validateTransform(transform, path, errors) {
   finiteVector(transform.scale, 3, `${path}.scale`, errors);
 }
 
+function validateFaceTextures(faceTextures, path, errors, textureIds = null) {
+  if (!isRecord(faceTextures)) { errors.push(`${path} must be an object`); return; }
+  for (const [slot, style] of Object.entries(faceTextures)) {
+    const slotPath = `${path}.${slot}`;
+    if (!/^\d+:\d+$/.test(slot)) errors.push(`${slotPath} must use a meshIndex:materialIndex key`);
+    if (!isRecord(style)) { errors.push(`${slotPath} must be an object`); continue; }
+    if (typeof style.texture !== 'string' || !/^tex:[a-z0-9][a-z0-9_-]{0,80}$/i.test(style.texture)) {
+      errors.push(`${slotPath}.texture must be a texture id`);
+    } else if (textureIds && !textureIds.has(style.texture)) errors.push(`${slotPath}.texture references missing texture ${style.texture}`);
+    if (style.fit !== undefined && !['stretch', 'cover'].includes(style.fit)) errors.push(`${slotPath}.fit must be stretch or cover`);
+    for (const key of ['flipX', 'flipY']) if (style[key] !== undefined && typeof style[key] !== 'boolean') errors.push(`${slotPath}.${key} must be boolean`);
+  }
+}
+
 function validateJsonValue(value, path, errors, depth = 0) {
   if (depth > 20) { errors.push(`${path} is nested too deeply`); return; }
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
@@ -47,7 +61,7 @@ function validateJsonValue(value, path, errors, depth = 0) {
   }
 }
 
-export function validateProjectDocument(document, { entityIds = null, assetIds = null } = {}) {
+export function validateProjectDocument(document, { entityIds = null, assetIds = null, textureIds = null } = {}) {
   const errors = [];
   if (!isRecord(document)) throw new ProjectValidationError(['root must be an object']);
   if (document.version !== PROJECT_SCHEMA_VERSION) errors.push(`version must be ${PROJECT_SCHEMA_VERSION}`);
@@ -60,6 +74,7 @@ export function validateProjectDocument(document, { entityIds = null, assetIds =
       if (entityIds && !entityIds.has(id)) errors.push(`unknown entity ID: ${id}`);
       if (!isRecord(override)) { errors.push(`entityOverrides.${id} must be an object`); continue; }
       if (override.transform !== undefined) validateTransform(override.transform, `entityOverrides.${id}.transform`, errors);
+      if (override.faceTextures !== undefined) validateFaceTextures(override.faceTextures, `entityOverrides.${id}.faceTextures`, errors, textureIds);
       for (const key of ['visible', 'disabled', 'locked']) {
         if (override[key] !== undefined && typeof override[key] !== 'boolean') errors.push(`entityOverrides.${id}.${key} must be boolean`);
       }
@@ -83,6 +98,7 @@ export function validateProjectDocument(document, { entityIds = null, assetIds =
       if (typeof placed.layer !== 'string' || !placed.layer.trim()) errors.push(`${path}.layer is required`);
       if (placed.name !== undefined && (typeof placed.name !== 'string' || !placed.name.trim() || placed.name.length > 200)) errors.push(`${path}.name is invalid`);
       validateTransform(placed.transform, `${path}.transform`, errors);
+      if (placed.faceTextures !== undefined) validateFaceTextures(placed.faceTextures, `${path}.faceTextures`, errors, textureIds);
       for (const key of ['visible', 'locked']) if (placed[key] !== undefined && typeof placed[key] !== 'boolean') errors.push(`${path}.${key} must be boolean`);
     });
   }

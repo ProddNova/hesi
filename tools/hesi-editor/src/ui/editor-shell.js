@@ -1,5 +1,6 @@
 import { sceneList } from '../scenes/scene-registry.js';
 import { GRID_SNAP_STEPS } from '../interaction/grid-snap.js';
+import { objectFaceSlots } from '/js/custom-assets.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -391,6 +392,7 @@ export function createEditorShell(root) {
   let selectedEntity = null;
   let selectedIds = null;
   let assetEntries = [];
+  let textureEntries = [];
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
   let actionHandler = () => {};
@@ -749,6 +751,79 @@ export function createEditorShell(root) {
   });
 
   const transformText = (values, digits = 3) => values?.map((value) => number(value, digits)).join(', ') || 'Unavailable';
+
+  const renderFaceTextures = (entity) => {
+    const section = inspectorSection('Face textures', true);
+    const object = entity.object3D;
+    if (!object) {
+      section.body.append(element('p', 'face-texture-help', 'This selection has no rendered geometry to texture.'));
+      return section.details;
+    }
+    if (entity.metadata?.instanced && entity.generated) {
+      section.body.append(element('p', 'face-texture-help', 'This item shares one instanced draw with many copies. Duplicate/place it as an independent object to texture its faces separately.'));
+      return section.details;
+    }
+    const slots = objectFaceSlots(object);
+    if (!slots.length) {
+      section.body.append(element('p', 'face-texture-help', 'No mesh face slots are exposed by this object.'));
+      return section.details;
+    }
+    section.body.append(element('p', 'face-texture-help', 'Choose an image for each face. Fit & crop keeps image proportions and clips excess to the face silhouette.'));
+    for (const slot of slots.slice(0, 64)) {
+      const style = entity.metadata?.faceTextures?.[slot.key] || {};
+      const texture = textureEntries.find((entry) => entry.id === style.texture);
+      const card = element('div', 'face-texture-card');
+      const heading = element('div', 'face-texture-heading');
+      heading.append(element('b', '', slot.faceName), element('small', '', `${slot.meshLabel} · ${slot.materialName}`));
+      if (texture) {
+        const thumb = element('img', 'face-texture-thumb');
+        thumb.src = texture.dataUrl;
+        thumb.alt = texture.name || texture.id;
+        heading.prepend(thumb);
+      }
+      card.append(heading);
+      const assign = element('div', 'face-texture-assign');
+      const select = document.createElement('select');
+      select.setAttribute('aria-label', `${slot.faceName} texture image`);
+      select.add(new Option('No image', ''));
+      for (const entry of textureEntries) select.add(new Option(entry.name || entry.id, entry.id));
+      select.value = style.texture || '';
+      select.addEventListener('change', () => triggerAction('face-texture-set', { slotKey: slot.key, texture: select.value || null }));
+      const upload = button('Upload…', '', { title: `Upload an image for ${slot.faceName}` });
+      upload.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.addEventListener('change', () => {
+          if (input.files?.[0]) triggerAction('face-texture-upload', { slotKey: slot.key, file: input.files[0] });
+        }, { once: true });
+        input.click();
+      });
+      assign.append(select, upload);
+      card.append(assign);
+      if (style.texture) {
+        const controls = element('div', 'face-texture-controls');
+        const fit = document.createElement('select');
+        fit.setAttribute('aria-label', `${slot.faceName} image fit`);
+        fit.add(new Option('Stretch', 'stretch'));
+        fit.add(new Option('Fit & crop', 'cover'));
+        fit.value = style.fit === 'cover' ? 'cover' : 'stretch';
+        fit.addEventListener('change', () => triggerAction('face-texture-style', { slotKey: slot.key, patch: { fit: fit.value } }));
+        const flipX = button('Flip H', '', { pressed: Boolean(style.flipX), title: 'Flip horizontally' });
+        flipX.addEventListener('click', () => triggerAction('face-texture-style', { slotKey: slot.key, patch: { flipX: !style.flipX } }));
+        const flipY = button('Flip V', '', { pressed: Boolean(style.flipY), title: 'Flip vertically' });
+        flipY.addEventListener('click', () => triggerAction('face-texture-style', { slotKey: slot.key, patch: { flipY: !style.flipY } }));
+        const clear = button('Clear', '', { title: 'Remove this face texture' });
+        clear.addEventListener('click', () => triggerAction('face-texture-set', { slotKey: slot.key, texture: null }));
+        controls.append(fit, flipX, flipY, clear);
+        card.append(controls);
+      }
+      section.body.append(card);
+    }
+    if (slots.length > 64) section.body.append(element('p', 'face-texture-help', `Showing the first 64 of ${slots.length} face slots.`));
+    return section.details;
+  };
+
   const renderInspector = () => {
     inspectorContent.innerHTML = '';
     if (selectedEntity) {
@@ -840,7 +915,8 @@ export function createEditorShell(root) {
       property(optimization.body, 'Draw calls', String(render.drawCallContribution ?? 'Unavailable'));
       property(optimization.body, 'Geometry', render.geometryShared ? 'Shared' : 'Unique or unavailable');
       property(optimization.body, 'Material', render.materialShared ? 'Shared' : 'Unique or unavailable');
-      inspectorContent.append(identity.details, transform.details, world.details, rendering.details, physics.details, optimization.details);
+      const faceTextures = renderFaceTextures(entity);
+      inspectorContent.append(identity.details, transform.details, faceTextures, world.details, rendering.details, physics.details, optimization.details);
       return;
     }
     inspectorTitle.textContent = 'Inspector';
@@ -1060,6 +1136,10 @@ export function createEditorShell(root) {
       const selectedRow = entity ? entityTree.querySelector(`[data-entity-id="${CSS.escape(entity.id)}"]`) : null;
       selectedRow?.scrollIntoView?.({ block: 'nearest' });
       if (currentTab === 'edit') renderBottom();
+    },
+    setTextures(entries) {
+      textureEntries = Array.isArray(entries) ? entries : [];
+      renderInspector();
     },
     refreshInspector() { renderInspector(); },
     setNavigation({ mode, speed, speedPreset, pointerLocked }) {

@@ -8,6 +8,7 @@ import {
   validateProjectDocument,
 } from './override-schema.js';
 import { buildSceneDocument } from './map-builder.js';
+import { applyObjectFaceStyles, clearObjectFaceStyles } from '../../../../js/custom-assets.js';
 
 const RECENTS_KEY = 'hesi-editor:recent-projects';
 const CURRENT_KEY = 'hesi-editor:current-project';
@@ -65,6 +66,14 @@ export class ProjectPersistence {
 
   entityIds() { return new Set(this.registry.list().filter((entity) => entity.generated).map((entity) => entity.id)); }
 
+  validationOptions() {
+    return {
+      entityIds: this.entityIds(),
+      assetIds: this.assetRegistry.ids(),
+      textureIds: new Set(Object.keys(this.customAssetStore?.texturesById?.() || {})),
+    };
+  }
+
   recentProjects() {
     try { return JSON.parse(localStorage.getItem(sceneKey(RECENTS_KEY, this.scene.id)) || '[]').filter((item) => typeof item === 'string').slice(0, 8); }
     catch { return []; }
@@ -95,6 +104,7 @@ export class ProjectPersistence {
       const clean = {};
       if (override.transform) clean.transform = toPersistedTransform(override.transform);
       for (const key of ['visible', 'disabled', 'locked', 'name']) if (override[key] !== undefined) clean[key] = override[key];
+      if (override.faceTextures && Object.keys(override.faceTextures).length) clean.faceTextures = clone(override.faceTextures);
       if (Object.keys(clean).length) entityOverrides[id] = clean;
     }
     const placedObjects = raw.placedObjects.map((placed) => ({
@@ -106,6 +116,7 @@ export class ProjectPersistence {
       transform: toPersistedTransform(placed.transform),
       visible: placed.visible !== false,
       locked: Boolean(placed.locked),
+      ...(placed.faceTextures && Object.keys(placed.faceTextures).length ? { faceTextures: clone(placed.faceTextures) } : {}),
     }));
     const document = {
       version: 1,
@@ -115,7 +126,7 @@ export class ProjectPersistence {
       groups: clone(raw.groups || []),
       editorState: clone(raw.editorState || {}),
     };
-    validateProjectDocument(document, { entityIds: this.entityIds(), assetIds: this.assetRegistry.ids() });
+    validateProjectDocument(document, this.validationOptions());
     return canonicalizeProjectDocument(document);
   }
 
@@ -128,7 +139,7 @@ export class ProjectPersistence {
 
   async write(path, document) {
     const normalized = normalizeProjectPath(path);
-    validateProjectDocument(document, { entityIds: this.entityIds(), assetIds: this.assetRegistry.ids() });
+    validateProjectDocument(document, this.validationOptions());
     return responseJson(await fetch('/__hesi_editor_project', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -137,7 +148,7 @@ export class ProjectPersistence {
   }
 
   applyDocument(document, { resetHistory = false } = {}) {
-    validateProjectDocument(document, { entityIds: this.entityIds(), assetIds: this.assetRegistry.ids() });
+    validateProjectDocument(document, this.validationOptions());
     this.selection.clear('project-apply');
     this.transformManager.setSelection(null);
     const current = this.projectState.toJSON();
@@ -153,10 +164,12 @@ export class ProjectPersistence {
       for (const id of resetIds) {
         const entity = this.registry.getById(id);
         if (!entity?.generated) continue;
+        clearObjectFaceStyles(entity.object3D);
         if (entity.object3D) applyEntityTransform(entity, sourceTransformFor(entity), { visible: true });
         entity.metadata.disabled = false;
         entity.metadata.locked = false;
         entity.metadata.hasOverride = false;
+        entity.metadata.faceTextures = {};
         if (entity.metadata.editorSourceName) entity.name = entity.metadata.editorSourceName;
         this.registry.update(entity.id, { name: entity.name, metadata: entity.metadata });
       }
@@ -168,7 +181,9 @@ export class ProjectPersistence {
         entity.metadata.disabled = override.visible === false || Boolean(override.disabled);
         entity.metadata.locked = Boolean(override.locked);
         entity.metadata.hasOverride = true;
+        entity.metadata.faceTextures = clone(override.faceTextures || {});
         if (override.name) entity.name = override.name;
+        if (entity.object3D) applyObjectFaceStyles(entity.object3D, override.faceTextures || {}, this.customAssetStore?.texturesById?.() || {});
         this.registry.update(id, { name: entity.name, metadata: entity.metadata });
       }
       for (const placed of document.placedObjects) {
@@ -183,6 +198,8 @@ export class ProjectPersistence {
         entity.metadata.locked = Boolean(placed.locked);
         entity.metadata.initialTransform = clone(transform);
         entity.metadata.initialName = entity.name;
+        entity.metadata.faceTextures = clone(placed.faceTextures || {});
+        applyObjectFaceStyles(entity.object3D, placed.faceTextures || {}, this.customAssetStore?.texturesById?.() || {});
         this.registry.register(entity);
         this.adapter.registerEditorEntity(entity);
       }
@@ -205,7 +222,7 @@ export class ProjectPersistence {
       this.onProjectChange(this.state());
       return null;
     }
-    validateProjectDocument(result.document, { entityIds: this.entityIds(), assetIds: this.assetRegistry.ids() });
+    validateProjectDocument(result.document, this.validationOptions());
     this.currentPath = normalized;
     this.lastSavedDocument = clone(result.document);
     this.lastSavedModifiedMs = result.modifiedMs || 0;
