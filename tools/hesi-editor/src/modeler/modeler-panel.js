@@ -21,6 +21,9 @@ function button(label, className = 'tool-button', title = '') {
 }
 
 const PRIMITIVE_BUTTONS = ['box', 'cylinder', 'pyramid', 'cone', 'wedge', 'plane', 'sphere'];
+const SUBDIVIDABLE_KINDS = ['box', 'cylinder', 'pyramid', 'cone', 'plane'];
+const SNAP_STEPS = [0.05, 0.1, 0.25, 0.5, 1];
+const HISTORY_LIMIT = 60;
 
 function blankDefinition(id) {
   return {
@@ -58,6 +61,12 @@ export class ModelerPanel {
     this.pointer = new THREE.Vector2();
     this.frameId = 0;
     this.disposed = false;
+    this.snapEnabled = false;
+    this.snapStep = 0.25;
+    this.carRef = null;
+    this.carRefVisible = false;
+    this.history = [];
+    this.historyIndex = -1;
 
     this._buildDom(host);
     this._buildScene();
@@ -119,6 +128,19 @@ export class ModelerPanel {
     this.addCatalogButton = button('Add', 'tool-button small');
     catalogRow.append(this.catalogSelect, this.addCatalogButton);
     left.append(catalogRow);
+    const scaleRow = element('div', 'modeler-object-scale');
+    scaleRow.append(element('small', '', 'Object scale (all parts at once)'));
+    this.scaleHalfButton = button('×½', 'tool-button small', 'Shrink the whole object to half size');
+    this.scaleDoubleButton = button('×2', 'tool-button small', 'Double the whole object size');
+    this.scaleFactorInput = document.createElement('input');
+    this.scaleFactorInput.type = 'number';
+    this.scaleFactorInput.step = '0.1';
+    this.scaleFactorInput.min = '0.01';
+    this.scaleFactorInput.value = '1.5';
+    this.scaleFactorInput.setAttribute('aria-label', 'Custom object scale factor');
+    this.scaleApplyButton = button('Apply ×', 'tool-button small', 'Scale the whole object by the custom factor');
+    scaleRow.append(this.scaleHalfButton, this.scaleDoubleButton, this.scaleFactorInput, this.scaleApplyButton);
+    left.append(scaleRow);
 
     // Center: viewport + mode switch
     const center = element('section', 'modeler-viewport-wrap');
@@ -135,8 +157,28 @@ export class ModelerPanel {
       this.modeButtons[mode] = node;
       modeBar.append(node);
     }
+    this.addVerticesButton = button('+ Vertices', 'tool-button small', 'Subdivide the selected part for more editable vertices (resets its vertex edits)');
+    this.addVerticesButton.hidden = true;
+    this.undoButton = button('⟲', 'tool-button small', 'Undo (Ctrl+Z)');
+    this.redoButton = button('⟳', 'tool-button small', 'Redo (Ctrl+Y)');
+    this.snapButton = button('Snap', 'tool-button small', 'Snap to grid while dragging (G): parts and vertices land on clean steps');
+    this.snapButton.setAttribute('aria-pressed', 'false');
+    this.snapStepSelect = document.createElement('select');
+    this.snapStepSelect.className = 'modeler-snap-step';
+    this.snapStepSelect.setAttribute('aria-label', 'Snap step in meters');
+    for (const step of SNAP_STEPS) this.snapStepSelect.add(new Option(`${step} m`, String(step)));
+    this.snapStepSelect.value = String(this.snapStep);
+    this.carRefButton = button('🚗 Car', 'tool-button small', 'Show the player car next to the object for a sense of scale (4.25 × 1.7 × 1.3 m)');
+    this.carRefButton.setAttribute('aria-pressed', 'false');
     this.modeHint = element('span', 'modeler-mode-hint', '');
-    modeBar.append(this.modeHint);
+    modeBar.append(
+      this.addVerticesButton,
+      element('span', 'modeler-modebar-sep'),
+      this.undoButton, this.redoButton,
+      element('span', 'modeler-modebar-sep'),
+      this.snapButton, this.snapStepSelect, this.carRefButton,
+      this.modeHint,
+    );
     this.viewportHost = element('div', 'modeler-viewport');
     this.viewportHost.dataset.testid = 'modeler-viewport';
     center.append(modeBar, this.viewportHost);
@@ -228,7 +270,8 @@ export class ModelerPanel {
   _bindEvents() {
     this.closeButton.addEventListener('click', () => this.close());
     this.newObjectButton.addEventListener('click', () => this._loadDefinition(null));
-    this.nameInput.addEventListener('input', () => { if (this.definition) { this.definition.label = this.nameInput.value; this._markDirty(); } });
+    this.nameInput.addEventListener('input', () => { if (this.definition) { this.definition.label = this.nameInput.value; this._markDirty({ history: false }); } });
+    this.nameInput.addEventListener('change', () => { if (this.definition) this._recordHistory(); });
     this.layerSelect.addEventListener('change', () => { if (this.definition) { this.definition.layer = this.layerSelect.value; this._markDirty(); } });
     this.saveButton.addEventListener('click', () => this._save(false));
     this.saveCopyButton.addEventListener('click', () => this._save(true));
@@ -236,8 +279,20 @@ export class ModelerPanel {
     for (const [kind, node] of Object.entries(this.addButtons)) node.addEventListener('click', () => this._addPart(kind));
     this.addCatalogButton.addEventListener('click', () => this._addCatalogPart());
     for (const [mode, node] of Object.entries(this.modeButtons)) node.addEventListener('click', () => this._setMode(mode));
+    this.addVerticesButton.addEventListener('click', () => this._addVertices());
+    this.undoButton.addEventListener('click', () => this._undo());
+    this.redoButton.addEventListener('click', () => this._redo());
+    this.snapButton.addEventListener('click', () => this._setSnap(!this.snapEnabled));
+    this.snapStepSelect.addEventListener('change', () => {
+      this.snapStep = Number(this.snapStepSelect.value) || 0.25;
+      if (this.snapEnabled) this._applySnap();
+    });
+    this.carRefButton.addEventListener('click', () => this._toggleCarReference());
+    this.scaleHalfButton.addEventListener('click', () => this._scaleObject(0.5));
+    this.scaleDoubleButton.addEventListener('click', () => this._scaleObject(2));
+    this.scaleApplyButton.addEventListener('click', () => this._scaleObject(Number(this.scaleFactorInput.value)));
     this.uploadTextureButton.addEventListener('click', () => this._pickImage((textureId) => {
-      this._markDirty();
+      this._markDirty({ history: false });
       this._renderTextures();
       this.onStatus(`Added texture ${textureId} to the library`);
     }));
@@ -251,8 +306,16 @@ export class ModelerPanel {
     this._onKeyDown = (event) => {
       if (!this.openState) return;
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.code === 'KeyZ') {
+        event.preventDefault();
+        if (event.shiftKey) this._redo(); else this._undo();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.code === 'KeyY') { event.preventDefault(); this._redo(); return; }
+      if (event.ctrlKey || event.metaKey) return;
       if (event.code === 'Escape') { event.preventDefault(); this._detachGizmo(); return; }
       if (event.code === 'Delete') { event.preventDefault(); this._deleteSelectedPart(); return; }
+      if (event.code === 'KeyG') { event.preventDefault(); this._setSnap(!this.snapEnabled); return; }
       const modes = { KeyW: 'translate', KeyE: 'rotate', KeyR: 'scale' };
       if (modes[event.code] && this.mode === 'part') { event.preventDefault(); this.gizmo.setMode(modes[event.code]); }
     };
@@ -290,6 +353,7 @@ export class ModelerPanel {
     this.selectedFace = null;
     this.selectedVertex = -1;
     this._detachGizmo();
+    this._resetHistory();
     this._renderAll();
   }
 
@@ -319,8 +383,9 @@ export class ModelerPanel {
     this.selectedFace = null;
     this.selectedVertex = -1;
     this.open();
+    this._resetHistory();
     this._renderAll();
-    this._markDirty();
+    this._markDirty({ history: false });
   }
 
   /** Opens the modeler pre-loaded with an assembled definition (from map selection). */
@@ -331,8 +396,9 @@ export class ModelerPanel {
     this.selectedFace = null;
     this.selectedVertex = -1;
     this.open();
+    this._resetHistory();
     this._renderAll();
-    this._markDirty();
+    this._markDirty({ history: false });
   }
 
   // ------------------------------------------------------------ rendering --
@@ -350,8 +416,56 @@ export class ModelerPanel {
     this.dirtyChip.textContent = this.store.dirty ? 'Unsaved changes' : '';
   }
 
-  _markDirty() {
+  _markDirty({ history = true } = {}) {
     this.store.dirty = true;
+    this.dirtyChip.textContent = 'Unsaved changes';
+    if (history) this._recordHistory();
+  }
+
+  // ---------------------------------------------------------- undo / redo --
+  _snapshot() {
+    return { definition: clone(this.definition), selectedPart: this.selectedPart };
+  }
+
+  _resetHistory() {
+    this.history = this.definition ? [this._snapshot()] : [];
+    this.historyIndex = this.history.length - 1;
+  }
+
+  _recordHistory() {
+    if (!this.definition) return;
+    const entry = this._snapshot();
+    const current = this.history[this.historyIndex];
+    if (current && JSON.stringify(current.definition) === JSON.stringify(entry.definition)) return;
+    this.history.length = this.historyIndex + 1;
+    this.history.push(entry);
+    if (this.history.length > HISTORY_LIMIT) this.history.shift();
+    this.historyIndex = this.history.length - 1;
+  }
+
+  _undo() {
+    if (this.historyIndex <= 0) { this.onStatus('Nothing to undo'); return; }
+    this.historyIndex -= 1;
+    this._restoreHistoryEntry();
+    this.onStatus(`Undo · ${this.historyIndex} step${this.historyIndex === 1 ? '' : 's'} left`);
+  }
+
+  _redo() {
+    if (this.historyIndex >= this.history.length - 1) { this.onStatus('Nothing to redo'); return; }
+    this.historyIndex += 1;
+    this._restoreHistoryEntry();
+    this.onStatus('Redo');
+  }
+
+  _restoreHistoryEntry() {
+    const entry = this.history[this.historyIndex];
+    if (!entry) return;
+    this.definition = clone(entry.definition);
+    this.selectedPart = Math.min(entry.selectedPart, this.definition.parts.length - 1);
+    this.selectedFace = null;
+    this.selectedVertex = -1;
+    this.store.dirty = true;
+    this._renderAll();
     this.dirtyChip.textContent = 'Unsaved changes';
   }
 
@@ -372,6 +486,7 @@ export class ModelerPanel {
     });
     this._rebuildVertexHandles();
     this._attachGizmoToSelection();
+    if (this.carRefVisible) this._positionCarReference();
   }
 
   _rebuildPartGeometry(index) {
@@ -511,7 +626,8 @@ export class ModelerPanel {
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
       colorInput.value = part.color || '#9aa7b5';
-      colorInput.addEventListener('input', () => { part.color = colorInput.value; this._markDirty(); this._rebuildObject(); });
+      colorInput.addEventListener('input', () => { part.color = colorInput.value; this._markDirty({ history: false }); this._rebuildObject(); });
+      colorInput.addEventListener('change', () => this._recordHistory());
       colorRow.append(element('span', '', 'Base colour'), colorInput);
       this.inspector.append(colorRow);
       if (['cylinder', 'cone', 'sphere'].includes(part.kind)) {
@@ -529,6 +645,26 @@ export class ModelerPanel {
         });
         segmentsRow.append(element('span', '', 'Segments (low = PSX)'), segmentsInput);
         this.inspector.append(segmentsRow);
+      }
+      if (SUBDIVIDABLE_KINDS.includes(part.kind)) {
+        const subdivisionsRow = element('label', 'modeler-field');
+        const subdivisionsInput = document.createElement('input');
+        subdivisionsInput.type = 'number';
+        subdivisionsInput.min = '1';
+        subdivisionsInput.max = '8';
+        subdivisionsInput.value = String(part.subdivisions || 1);
+        subdivisionsInput.title = 'Subdivide the part into more editable vertices (1 = plain primitive). Changing it resets vertex edits.';
+        subdivisionsInput.addEventListener('change', () => {
+          const next = Math.min(8, Math.max(1, Math.round(Number(subdivisionsInput.value) || 1)));
+          if (next === (part.subdivisions || 1)) return;
+          if (next === 1) delete part.subdivisions; else part.subdivisions = next;
+          delete part.vertexOffsets; // topology changed
+          this._markDirty();
+          this._rebuildObject();
+          this._renderInspector();
+        });
+        subdivisionsRow.append(element('span', '', 'Vertex detail'), subdivisionsInput);
+        this.inspector.append(subdivisionsRow);
       }
       if (part.vertexOffsets?.length) {
         const reset = button('Reset vertex edits', 'tool-button small', 'Remove all vertex offsets of this part');
@@ -625,7 +761,7 @@ export class ModelerPanel {
       const upload = button(currentRecord ? 'Replace…' : 'Set image…', 'tool-button small', `Upload the repeated image for ${meta.label}`);
       upload.addEventListener('click', () => this._pickImage((textureId) => {
         this.store.setWorldTexture(slot, textureId);
-        this._markDirty();
+        this._markDirty({ history: false });
         this._renderWorldTextures();
         this.onWorldTexturesChanged();
         this.onStatus(`${meta.label} texture set · Save Object/textures to persist, the playable game updates on reload`);
@@ -635,7 +771,7 @@ export class ModelerPanel {
         const clear = button('Clear', 'tool-button small danger', 'Back to the original generated colour');
         clear.addEventListener('click', () => {
           this.store.setWorldTexture(slot, null);
-          this._markDirty();
+          this._markDirty({ history: false });
           this._renderWorldTextures();
           this.onWorldTexturesChanged();
         });
@@ -650,11 +786,112 @@ export class ModelerPanel {
 
   _syncModeButtons() {
     for (const [mode, node] of Object.entries(this.modeButtons)) node.setAttribute('aria-pressed', String(mode === this.mode));
+    this.addVerticesButton.hidden = this.mode !== 'vertex';
     this.modeHint.textContent = {
-      part: 'Click a part to select · W/E/R switch move/rotate/scale · Del removes the part',
+      part: 'Click a part to select · W/E/R move/rotate/scale · G snap · Del removes · Ctrl+Z/Y undo/redo',
       face: 'Click a face of the object, then attach an image from the panel on the right',
-      vertex: 'Click a vertex handle, then drag the gizmo · low-poly PSX shaping',
+      vertex: 'Click a vertex handle, then drag the gizmo · + Vertices adds detail · G snaps to the grid',
     }[this.mode] || '';
+  }
+
+  // ---------------------------------------------------------- snap to grid --
+  _setSnap(enabled) {
+    this.snapEnabled = enabled;
+    this.snapButton.setAttribute('aria-pressed', String(enabled));
+    this._applySnap();
+    this.onStatus(enabled ? `Snap to grid on · ${this.snapStep} m steps, 15° rotations` : 'Snap to grid off');
+  }
+
+  _applySnap() {
+    this.gizmo.setTranslationSnap(this.snapEnabled ? this.snapStep : null);
+    this.gizmo.setRotationSnap(this.snapEnabled ? THREE.MathUtils.degToRad(15) : null);
+    this.gizmo.setScaleSnap(this.snapEnabled ? 0.1 : null);
+  }
+
+  // ------------------------------------------------------- car scale ref --
+  _toggleCarReference() {
+    this.carRefVisible = !this.carRefVisible;
+    this.carRefButton.setAttribute('aria-pressed', String(this.carRefVisible));
+    if (this.carRefVisible) {
+      if (!this.carRef) this.carRef = this._buildCarReference();
+      this.scene.add(this.carRef);
+      this._positionCarReference();
+      this.onStatus('Player car shown for scale · 4.25 m long, 1.7 m wide, 1.3 m tall');
+    } else {
+      this.carRef?.removeFromParent();
+      this.onStatus('Player car reference hidden');
+    }
+  }
+
+  _positionCarReference() {
+    if (!this.carRef) return;
+    const bounds = new THREE.Box3().setFromObject(this.assetGroup);
+    const edge = bounds.isEmpty() ? 0 : Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x));
+    this.carRef.position.set(-(edge + 1.9), 0, 0);
+  }
+
+  /** Same silhouette and default dimensions as the game's player car (js/game.js createCarMesh). */
+  _buildCarReference() {
+    const group = new THREE.Group();
+    group.name = 'Player car (scale reference)';
+    const L = 4.25, W = 1.7, H = 1.3;
+    const body = new THREE.MeshLambertMaterial({ color: 0x8f2d38, flatShading: true });
+    const dark = new THREE.MeshLambertMaterial({ color: 0x0b1018, flatShading: true });
+    const rubber = new THREE.MeshLambertMaterial({ color: 0x08090b, flatShading: true });
+    const add = (geometry, material, x, y, z) => {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, y, z);
+      group.add(mesh);
+      return mesh;
+    };
+    add(new THREE.BoxGeometry(W, 0.42, L), body, 0, 0.48, 0);
+    add(new THREE.BoxGeometry(W * 0.93, 0.18, L * 0.3), body, 0, 0.74, L * -0.32);
+    add(new THREE.BoxGeometry(W * 0.76, H * 0.45, L * 0.4), dark, 0, 1.0, L * 0.04);
+    add(new THREE.BoxGeometry(W * 0.7, 0.11, L * 0.32), body, 0, 1.3, L * 0.05);
+    const wheelGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.17, 8);
+    for (const x of [-W * 0.52, W * 0.52]) {
+      for (const z of [-L * 0.31, L * 0.31]) add(wheelGeometry, rubber, x, 0.33, z).rotation.z = Math.PI / 2;
+    }
+    const head = new THREE.MeshBasicMaterial({ color: 0xffe4b0 });
+    const tail = new THREE.MeshBasicMaterial({ color: 0xff1833 });
+    for (const x of [-W * 0.31, W * 0.31]) add(new THREE.BoxGeometry(0.28, 0.13, 0.04), head, x, 0.63, -L * 0.505);
+    for (const x of [-W * 0.32, W * 0.32]) add(new THREE.BoxGeometry(0.3, 0.13, 0.04), tail, x, 0.63, L * 0.505);
+    return group;
+  }
+
+  // -------------------------------------------------------- whole object --
+  _scaleObject(factor) {
+    if (!this.definition?.parts.length) { this.onStatus('Nothing to scale yet — add a part first'); return; }
+    if (!Number.isFinite(factor) || factor <= 0) { this.onStatus('Enter a scale factor above 0'); return; }
+    if (Math.abs(factor - 1) < 1e-9) return;
+    for (const part of this.definition.parts) {
+      part.position = (part.position || [0, 0, 0]).map((value) => value * factor);
+      part.scale = (part.scale || [1, 1, 1]).map((value) => value * factor);
+    }
+    this._markDirty();
+    this._rebuildObject();
+    this._renderInspector();
+    this.onStatus(`Scaled the whole object ×${factor}`);
+  }
+
+  _addVertices() {
+    const part = this.definition?.parts[this.selectedPart];
+    if (!part) { this.onStatus('Select a part first'); return; }
+    if (!SUBDIVIDABLE_KINDS.includes(part.kind)) {
+      this.onStatus(part.kind === 'sphere'
+        ? 'Spheres gain vertices through the Segments field in the inspector'
+        : `${PART_KINDS[part.kind]?.label || part.kind} parts cannot be subdivided`);
+      return;
+    }
+    const current = Number.isInteger(part.subdivisions) ? part.subdivisions : 1;
+    if (current >= 8) { this.onStatus('Maximum vertex detail reached (8×8 per face)'); return; }
+    const hadOffsets = Boolean(part.vertexOffsets?.length);
+    part.subdivisions = current + 1;
+    delete part.vertexOffsets; // topology changed: welded indices no longer line up
+    this._markDirty();
+    this._rebuildObject();
+    this._renderInspector();
+    this.onStatus(`Vertex detail ${part.subdivisions}×${part.subdivisions}${hadOffsets ? ' · previous vertex edits were reset (topology changed)' : ''}`);
   }
 
   // ------------------------------------------------------------- behaviour --
@@ -781,9 +1018,9 @@ export class ModelerPanel {
       faces: {},
     };
     this.definition.parts.push(part);
-    this._markDirty();
     this._rebuildObject();
     this._selectPart(this.definition.parts.length - 1);
+    this._markDirty();
     this._renderPartList();
   }
 
@@ -802,9 +1039,9 @@ export class ModelerPanel {
     };
     if (asset.kind !== 'custom') part.components = bakeAssetPartComponents(this.assetRegistry, assetRef);
     this.definition.parts.push(part);
-    this._markDirty();
     this._rebuildObject();
     this._selectPart(this.definition.parts.length - 1);
+    this._markDirty();
     this._renderPartList();
     this.onStatus(`Added ${asset.label || assetRef} as an assembled part`);
   }
@@ -881,6 +1118,7 @@ export class ModelerPanel {
       refreshCustomAsset(this.assetRegistry, this.store.document, saved.id);
       this.definition = clone(saved);
       this.editingExisting = true;
+      if (asCopy) this._resetHistory(); // old entries carry the previous asset id
       this.onAssetsChanged();
       this._renderAssetList();
       this.dirtyChip.textContent = '';

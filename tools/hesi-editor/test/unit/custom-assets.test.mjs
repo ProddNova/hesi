@@ -69,6 +69,34 @@ test('every primitive kind builds geometry with one group per named face', () =>
   }
 });
 
+test('subdivisions add editable vertices while keeping one group per face', () => {
+  for (const kind of ['box', 'cylinder', 'pyramid', 'cone', 'plane']) {
+    const base = partGeometry({ kind });
+    const dense = partGeometry({ kind, subdivisions: 3 });
+    assert.equal(dense.groups.length, PART_KINDS[kind].faces.length, `${kind} keeps its face groups`);
+    assert.ok(
+      weldedVertices(dense).welded.length > weldedVertices(base).welded.length,
+      `${kind} gains welded vertices with subdivisions`,
+    );
+    base.dispose();
+    dense.dispose();
+  }
+});
+
+test('subdivisions validate as integers between 1 and 8', () => {
+  const good = validDocument();
+  good.assets['custom:0001'].parts[0].subdivisions = 4;
+  assert.deepEqual(customAssetsDocumentErrors(good), []);
+  for (const bad of [0, 9, 2.5, '3']) {
+    const document = validDocument();
+    document.assets['custom:0001'].parts[0].subdivisions = bad;
+    assert.ok(
+      customAssetsDocumentErrors(document).some((error) => error.includes('subdivisions')),
+      `subdivisions=${bad} rejected`,
+    );
+  }
+});
+
 test('vertex welding and offsets deform the box deterministically', () => {
   const geometry = partGeometry({ kind: 'box' });
   const { welded, weldIndexOf } = weldedVertices(geometry);
