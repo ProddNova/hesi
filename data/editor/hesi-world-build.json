@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-19T21:58:46.315Z",
+  "generatedAt": "2026-07-19T22:11:05.621Z",
   "project": {
-    "draftSignature": "fnv1a32:95b64e5b",
+    "draftSignature": "fnv1a32:3dcf1f57",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -118,6 +118,98 @@
         1.06786
       ],
       "visible": true
+    },
+    {
+      "index": 28,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1076.25293,
+        68.37345,
+        -5223.22754,
+        1
+      ],
+      "mesh": "chunk 1,-9 lamppost:concrete",
+      "op": "instance"
+    },
+    {
+      "index": 28,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1074.41589,
+        77.63345,
+        -5224.57764,
+        1
+      ],
+      "mesh": "chunk 1,-9 box:lampSodium",
+      "op": "instance"
+    },
+    {
+      "index": 28,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1073.85193,
+        68.65737,
+        -5224.99268,
+        1
+      ],
+      "mesh": "chunk 1,-9 pool:lightPool",
+      "op": "instance"
+    },
+    {
+      "index": 28,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1074.17419,
+        68.65732,
+        -5224.75537,
+        1
+      ],
+      "mesh": "chunk 1,-9 pool:lightStreak",
+      "op": "instance"
     },
     {
       "index": 0,
@@ -866,8 +958,8 @@
         0.00753,
         0,
         0,
-        -1.00222,
-        0,
+        -1.00223,
+        0.00002,
         -7.1727,
         0,
         3610.03247,
@@ -1454,6 +1546,29 @@
       "op": "instance"
     },
     {
+      "index": 0,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3952.07959,
+        49.63462,
+        -3931.82959,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedBody",
+      "op": "instance"
+    },
+    {
       "index": 6,
       "matrix": [
         0,
@@ -1546,7 +1661,7 @@
       "op": "instance"
     },
     {
-      "index": 0,
+      "index": 1,
       "matrix": [
         -0.07455,
         0,
@@ -1565,7 +1680,7 @@
         -4073.21558,
         1
       ],
-      "mesh": "chunk 6,-7 box:konbini",
+      "mesh": "chunk 6,-7 box:parkedBody",
       "op": "instance"
     },
     {

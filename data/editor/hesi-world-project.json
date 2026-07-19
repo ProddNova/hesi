@@ -52,6 +52,9 @@
         ]
       }
     },
+    "lamp:ramp-2:0011": {
+      "visible": false
+    },
     "lamp:wangan-0:0627": {
       "visible": false
     },
@@ -272,6 +275,9 @@
       "visible": false
     },
     "prop:wangan-0:3137": {
+      "visible": false
+    },
+    "prop:wangan-0:3138": {
       "visible": false
     },
     "prop:wangan-1:3211": {
