@@ -57,6 +57,7 @@ export class SelectionManager {
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this._down = null;
+    this._pickBlocked = false;
     this._lastPick = { x: Infinity, y: Infinity, at: 0, ids: [], index: -1 };
     this.debug = { bounds: false, pivot: false };
 
@@ -94,15 +95,19 @@ export class SelectionManager {
     viewport.scene.add(this.pivotHelper);
 
     this._onPointerDown = (event) => {
-      if (event.button === 0) this._down = { x: event.clientX, y: event.clientY };
+      if (this._pickBlocked || event.button !== 0) return;
+      this._down = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     };
     this._onPointerUp = (event) => {
+      if (this._pickBlocked) { this._down = null; return; }
       if (event.button !== 0 || !this._down) return;
+      if (this._down.pointerId != null && event.pointerId !== this._down.pointerId) return;
       const travel = Math.hypot(event.clientX - this._down.x, event.clientY - this._down.y);
       this._down = null;
       if (travel > 4 || document.pointerLockElement === this.viewport.canvas) return;
       this.pick(event.clientX, event.clientY, { additive: event.shiftKey });
     };
+    this._cancelPendingPick = () => { this._down = null; };
     this._onKeyDown = (event) => {
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
       if (event.code === 'Escape' && document.pointerLockElement !== this.viewport.canvas) this.clear('keyboard');
@@ -113,10 +118,17 @@ export class SelectionManager {
     };
     viewport.canvas.addEventListener('pointerdown', this._onPointerDown);
     viewport.canvas.addEventListener('pointerup', this._onPointerUp);
+    viewport.canvas.addEventListener('pointercancel', this._cancelPendingPick);
+    window.addEventListener('blur', this._cancelPendingPick);
     window.addEventListener('keydown', this._onKeyDown);
   }
 
   setInspectLocked(enabled) { this.inspectLocked = Boolean(enabled); }
+
+  setPickingBlocked(blocked) {
+    this._pickBlocked = Boolean(blocked);
+    if (this._pickBlocked) this._cancelPendingPick();
+  }
 
   setDebugOptions(patch = {}) {
     this.debug = { ...this.debug, ...patch };
@@ -367,6 +379,8 @@ export class SelectionManager {
   dispose() {
     this.viewport.canvas.removeEventListener('pointerdown', this._onPointerDown);
     this.viewport.canvas.removeEventListener('pointerup', this._onPointerUp);
+    this.viewport.canvas.removeEventListener('pointercancel', this._cancelPendingPick);
+    window.removeEventListener('blur', this._cancelPendingPick);
     window.removeEventListener('keydown', this._onKeyDown);
     for (const edges of this._edgeCache.values()) edges.dispose();
     this._edgeCache.clear();

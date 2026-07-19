@@ -46,6 +46,8 @@ export async function createEditorApp(root) {
   let roadPublishPending = false;
   let projectBuildPending = false;
   let savedRoadRouteCount = 0;
+  let intentionalUnload = false;
+  let activeProjectTask = null;
   const syncPublishState = () => shell.setPublishState({
     roadDirty: roadDraftDirty,
     gamePending: roadDraftDirty || roadPublishPending || projectBuildPending
@@ -58,11 +60,27 @@ export async function createEditorApp(root) {
       syncPublishState();
     },
   });
-  const runProjectTask = (task) => Promise.resolve().then(task).catch((error) => {
-    shell.setStatus(`Project operation failed · ${error.message}`);
-    shell.showError(error, 'Project operation failed');
-    return null;
-  });
+  const finishActiveInteractions = () => {
+    transformManager?.finishActiveDrag();
+    roadEdit?.finishActiveDrag({ commit: true });
+  };
+  const runProjectTask = (task) => {
+    if (activeProjectTask) {
+      shell.setStatus('A project operation is already in progress');
+      return activeProjectTask;
+    }
+    finishActiveInteractions();
+    const operation = Promise.resolve().then(task).catch((error) => {
+      shell.setStatus(`Project operation failed · ${error.message}`);
+      shell.showError(error, 'Project operation failed');
+      return null;
+    });
+    const trackedOperation = operation.finally(() => {
+      if (activeProjectTask === trackedOperation) activeProjectTask = null;
+    });
+    activeProjectTask = trackedOperation;
+    return trackedOperation;
+  };
   const saveRoadEdits = async () => {
     if (!roadEdit?.hasDirty()) return null;
     const updates = roadEdit.dirtyRouteUpdates();
@@ -84,6 +102,7 @@ export async function createEditorApp(root) {
     const selectedId = selection?.selected?.id;
     if (selectedId) url.searchParams.set('select', selectedId);
     else url.searchParams.delete('select');
+    intentionalUnload = true;
     window.location.href = url.toString();
   };
   const saveDraftWorkspace = async (options = {}) => {
@@ -256,10 +275,17 @@ export async function createEditorApp(root) {
   const onKeyDown = (event) => {
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '') || event.target?.isContentEditable || event.target?.closest?.('[contenteditable="true"]')) return;
     const commandKey = event.ctrlKey || event.metaKey;
-    // In fly mode Ctrl is a movement key. Keep Ctrl+W/A/S/D inside the
-    // viewport so descent + movement cannot close the tab, select the page,
-    // save, or duplicate objects.
-    if (viewport.navigationMode === 'fly' && event.ctrlKey && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+    // Saving must remain reliable in every navigation mode. Clear held fly
+    // keys first so Ctrl+S cannot move the camera while the draft is saved.
+    if (commandKey && event.code === 'KeyS') {
+      event.preventDefault();
+      viewport.clearNavigationInput();
+      if (persistence) runProjectTask(() => saveDraftWorkspace());
+      return;
+    }
+    // Keep Ctrl+W inside the viewport while navigating; Q/E own vertical
+    // movement, leaving editor shortcuts such as Ctrl+S and Ctrl+D reliable.
+    if (viewport.navigationMode === 'fly' && event.ctrlKey && event.code === 'KeyW') {
       event.preventDefault();
       return;
     }
@@ -269,7 +295,6 @@ export async function createEditorApp(root) {
       return;
     }
     if (commandKey && event.code === 'KeyY') { event.preventDefault(); history.redo(); return; }
-    if (commandKey && event.code === 'KeyS') { event.preventDefault(); if (persistence) runProjectTask(() => saveDraftWorkspace()); return; }
     if (commandKey && event.code === 'KeyD') { event.preventDefault(); editActions?.duplicate(); return; }
     if (event.code === 'KeyL' && !commandKey) {
       event.preventDefault();
@@ -352,6 +377,7 @@ export async function createEditorApp(root) {
         if (entity) shell.refreshInspector();
       },
       onStatus: (message) => shell.setStatus(message),
+      onDraggingChange: (dragging) => selection?.setPickingBlocked(dragging),
     });
     editActions = new EditActions({
       registry, adapter, assetRegistry, projectState, history, selection, transformManager,
@@ -441,6 +467,7 @@ export async function createEditorApp(root) {
   // Outside fly mode, warn only for unsaved editor/road changes; ordinary
   // clean page closes remain warning-free.
   const onBeforeUnload = (event) => {
+    if (intentionalUnload) return;
     if (viewport.navigationMode !== 'fly' && !history.dirty && !roadEdit?.hasDirty()) return;
     event.preventDefault();
     event.returnValue = '';

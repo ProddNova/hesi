@@ -5,16 +5,18 @@ import { anchorShiftForScale, applyEntityTransform, snapshotTransform, sourceTra
 function clone(value) { return value == null ? value : structuredClone(value); }
 
 export class TransformManager {
-  constructor({ viewport, history, projectState, registry, onChange = () => {}, onStatus = () => {} }) {
+  constructor({ viewport, history, projectState, registry, onChange = () => {}, onStatus = () => {}, onDraggingChange = () => {} }) {
     this.viewport = viewport;
     this.history = history;
     this.projectState = projectState;
     this.registry = registry;
     this.onChange = onChange;
     this.onStatus = onStatus;
+    this.onDraggingChange = onDraggingChange;
     this.entity = null;
     this.dragStart = null;
     this.scaleAnchor = null;
+    this.dragMode = null;
     this.mode = 'translate';
     this.space = 'world';
     this.axes = { x: true, y: true, z: true };
@@ -26,9 +28,12 @@ export class TransformManager {
 
     this._onMouseDown = () => {
       if (!this.entity) return;
+      if (this.dragStart) this._completeDrag();
       this.dragStart = snapshotTransform(this.entity.object3D);
+      this.dragMode = this.mode;
       this.scaleAnchor = this.mode === 'scale' ? this._makeScaleAnchor(this.entity) : null;
-      this.viewport.setNavigationBlocked(true);
+      this.viewport.setNavigationBlocked(true, this);
+      this.onDraggingChange(true);
     };
     this._onObjectChange = () => {
       if (!this.entity) return;
@@ -37,18 +42,43 @@ export class TransformManager {
       this.entity.metadata.hasOverride = true;
       this.onChange(this.entity, { live: true });
     };
-    this._onMouseUp = () => {
-      this.viewport.setNavigationBlocked(false);
-      this.scaleAnchor = null;
-      if (!this.entity || !this.dragStart) return;
-      const before = this.dragStart;
-      const after = snapshotTransform(this.entity.object3D);
-      this.dragStart = null;
-      if (!transformsEqual(before, after)) this.commitTransform(before, after, `${this.mode[0].toUpperCase()}${this.mode.slice(1)} ${this.entity.name}`, { alreadyApplied: true });
-    };
+    this._onMouseUp = () => this._completeDrag();
+    this._recoverInterruptedDrag = () => this.finishActiveDrag();
     this.control.addEventListener('mouseDown', this._onMouseDown);
     this.control.addEventListener('objectChange', this._onObjectChange);
     this.control.addEventListener('mouseUp', this._onMouseUp);
+    viewport.canvas.addEventListener('pointercancel', this._recoverInterruptedDrag);
+    viewport.canvas.addEventListener('lostpointercapture', this._recoverInterruptedDrag);
+    window.addEventListener('blur', this._recoverInterruptedDrag);
+    this._onVisibilityChange = () => { if (document.hidden) this._recoverInterruptedDrag(); };
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
+  }
+
+  _completeDrag() {
+    this.viewport.setNavigationBlocked(false, this);
+    this.onDraggingChange(false);
+    this.scaleAnchor = null;
+    const entity = this.entity;
+    const before = this.dragStart;
+    const mode = this.dragMode || this.mode;
+    this.dragStart = null;
+    this.dragMode = null;
+    if (!entity || !before) return false;
+    const after = snapshotTransform(entity.object3D);
+    if (transformsEqual(before, after)) return false;
+    this.commitTransform(before, after, `${mode[0].toUpperCase()}${mode.slice(1)} ${entity.name}`, { alreadyApplied: true });
+    return true;
+  }
+
+  finishActiveDrag() {
+    const active = Boolean(this.dragStart || this.control.dragging);
+    if (!active) return false;
+    // TransformControls does not recover its state from pointercancel/blur.
+    // Its pointerUp method resets dragging/axis and emits the normal mouseUp,
+    // so interrupted and ordinary drags share exactly one commit path.
+    if (this.control.dragging) this.control.pointerUp(null);
+    else this._completeDrag();
+    return true;
   }
 
   // Bounds of the dragged entity expressed in the object's local frame, so a
@@ -100,6 +130,7 @@ export class TransformManager {
   }
 
   setSelection(entity) {
+    this.finishActiveDrag();
     if (this.entity?.object3D?.userData?.editorInstanceProxy) this.entity.object3D.removeFromParent();
     this.control.detach();
     this.entity = entity || null;
@@ -206,9 +237,14 @@ export class TransformManager {
   }
 
   dispose() {
+    this.finishActiveDrag();
     this.control.removeEventListener('mouseDown', this._onMouseDown);
     this.control.removeEventListener('objectChange', this._onObjectChange);
     this.control.removeEventListener('mouseUp', this._onMouseUp);
+    this.viewport.canvas.removeEventListener('pointercancel', this._recoverInterruptedDrag);
+    this.viewport.canvas.removeEventListener('lostpointercapture', this._recoverInterruptedDrag);
+    window.removeEventListener('blur', this._recoverInterruptedDrag);
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
     this.setSelection(null);
     this.control.dispose();
     this.control.removeFromParent();

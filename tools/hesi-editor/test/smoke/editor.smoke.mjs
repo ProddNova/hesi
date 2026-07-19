@@ -215,6 +215,33 @@ try {
   if (!syntheticBaseline.synthetic || syntheticBaseline.yOffset !== 0 || !syntheticBaseline.handleTarget) {
     throw new Error(`Tatsumi PA exit did not enter editable synthetic-route mode: ${JSON.stringify(syntheticBaseline)}`);
   }
+  const roadPointBeforeInterruptedDrag = await page.evaluate((index) => {
+    const point = window.hesiEditor.roadEdit.route.points[index];
+    return [point[0], point[2]];
+  }, syntheticBaseline.handleTarget.index);
+  await page.mouse.move(syntheticBaseline.handleTarget.x, syntheticBaseline.handleTarget.y);
+  await page.mouse.down();
+  await page.waitForFunction(() => Boolean(window.hesiEditor.roadEdit.drag));
+  await page.mouse.move(syntheticBaseline.handleTarget.x + 18, syntheticBaseline.handleTarget.y + 10);
+  await page.waitForFunction(() => window.hesiEditor.roadEdit.drag?.moved === true);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.mouse.up();
+  const roadDragRecovery = await page.evaluate((index) => {
+    const app = window.hesiEditor;
+    const point = app.roadEdit.route.points[index];
+    return {
+      point: [point[0], point[2]],
+      dragging: Boolean(app.roadEdit.drag),
+      navigationBlocked: app.viewport.isNavigationBlocked(),
+      orbitEnabled: app.viewport.orbit.enabled,
+      dirty: app.roadEdit.hasDirty(),
+    };
+  }, syntheticBaseline.handleTarget.index);
+  if (roadDragRecovery.dragging || roadDragRecovery.navigationBlocked || !roadDragRecovery.orbitEnabled
+    || roadDragRecovery.dirty
+    || roadDragRecovery.point.some((value, index) => Math.abs(value - roadPointBeforeInterruptedDrag[index]) > 0.001)) {
+    throw new Error(`Interrupted road drag left the editor blocked or mutated the route: ${JSON.stringify(roadDragRecovery)}`);
+  }
   await page.mouse.click(syntheticBaseline.handleTarget.x, syntheticBaseline.handleTarget.y, { button: 'right' });
   await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count - 1,
     syntheticBaseline.pointCount);
@@ -371,6 +398,55 @@ try {
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await page.getByRole('button', { name: 'Move', exact: true }).click();
+  // Regression: a save that starts while TransformControls still owns the
+  // pointer must close and commit that drag. Previously the live object moved,
+  // but navigation, selection and persisted project state could stay stuck.
+  const interruptedDrag = await page.evaluate(() => {
+    const app = window.hesiEditor;
+    const manager = app.transformManager;
+    const entity = app.selection.selected;
+    const beforeX = entity.object3D.position.x;
+    const beforeHistoryIndex = app.history.state().index;
+    manager.control.axis = 'X';
+    manager.control.dragging = true;
+    manager.control.dispatchEvent({ type: 'mouseDown' });
+    entity.object3D.position.x += 1;
+    manager.control.dispatchEvent({ type: 'objectChange' });
+    return {
+      beforeX,
+      beforeHistoryIndex,
+      pickingBlocked: app.selection._pickBlocked,
+      navigationBlocked: app.viewport.isNavigationBlocked(),
+      orbitEnabled: app.viewport.orbit.enabled,
+    };
+  });
+  if (!interruptedDrag.pickingBlocked || !interruptedDrag.navigationBlocked || interruptedDrag.orbitEnabled) {
+    throw new Error(`Active gizmo drag did not own interaction state: ${JSON.stringify(interruptedDrag)}`);
+  }
+  await page.locator('[data-action="save-project"]').click();
+  await page.waitForFunction(() => window.hesiEditor.history.dirty === false);
+  const recoveredDrag = await page.evaluate(() => {
+    const app = window.hesiEditor;
+    const entity = app.selection.selected;
+    return {
+      x: entity.object3D.position.x,
+      historyIndex: app.history.state().index,
+      override: app.projectState.getOverride(entity.id),
+      savedOverride: app.persistence.lastSavedDocument?.entityOverrides?.[entity.id],
+      dragStart: app.transformManager.dragStart,
+      controlDragging: app.transformManager.control.dragging,
+      pickingBlocked: app.selection._pickBlocked,
+      navigationBlocked: app.viewport.isNavigationBlocked(),
+      orbitEnabled: app.viewport.orbit.enabled,
+    };
+  });
+  if (Math.abs(recoveredDrag.x - (interruptedDrag.beforeX + 1)) > 0.001
+    || recoveredDrag.historyIndex !== interruptedDrag.beforeHistoryIndex + 1
+    || !recoveredDrag.override?.transform || !recoveredDrag.savedOverride?.transform
+    || recoveredDrag.dragStart || recoveredDrag.controlDragging || recoveredDrag.pickingBlocked
+    || recoveredDrag.navigationBlocked || !recoveredDrag.orbitEnabled) {
+    throw new Error(`Interrupted gizmo drag was not committed and released before save: ${JSON.stringify(recoveredDrag)}`);
+  }
   const originalX = await page.getByRole('spinbutton', { name: 'Position X' }).inputValue();
   await page.getByRole('spinbutton', { name: 'Position X' }).fill(String(Number(originalX) + 6));
   await page.getByRole('button', { name: 'Apply numeric transform', exact: true }).click();
@@ -407,8 +483,18 @@ try {
   await page.getByRole('button', { name: 'Focus', exact: true }).click();
   await page.screenshot({ path: path.join(OUT, 'checkpoint-3-real-lamp-editing.png'), fullPage: true });
   const buildBeforeDraft = await snapshotFile(BUILD_PATH);
-  await page.locator('[data-action="save-project"]').click();
+  await page.getByRole('button', { name: 'Fly', exact: true }).click();
+  const beforeFlySave = await page.evaluate(() => window.hesiEditor.viewport.camera.position.toArray());
+  await page.keyboard.press('Control+S');
   await page.waitForFunction(() => window.hesiEditor.history.dirty === false);
+  const afterFlySave = await page.evaluate(() => ({
+    position: window.hesiEditor.viewport.camera.position.toArray(),
+    heldKeys: window.hesiEditor.viewport.fly.keys.size,
+  }));
+  if (afterFlySave.heldKeys !== 0 || beforeFlySave.some((value, index) => Math.abs(value - afterFlySave.position[index]) > 0.01)) {
+    throw new Error(`Ctrl+S moved the camera or left fly input active: ${JSON.stringify({ beforeFlySave, afterFlySave })}`);
+  }
+  await page.getByRole('button', { name: 'Orbit', exact: true }).click();
   const buildAfterDraft = await snapshotFile(BUILD_PATH);
   if (buildBeforeDraft == null ? buildAfterDraft != null : !buildBeforeDraft.equals(buildAfterDraft)) {
     throw new Error('Save Draft changed the playable game build file');
@@ -420,6 +506,8 @@ try {
   if (draftBadges.draft !== 'Draft: Saved' || draftBadges.game !== 'Game: Update pending') {
     throw new Error(`Draft/game badges are incoherent after Save Draft: ${JSON.stringify(draftBadges)}`);
   }
+  // App-driven reloads must not trip the fly-mode beforeunload guard.
+  await page.getByRole('button', { name: 'Fly', exact: true }).click();
   const appliedNavigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
   await page.locator('[data-action="rebuild-world"]').click();
   await appliedNavigation;

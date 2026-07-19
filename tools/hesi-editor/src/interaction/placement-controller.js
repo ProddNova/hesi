@@ -55,6 +55,7 @@ export class PlacementController {
   begin(assetId, label) {
     if (this.pending?.assetId === assetId) { this.cancel(); return false; }
     this._end();
+    this.transformManager.finishActiveDrag?.();
     this.pending = { assetId, label: label || assetId };
     if (this.viewport.navigationMode === 'fly') this.viewport.setNavigationMode('orbit');
     this.transformManager.control.enabled = false;

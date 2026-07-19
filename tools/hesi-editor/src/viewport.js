@@ -38,6 +38,8 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
   orbit.update();
 
   let navigationMode = 'orbit';
+  const navigationBlockers = new Set();
+  const legacyNavigationBlocker = Symbol('legacy-navigation-blocker');
   const emitNavigation = (flyState = {}) => onNavigation({
     mode: navigationMode,
     speed: fly.speed,
@@ -45,6 +47,13 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     pointerLocked: flyState.locked ?? document.pointerLockElement === renderer.domElement,
   });
   const fly = new FlyCameraController(camera, renderer.domElement, { onChange: emitNavigation });
+  const navigationIsBlocked = () => navigationBlockers.size > 0;
+  const applyNavigationBlocking = () => {
+    const blocked = navigationIsBlocked();
+    fly.setBlocked(blocked);
+    orbit.enabled = navigationMode === 'orbit' && !blocked;
+    return blocked;
+  };
 
   // The world spans tens of kilometres, so a grid anchored at the origin is
   // out of sight from most camera presets. Snap it to the camera in whole-cell
@@ -196,7 +205,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
       const forward = new THREE.Vector3();
       camera.getWorldDirection(forward);
       orbit.target.copy(camera.position).addScaledVector(forward, Math.max(15, fly.speed * 0.8));
-      orbit.enabled = true;
+      orbit.enabled = !navigationIsBlocked();
       fly.setEnabled(false);
       orbit.update();
     } else {
@@ -224,7 +233,13 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     applyCameraPreset,
     setNavigationMode,
     setFlySpeedPreset(preset) { return fly.setSpeedPreset(preset); },
-    setNavigationBlocked(blocked) { fly.setBlocked(blocked); orbit.enabled = navigationMode === 'orbit' && !blocked; },
+    setNavigationBlocked(blocked, owner = legacyNavigationBlocker) {
+      if (blocked) navigationBlockers.add(owner);
+      else navigationBlockers.delete(owner);
+      return applyNavigationBlocking();
+    },
+    isNavigationBlocked() { return navigationIsBlocked(); },
+    clearNavigationInput() { fly.clearInput(); },
     resetCamera() {
       camera.position.copy(DEFAULT_POSITION);
       orbit.target.copy(DEFAULT_TARGET);

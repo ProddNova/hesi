@@ -89,14 +89,17 @@ export class RoadEditController {
       this.drag = {
         index,
         mesh,
+        pointerId: event.pointerId,
         before: [point[0], point[2]],
         plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldPoint[1]),
         moved: false,
       };
-      this.viewport.setNavigationBlocked(true);
+      try { this.viewport.canvas.setPointerCapture(event.pointerId); } catch { /* Pointer may already have ended. */ }
+      this.viewport.setNavigationBlocked(true, this);
     };
     this._onPointerMove = (event) => {
       if (!this.active || !this.drag) return;
+      if (this.drag.pointerId != null && event.pointerId !== this.drag.pointerId) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       this._setPointer(event);
@@ -123,24 +126,21 @@ export class RoadEditController {
     };
     this._onPointerUp = (event) => {
       if (!this.active || !this.drag) return;
+      if (this.drag.pointerId != null && event.pointerId !== this.drag.pointerId) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const drag = this.drag;
-      this.drag = null;
-      this.viewport.setNavigationBlocked(false);
-      if (!drag.moved || !this.route) return;
-      const route = this.route;
-      const synthetic = this.synthetic;
-      const index = drag.index;
-      const before = drag.before;
-      const after = [drag.mesh.position.x, drag.mesh.position.z];
-      this.history.execute({
-        label: `Move road point · ${route.name}`,
-        redo: () => { movePoint(route, index, after); this._afterRouteMutation(route, synthetic); },
-        undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
-      });
-      this.onStatus('Road draft updated · Save Draft applies it to the editor map only · Apply to Game publishes it');
+      this.finishActiveDrag({ commit: true });
     };
+    this._onPointerCancel = (event) => {
+      if (!this.drag || (this.drag.pointerId != null && event.pointerId !== this.drag.pointerId)) return;
+      this.finishActiveDrag({ commit: false });
+    };
+    this._onLostPointerCapture = (event) => {
+      if (!this.drag || (this.drag.pointerId != null && event.pointerId !== this.drag.pointerId)) return;
+      this.finishActiveDrag({ commit: false });
+    };
+    this._onWindowBlur = () => this.finishActiveDrag({ commit: false });
+    this._onVisibilityChange = () => { if (document.hidden) this.finishActiveDrag({ commit: false }); };
     this._onDblClick = (event) => {
       if (!this.active || event.target !== this.viewport.canvas || !this.line) return;
       this._setPointer(event);
@@ -181,12 +181,48 @@ export class RoadEditController {
     window.addEventListener('pointerdown', this._onPointerDown, { capture: true });
     window.addEventListener('pointermove', this._onPointerMove, { capture: true });
     window.addEventListener('pointerup', this._onPointerUp, { capture: true });
+    window.addEventListener('pointercancel', this._onPointerCancel, { capture: true });
+    this.viewport.canvas.addEventListener('lostpointercapture', this._onLostPointerCapture);
+    window.addEventListener('blur', this._onWindowBlur);
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
     window.addEventListener('dblclick', this._onDblClick, { capture: true });
     window.addEventListener('contextmenu', this._onContextMenu, { capture: true });
     window.addEventListener('keydown', this._onKeyDown, { capture: true });
   }
 
   get active() { return Boolean(this.activeEntity); }
+
+  finishActiveDrag({ commit = true } = {}) {
+    const drag = this.drag;
+    if (!drag) return false;
+    this.drag = null;
+    this.viewport.setNavigationBlocked(false, this);
+    if (drag.pointerId != null) {
+      try {
+        if (this.viewport.canvas.hasPointerCapture(drag.pointerId)) this.viewport.canvas.releasePointerCapture(drag.pointerId);
+      } catch { /* The browser may already have released capture. */ }
+    }
+    if (this._previewRefreshFrame != null) {
+      cancelAnimationFrame(this._previewRefreshFrame);
+      this._previewRefreshFrame = null;
+    }
+    if (!commit || !drag.moved || !this.route) {
+      if (drag.moved) this._refreshHelpers();
+      return false;
+    }
+    const route = this.route;
+    const synthetic = this.synthetic;
+    const index = drag.index;
+    const before = drag.before;
+    const after = [drag.mesh.position.x, drag.mesh.position.z];
+    this.history.execute({
+      label: `Move road point · ${route.name}`,
+      redo: () => { movePoint(route, index, after); this._afterRouteMutation(route, synthetic); },
+      undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
+    });
+    this.onStatus('Road draft updated · Save Draft applies it to the editor map only · Apply to Game publishes it');
+    return true;
+  }
 
   hasDirty() { return this.dirty.size > 0; }
 
@@ -346,10 +382,7 @@ export class RoadEditController {
 
   _deactivate() {
     this._activateToken = null;
-    if (this.drag) {
-      this.drag = null;
-      this.viewport.setNavigationBlocked(false);
-    }
+    this.finishActiveDrag({ commit: false });
     clearInterval(this._refreshTimer);
     this._refreshTimer = null;
     this.activeEntity = null;
@@ -577,6 +610,10 @@ export class RoadEditController {
     window.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
     window.removeEventListener('pointermove', this._onPointerMove, { capture: true });
     window.removeEventListener('pointerup', this._onPointerUp, { capture: true });
+    window.removeEventListener('pointercancel', this._onPointerCancel, { capture: true });
+    this.viewport.canvas.removeEventListener('lostpointercapture', this._onLostPointerCapture);
+    window.removeEventListener('blur', this._onWindowBlur);
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
     window.removeEventListener('dblclick', this._onDblClick, { capture: true });
     window.removeEventListener('contextmenu', this._onContextMenu, { capture: true });
     window.removeEventListener('keydown', this._onKeyDown, { capture: true });

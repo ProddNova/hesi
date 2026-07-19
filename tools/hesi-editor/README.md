@@ -127,8 +127,8 @@ available on Windows.
   with a one-key toggle to the original game night lighting (`L`), exposure
   slider, and full-fog toggle under the View menu
 - orbit and dedicated no-clip fly cameras
-- fly controls: click viewport for mouse look, `W/A/S/D`, `Space`/`Ctrl` (or
-  `Q/E`) down/up, `Shift`, mouse wheel, and `Escape`
+- fly controls: click viewport for mouse look, `W/A/S/D`, `Q/E` down/up,
+  `Space` up, `Shift`, mouse wheel, and `Escape`
 - first-person crosshair in fly mode (solid while the pointer is locked)
 - slow, normal, and fast speed presets
 - metadata-driven Tatsumi PA, initial-spawn, map-center, and entire-world views
