@@ -7,10 +7,12 @@ import { CommandHistory } from './interaction/command-history.js';
 import { TransformManager } from './interaction/transform-manager.js';
 import { EditActions } from './interaction/edit-actions.js';
 import { PlacementController } from './interaction/placement-controller.js';
+import { RoadEditController } from './interaction/road-edit-controller.js';
 import { CollisionOverlay } from './debug/collision-overlay.js';
 import { WorldProjectState } from './overrides/world-project-state.js';
 import { AssetRegistry } from './world/asset-registry.js';
 import { ProjectPersistence } from './overrides/project-persistence.js';
+import { createRoutePersistence } from './overrides/route-persistence.js';
 import { getScene, sceneFromSearch } from './scenes/scene-registry.js';
 
 export async function createEditorApp(root) {
@@ -32,6 +34,8 @@ export async function createEditorApp(root) {
   let assetRegistry = null;
   let persistence = null;
   let placement = null;
+  let roadEdit = null;
+  let routePersistence = null;
   let disposed = false;
   const collisionOverlay = new CollisionOverlay({ viewport });
   const viewFlags = { grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
@@ -42,6 +46,19 @@ export async function createEditorApp(root) {
     shell.showError(error, 'Project operation failed');
     return null;
   });
+  const saveRoadEdits = async () => {
+    if (!roadEdit?.hasDirty()) return null;
+    const updates = roadEdit.dirtyRouteUpdates();
+    if (!updates.length) throw new Error('Road edits are marked dirty but no changed routes are available');
+    shell.setStatus(`Saving ${updates.length} changed road route${updates.length === 1 ? '' : 's'}`);
+    const result = await routePersistence.save(updates);
+    roadEdit.clearDirty();
+    return result;
+  };
+  const saveWorkspace = async (options = {}) => {
+    await saveRoadEdits();
+    return persistence.save(options);
+  };
   const refreshCommits = async () => {
     if (!persistence) return;
     const commits = await persistence.listCommits();
@@ -75,7 +92,16 @@ export async function createEditorApp(root) {
   shell.onToolbar('focus-selected', () => selection?.focusSelected());
   shell.onToolbar('undo', () => history.undo());
   shell.onToolbar('redo', () => history.redo());
-  shell.onToolbar('save-project', () => persistence && runProjectTask(() => persistence.save()));
+  shell.onToolbar('save-project', () => persistence && runProjectTask(() => saveWorkspace()));
+  shell.onToolbar('rebuild-world', () => runProjectTask(async () => {
+    await saveWorkspace();
+    await routePersistence.publish();
+    const url = new URL(window.location.href);
+    const selectedId = selection?.selected?.id;
+    if (selectedId) url.searchParams.set('select', selectedId);
+    else url.searchParams.delete('select');
+    window.location.href = url.toString();
+  }));
   shell.onToolbar('add-object', () => {
     shell.showTab('assets');
     shell.setStatus('Choose an asset below, then click a surface in the world to place it · Esc cancels');
@@ -90,7 +116,7 @@ export async function createEditorApp(root) {
     shell.onToolbar(`speed-${speed}`, () => viewport.setFlySpeedPreset(speed));
   }
   shell.onPreset(applyPreset);
-  shell.onEntitySelect((id) => selection?.select(id, { source: 'hierarchy' }));
+  shell.onEntitySelect((id, { additive = false } = {}) => selection?.select(id, { source: 'hierarchy', additive }));
   shell.onInspectLocked((enabled) => selection?.setInspectLocked(enabled));
   shell.onAction((action, detail) => {
     const viewActions = {
@@ -139,13 +165,14 @@ export async function createEditorApp(root) {
       'snap-rotate': () => transformManager.setSnaps({ rotateDegrees: detail }),
       'snap-scale': () => transformManager.setSnaps({ scale: detail }),
       'axis-toggle': () => transformManager.setAxes({ ...transformManager.axes, [detail.axis]: detail.enabled }),
-      'project-save': () => runProjectTask(() => persistence.save({ name: detail.name })),
-      'project-save-as': () => runProjectTask(() => persistence.save({ path: detail.path, name: detail.name })),
+      'project-save': () => runProjectTask(() => saveWorkspace({ name: detail.name })),
+      'project-save-as': () => runProjectTask(() => saveWorkspace({ path: detail.path, name: detail.name })),
       'project-load': () => runProjectTask(async () => { shell.showProjectNotice(''); await persistence.load(detail.path); }),
       'project-export': () => persistence.exportOverrides(),
       'project-reset-unsaved': () => runProjectTask(async () => { shell.showProjectNotice(''); await persistence.resetUnsaved(); }),
       'project-reset-all': () => persistence.resetAll(),
       'project-commit': () => runProjectTask(async () => {
+        await saveRoadEdits();
         await persistence.commit(detail?.message);
         await refreshCommits();
       }),
@@ -165,15 +192,22 @@ export async function createEditorApp(root) {
   });
 
   const onKeyDown = (event) => {
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '') || event.target?.isContentEditable || event.target?.closest?.('[contenteditable="true"]')) return;
     const commandKey = event.ctrlKey || event.metaKey;
+    // In fly mode Ctrl is a movement key. Keep Ctrl+W/A/S/D inside the
+    // viewport so descent + movement cannot close the tab, select the page,
+    // save, or duplicate objects.
+    if (viewport.navigationMode === 'fly' && event.ctrlKey && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+      event.preventDefault();
+      return;
+    }
     if (commandKey && event.code === 'KeyZ') {
       event.preventDefault();
       if (event.shiftKey) history.redo(); else history.undo();
       return;
     }
     if (commandKey && event.code === 'KeyY') { event.preventDefault(); history.redo(); return; }
-    if (commandKey && event.code === 'KeyS') { event.preventDefault(); if (persistence) runProjectTask(() => persistence.save()); return; }
+    if (commandKey && event.code === 'KeyS') { event.preventDefault(); if (persistence) runProjectTask(() => saveWorkspace()); return; }
     if (commandKey && event.code === 'KeyD') { event.preventDefault(); editActions?.duplicate(); return; }
     if (event.code === 'KeyL' && !commandKey) {
       event.preventDefault();
@@ -226,8 +260,9 @@ export async function createEditorApp(root) {
     selection = new SelectionManager({
       viewport, registry, adapter,
       onChange: (entity) => {
-        shell.setSelection(entity);
+        shell.setSelection(entity, { ids: selection?.selectedEntities?.map((item) => item.id) });
         transformManager?.setSelection(entity);
+        roadEdit?.setActiveEntity(entity);
       },
       onStatus: (message) => shell.setStatus(message),
     });
@@ -245,7 +280,7 @@ export async function createEditorApp(root) {
       registry, adapter, assetRegistry, projectState, history, selection, transformManager,
       onChange: (entity) => {
         selection?.refreshHighlight();
-        shell.setSelection(selection?.selected || entity || null);
+        shell.setSelection(selection?.selected || entity || null, { ids: selection?.selectedEntities?.map((item) => item.id) });
         shell.setTransformState(transformManager.state());
       },
       onStatus: (message) => shell.setStatus(message),
@@ -253,6 +288,19 @@ export async function createEditorApp(root) {
     placement = new PlacementController({
       viewport, adapter, editActions, transformManager,
       onChange: (active, label) => shell.setPlacement(active, label),
+      onStatus: (message) => shell.setStatus(message),
+    });
+    routePersistence = createRoutePersistence({
+      onStatus: (message) => shell.setStatus(message),
+    });
+    try {
+      await routePersistence.loadIntoModule();
+    } catch (error) {
+      shell.setStatus(`Saved road routes unavailable · ${error.message}`);
+      shell.showError(error, 'Saved road routes unavailable');
+    }
+    roadEdit = new RoadEditController({
+      viewport, history, selection,
       onStatus: (message) => shell.setStatus(message),
     });
     shell.setAssets(assetRegistry.catalog());
@@ -266,13 +314,16 @@ export async function createEditorApp(root) {
     shell.setTransformState(transformManager.state());
     shell.setLoading(true, 'Loading saved editor project');
     const initialProjectPath = mode === 'demo' && !params.has('project')
-      ? scene.projectPath
+      ? `data/editor/demo-${scene.id}-project.json`
       : persistence.initialPath();
     await persistence.load(initialProjectPath, { allowMissing: true });
     persistence.startAutosave();
     refreshCommits().catch((error) => shell.setStatus(`Commit list unavailable · ${error.message}`));
     shell.showWorldWarning(adapter.warning);
     applyPreset(adapter.presets.has('tatsumi-pa') ? 'tatsumi-pa' : 'initial-spawn');
+    // Restore the pre-rebuild selection (Rebuild Map reloads with ?select=).
+    const reselectId = params.get('select');
+    if (reselectId) selection.select(reselectId, { source: 'rebuild' });
     shell.setLoading(false);
     shell.setStatus(adapter.strategy === 'garage'
       ? `Garage interior ready · ${adapter.entities.length} editable parts`
@@ -290,8 +341,11 @@ export async function createEditorApp(root) {
     if (disposed) return;
     disposed = true;
     window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('beforeunload', onBeforeUnload);
+    window.removeEventListener('pagehide', dispose);
     unsubscribeRegistry();
     placement?.dispose();
+    roadEdit?.dispose();
     collisionOverlay.dispose();
     editActions?.exitIsolation();
     persistence?.dispose();
@@ -303,7 +357,16 @@ export async function createEditorApp(root) {
     viewport.dispose();
     shell.dispose();
   };
-  window.addEventListener('beforeunload', dispose, { once: true });
+  // Ctrl+W is a browser-level shortcut, so fly mode needs the native guard.
+  // Outside fly mode, warn only for unsaved editor/road changes; ordinary
+  // clean page closes remain warning-free.
+  const onBeforeUnload = (event) => {
+    if (viewport.navigationMode !== 'fly' && !history.dirty && !roadEdit?.hasDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  };
+  window.addEventListener('beforeunload', onBeforeUnload);
+  window.addEventListener('pagehide', dispose, { once: true });
 
   return {
     checkpoint: 4,
@@ -318,6 +381,8 @@ export async function createEditorApp(root) {
     get persistence() { return persistence; },
     get selection() { return selection; },
     get placement() { return placement; },
+    get roadEdit() { return roadEdit; },
+    get routePersistence() { return routePersistence; },
     get adapter() { return adapter; },
     applyPreset,
     showError(message) { shell.showError(message instanceof Error ? message : new Error(String(message))); },

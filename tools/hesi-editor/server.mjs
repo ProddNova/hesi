@@ -19,6 +19,17 @@ import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseProjectDocument, serializeProjectDocument, validateProjectDocument } from './src/overrides/override-schema.js';
 import { BUILD_PATHS, serializeBuildDocument } from './src/overrides/build-schema.js';
+import {
+  ROAD_ROUTE_PATHS,
+  applyRoadRouteOverrides,
+  blankRoadRouteOverrides,
+  canonicalizeRoadRouteOverrides,
+  mergeRoadRouteUpdates,
+  productionRouteModuleSource,
+  serializeProductionRoutes,
+  serializeRoadRouteOverrides,
+  validateProductionRouteDocument,
+} from './src/overrides/road-route-schema.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const PORT = Number(process.env.HESI_EDITOR_PORT) || 8081;
@@ -26,6 +37,7 @@ const EDITOR_PATH = '/tools/hesi-editor/index.html';
 const PROJECT_ENDPOINT = '/__hesi_editor_project';
 const BUILD_ENDPOINT = '/__hesi_editor_build';
 const COMMITS_ENDPOINT = '/__hesi_editor_commits';
+const ROUTES_ENDPOINT = '/__hesi_editor_routes';
 const COMMITS_DIR = 'data/editor/commits';
 const MAX_PROJECT_BYTES = 2 * 1024 * 1024;
 const MAX_COMMITS_LISTED = 200;
@@ -118,6 +130,63 @@ async function saveBuild(scene, build) {
   const file = resolve(ROOT, targetPath);
   await writeFileSafe(file, serialized);
   return { path: targetPath, bytes: Buffer.byteLength(serialized), operations: build.operations.length };
+}
+
+// Road edits have a versioned source file and an explicit publish step. This
+// keeps editor Save separate from the generated files loaded by the game.
+async function readProductionRoutes() {
+  const file = resolve(ROOT, ROAD_ROUTE_PATHS.productionJson);
+  let document;
+  try { document = JSON.parse(await readFile(file, 'utf8')); }
+  catch (error) { throw new Error(`Production route data is unreadable: ${error.message}`); }
+  return validateProductionRouteDocument(document);
+}
+
+async function readRoadRouteOverrides(production) {
+  const file = resolve(ROOT, ROAD_ROUTE_PATHS.source);
+  try {
+    const document = JSON.parse(await readFile(file, 'utf8'));
+    return canonicalizeRoadRouteOverrides(document, { production });
+  } catch (error) {
+    if (error.code === 'ENOENT') return blankRoadRouteOverrides();
+    throw new Error(`Saved road route overrides are unreadable: ${error.message}`);
+  }
+}
+
+// Save only the explicitly changed routes. Unrelated routes are copied from
+// the existing source document and raw/generated production data is untouched.
+async function saveRoadRouteUpdates(updates) {
+  const production = await readProductionRoutes();
+  const previous = await readRoadRouteOverrides(production);
+  const document = mergeRoadRouteUpdates(previous, updates, production);
+  const serialized = serializeRoadRouteOverrides(document, { production });
+  await writeFileSafe(resolve(ROOT, ROAD_ROUTE_PATHS.source), serialized);
+  return {
+    path: ROAD_ROUTE_PATHS.source,
+    bytes: Buffer.byteLength(serialized),
+    routes: Object.keys(document.routes).sort(),
+  };
+}
+
+// Publish is deliberately separate from Save: it validates the versioned
+// editor source, merges only its route point arrays into production data, and
+// emits the JSON + ES module consumed by js/map.js and the playable game.
+async function publishRoadRoutes() {
+  const production = await readProductionRoutes();
+  const overrides = await readRoadRouteOverrides(production);
+  if (!Object.keys(overrides.routes).length) throw new Error(`No saved road route edits found in ${ROAD_ROUTE_PATHS.source}; edit and Save a road first`);
+  const output = applyRoadRouteOverrides(production, overrides);
+  const json = serializeProductionRoutes(output);
+  const moduleSource = productionRouteModuleSource(json);
+  await writeFileSafe(resolve(ROOT, ROAD_ROUTE_PATHS.productionModule), moduleSource);
+  await writeFileSafe(resolve(ROOT, ROAD_ROUTE_PATHS.productionJson), json);
+  return {
+    sourcePath: ROAD_ROUTE_PATHS.source,
+    jsonPath: ROAD_ROUTE_PATHS.productionJson,
+    modulePath: ROAD_ROUTE_PATHS.productionModule,
+    bytes: Buffer.byteLength(json),
+    routes: Object.keys(overrides.routes).sort(),
+  };
 }
 
 // ---- Commit management: every commit snapshots one full project version ----
@@ -271,6 +340,27 @@ const server = createServer(async (req, res) => {
       if (req.method === 'DELETE') {
         await rm(commitFile(scene, id), { force: true });
         sendJson(res, 200, { ok: true, id }, req.method);
+        return;
+      }
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);
+      return;
+    }
+    if (path === ROUTES_ENDPOINT) {
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const production = await readProductionRoutes();
+        const document = await readRoadRouteOverrides(production);
+        sendJson(res, 200, { ok: true, path: ROAD_ROUTE_PATHS.source, document }, req.method);
+        return;
+      }
+      if (req.method === 'PUT') {
+        const payload = await readJsonBody(req);
+        const result = await saveRoadRouteUpdates(payload.updates);
+        sendJson(res, 200, { ok: true, ...result }, req.method);
+        return;
+      }
+      if (req.method === 'POST') {
+        const result = await publishRoadRoutes();
+        sendJson(res, 200, { ok: true, ...result }, req.method);
         return;
       }
       sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);

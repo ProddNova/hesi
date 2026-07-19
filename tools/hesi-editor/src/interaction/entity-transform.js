@@ -76,3 +76,25 @@ export function sourceTransformFor(entity) {
   entity.metadata.editorSourceTransform = structuredClone(source);
   return source;
 }
+
+/**
+ * One-sided gizmo scaling. When a single-axis scale handle is dragged, keep
+ * the opposite face of the object's bounds fixed in world space by shifting
+ * the position by R·(S0−S1)·a, where `a` is the local-space bounds min corner
+ * on that axis and R the object's local rotation (position lives in parent
+ * space, so the shift is rotated by the local quaternion only).
+ *
+ * Returns the position delta [x, y, z] relative to the drag-start position,
+ * or null when the axis is not a single axis (e.g. the XYZ center handle,
+ * which keeps symmetric scaling).
+ */
+export function anchorShiftForScale(axis, startScale, nextScale, localBoundsMin, quaternion) {
+  const index = { x: 0, y: 1, z: 2 }[axis];
+  if (index == null) return null;
+  if (!startScale || !nextScale || !localBoundsMin || !quaternion) return null;
+  const delta = (startScale[index] - nextScale[index]) * localBoundsMin[index];
+  if (!Number.isFinite(delta) || delta === 0) return [0, 0, 0];
+  const local = new THREE.Vector3();
+  local.setComponent(index, delta);
+  return local.applyQuaternion(quaternion).toArray();
+}

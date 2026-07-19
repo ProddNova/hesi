@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { applyEntityTransform, snapshotTransform, sourceTransformFor, transformsEqual } from './entity-transform.js';
+import { anchorShiftForScale, applyEntityTransform, snapshotTransform, sourceTransformFor, transformsEqual } from './entity-transform.js';
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 
@@ -14,6 +14,7 @@ export class TransformManager {
     this.onStatus = onStatus;
     this.entity = null;
     this.dragStart = null;
+    this.scaleAnchor = null;
     this.mode = 'translate';
     this.space = 'world';
     this.axes = { x: true, y: true, z: true };
@@ -26,16 +27,19 @@ export class TransformManager {
     this._onMouseDown = () => {
       if (!this.entity) return;
       this.dragStart = snapshotTransform(this.entity.object3D);
+      this.scaleAnchor = this.mode === 'scale' ? this._makeScaleAnchor(this.entity) : null;
       this.viewport.setNavigationBlocked(true);
     };
     this._onObjectChange = () => {
       if (!this.entity) return;
+      this._anchorScaleDrag();
       applyEntityTransform(this.entity, snapshotTransform(this.entity.object3D));
       this.entity.metadata.hasOverride = true;
       this.onChange(this.entity, { live: true });
     };
     this._onMouseUp = () => {
       this.viewport.setNavigationBlocked(false);
+      this.scaleAnchor = null;
       if (!this.entity || !this.dragStart) return;
       const before = this.dragStart;
       const after = snapshotTransform(this.entity.object3D);
@@ -45,6 +49,54 @@ export class TransformManager {
     this.control.addEventListener('mouseDown', this._onMouseDown);
     this.control.addEventListener('objectChange', this._onObjectChange);
     this.control.addEventListener('mouseUp', this._onMouseUp);
+  }
+
+  // Bounds of the dragged entity expressed in the object's local frame, so a
+  // single-axis scale drag can keep the opposite face fixed in world space.
+  _makeScaleAnchor(entity) {
+    const object = entity?.object3D;
+    if (!object) return null;
+    object.updateWorldMatrix(true, false);
+    const inverse = object.matrixWorld.clone().invert();
+    const localBox = new THREE.Box3().makeEmpty();
+    const corner = new THREE.Vector3();
+    const addGeometry = (geometry, worldMatrix) => {
+      if (!geometry) return;
+      geometry.computeBoundingBox?.();
+      const box = geometry.boundingBox;
+      if (!box || box.isEmpty()) return;
+      for (let i = 0; i < 8; i += 1) {
+        corner.set(
+          i & 1 ? box.max.x : box.min.x,
+          i & 2 ? box.max.y : box.min.y,
+          i & 4 ? box.max.z : box.min.z,
+        ).applyMatrix4(worldMatrix).applyMatrix4(inverse);
+        localBox.expandByPoint(corner);
+      }
+    };
+    object.traverse?.((child) => {
+      if (!child.geometry) return;
+      child.updateWorldMatrix(true, false);
+      addGeometry(child.geometry, child.matrixWorld);
+    });
+    // Generated instances use a transform-only proxy. Its source geometry is
+    // already expressed in the proxy's local frame.
+    if (localBox.isEmpty()) addGeometry(entity.metadata?.instanceMesh?.geometry, object.matrixWorld);
+    if (localBox.isEmpty()) return null;
+    return { localMin: localBox.min.toArray(), localMax: localBox.max.toArray() };
+  }
+
+  // One-sided scaling: set the position from the drag-start position plus the
+  // anchor shift (idempotent — safe to run on every objectChange of the drag).
+  _anchorScaleDrag() {
+    if (!this.scaleAnchor || this.mode !== 'scale' || !this.dragStart) return;
+    const axis = { X: 'x', Y: 'y', Z: 'z' }[this.control.axis];
+    if (!axis) return; // XYZ center handle keeps symmetric scaling
+    const object = this.entity.object3D;
+    const shift = anchorShiftForScale(axis, this.dragStart.scale, object.scale.toArray(), this.scaleAnchor.localMin, object.quaternion);
+    if (!shift) return;
+    const base = this.dragStart.position;
+    object.position.set(base[0] + shift[0], base[1] + shift[1], base[2] + shift[2]);
   }
 
   setSelection(entity) {

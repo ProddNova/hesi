@@ -131,7 +131,7 @@ export function discoverHesiEntities(map) {
     const id = `road:${stableSlug(route.id)}`;
     const entity = add({
       id, name: `${route.code ? `${route.code} · ` : ''}${route.name}`, type: route.kind === 'service' ? 'service-route' : 'road-route',
-      layer: 'Roads', object3D: null, source: 'data/routes-smoothed.json', editable: false, generated: true,
+      layer: 'Roads', object3D: null, source: 'data/routes-smoothed.json', editable: true, generated: true,
       assetId: null, parentId: route.group ? `road-group:${stableSlug(route.group)}` : null,
       metadata: {
         routeId: route.id, routeName: route.name, groupId: route.group || null, code: route.code || null,

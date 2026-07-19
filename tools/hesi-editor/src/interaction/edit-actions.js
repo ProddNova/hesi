@@ -12,9 +12,13 @@ export class EditActions {
 
   get entity() { return this.selection.selected; }
 
-  setVisibility(visible) {
-    const entity = this.entity;
-    if (!entity?.object3D) return this._status('Nothing visual is selected');
+  get entities() {
+    if (this.selection.selectedEntities?.length) return [...this.selection.selectedEntities];
+    return this.selection.selected ? [this.selection.selected] : [];
+  }
+
+  setVisibility(visible, entity = this.entity, { quiet = false } = {}) {
+    if (!entity?.object3D) return quiet ? false : this._status('Nothing visual is selected');
     const before = !entity.metadata.disabled;
     const after = Boolean(visible);
     if (before === after) return false;
@@ -37,10 +41,17 @@ export class EditActions {
     return true;
   }
 
-  toggleVisibility() { return this.setVisibility(Boolean(this.entity?.metadata?.disabled)); }
+  toggleVisibility() {
+    const list = this.entities;
+    if (!list.length) return this._status('Nothing is selected');
+    const target = Boolean(this.entity?.metadata?.disabled);
+    let changed = false;
+    for (const entity of list) changed = this.setVisibility(target, entity, { quiet: list.length > 1 }) || changed;
+    if (!changed && list.length > 1) return this._status('Selection has no visual entities to show or hide');
+    return changed;
+  }
 
-  setLocked(locked) {
-    const entity = this.entity;
+  setLocked(locked, entity = this.entity) {
     if (!entity) return this._status('Nothing is selected');
     const before = Boolean(entity.metadata.locked);
     const after = Boolean(locked);
@@ -64,12 +75,25 @@ export class EditActions {
     return true;
   }
 
-  toggleLocked() { return this.setLocked(!this.entity?.metadata?.locked); }
+  toggleLocked() {
+    const list = this.entities;
+    if (!list.length) return this._status('Nothing is selected');
+    const target = !this.entity?.metadata?.locked;
+    let changed = false;
+    for (const entity of list) changed = this.setLocked(target, entity) || changed;
+    return changed;
+  }
 
   duplicate() {
-    const source = this.entity;
-    if (!source) return this._status('Nothing is selected');
-    if (!this.assetRegistry.supports(source)) return this._status('Duplicate unavailable: select an individual reusable generated asset');
+    const list = this.entities;
+    if (!list.length) return this._status('Nothing is selected');
+    let placed = null;
+    for (const source of list) placed = this._duplicateOne(source) || placed;
+    return placed;
+  }
+
+  _duplicateOne(source) {
+    if (!this.assetRegistry.supports(source)) return this._status(`Duplicate unavailable for ${source.name}: select an individual reusable generated asset`);
     const placed = this.assetRegistry.createPlacedEntity(source);
     if (!source.generated) {
       const transform = snapshotTransform(source.object3D);
@@ -107,7 +131,7 @@ export class EditActions {
       this.onChange(placed);
     };
     const remove = () => {
-      if (this.selection.selected?.id === placed.id) this.selection.clear('undo-place');
+      this.selection.removeFromSelection?.(placed.id, 'undo-place');
       this.registry.unregister(placed.id);
       placed.object3D.removeFromParent();
       this.projectState.removePlaced(placed.id);
@@ -119,12 +143,20 @@ export class EditActions {
   }
 
   deleteSelected() {
-    const entity = this.entity;
-    if (!entity) return this._status('Nothing is selected');
-    if (entity.generated) return this.setVisibility(false);
+    const list = this.entities;
+    if (!list.length) return this._status('Nothing is selected');
+    let changed = false;
+    for (const entity of list) {
+      if (entity.generated) changed = this.setVisibility(false, entity, { quiet: list.length > 1 }) || changed;
+      else changed = this._deletePlaced(entity) || changed;
+    }
+    return changed;
+  }
+
+  _deletePlaced(entity) {
     const record = this.projectState.getPlaced(entity.id) || this.assetRegistry.recordFor(entity);
     const remove = () => {
-      if (this.selection.selected?.id === entity.id) this.selection.clear('delete');
+      this.selection.removeFromSelection?.(entity.id, 'delete');
       this.registry.unregister(entity.id);
       entity.object3D.removeFromParent();
       this.projectState.removePlaced(entity.id);
@@ -135,7 +167,7 @@ export class EditActions {
       if (!this.registry.has(entity.id)) this.registry.register(entity);
       this.adapter.registerEditorEntity(entity);
       if (!this.projectState.getPlaced(entity.id)) this.projectState.addPlaced(record);
-      this.selection.select(entity, { source: 'undo-delete' });
+      this.selection.select(entity, { source: 'undo-delete', additive: true });
       this.onChange(entity);
     };
     this.history.execute({ label: `Delete ${entity.name}`, redo: remove, undo: restore });
