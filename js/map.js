@@ -970,7 +970,8 @@ export class HighwayMap {
    * Replace one runtime route curve without rebuilding the whole map. The
    * editor uses this for collision-accurate live previews; published
    * synthetic-route overrides run here before world geometry is generated.
-   * Endpoints stay immutable so connectivity cannot be disconnected.
+   * The default tolerance rejects accidentally moved endpoints; editor call
+   * sites pass Infinity because endpoint edits are an explicit user action.
    */
   applyEditorRouteOverride(routeId, pointArrays, { endpointTolerance = 0.35 } = {}) {
     const route = this.routes.get(routeId);
@@ -1020,7 +1021,8 @@ export class HighwayMap {
     const overrides = ROUTE_DATA.meta?.editorRoadOverrides?.syntheticRoutes;
     if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return;
     for (const [routeId, entry] of Object.entries(overrides)) {
-      if (!this.applyEditorRouteOverride(routeId, entry?.points)) {
+      // Endpoint moves are deliberate editor output here, so accept them.
+      if (!this.applyEditorRouteOverride(routeId, entry?.points, { endpointTolerance: Infinity })) {
         console.warn(`Shutoko map: synthetic editor route override was not applied: ${routeId}`);
       }
     }

@@ -23,10 +23,6 @@ function canonicalPoints(points, label) {
   });
 }
 
-function samePoint(a, b) {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
-}
-
 export function validateProductionRouteDocument(document) {
   if (!isRecord(document) || !Array.isArray(document.routes)) {
     throw new TypeError('Production route document must be an object with a routes array');
@@ -48,7 +44,14 @@ export function blankRoadRouteOverrides() {
   return { version: 1, source: PRODUCTION_JSON_PATH, routes: {}, syntheticRoutes: {} };
 }
 
-export function canonicalizeRoadRouteOverrides(document, { production = null } = {}) {
+/**
+ * Structurally validates and normalizes a road-route override document.
+ * With `production`, override ids are checked against production routes;
+ * `dropUnknown` silently drops overrides whose production route no longer
+ * exists (stale files after an OSM/route rebuild) instead of failing every
+ * subsequent save and publish.
+ */
+export function canonicalizeRoadRouteOverrides(document, { production = null, dropUnknown = false } = {}) {
   if (!isRecord(document)) throw new TypeError('Road route overrides must be an object');
   if (document.version !== 1) throw new TypeError('Road route overrides version must be 1');
   if (document.source !== PRODUCTION_JSON_PATH) throw new TypeError(`Road route overrides source must be ${PRODUCTION_JSON_PATH}`);
@@ -64,18 +67,13 @@ export function canonicalizeRoadRouteOverrides(document, { production = null } =
   const routes = {};
   for (const id of ids) {
     if (!id.trim()) throw new TypeError('Road route override id cannot be empty');
-    if (productionRoutes && !productionRoutes.has(id)) throw new TypeError(`Road route override references unknown production route: ${id}`);
+    if (productionRoutes && !productionRoutes.has(id)) {
+      if (dropUnknown) continue;
+      throw new TypeError(`Road route override references unknown production route: ${id}`);
+    }
     const entry = document.routes[id];
     if (!isRecord(entry)) throw new TypeError(`Road route override ${id} must be an object`);
-    const points = canonicalPoints(entry.points, `Road route override ${id}.points`);
-    if (productionRoutes) {
-      const reference = productionRoutes.get(id).points;
-      const referenceEndpoints = canonicalPoints([reference[0], reference.at(-1)], `Production route ${id} endpoints`);
-      if (!samePoint(points[0], referenceEndpoints[0]) || !samePoint(points.at(-1), referenceEndpoints[1])) {
-        throw new TypeError(`Road route override ${id} cannot move or remove production route endpoints`);
-      }
-    }
-    routes[id] = { points };
+    routes[id] = { points: canonicalPoints(entry.points, `Road route override ${id}.points`) };
   }
   const syntheticRoutes = {};
   for (const id of syntheticIds) {
@@ -89,7 +87,7 @@ export function canonicalizeRoadRouteOverrides(document, { production = null } =
 }
 
 export function mergeRoadRouteUpdates(previous, updates, production) {
-  const base = canonicalizeRoadRouteOverrides(previous || blankRoadRouteOverrides(), { production });
+  const base = canonicalizeRoadRouteOverrides(previous || blankRoadRouteOverrides(), { production, dropUnknown: true });
   if (!Array.isArray(updates) || !updates.length) throw new TypeError('Road route save requires at least one route update');
   const seen = new Set();
   const routes = { ...base.routes };
@@ -104,12 +102,12 @@ export function mergeRoadRouteUpdates(previous, updates, production) {
     else if (update.synthetic === true) syntheticRoutes[update.id] = entry;
     else throw new TypeError(`Road route update references unknown production route: ${update.id}`);
   }
-  return canonicalizeRoadRouteOverrides({ ...base, routes, syntheticRoutes }, { production });
+  return canonicalizeRoadRouteOverrides({ ...base, routes, syntheticRoutes }, { production, dropUnknown: true });
 }
 
 export function applyRoadRouteOverrides(production, overrides) {
   validateProductionRouteDocument(production);
-  const source = canonicalizeRoadRouteOverrides(overrides, { production });
+  const source = canonicalizeRoadRouteOverrides(overrides, { production, dropUnknown: true });
   const output = structuredClone(production);
   const byId = new Map(output.routes.map((route) => [route.id, route]));
   for (const [id, entry] of Object.entries(source.routes)) byId.get(id).points = structuredClone(entry.points);

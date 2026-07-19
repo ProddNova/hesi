@@ -21,12 +21,22 @@ test('road surface hits resolve to the nearest semantic route entity', () => {
   assert.equal(resolveRoadSurfaceRoute(surface, point, adapter, routes), route);
   assert.deepEqual(received, { hitPoint: point, options: { maxDistance: 80 } });
   assert.equal(resolveRoadSurfaceRoute(serviceSurface, point, adapter, routes), route);
-  assert.equal(resolveRoadSurfaceRoute({ id: 'deck', type: 'generated-prop-batch', name: 'Tatsumi PA deck' }, point, adapter, routes), route);
-  assert.equal(resolveRoadSurfaceRoute({
+});
+
+test('non-surface objects such as the Tatsumi PA deck stay directly selectable', () => {
+  const point = { x: 12, y: 40, z: -8 };
+  const adapter = { map: { getNearestRoute: () => ({ route: { id: 'wangan_0' } }) } };
+  const routes = new Map([['wangan_0', route]]);
+  const deck = { id: 'deck', type: 'generated-prop-batch', name: 'Tatsumi PA deck' };
+  assert.equal(resolveRoadSurfaceRoute(deck, point, adapter, routes), deck);
+  const chunkDeck = {
     id: 'generated-prop-batch:6-n7-unknown-tatsumi-pa-deck-6',
     name: 'Generated props · chunk 6,-7',
     type: 'generated-prop-batch',
-  }, point, adapter, routes), route);
+  };
+  assert.equal(resolveRoadSurfaceRoute(chunkDeck, point, adapter, routes), chunkDeck);
+  const lamp = { id: 'lamp', type: 'highway-lamp' };
+  assert.equal(resolveRoadSurfaceRoute(lamp, point, adapter, routes), lamp);
 });
 
 test('road surface resolution safely falls back when no matching route exists', () => {

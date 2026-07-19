@@ -76,8 +76,18 @@ export async function createEditorApp(root) {
     syncPublishState();
     return result;
   };
+  // Reload the page keeping the current selection: the world generator runs
+  // again at startup, now consuming the freshly saved draft (or, after Apply
+  // to Game, the freshly published production data).
+  const reloadEditor = () => {
+    const url = new URL(window.location.href);
+    const selectedId = selection?.selected?.id;
+    if (selectedId) url.searchParams.set('select', selectedId);
+    else url.searchParams.delete('select');
+    window.location.href = url.toString();
+  };
   const saveDraftWorkspace = async (options = {}) => {
-    await saveRoadEdits();
+    const savedRoads = await saveRoadEdits();
     const result = await persistence.save({ ...options, build: false });
     // The history index already tracks edited project geometry. Only refresh
     // the loaded baseline comparison when the draft is at that same index
@@ -86,6 +96,15 @@ export async function createEditorApp(root) {
       projectBuildPending = !(await persistence.gameBuildMatches());
     }
     syncPublishState();
+    if (savedRoads) {
+      // Rebuild the editor world from the saved draft so the real asphalt,
+      // markings, and collision show the road change locally; the playable
+      // game keeps its published data until Apply to Game.
+      shell.setStatus('Draft saved · rebuilding the editor map with your road changes · playable game unchanged');
+      shell.setLoading(true, 'Rebuilding the editor map from the saved road draft');
+      reloadEditor();
+      return result;
+    }
     shell.setStatus('Draft saved · editor project and road source updated · playable game unchanged');
     return result;
   };
@@ -137,11 +156,7 @@ export async function createEditorApp(root) {
   shell.onToolbar('save-project', () => persistence && runProjectTask(() => saveDraftWorkspace()));
   shell.onToolbar('rebuild-world', () => runProjectTask(async () => {
     await applyWorkspaceToGame();
-    const url = new URL(window.location.href);
-    const selectedId = selection?.selected?.id;
-    if (selectedId) url.searchParams.set('select', selectedId);
-    else url.searchParams.delete('select');
-    window.location.href = url.toString();
+    reloadEditor();
   }));
   shell.onToolbar('add-object', () => {
     shell.showTab('assets');
@@ -284,6 +299,21 @@ export async function createEditorApp(root) {
   const params = new URLSearchParams(window.location.search);
   const mode = params.get('world') === 'demo' ? 'demo' : 'real';
   try {
+    routePersistence = createRoutePersistence({
+      onStatus: (message) => shell.setStatus(message),
+    });
+    // Apply saved road drafts to the routes module BEFORE the world builds so
+    // the editor's rendered map (asphalt, markings, collision) matches the
+    // draft. The playable game keeps its published files until Apply to Game.
+    let routeDraftLoad = null;
+    if (mode === 'real' && scene.id === 'highway') {
+      try {
+        shell.setLoading(true, 'Loading saved road drafts');
+        routeDraftLoad = await routePersistence.loadDraftIntoModule();
+      } catch (error) {
+        shell.setStatus(`Saved road drafts unavailable · ${error.message}`);
+      }
+    }
     adapter = await loadWorld({
       mode,
       scene: scene.id,
@@ -337,17 +367,10 @@ export async function createEditorApp(root) {
       onChange: (active, label) => shell.setPlacement(active, label),
       onStatus: (message) => shell.setStatus(message),
     });
-    routePersistence = createRoutePersistence({
-      onStatus: (message) => shell.setStatus(message),
-    });
-    try {
-      const routeLoad = await routePersistence.loadIntoModule(adapter.map);
-      savedRoadRouteCount = routeLoad.routes.length;
-      roadPublishPending = routeLoad.pending;
+    if (routeDraftLoad) {
+      savedRoadRouteCount = routeDraftLoad.routes.length;
+      roadPublishPending = routeDraftLoad.pending;
       syncPublishState();
-    } catch (error) {
-      shell.setStatus(`Saved road routes unavailable · ${error.message}`);
-      shell.showError(error, 'Saved road routes unavailable');
     }
     roadEdit = new RoadEditController({
       viewport, history, selection, adapter,
