@@ -1,159 +1,123 @@
-# Tatsumi No.1 PA — live garage, ramp_8 exit, left-hand traffic
+# Tatsumi No.1 PA — real-world dressing, stale-override guard, live garage
 
-Checkpoint status: **the deck is the live player location.** The elevated
-deck between ramp_8 and ramp_9 (placed by the previous checkpoint, see the
-history below) now owns the active garage and every spawn flow, has a built
-player exit onto `ramp_8`, and the whole network runs Japanese left-hand
-traffic. Lane dashes are shorter and denser network-wide.
+Checkpoint status: **the deck is dressed after the real Tatsumi No.1 PA and
+is still the live player location.** The elevated deck between ramp_8 and
+ramp_9 keeps the active garage, the spawn and the ramp_8 entry/exit built by
+the previous checkpoints, and now carries the real lot furniture
+(perpendicular stalls, toilet block, vending row, smoking corner, poles,
+signage, painted one-way flow). This checkpoint also repairs the PA access,
+which the recent editor map edits had broken (see §1).
 
-## 1. Left-hand traffic (`reverseNetworkData`, js/map.js)
+## 1. Stale synthetic-override guard (js/map.js `_applyEditorSyntheticRouteOverrides`)
 
-The OSM ways are digitised along the real (left-hand) travel direction, but
-the lon→x / lat→z projection renders a mirror image of Tokyo, so driving the
-data forward *looked* like right-hand traffic — the opposing carriageway sat
-on the driver's left everywhere. `reverseNetworkData` reverses every
-carriageway polyline (rebasing edges, tunnel/bridge ranges and PA side labels
-onto the flipped chainage) at load time; `ROUTE_DATA` itself is never
-mutated and `options.legacyFlow === true` builds the original flow for
-probes. Verified around Tatsumi (tatsumi-pa-flow-probe):
+The hesi-editor "publish" step had baked overrides for the synthetic
+`tatsumi_pa_entry` / `tatsumi_pa_exit` connectors into
+`data/routes-smoothed.js` meta while `ramp_8` was being re-drawn. The deck
+rectangle is re-fitted from the live ramp geometry on every load, so those
+hand-captured polylines drifted clear off the re-fitted deck: the entry
+ended ~5 m short of the end gate at the wrong lateral, the exit started past
+the end line, and the flow probe failed 4 checks (never crossing an end
+line, a 0.161 m collision step and 0.137 m render/collision divergence on
+the entry).
 
-- opposing carriageway on the driver's **right** along the Wangan pair;
-- every traffic lane runs direction +1 and lane sampling faces the tangent;
-- `ramp_8` (reversed) descends from Route 9 past the deck and **merges into
-  `wangan_0`** with >20 km of Bayshore mainline ahead — the PA exit joins it
-  upstream of that merge;
-- `wangan_1` (the opposite direction) terminates in the Tatsumi turnaround
-  (`wangan_uturn_0`) back onto `wangan_0`.
+`_syntheticOverrideIsStale` now validates any published override that
+replaces a lot connector: its on-deck terminus (entry last point / exit
+first point) must still land inside the lot rectangle at deck height,
+otherwise the override is skipped with a console warning and the
+runtime-built connector survives. With the stale pair skipped, the live
+entry (260 m) and exit (202 m) are the checkpoint-documented lanes again and
+the whole flow probe passes. The override data itself is untouched —
+republishing from the editor against the current deck will apply again.
 
-**Progressive prototypes are legacy-flow-bound.** Reversal flips both
-junction senses (P1 diverge→merge, P2 merge→diverge) and the transition
-builder cannot reproduce the engineered treatments in the flipped sense
-(missing lane mappings, marking targets missed, a 144 m A-B suppression
-error at J2). The prototypes file is untouched from main; `js/map.js` simply
-passes an empty prototype list unless `options.legacyFlow` is set. The live
-network uses the standard junction treatment at J2/J48 (all generic gates
-pass there), the live dev map shows no prototype pins (DEV_MAP.md), and the
-whole progressive probe suite now constructs `legacyFlow` maps — including
-the re-recorded P1 geometry digest, which was already stale on the
-pre-continuation baseline (every hashed field is byte-identical to 34909c3).
+## 2. Real-world dressing (`_buildTatsumiPaDressing`, js/map.js)
 
-## 2. Compact empty deck, garage + spawn (refined 2026-07-17)
+Modeled on the real Tatsumi No.1 PA (Shuto Route 9 at Tatsumi JCT): a
+compact lot with parking, toilets and vending machines only — no shop, no
+fuel. Everything is laid out in the deck frame (u along the one-way flow, v
+across; `area.aisleV` marks the aisle side), so a re-fitted rectangle moves
+the whole layout with it. Props are visual instances only — lot collision
+stays the flat slab.
 
-The fitted rectangle is trimmed to a fixed 110 m around its centre
-(re-fitted, so the shorter window keeps the extra width its own pinches
-allow — now 27.5 m wide) and the lot is deliberately BARE
-(`area.dressingMinimal`): no stalls, parked cars, konbini, vending, lamps,
-signs or refuel/PA markers — only the slab, the support pillars in the
-Wangan median gap, the unbroken perimeter kerb/fence, the end rails on the
-outward halves, and the pulsing garage ENTER ring + beacon
-(`_buildGarageExterior` builds just the ring for minimal lots).
-`_defineServiceAreas` still clears every other lot's garage flag; the
-`paAccessLanes:true` twin keeps the legacy Shibaura garage.
+- **Perpendicular stalls, backed in.** White 5.0 m dividers at 2.8 m pitch:
+  an unbroken aisle-side row along the full lot, and a far-side row
+  interrupted by the garage-ring forecourt (no stalls within 13.5 m of the
+  ring centre) and the toilet block. Parked box cars (~50 % occupancy,
+  deterministic from the map seed) face nose-out with the cabin set aft —
+  the Tatsumi meet look.
+- **Toilet block.** The PA's only building (14 m × 5.4 m, far side at
+  u≈25): dark walls, glowing front band, roof parapet, トイレ/TOILET sign
+  facing the aisle, a light pool and a painted zebra walkway from the aisle
+  edge to the door.
+- **Vending row + smoking corner.** Five lit machines (red/blue/cream)
+  against the far fence past the toilets with their own glow pool, then a
+  partition panel, bench and bin at the exit end.
+- **Sodium poles.** Four lampposts with sodium heads and light pools: two
+  on each side, arms toward the lot, pools washing over the stall rows.
+  Poles stand in the stall line, so their slots never spawn a parked car.
+- **Signage.** 辰巳第一PA / TATSUMI No.1 PA blue panel and a P sign facing
+  the entry descent, 出口/EXIT green panel at the exit end.
+- **Painted flow.** Edge lines just outside the rendered connector strips
+  (the far-side line splits around the ring forecourt) and chevron arrows on
+  the aisle at u = −42/+20/+42, floated above the strip surface so they stay
+  visible along the entry/exit runs.
 
-- ENTER ring at deck u=−24, on the far side of the aisle; `initialSpawn`
-  (boot, garage exit, tow, crash recovery) sits at deck u=0 on the aisle
-  (v=−3.2), facing the exit end — outside both the 13 m transition radius
-  and the 18 m proximity-prompt radius.
+Kept clear by construction: the aisle band the connectors ride, the spawn at
+u=0, the ENTER ring forecourt and both deck ends. The garage stays ring +
+beacon only (`_buildGarageExterior` skips the building for
+`dressing === 'tatsumi'` exactly as it did for the old bare deck).
 
-## 3. ramp_8 access — one entry, one exit (refined 2026-07-17)
+The deck registration (`_defineTatsumiDeck` §9) now sets
+`area.dressing = 'tatsumi'` + `area.aisleV` instead of
+`area.dressingMinimal`; `_buildServiceAreaDressing` dispatches to the
+dedicated builder and the other three PAs keep the generic recipe.
 
-Both connectors pass through the deck ENDS, exactly like the legacy access
-lanes did (their lot legs attached at ±0.52 L — the end rails only ever
-covered the outward half of each end, so the gates are open by
-construction and the side fence stays unbroken):
+## 3. Access, traffic and history
 
-- **Entry** (`tatsumi_pa_entry`, 260 m): probability-0 diverge from ramp_8
-  upstream (player-only, like legacy PA entries), a 60 m legacy mouth pair
-  + glide riding INSIDE the ramp's paved band exactly ON its banked deck
-  plane (`_frameAt` + `_deckPoint` at each point's own lateral), pinned
-  hand-off points just off the band, then a descent through the leftover
-  fitted-corridor channel (the ramps keep their clearance for ~60 m past
-  each deck end) resampled every ~9 m with a trapezoidal ease — grade
-  ≤ 4.7 % — flush at the end line, then the aisle.
-- **Exit** (`tatsumi_pa_exit`, 202 m): aisle → end gate (flush) → eased
-  descent over the void → band join on the ramp plane → glide to the
-  legacy mouth inset → 60 m mouth pair → merge edge, downstream of which
-  ramp_8 continues into `wangan_0` (the Bayshore continuation). Grade
-  ≤ 3.6 %.
-- Band ride lateral is 3.55 m (inside the 4.5 m half-width, clear of the
-  corridor outer-wall correction band at car radius ~0.8).
-
-**Sinking root cause + fix.** The previous glue drew its own descending
-strip up to ~0.9 m above the ramp plane while `getRoadInfo` scored the
-ramp corridor best — the car rode the ramp plane *under* the drawn branch
-asphalt (and scraped the rail between the two strips). Now every point
-that can overlap the ramp corridor lies exactly ON the ramp's banked
-plane, the descents are sole-owner (over the void), and the deck sections
-are flush with the lot — rendering, collision and road lookup share one
-profile everywhere (probe: collision-vs-render ≤ 0.063 m, steps ≤ 0.113 m
-per 0.5 m station across centreline and both wheel tracks, zero
-wall-collision hits sweeping both lanes at car radius).
-
-One shared-machinery fix fell out of this: `_surfaceDefersToHost` handed a
-branch centreline to the host as soon as its coplanar strip was covered by
-the host's DRAWN deck, but the host's drivable band is ~0.4–0.9 m
-narrower, so crossing the host's edge line left a no-man's ring that
-wall-corrected (scraped) the car mid-crossing. The non-progressive defer
-now keeps the branch corridor alive in that margin (heights agree either
-way — the dy gate already guarantees coplanarity).
-
-## 4. Dashed markings
-
-Centralised in js/map.js: `LANE_DASH_LENGTH 3.0` / `LANE_DASH_PERIOD 8`
-(route dashes, was 6.2/15), `SERVICE_DASH_PERIOD 14` (was 26),
-`ZONE_DASH_LENGTH 3.0` / `ZONE_DASH_PERIOD 6` (junction-zone broken lines,
-was 5/10). The progressive-transition divider reuses the same constants so
-its phase mapping stays 1:1. No boundary types, junction suppression or
-ownership changed (`road-surface`, `ab-marking-clipping`, `merge-marking`,
-`marking-orientation` probes all pass). Before/after:
-`.devtests/shots/FLOW-markings-chase-before.png` vs `FLOW-markings-chase.png`.
+The ramp_8 entry/exit construction, one-height-authority rules, left-hand
+traffic reversal and dash constants are unchanged from the previous
+checkpoints — see the git history of this file (`1c43a2d` and earlier) for
+those write-ups. `_defineTatsumiDeck` sections 1–8 remain accurate.
 
 ## Verification
 
-- `.devtests/tatsumi-pa-flow-probe.mjs` — garage/spawn on the bare deck,
-  entry+exit continuity + one-height-authority (incl. physics wall sweeps
-  and visible-rail gap coverage at both edge crossings), end gates,
-  grade separation, left-hand traffic, nothing-else-enabled. PASS.
-- `.devtests/tatsumi-pa-placement-probe.mjs` — updated to the live-garage
-  state (exactly the entry+exit pair allowed; thresholds scaled to the
-  compact deck; twin reversibility kept). PASS.
-- `.devtests/pa-access-probe.mjs` — updated: deck garage instead of the
-  Shibaura shoulder trigger; twin still restores all 4 legacy lanes. PASS.
+- `.devtests/tatsumi-pa-flow-probe.mjs` — updated: asserts
+  `dressing === 'tatsumi'` + a sane `aisleV` instead of the bare-platform
+  flag; all continuity/gate/grade/traffic checks PASS again (they failed 4
+  at the pre-checkpoint baseline through the stale overrides).
+- `.devtests/tatsumi-pa-placement-probe.mjs`, `.devtests/pa-access-probe.mjs`
+  — PASS, unchanged.
 - Progressive suite (`progressive-merge-probe/-handoff/-model/-drive`,
-  `progressive-junction-classification`, `p4-diverge-continuity`) — all on
-  `legacyFlow` maps. PASS (model digest re-recorded, see §1).
+  `progressive-junction-classification`, `p4-diverge-continuity`) — PASS.
 - Generic gates: road-surface, guardrail probe + audit, merge-marking,
   marking-orientation, ab-marking-clipping, lateral-junction, grip. PASS.
-- `network-test.mjs` — same two pre-existing failures as the baseline
-  (stale total-km expectation; stale legacy route ids crash the tail).
-- `junction-finishing-probe` — FAIL(6) both here and at baseline (pre-existing
-  mouth-local noise at unrelated r6/ramp junctions).
-- `e2e.mjs` — 41/41 (boot → garage exit spawn on the deck → drive, recover,
-  tow, save/reload, no console errors). `dev-map-test.mjs` — 31/31 (no
-  prototype pins under live flow). `performance.mjs` — map build over its
-  4000 ms limit like the baseline (7.3 s vs 6.1 s; frame p95 improved
-  166.7 → 150.1 ms).
-- Screenshots (`.devtests/shots/`, gitignored): `FLOW-top-down` (compact
-  empty deck), `FLOW-spawn-chase`, `FLOW-entrance`, `FLOW-exit`,
-  `FLOW-drive-entry`/`FLOW-drive-exit` (the car mid-transition, no
-  sinking), `FLOW-side-elevation`, `FLOW-markings-chase(-before)`,
-  `FLOW-traffic-directions` — via `.devtests/tatsumi-pa-flow-shots.mjs`.
+- `junction-finishing-probe` — FAIL(27) vs FAIL(28) at the pre-checkpoint
+  baseline (pre-existing mouth-local noise from the editor map edits, one
+  fewer failure with the stale overrides skipped).
+- `network-test.mjs` — crashes at the baseline and here alike (stale legacy
+  expectations, pre-existing).
+- `e2e.mjs` — 39/41, `dev-map-test.mjs` — 30/31: identical scores and
+  identical failures at the baseline (a 404'd resource logged as a console
+  error, pre-existing).
+- `performance.mjs` — map build ~6.1–6.3 s both sides of the change (the
+  4000 ms gate was already failing); frame p95 within its 150 ms limit on
+  repeat runs.
+- Screenshots (`.devtests/shots/`, gitignored):
+  `FLOW-*-dressed.png` via `.devtests/tatsumi-pa-flow-shots.mjs dressed`
+  (spawn chase between the stall rows, entry/exit drive-throughs, top-down)
+  and the new `.devtests/tatsumi-pa-dressing-shots.mjs` close-ups
+  (`DRESS-lot-overview/stall-row/toilets-vending/ring-forecourt/
+  entry-signage/exit-signage`).
 
 ## Remaining / debt
 
-- The entry descent peaks at 4.7 % and the exit at 3.6 % — comfortably
-  drivable; a longer swing could soften them further.
-- game.js debug capture views (`p2-*`, `auxiliary`) reference legacy-flow
-  transitions/chainages; they no-op safely under live flow.
+- The stall/furniture layout constants live in `_buildTatsumiPaDressing`;
+  if the deck is ever re-fitted much shorter than ~100 m the far-side
+  u-plan (ring forecourt / toilets / vending) would need rescaling.
+- The editor's published `tatsumi_pa_entry`/`tatsumi_pa_exit` overrides in
+  `data/routes-smoothed.js` are currently skipped as stale (console warning
+  at load). Republish from the editor against the live deck — or clear
+  them — to silence the warnings.
 - The direct `wangan_0` exit anchor (`futureAnchors.wanganExit`) is still
   unbuilt (deliberate).
-- Map build time regressed ~1.2 s from the load-time reversal clone; the
-  4000 ms performance gate was already failing before it.
-
-## History
-
-The elevated-deck placement checkpoint (corridor discovery, axis fit,
-rectangle search, elevation, `_pushServiceArea` registration, pillar
-offsets in the median gap) is documented in the git history of this file
-(`34909c3` and earlier) and remains accurate for `_defineTatsumiDeck`
-sections 1–7.
+- Map build time and the junction-finishing/network-test failures inherited
+  from the editor map edits are unchanged (pre-existing, see Verification).

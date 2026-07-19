@@ -6,8 +6,9 @@
  *
  *  1. ACTIVE GARAGE — tatsumi_pa owns the only hasGarage flag; the ENTER
  *     trigger sits on the drivable deck, fires getGarageTransition, the
- *     minimap marker follows it, and the deck is flagged dressingMinimal
- *     (bare platform: no stalls, buildings, vending, lamps or signs).
+ *     minimap marker follows it, and the deck carries the dedicated
+ *     real-world dressing style (dressing === 'tatsumi', not the generic
+ *     recipe and not the bare dressingMinimal platform).
  *  2. SPAWN — initialSpawn (boot, garage exit, tow and crash recovery all
  *     route through game.js placeAtSpawn) is anchored to tatsumi_pa on the
  *     drivable deck, above collision, aligned with the deck axis toward the
@@ -65,7 +66,10 @@ check(area.width >= 18, `deck only ${area.width.toFixed(0)} m wide`);
 const garageAreas = map.serviceAreas.filter((candidate) => candidate.hasGarage);
 check(garageAreas.length === 1 && garageAreas[0].id === 'tatsumi_pa',
   `active garages: ${garageAreas.map((a) => a.id).join(', ') || '(none)'}`);
-check(area.dressingMinimal === true, 'deck is not flagged dressingMinimal (props would be built)');
+check(area.dressing === 'tatsumi' && area.dressingMinimal !== true,
+  'deck does not carry the dedicated Tatsumi dressing style');
+check(Number.isFinite(area.aisleV) && Math.abs(area.aisleV) > 1 && Math.abs(area.aisleV) < area.width * 0.25,
+  `deck aisleV missing or implausible (${area.aisleV})`);
 const entrance = area.garageEntrance;
 const entranceInfo = map.getRoadInfo(entrance.clone());
 check(!!entranceInfo?.inServiceArea && !!entranceInfo?.drivable, 'ENTER trigger not on the drivable deck');
