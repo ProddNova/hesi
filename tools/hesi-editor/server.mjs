@@ -38,8 +38,12 @@ const PROJECT_ENDPOINT = '/__hesi_editor_project';
 const BUILD_ENDPOINT = '/__hesi_editor_build';
 const COMMITS_ENDPOINT = '/__hesi_editor_commits';
 const ROUTES_ENDPOINT = '/__hesi_editor_routes';
+const ASSETS_ENDPOINT = '/__hesi_editor_assets';
+const CUSTOM_ASSETS_PATH = 'data/editor/custom-assets.json';
 const COMMITS_DIR = 'data/editor/commits';
 const MAX_PROJECT_BYTES = 2 * 1024 * 1024;
+// Custom assets embed face textures as data URLs, so they get a larger budget.
+const MAX_ASSETS_BYTES = 24 * 1024 * 1024;
 const MAX_COMMITS_LISTED = 200;
 
 const MIME = {
@@ -74,16 +78,45 @@ function projectFile(projectPath) {
   return { normalized, file };
 }
 
-async function readJsonBody(req) {
+async function readJsonBody(req, maxBytes = MAX_PROJECT_BYTES) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_PROJECT_BYTES) throw new Error('Project request exceeds 2 MiB');
+    if (size > maxBytes) throw new Error(`Request exceeds ${Math.round(maxBytes / 1024 / 1024)} MiB`);
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch (error) { throw new Error(`Request JSON is invalid: ${error.message}`); }
+}
+
+// Structural validation for the custom-assets document (Modeler output). The
+// browser-side builder (js/custom-assets.js) performs the full semantic pass;
+// the server stays dependency-free and rejects clearly malformed payloads.
+function validateCustomAssetsDocument(document) {
+  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isRecord(document)) throw new Error('Custom assets document must be an object');
+  if (document.version !== 1) throw new Error('Custom assets document version must be 1');
+  if (!isRecord(document.assets) || !isRecord(document.textures)) throw new Error('Custom assets document needs assets and textures objects');
+  if (document.worldTextures !== undefined && !isRecord(document.worldTextures)) throw new Error('worldTextures must be an object');
+  const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
+  for (const id of Object.keys(document.assets)) {
+    if (forbidden.has(id) || !/^custom:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid custom asset id: ${id}`);
+    if (!Array.isArray(document.assets[id]?.parts) || !document.assets[id].parts.length) throw new Error(`Asset ${id} needs a non-empty parts array`);
+  }
+  for (const [id, texture] of Object.entries(document.textures)) {
+    if (forbidden.has(id) || !/^tex:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid texture id: ${id}`);
+    if (typeof texture?.dataUrl !== 'string' || !texture.dataUrl.startsWith('data:image/')) throw new Error(`Texture ${id} must embed a data:image/... URL`);
+  }
+  return document;
+}
+
+async function saveCustomAssets(document) {
+  validateCustomAssetsDocument(document);
+  const serialized = `${JSON.stringify(document, null, 2)}\n`;
+  const file = resolve(ROOT, CUSTOM_ASSETS_PATH);
+  const backedUp = await writeFileSafe(file, serialized);
+  return { path: CUSTOM_ASSETS_PATH, bytes: Buffer.byteLength(serialized), backup: backedUp ? `${CUSTOM_ASSETS_PATH}.bak` : null };
 }
 
 // Full write into a temporary sibling, previous content copied to .bak, then an
@@ -343,6 +376,24 @@ const server = createServer(async (req, res) => {
       if (req.method === 'DELETE') {
         await rm(commitFile(scene, id), { force: true });
         sendJson(res, 200, { ok: true, id }, req.method);
+        return;
+      }
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);
+      return;
+    }
+    if (path === ASSETS_ENDPOINT) {
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const file = resolve(ROOT, CUSTOM_ASSETS_PATH);
+        let document = { version: 1, assets: {}, textures: {}, worldTextures: {} };
+        try { document = validateCustomAssetsDocument(JSON.parse(await readFile(file, 'utf8'))); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+        sendJson(res, 200, { ok: true, path: CUSTOM_ASSETS_PATH, document }, req.method);
+        return;
+      }
+      if (req.method === 'PUT') {
+        const payload = await readJsonBody(req, MAX_ASSETS_BYTES);
+        const result = await saveCustomAssets(payload.document);
+        sendJson(res, 200, { ok: true, ...result }, req.method);
         return;
       }
       sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);

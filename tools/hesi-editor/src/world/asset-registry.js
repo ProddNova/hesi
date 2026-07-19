@@ -134,6 +134,39 @@ export class AssetRegistry {
     }
   }
 
+  /**
+   * Registers (or refreshes) one Modeler-built custom asset. `components` are
+   * pre-built meshes flattened to the shared component shape; `definition` is
+   * the persisted document entry (kept for build ops and re-editing).
+   */
+  registerCustomAsset(definition, components) {
+    if (!definition?.id || !Array.isArray(components) || !components.length) return null;
+    const asset = {
+      id: definition.id,
+      kind: 'custom',
+      label: definition.label || definition.id,
+      description: definition.description || 'Custom modeled object',
+      layer: definition.layer || 'Props',
+      editorOwned: true,
+      sourceEntityId: null,
+      components,
+      baseWorldMatrix: new THREE.Matrix4(),
+      definition,
+    };
+    this.assets.set(definition.id, asset);
+    return asset;
+  }
+
+  removeCustomAsset(assetId) {
+    const asset = this.assets.get(assetId);
+    if (!asset || asset.kind !== 'custom') return false;
+    return this.assets.delete(assetId);
+  }
+
+  customAssets() {
+    return [...this.assets.values()].filter((asset) => asset.kind === 'custom');
+  }
+
   supports(entity) {
     return Boolean(entity?.assetId && this.assets.has(entity.assetId));
   }
@@ -145,6 +178,16 @@ export class AssetRegistry {
 
   catalog() {
     const entries = [];
+    // Modeler-built objects come first so new creations are easy to find.
+    for (const asset of this.customAssets().sort((a, b) => a.label.localeCompare(b.label))) {
+      entries.push({
+        id: asset.id,
+        label: asset.label,
+        description: asset.description,
+        kind: 'custom',
+        layer: asset.layer || 'Props',
+      });
+    }
     for (const id of CATALOG_ORDER) {
       const asset = this.assets.get(id);
       if (!asset) continue;

@@ -211,6 +211,56 @@ test('road route endpoint saves isolated source updates, rejects malformed data,
   }
 });
 
+test('custom assets endpoint round-trips the Modeler document', async () => {
+  const ASSET_FILES = [
+    new URL('../../../data/editor/custom-assets.json', import.meta.url),
+    new URL('../../../data/editor/custom-assets.json.bak', import.meta.url),
+  ];
+  const snapshots = await Promise.all(ASSET_FILES.map(snapshotOptional));
+  try {
+    const document = {
+      version: 1,
+      assets: {
+        'custom:0001': {
+          id: 'custom:0001',
+          label: 'Cestino test',
+          layer: 'Props',
+          parts: [{ kind: 'box', position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [0.5, 1, 0.5], color: '#5588aa', faces: {} }],
+        },
+      },
+      textures: { 'tex:0001': { name: 'top.png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' } },
+      worldTextures: { road: 'tex:0001' },
+    };
+    const put = await fetch(`${BASE}/__hesi_editor_assets`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ document }),
+    });
+    assert.equal(put.status, 200);
+    const saved = await put.json();
+    assert.equal(saved.path, 'data/editor/custom-assets.json');
+    const get = await fetch(`${BASE}/__hesi_editor_assets`);
+    assert.equal(get.status, 200);
+    const loaded = await get.json();
+    assert.equal(loaded.document.assets['custom:0001'].label, 'Cestino test');
+    assert.equal(loaded.document.worldTextures.road, 'tex:0001');
+    const badId = await fetch(`${BASE}/__hesi_editor_assets`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ document: { ...document, assets: { 'evil/../id': { parts: [{}] } } } }),
+    });
+    assert.equal(badId.status, 400);
+    const badTexture = await fetch(`${BASE}/__hesi_editor_assets`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ document: { ...document, textures: { 'tex:0002': { dataUrl: 'javascript:alert(1)' } } } }),
+    });
+    assert.equal(badTexture.status, 400);
+  } finally {
+    await Promise.all(ASSET_FILES.map((file, index) => restoreOptional(file, snapshots[index])));
+  }
+});
+
 test('commit endpoints snapshot, list, read, and delete map versions', async () => {
   const create = await fetch(`${BASE}/__hesi_editor_commits`, {
     method: 'POST',

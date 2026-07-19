@@ -66,6 +66,7 @@ export function createEditorShell(root) {
     sceneSwitch,
     element('span', 'toolbar-divider'),
     button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
+    button('Modeler', 'open-modeler', { title: 'Open the Object Modeler: create and texture PSX-style objects' }),
     element('span', 'toolbar-divider'),
     button('Move', 'transform-translate', { pressed: true, title: 'Move selected object (W)' }),
     button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected object (E)' }),
@@ -502,17 +503,37 @@ export function createEditorShell(root) {
 
   const renderAssets = () => {
     const panel = element('div', 'assets-panel');
-    panel.append(element('p', 'assets-hint', 'Pick an asset, then click a surface in the world to place it. Escape cancels placement.'));
+    panel.append(element('p', 'assets-hint', 'Pick an asset, then click a surface in the world to place it. Escape cancels placement. Use the Modeler to create and texture brand-new objects.'));
     const grid = element('div', 'asset-grid');
+    const createCard = element('div', 'asset-card');
+    createCard.append(element('b', '', '+ New object'), element('small', '', 'Model a new PSX-style object with textured faces in the Modeler'));
+    const createFooter = element('div', 'asset-card-footer');
+    createFooter.append(element('span', 'asset-kind custom', 'Modeler'));
+    const create = button('Open Modeler', 'open-modeler-card', { title: 'Create a new custom object' });
+    create.dataset.testid = 'assets-open-modeler';
+    create.addEventListener('click', () => triggerAction('modeler-new'));
+    createFooter.append(create);
+    createCard.append(createFooter);
+    grid.append(createCard);
     for (const entry of assetEntries) {
       const card = element('div', 'asset-card');
       card.append(element('b', '', entry.label), element('small', '', entry.description));
       const footer = element('div', 'asset-card-footer');
-      footer.append(element('span', `asset-kind ${entry.kind}`, entry.kind === 'primitive' ? 'Primitive' : 'World asset'));
+      const kindLabel = entry.kind === 'primitive' ? 'Primitive' : entry.kind === 'custom' ? 'Custom object' : 'World asset';
+      footer.append(element('span', `asset-kind ${entry.kind}`, kindLabel));
       const place = button('Place', 'place-asset', { title: `Place a new ${entry.label}` });
       place.dataset.testid = `place-${entry.id}`;
       place.addEventListener('click', () => triggerAction('place-asset', entry.id));
       footer.append(place);
+      const edit = button(entry.kind === 'custom' ? 'Edit' : 'Customize', 'edit-asset', {
+        title: entry.kind === 'custom'
+          ? `Edit ${entry.label} in the Modeler`
+          : `Open a customizable copy of ${entry.label} in the Modeler`,
+      });
+      edit.classList.add('asset-edit');
+      edit.dataset.testid = `edit-${entry.id}`;
+      edit.addEventListener('click', () => triggerAction(entry.kind === 'custom' ? 'modeler-edit-asset' : 'modeler-copy-asset', entry.id));
+      footer.append(edit);
       card.append(footer);
       grid.append(card);
     }
@@ -600,6 +621,7 @@ export function createEditorShell(root) {
         editButton(selectedEntity?.metadata?.locked ? 'Unlock' : 'Lock', 'toggle-lock', 'Prevent or allow selection and edits'),
         editButton('Duplicate', 'duplicate', 'Duplicate this asset as a new placed object (Ctrl+D)'),
         editButton('Delete', 'delete', generated ? 'Disable this generated object (Del)' : 'Remove this placed object (Del)'),
+        editButton('Assemble into object', 'assemble-selection', 'Combine the selected objects (e.g. a sign and its pole) into one single custom object in the Modeler'),
       );
       const renameRow = element('div', 'rename-row');
       const renameInput = document.createElement('input');
@@ -668,7 +690,9 @@ export function createEditorShell(root) {
       [
         ['Select', 'Click an object in the viewport · click again to cycle overlapping hits · Shift+click adds/removes objects · Esc clears'],
         ['Roads', 'Click asphalt or select a road → realistic draft asphalt appears · drag any orange point, endpoints included · right-click road adds · right-click point removes'],
-        ['Camera', 'Orbit: drag / wheel · Fly: click viewport, then WASD + Q/E, wheel speed, Shift boost'],
+        ['Camera', 'Orbit: drag / wheel · Fly: click viewport, then WASD · E/Space up · Q/CapsLock down · wheel speed · Shift boost'],
+        ['Modeler', 'Toolbar → Modeler: build PSX-style objects from simple parts, texture each face with images, edit vertices, assemble catalog assets, and replace world textures (road asphalt included)'],
+        ['Assemble', 'Shift+click multiple map objects (sign + pole, barriers, ...) → Edit tab → Assemble into object → one placeable asset'],
         ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
         ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],
         ['Add Object', '+ Add Object → pick an asset → click a surface to place · Esc cancels placement'],

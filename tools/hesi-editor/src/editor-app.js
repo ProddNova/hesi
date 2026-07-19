@@ -14,6 +14,10 @@ import { AssetRegistry } from './world/asset-registry.js';
 import { ProjectPersistence } from './overrides/project-persistence.js';
 import { createRoutePersistence } from './overrides/route-persistence.js';
 import { getScene, sceneFromSearch } from './scenes/scene-registry.js';
+import { CustomAssetStore } from './world/custom-asset-store.js';
+import { assembleDefinitionFromEntities, registerCustomAssets } from './world/custom-asset-integration.js';
+import { ModelerPanel } from './modeler/modeler-panel.js';
+import { applyWorldTextureOverrides } from '/js/custom-assets.js';
 
 export async function createEditorApp(root) {
   if (!root) throw new Error('Editor root element is missing');
@@ -36,6 +40,8 @@ export async function createEditorApp(root) {
   let placement = null;
   let roadEdit = null;
   let routePersistence = null;
+  let customAssetStore = null;
+  let modeler = null;
   let disposed = false;
   const collisionOverlay = new CollisionOverlay({ viewport });
   const viewFlags = { grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
@@ -181,6 +187,10 @@ export async function createEditorApp(root) {
     shell.showTab('assets');
     shell.setStatus('Choose an asset below, then click a surface in the world to place it · Esc cancels');
   });
+  shell.onToolbar('open-modeler', () => {
+    if (modeler) modeler.open();
+    else shell.setStatus('The Modeler is available once the world has loaded');
+  });
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));
@@ -216,8 +226,32 @@ export async function createEditorApp(root) {
       },
       'place-asset': () => {
         if (!placement || !assetRegistry) return;
+        if (modeler?.isOpen) modeler.close();
         const entry = assetRegistry.catalog().find((item) => item.id === detail);
         placement.begin(detail, entry?.label || detail);
+      },
+      'modeler-new': () => modeler?.open(null),
+      'modeler-edit-asset': () => modeler?.open(detail),
+      'modeler-copy-asset': () => modeler?.editCopyOfAsset(detail),
+      'assemble-selection': () => {
+        if (!modeler || !customAssetStore || !selection || !assetRegistry) return;
+        const entities = selection.selectedEntities?.length
+          ? [...selection.selectedEntities]
+          : (selection.selected ? [selection.selected] : []);
+        if (!entities.length) { shell.setStatus('Select the objects to assemble first (Shift+click adds to the selection)'); return; }
+        try {
+          const suggested = entities.length > 1 ? `${entities[0].name} assembly` : `${entities[0].name} object`;
+          const label = window.prompt('Name for the assembled object:', suggested);
+          if (!label?.trim()) return;
+          const definition = assembleDefinitionFromEntities(entities, assetRegistry, {
+            id: customAssetStore.newAssetId(),
+            label: label.trim(),
+          });
+          modeler.openAssembled(definition);
+          shell.setStatus(`Assembled ${definition.parts.length} object${definition.parts.length === 1 ? '' : 's'} into one · adjust in the Modeler, then Save Object`);
+        } catch (error) {
+          shell.setStatus(error.message);
+        }
       },
     };
     if (viewActions[action]) { viewActions[action](); return; }
@@ -273,6 +307,7 @@ export async function createEditorApp(root) {
   });
 
   const onKeyDown = (event) => {
+    if (modeler?.isOpen) return; // the Modeler owns its own shortcuts
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '') || event.target?.isContentEditable || event.target?.closest?.('[contenteditable="true"]')) return;
     const commandKey = event.ctrlKey || event.metaKey;
     // Saving must remain reliable in every navigation mode. Clear held fly
@@ -369,6 +404,19 @@ export async function createEditorApp(root) {
       onStatus: (message) => shell.setStatus(message),
     });
     assetRegistry = new AssetRegistry({ editorGroup: adapter.editorObjectsGroup }).collect(adapter.entities);
+    // Modeler-built custom assets join the shared catalog before the saved
+    // project loads, so placed custom objects reconstruct on reload. Saved
+    // world texture overrides (custom road asphalt, ...) apply to the live map.
+    customAssetStore = new CustomAssetStore({ onStatus: (message) => shell.setStatus(message) });
+    try {
+      shell.setLoading(true, 'Loading custom modeled assets');
+      await customAssetStore.load();
+      const registered = registerCustomAssets(assetRegistry, customAssetStore.document);
+      if (registered) shell.setStatus(`Loaded ${registered} custom modeled asset${registered === 1 ? '' : 's'}`);
+      if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
+    } catch (error) {
+      shell.setStatus(`Custom assets unavailable · ${error.message}`);
+    }
     transformManager = new TransformManager({
       viewport, history, projectState, registry,
       onChange: (entity) => {
@@ -405,6 +453,18 @@ export async function createEditorApp(root) {
         roadDraftDirty = Boolean(dirty);
         syncPublishState();
       },
+    });
+    modeler = new ModelerPanel({
+      host: shell.root,
+      store: customAssetStore,
+      assetRegistry,
+      onStatus: (message) => shell.setStatus(message),
+      onAssetsChanged: () => shell.setAssets(assetRegistry.catalog()),
+      onWorldTexturesChanged: () => {
+        if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
+      },
+      isAssetInUse: (assetId) => projectState.toJSON().placedObjects.some((placedRecord) => placedRecord.assetId === assetId),
+      onOpenChange: (open) => viewport.setNavigationBlocked(open, 'modeler-overlay'),
     });
     shell.setAssets(assetRegistry.catalog());
     syncViewState();
@@ -450,6 +510,7 @@ export async function createEditorApp(root) {
     window.removeEventListener('beforeunload', onBeforeUnload);
     window.removeEventListener('pagehide', dispose);
     unsubscribeRegistry();
+    modeler?.dispose();
     placement?.dispose();
     roadEdit?.dispose();
     collisionOverlay.dispose();
@@ -490,6 +551,8 @@ export async function createEditorApp(root) {
     get placement() { return placement; },
     get roadEdit() { return roadEdit; },
     get routePersistence() { return routePersistence; },
+    get modeler() { return modeler; },
+    get customAssetStore() { return customAssetStore; },
     get adapter() { return adapter; },
     applyPreset,
     showError(message) { shell.showError(message instanceof Error ? message : new Error(String(message))); },

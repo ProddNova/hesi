@@ -84,6 +84,15 @@ const OPERATION_VALIDATORS = {
     if (!BUILD_PRIMITIVES.includes(op.primitive)) errors.push(`${path}.primitive must be one of ${BUILD_PRIMITIVES.join(', ')}`);
     validateTransformFields(op, path, errors);
   },
+  // Add a Modeler-built custom asset; the game rebuilds it from the shared
+  // data/editor/custom-assets.json document (js/custom-assets.js).
+  'place-custom'(op, path, errors) {
+    if (op.name !== undefined && typeof op.name !== 'string') errors.push(`${path}.name must be a string`);
+    if (typeof op.assetId !== 'string' || !/^custom:[a-z0-9][a-z0-9_-]{0,80}$/i.test(op.assetId)) {
+      errors.push(`${path}.assetId must be a custom:<id> asset id`);
+    }
+    validateTransformFields(op, path, errors);
+  },
 };
 
 export function validateBuildDocument(document) {

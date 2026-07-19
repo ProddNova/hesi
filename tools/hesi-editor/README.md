@@ -98,6 +98,38 @@ junction boundaries. If the normal raw-route smoothing pipeline later
 regenerates `data/routes-smoothed.*`, press **Apply to Game** again to reapply
 the saved editor source.
 
+## Object Modeler
+
+The toolbar's **Modeler** button (also reachable from the Assets tab) opens a
+full-screen modeling section that is always available inside the editor:
+
+- build objects from simple PSX-style parts: box, cylinder, pyramid, cone,
+  wedge, plane, and low-segment sphere; move/rotate/scale each part with a
+  gizmo (`W`/`E`/`R`) or numeric fields
+- **Faces mode**: click any face of a part and attach an image to it —
+  making a bin means uploading the photos of its top, bottom, and sides;
+  textures use nearest filtering for the PSX look, and one uploaded image can
+  be reused across faces and objects
+- **Vertices mode**: drag welded vertex handles to deform primitives into
+  hand-made low-poly shapes (offsets are saved with the object)
+- **Assembly**: add any existing catalog asset (lamp, sign, barrier segment,
+  or another custom object) as a part, so split map elements become one
+  object. In the map editor, `Shift`-select several objects (e.g. a sign and
+  its pole) and use *Edit → Assemble into object* to convert the live
+  selection into a single custom asset
+- **Edit existing objects**: custom assets reopen in the Modeler with *Edit*;
+  built-in world assets open as a customizable copy with *Customize*
+- **World textures**: replace the repeated textures of the generated map —
+  road asphalt (tiled per road segment), alternate/service asphalt, concrete,
+  barriers, buildings, and tunnel walls — with uploaded images
+
+Saved objects land in `data/editor/custom-assets.json` (textures embedded as
+data URLs) through the dev server's `/__hesi_editor_assets` endpoint, join the
+Assets catalog immediately, and are placeable like any world asset. Builds
+reference them with `place-custom` operations; the playable game rebuilds
+them — and applies world texture overrides — from the same saved document via
+`js/custom-assets.js` (shared builder) and `js/editor-map-patch.js`.
+
 ## Commits (map versions)
 
 The Project tab has a **Map versions** panel (also reachable with the
@@ -127,8 +159,9 @@ available on Windows.
   with a one-key toggle to the original game night lighting (`L`), exposure
   slider, and full-fog toggle under the View menu
 - orbit and dedicated no-clip fly cameras
-- fly controls: click viewport for mouse look, `W/A/S/D`, `Q/E` down/up,
-  `Space` up, `Shift`, mouse wheel, and `Escape`
+- fly controls: click viewport for mouse look, `W/A/S/D`, `E`/`Space` up,
+  `Q`/`CapsLock` down, `Shift` boost, mouse wheel, and `Escape` (`Ctrl` combos
+  are browser-reserved, so `CapsLock` is the reliable descend key)
 - first-person crosshair in fly mode (solid while the pointer is locked)
 - slow, normal, and fast speed presets
 - metadata-driven Tatsumi PA, initial-spawn, map-center, and entire-world views
