@@ -4,12 +4,6 @@
     "name": "HESI Main World"
   },
   "entityOverrides": {
-    "barrier-instance-batch:5-n7-box-fence": {
-      "visible": false
-    },
-    "barrier-instance-batch:6-n7-box-fence": {
-      "visible": false
-    },
     "generated-prop-batch:6-n7-unknown-garage-transition-marker-10": {
       "transform": {
         "position": [
