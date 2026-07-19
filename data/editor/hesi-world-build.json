@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-19T20:07:59.496Z",
+  "generatedAt": "2026-07-19T21:58:46.315Z",
   "project": {
-    "draftSignature": "fnv1a32:185d83d8",
+    "draftSignature": "fnv1a32:95b64e5b",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -54,6 +54,28 @@
       "visible": false
     },
     {
+      "name": "sign 辰巳第一PA|TATSUMI No.1 PA",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        3725.33393,
+        61.57171,
+        -4036.79214
+      ],
+      "quaternion": [
+        0,
+        0.56002,
+        0,
+        0.82848
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
       "name": "sign トイレ|TOILET",
       "nameIndex": 0,
       "op": "object",
@@ -80,9 +102,9 @@
       "nameIndex": 0,
       "op": "object",
       "position": [
-        3646.5151,
+        3645.31152,
         57.1103,
-        -4056.63133
+        -4057.11476
       ],
       "quaternion": [
         0,
@@ -93,7 +115,7 @@
       "scale": [
         1,
         1,
-        1.05421
+        1.06786
       ],
       "visible": true
     },
@@ -512,6 +534,52 @@
       "op": "instance"
     },
     {
+      "index": 18,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3732.60449,
+        48.69563,
+        -4026.59155,
+        1
+      ],
+      "mesh": "chunk 6,-7 lamppost:concrete",
+      "op": "instance"
+    },
+    {
+      "index": 18,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3733.43726,
+        57.95562,
+        -4028.71387,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:lampSodium",
+      "op": "instance"
+    },
+    {
       "index": 0,
       "matrix": [
         0,
@@ -578,6 +646,236 @@
         1
       ],
       "mesh": "chunk 5,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 55,
+      "matrix": [
+        -0.05591,
+        0,
+        0.13919,
+        0,
+        0,
+        0.02,
+        0,
+        0,
+        -80.29177,
+        -0.00009,
+        -32.25277,
+        0,
+        3682.229,
+        57.70171,
+        -4039.26465,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 71,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3627.49048,
+        57.70171,
+        -4056.26294,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 72,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3625.26343,
+        57.70171,
+        -4057.15771,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 73,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3623.03638,
+        57.70171,
+        -4058.05225,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 74,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3620.80933,
+        57.70171,
+        -4058.94678,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 75,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3618.58228,
+        57.70171,
+        -4059.84131,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 76,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3616.35522,
+        57.70171,
+        -4060.73608,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 77,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3614.34717,
+        57.70171,
+        -4060.06421,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 78,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3612.19336,
+        57.70171,
+        -4060.43311,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 79,
+      "matrix": [
+        -0.41596,
+        0,
+        0.05812,
+        0,
+        0,
+        0.00753,
+        0,
+        0,
+        -1.00222,
+        0,
+        -7.1727,
+        0,
+        3610.03247,
+        57.69547,
+        -4060.85547,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
       "op": "instance"
     },
     {
@@ -917,6 +1215,121 @@
         0,
         0,
         0,
+        3709.05127,
+        59.62171,
+        -4019.22388,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
+      "index": 1,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3675.98145,
+        59.62171,
+        -4032.50781,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
+      "index": 2,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3661.80859,
+        59.62171,
+        -4038.20093,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
+      "index": 3,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3633.46313,
+        59.62171,
+        -4049.5874,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
+      "index": 33,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3725.33398,
+        59.07171,
+        -4036.79224,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:concrete",
+      "op": "instance"
+    },
+    {
+      "index": 0,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
         3616.87793,
         58.82171,
         -4080.95117,
@@ -1041,6 +1454,98 @@
       "op": "instance"
     },
     {
+      "index": 6,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3711.90234,
+        58.92171,
+        -4020.44067,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedBody",
+      "op": "instance"
+    },
+    {
+      "index": 7,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3678.83252,
+        58.92171,
+        -4033.72485,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedBody",
+      "op": "instance"
+    },
+    {
+      "index": 8,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3664.65967,
+        58.92171,
+        -4039.41797,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedBody",
+      "op": "instance"
+    },
+    {
+      "index": 9,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3636.31421,
+        58.92171,
+        -4050.80444,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedBody",
+      "op": "instance"
+    },
+    {
       "index": 0,
       "matrix": [
         -0.07455,
@@ -1062,6 +1567,50 @@
       ],
       "mesh": "chunk 6,-7 box:konbini",
       "op": "instance"
+    },
+    {
+      "assetId": "custom:0001",
+      "name": "Macchinetta_primo_test",
+      "op": "place-custom",
+      "position": [
+        3625.88785,
+        57.67484,
+        -4052.00744
+      ],
+      "quaternion": [
+        0.00015,
+        0.98211,
+        0.00276,
+        0.18828
+      ],
+      "scale": [
+        1.32795,
+        1.33195,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0001",
+      "name": "Macchinetta_primo_test copy",
+      "op": "place-custom",
+      "position": [
+        3624.30866,
+        57.67484,
+        -4052.59217
+      ],
+      "quaternion": [
+        0.00057,
+        0.98306,
+        -0.0009,
+        0.18328
+      ],
+      "scale": [
+        1.32795,
+        1.33195,
+        1
+      ],
+      "visible": true
     }
   ]
 }

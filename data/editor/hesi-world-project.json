@@ -27,15 +27,18 @@
       },
       "visible": false
     },
+    "generated-prop-batch:6-n7-unknown-sign-pa-tatsumi-no-1-pa-8": {
+      "visible": false
+    },
     "generated-prop-batch:6-n7-unknown-sign-toilet-7": {
       "visible": false
     },
     "generated-prop-batch:6-n7-unknown-tatsumi-pa-deck-6": {
       "transform": {
         "position": [
-          3646.5151,
+          3645.31152,
           57.1103,
-          -4056.63133
+          -4057.11476
         ],
         "rotation": [
           3.14159,
@@ -45,7 +48,7 @@
         "scale": [
           1,
           1,
-          1.05421
+          1.06786
         ]
       }
     },
@@ -76,6 +79,9 @@
     "lamp:wangan-1:0645": {
       "visible": false
     },
+    "lamp:wangan-1:0646": {
+      "visible": false
+    },
     "marking:tatsumi-pa-exit:0001": {
       "visible": false
     },
@@ -84,6 +90,102 @@
     },
     "marking:tatsumi-pa-exit:0003": {
       "visible": false
+    },
+    "marking:wangan-0:0021": {
+      "transform": {
+        "position": [
+          3682.2291,
+          57.70171,
+          -4039.26466
+        ],
+        "rotation": [
+          3.14159,
+          -1.18883,
+          3.14159
+        ],
+        "scale": [
+          0.15,
+          0.02,
+          86.52751
+        ]
+      }
+    },
+    "marking:wangan-0:0022": {
+      "visible": false
+    },
+    "marking:wangan-0:0023": {
+      "visible": false
+    },
+    "marking:wangan-0:0024": {
+      "visible": false
+    },
+    "marking:wangan-0:0025": {
+      "visible": false
+    },
+    "marking:wangan-0:0026": {
+      "visible": false
+    },
+    "marking:wangan-0:0027": {
+      "visible": false
+    },
+    "marking:wangan-0:0028": {
+      "transform": {
+        "position": [
+          3614.34705,
+          57.70171,
+          -4060.06418
+        ],
+        "rotation": [
+          -3.14159,
+          -0.13883,
+          -3.14159
+        ],
+        "scale": [
+          0.42,
+          0.02,
+          9.25797
+        ]
+      },
+      "visible": false
+    },
+    "marking:wangan-0:0029": {
+      "transform": {
+        "position": [
+          3612.19343,
+          57.70171,
+          -4060.43319
+        ],
+        "rotation": [
+          -3.14159,
+          -0.13883,
+          -3.14159
+        ],
+        "scale": [
+          0.42,
+          0.02,
+          8.19671
+        ]
+      },
+      "visible": false
+    },
+    "marking:wangan-0:0030": {
+      "transform": {
+        "position": [
+          3610.03241,
+          57.69547,
+          -4060.85539
+        ],
+        "rotation": [
+          -3.14159,
+          -0.13883,
+          -3.14159
+        ],
+        "scale": [
+          0.42,
+          0.00753,
+          7.24238
+        ]
+      }
     },
     "marking:wangan-1:0032": {
       "visible": false
@@ -127,6 +229,21 @@
     "pillar:ramp-9:0004": {
       "visible": false
     },
+    "prop:ramp-8:0063": {
+      "visible": false
+    },
+    "prop:ramp-8:0064": {
+      "visible": false
+    },
+    "prop:ramp-8:0065": {
+      "visible": false
+    },
+    "prop:ramp-8:0066": {
+      "visible": false
+    },
+    "prop:ramp-9:0045": {
+      "visible": false
+    },
     "prop:ramp-9:0081": {
       "visible": false
     },
@@ -143,6 +260,18 @@
       "visible": false
     },
     "prop:tatsumi-pa-exit:0005": {
+      "visible": false
+    },
+    "prop:wangan-0:3134": {
+      "visible": false
+    },
+    "prop:wangan-0:3135": {
+      "visible": false
+    },
+    "prop:wangan-0:3136": {
+      "visible": false
+    },
+    "prop:wangan-0:3137": {
       "visible": false
     },
     "prop:wangan-1:3211": {
@@ -165,7 +294,60 @@
       }
     }
   },
-  "placedObjects": [],
+  "placedObjects": [
+    {
+      "assetId": "custom:0001",
+      "id": "placed:0001",
+      "layer": "Props",
+      "locked": false,
+      "name": "Macchinetta_primo_test",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          3625.88785,
+          57.67484,
+          -4052.00744
+        ],
+        "rotation": [
+          -3.13583,
+          0.37882,
+          3.1408
+        ],
+        "scale": [
+          1.32795,
+          1.33195,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0001",
+      "id": "placed:0002",
+      "layer": "Props",
+      "locked": false,
+      "name": "Macchinetta_primo_test copy",
+      "sourceEntityId": "placed:0001",
+      "transform": {
+        "position": [
+          3624.30866,
+          57.67484,
+          -4052.59217
+        ],
+        "rotation": [
+          3.13947,
+          0.36865,
+          -3.14004
+        ],
+        "scale": [
+          1.32795,
+          1.33195,
+          1
+        ]
+      },
+      "visible": true
+    }
+  ],
   "groups": [],
   "editorState": {}
 }
