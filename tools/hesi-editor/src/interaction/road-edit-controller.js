@@ -321,9 +321,18 @@ export class RoadEditController {
       if (data) this.onStatus(`Road route not found in data · ${routeId}`);
       return;
     }
-    this.synthetic = !sourceRoute;
-    this.yOffset = this.synthetic ? 0 : (this.adapter?.map?.roadNetworkYOffset || 0);
-    this.route = sourceRoute || {
+    // The runtime route owns the authoritative classification. Inferring it
+    // only from sourceRoute is unsafe while generated route data is being
+    // rebuilt or an older browser module is still loaded: a runtime-generated
+    // connector can then appear in both places and be saved without the
+    // `synthetic` flag, which the persistence schema correctly rejects.
+    const runtimeSynthetic = this.runtimeRoute?.synthetic;
+    this.synthetic = typeof runtimeSynthetic === 'boolean'
+      ? runtimeSynthetic
+      : (this.activeEntity?.metadata?.runtimeSynthetic === true || !sourceRoute);
+    const useSourceRoute = Boolean(sourceRoute && !this.synthetic);
+    this.yOffset = useSourceRoute ? (this.adapter?.map?.roadNetworkYOffset || 0) : 0;
+    this.route = useSourceRoute ? sourceRoute : {
       id: this.runtimeRoute.id,
       name: this.runtimeRoute.name,
       closed: Boolean(this.runtimeRoute.closed),

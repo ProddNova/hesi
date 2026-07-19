@@ -157,10 +157,27 @@ try {
   // Runtime-generated Tatsumi connectors must expose the same editing UX as
   // production routes. Exercise real right-click events: point removes,
   // orange road surface adds, and both rebuild the analytic collision curve.
+  // Simulate a stale production module containing the same id. The runtime
+  // route's explicit synthetic marker must still win, otherwise Save Draft
+  // sends the route as production data and the server rejects it.
+  await page.evaluate(() => {
+    const controller = window.hesiEditor.roadEdit;
+    const runtimeRoute = window.hesiEditor.adapter.map.routes.get('tatsumi_pa_exit');
+    controller.routeData.routes.push({
+      id: runtimeRoute.id,
+      name: runtimeRoute.name,
+      points: runtimeRoute.points.map((point) => point.toArray()),
+    });
+  });
   await page.getByTestId('hierarchy-search').fill('Tatsumi PA exit');
   await page.locator('[data-entity-id="road:tatsumi-pa-exit"]').click();
   await page.waitForFunction(() => window.hesiEditor.roadEdit?.route?.id === 'tatsumi_pa_exit'
     && window.hesiEditor.roadEdit?.synthetic === true);
+  await page.evaluate(() => {
+    const routes = window.hesiEditor.roadEdit.routeData.routes;
+    const staleIndex = routes.findIndex((route) => route.id === 'tatsumi_pa_exit');
+    if (staleIndex >= 0) routes.splice(staleIndex, 1);
+  });
   const syntheticBaseline = await page.evaluate(() => {
     const app = window.hesiEditor;
     const controller = app.roadEdit;
@@ -209,10 +226,27 @@ try {
     || deletedSynthetic.runtime !== deletedSynthetic.source) {
     throw new Error(`Right-click point deletion did not update live collision: ${JSON.stringify({ syntheticBaseline, deletedSynthetic })}`);
   }
-  await page.keyboard.press('Control+Z');
-  await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count,
-    syntheticBaseline.pointCount);
-  await page.evaluate(() => window.hesiEditor.roadEdit.clearDirty());
+  const syntheticDraftNavigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+  await page.keyboard.press('Control+S');
+  await syntheticDraftNavigation;
+  await page.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'real'
+    && window.hesiEditor.roadEdit?.route?.id === 'tatsumi_pa_exit'
+    && window.hesiEditor.roadEdit?.synthetic === true, null, { timeout: 60000 });
+  await page.waitForSelector('[data-testid="loading-overlay"]', { state: 'hidden' });
+  const savedSynthetic = await page.evaluate(async () => {
+    const response = await fetch('/__hesi_editor_routes', { cache: 'no-store' });
+    const payload = await response.json();
+    const saved = payload.document?.syntheticRoutes?.tatsumi_pa_exit;
+    return {
+      ok: response.ok && payload.ok,
+      pointCount: saved?.points?.length || 0,
+      dirty: window.hesiEditor.roadEdit.hasDirty(),
+    };
+  });
+  if (!savedSynthetic.ok || savedSynthetic.pointCount !== syntheticBaseline.pointCount - 1
+    || savedSynthetic.dirty) {
+    throw new Error(`Synthetic route Save Draft payload is invalid: ${JSON.stringify(savedSynthetic)}`);
+  }
 
   const addTarget = await page.evaluate(() => {
     const app = window.hesiEditor;
@@ -248,7 +282,7 @@ try {
   if (!addTarget || addTarget.handleClearance < 5) throw new Error(`Could not find a clear orange road-preview target: ${JSON.stringify(addTarget)}`);
   await page.mouse.click(addTarget.x, addTarget.y, { button: 'right' });
   await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count + 1,
-    syntheticBaseline.pointCount);
+    savedSynthetic.pointCount);
   const addedSynthetic = await page.evaluate(() => ({
     source: window.hesiEditor.roadEdit.route.points.length,
     runtime: window.hesiEditor.roadEdit.runtimeRoute.points.length,
@@ -261,7 +295,7 @@ try {
   await page.screenshot({ path: path.join(OUT, 'checkpoint-road-tatsumi-editing.png'), fullPage: true });
   await page.keyboard.press('Control+Z');
   await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count,
-    syntheticBaseline.pointCount);
+    savedSynthetic.pointCount);
   await page.evaluate(() => window.hesiEditor.roadEdit.clearDirty());
 
   await page.getByTestId('hierarchy-search').fill('lamp:wangan-0:0042');
