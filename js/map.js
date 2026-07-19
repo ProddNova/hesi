@@ -1021,11 +1021,37 @@ export class HighwayMap {
     const overrides = ROUTE_DATA.meta?.editorRoadOverrides?.syntheticRoutes;
     if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return;
     for (const [routeId, entry] of Object.entries(overrides)) {
+      if (this._syntheticOverrideIsStale(routeId, entry?.points)) {
+        console.warn(`Shutoko map: stale synthetic route override skipped (no longer reaches its lot): ${routeId}`);
+        continue;
+      }
       // Endpoint moves are deliberate editor output here, so accept them.
       if (!this.applyEditorRouteOverride(routeId, entry?.points, { endpointTolerance: Infinity })) {
         console.warn(`Shutoko map: synthetic editor route override was not applied: ${routeId}`);
       }
     }
+  }
+
+  /**
+   * A published override for a PA connector is only valid while its on-deck
+   * terminus still lands on the lot it serves. The deck rectangle is
+   * re-fitted from the live ramp geometry on every load, so an override
+   * captured against older ramps can drift clear off the deck (the lane then
+   * ends mid-air short of the lot); keep the runtime-built connector instead.
+   */
+  _syntheticOverrideIsStale(routeId, pointArrays) {
+    if (!Array.isArray(pointArrays) || pointArrays.length < 2) return false;
+    const area = this.serviceAreas.find(
+      (candidate) => candidate.entryRouteId === routeId || candidate.exitRouteId === routeId,
+    );
+    if (!area) return false;
+    const terminus = area.entryRouteId === routeId ? pointArrays.at(-1) : pointArrays[0];
+    if (!Array.isArray(terminus) || terminus.length !== 3 || !terminus.every(Number.isFinite)) return true;
+    const du = (terminus[0] - area.center.x) * area.tangent.x + (terminus[2] - area.center.z) * area.tangent.z;
+    const dv = (terminus[0] - area.center.x) * area.normal.x + (terminus[2] - area.center.z) * area.normal.z;
+    return Math.abs(du) > area.length * 0.5 - 0.5
+      || Math.abs(dv) > area.width * 0.5 - 0.5
+      || Math.abs(terminus[1] - area.elevation) > 1.5;
   }
 
   _polylineLength(points, closed) {
@@ -1885,14 +1911,18 @@ export class HighwayMap {
     // unbroken.
     area.fenceOpenings = [];
 
-    // 9. Active garage on the (deliberately empty) deck: no building and no
-    //    props for now — just the pulsing ENTER ring across the aisle from
-    //    the openings, the perimeter kerb/fence and the spawn.
+    // 9. Active garage on the deck plus the real-world dressing: the lot is
+    //    furnished after the real Tatsumi No.1 PA (perpendicular stalls,
+    //    toilet block, vending row, smoking corner — no shop, no fuel) by
+    //    _buildTatsumiPaDressing, which reads aisleV to keep the drive lane,
+    //    the spawn and the ENTER ring approach clear of props. The garage
+    //    itself stays ring-only (no building fits the 27 m deck).
     //    _defineServiceAreas clears every other lot's garage flag while this
     //    one is active; the paAccessLanes twin never reaches this block, so
     //    the legacy Shibaura garage survives there untouched.
     area.hasGarage = true;
-    area.dressingMinimal = true;
+    area.dressing = 'tatsumi';
+    area.aisleV = aisleV;
     area.garageEntrance = deckPoint(-length * 0.22, -rampSideSign * 5);
     area.garageEntrance.y = elevation + 0.15;
     area.garageLotAnchor = deckPoint(-length * 0.22 - 12, -rampSideSign * 5);
@@ -6938,9 +6968,15 @@ export class HighwayMap {
 
       // Internal dressing (stalls, parked cars, buildings, vending, lamps,
       // signs, markers) is skipped for a deliberately bare lot
-      // (area.dressingMinimal — the Tatsumi deck), which keeps only the
-      // slab, pillars, perimeter kerb/fence and the garage ENTER ring.
+      // (area.dressingMinimal), which keeps only the slab, pillars,
+      // perimeter kerb/fence and the garage ENTER ring. The Tatsumi deck
+      // gets its own real-world layout instead of the generic recipe.
       if (area.dressingMinimal) {
+        if (area.hasGarage) this._buildGarageExterior(area);
+        continue;
+      }
+      if (area.dressing === 'tatsumi') {
+        this._buildTatsumiPaDressing(area, random, carColors);
         if (area.hasGarage) this._buildGarageExterior(area);
         continue;
       }
@@ -7060,13 +7096,156 @@ export class HighwayMap {
     }
   }
 
+  /**
+   * Tatsumi No.1 PA dressing, modeled on the real lot (Shuto Route 9 at
+   * Tatsumi JCT): perpendicular small-car stalls along both long edges, a
+   * single-storey toilet block with a lit front, a vending-machine row, a
+   * smoking corner, tall sodium poles, entrance/exit signage and painted
+   * one-way flow — and, like the real thing, no shop and no fuel. Everything
+   * is laid out in the deck frame (u along the one-way flow, v across) so
+   * the fitted rectangle can move or resize without breaking the layout.
+   *
+   * Kept clear by construction: the aisle band the entry/exit strips ride
+   * (|v - aisleV| < 3.5), the spawn at u=0 on the aisle, the garage ENTER
+   * ring forecourt (no far-side stalls within 13.5 m of the ring centre)
+   * and both deck ends where the connectors cross. Props are visual only —
+   * lot collision stays the flat slab — so nothing here affects physics.
+   */
+  _buildTatsumiPaDressing(area, random, carColors) {
+    const s = Math.sign(area.aisleV ?? -1) || -1; // aisle side of the deck axis
+    const aisleV = area.aisleV ?? s * 3.2;
+    const halfL = area.length * 0.5;
+    const halfW = area.width * 0.5;
+    const tangent = area.tangent;
+    const outward = area.normal;
+    const alongQ = yawQuaternion(tangent);   // local +Z runs along the lot
+    const acrossQ = yawQuaternion(outward);  // local +Z runs across the lot
+    const at = (u, v, y = 0) => {
+      const point = area.center.clone().addScaledVector(tangent, u).addScaledVector(outward, v);
+      point.y = area.elevation + y;
+      return point;
+    };
+    const ringU = (area.garageEntrance.x - area.center.x) * tangent.x
+      + (area.garageEntrance.z - area.center.z) * tangent.z;
+
+    // --- perpendicular stalls (backed in, noses to the aisle — meet style) ---
+    const STALL_DEPTH = 5.0;
+    const STALL_PITCH = 2.8;
+    const parkCar = (u, row) => {
+      const color = carColors[Math.floor(random() * carColors.length)];
+      const vCar = row.back + row.dir * 2.55; // 4.1 m body + gap to the fence
+      const orientation = yawQuaternion(outward.clone().multiplyScalar(row.dir))
+        .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (random() - 0.5) * 0.1));
+      this._instance(at(u, vCar, 0.55), vec(1.72, 0.6, 4.1), orientation, color, 'box:parkedBody');
+      // cabin sits aft — reads as nose-out even on a box car
+      this._instance(at(u, vCar - row.dir * 0.45, 1.05), vec(1.5, 0.42, 2.0), orientation, null, 'box:parkedGlass');
+    };
+    const rows = [
+      // aisle-side row: one unbroken run, exactly like the real kerb line
+      { back: s * (halfW - 0.45), dir: -s, occupancy: 0.5, lampU: [-22, 26],
+        segments: [[-halfL + 6, halfL - 6]] },
+      // far-side row: interrupted by the garage-ring forecourt and the toilet block
+      { back: -s * (halfW - 0.45), dir: s, occupancy: 0.55, lampU: [-44, 2],
+        segments: [[-halfL + 6, ringU - 13.5], [ringU + 13.5, 16.5]] },
+    ];
+    for (const row of rows) {
+      for (const [from, to] of row.segments) {
+        const count = Math.floor((to - from) / STALL_PITCH);
+        if (count < 1) continue;
+        for (let i = 0; i <= count; i += 1) {
+          this._instance(at(from + i * STALL_PITCH, row.back + row.dir * STALL_DEPTH * 0.5, 0.03),
+            vec(0.12, 0.03, STALL_DEPTH), acrossQ, null, 'box:marking');
+        }
+        for (let i = 0; i < count; i += 1) {
+          const u = from + (i + 0.5) * STALL_PITCH;
+          if (row.lampU.some((lamp) => Math.abs(u - lamp) < 1.7)) continue; // pole stands here
+          if (random() < row.occupancy) parkCar(u, row);
+        }
+      }
+    }
+
+    // --- toilet block (the PA's only building) + walkway ---
+    const buildV = -s * (halfW - 3.2);
+    this._instance(at(25, buildV, 1.6), vec(5.4, 3.2, 14), alongQ, null, 'box:garage');
+    this._instance(at(25, buildV, 3.32), vec(5.9, 0.28, 14.6), alongQ, null, 'box:concreteDark');
+    this._instance(at(25, buildV + s * 2.72, 1.15), vec(0.22, 1.9, 9), alongQ, null, 'box:konbini');
+    const toiletSign = this._makeSignMesh('トイレ|TOILET', '#175ba5', 3.6, 1.5, true);
+    const toiletSignPos = at(25, buildV + s * 2.78, 2.55);
+    toiletSign.position.copy(toiletSignPos);
+    toiletSign.quaternion.copy(yawQuaternion(outward.clone().multiplyScalar(s)));
+    this._addChunkMesh(toiletSign, toiletSignPos);
+    this._instance(at(25, aisleV - s * 8.8, 0.07), vec(7, 1, 5), alongQ, null, 'pool:lightPool');
+    for (let i = 0; i < 6; i += 1) { // zebra walkway: stalls -> toilets
+      this._instance(at(25, aisleV - s * (4.4 + i * 1.2), 0.03), vec(0.55, 0.02, 2.4), alongQ, null, 'box:marking');
+    }
+
+    // --- vending row + smoking corner along the far fence ---
+    const vendingColors = [0xff5f6d, 0x8ad9ff, 0xfff2c9, 0xff5f6d, 0x8ad9ff];
+    for (let i = 0; i < 5; i += 1) {
+      this._instance(at(35.2 + i * 2.0, -s * (halfW - 1.05), 1.15), vec(1.55, 2.3, 0.85),
+        yawQuaternion(outward.clone().multiplyScalar(s)), vendingColors[i], 'box:vending');
+    }
+    this._instance(at(39.2, -s * (halfW - 3.4), 0.07), vec(10, 1, 5.5), alongQ, null, 'pool:lightPool');
+    this._instance(at(45.8, -s * 12.2, 0.85), vec(0.12, 1.7, 2.8), acrossQ, null, 'box:fence');
+    this._instance(at(48.6, -s * (halfW - 0.9), 0.28), vec(0.6, 0.5, 2.4), alongQ, null, 'box:concreteDark');
+    this._instance(at(47.2, -s * 12.6, 0.45), vec(0.55, 0.9, 0.55), alongQ, 0x8a2f24, 'box:parkedBody');
+
+    // --- sodium poles (arms toward the lot, pools over the stall rows) ---
+    const lampAt = (u, v, armVSign) => {
+      const orientation = yawQuaternion(tangent.clone().multiplyScalar(armVSign > 0 ? -1 : 1));
+      this._instance(at(u, v, 0), vec(1, 1, 1), orientation, null, 'lamppost:concrete');
+      this._instance(at(u, v + armVSign * 2.28, 9.26), vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
+      this._instance(at(u, v + armVSign * 3.4, 0.07), vec(11, 1, 14), orientation, null, 'pool:lightPool');
+    };
+    for (const u of [-22, 26]) lampAt(u, s * (halfW - 1.15), -s);
+    for (const u of [-44, 2]) lampAt(u, -s * (halfW - 1.15), s);
+
+    // --- signage: PA name + P at the entry end, EXIT at the exit end ---
+    const facingEntry = yawQuaternion(tangent.clone().multiplyScalar(-1));
+    const paSign = this._makeSignMesh('辰巳第一PA|TATSUMI No.1 PA', '#175ba5', 6.5, 2.2, true);
+    const paSignPos = at(-halfL + 5.5, aisleV - s * 5.8, 3.9);
+    paSign.position.copy(paSignPos);
+    paSign.quaternion.copy(facingEntry);
+    this._addChunkMesh(paSign, paSignPos);
+    this._instance(at(-halfL + 5.5, aisleV - s * 5.8, 1.4), vec(0.2, 2.8, 0.2), alongQ, null, 'box:concrete');
+    const pSign = this._makeSignMesh('P', '#1958a8', 1.9, 1.9);
+    const pSignPos = at(-halfL + 1.3, -s * 7, 3.1);
+    pSign.position.copy(pSignPos);
+    pSign.quaternion.copy(facingEntry);
+    this._addChunkMesh(pSign, pSignPos);
+    this._instance(at(-halfL + 1.3, -s * 7, 1.05), vec(0.16, 2.1, 0.16), alongQ, null, 'box:concrete');
+    const exitSign = this._makeSignMesh('出口|EXIT', '#0f6a3f', 3.4, 1.5, true);
+    const exitSignPos = at(halfL - 2.5, aisleV - s * 4.6, 3.3);
+    exitSign.position.copy(exitSignPos);
+    exitSign.quaternion.copy(facingEntry);
+    this._addChunkMesh(exitSign, exitSignPos);
+    this._instance(at(halfL - 2.5, aisleV - s * 4.6, 1.25), vec(0.18, 2.5, 0.18), alongQ, null, 'box:concrete');
+
+    // --- painted one-way flow on the aisle ---
+    // Edge lines sit just outside the rendered connector strips (half 3.3);
+    // the far-side line splits around the garage-ring forecourt.
+    this._instance(at(0, aisleV + s * 3.55, 0.03), vec(0.15, 0.02, area.length - 7), alongQ, null, 'box:marking');
+    for (const [from, to] of [[-halfL + 3.5, ringU - 11.5], [ringU + 11.5, halfL - 3.5]]) {
+      if (to - from < 2) continue;
+      this._instance(at((from + to) * 0.5, aisleV - s * 3.55, 0.03),
+        vec(0.15, 0.02, to - from), alongQ, null, 'box:marking');
+    }
+    for (const u of [-42, 20, 42]) { // chevron arrows ride ABOVE the strips
+      this._instance(at(u - 0.9, aisleV, 0.065), vec(0.34, 0.02, 2.2), alongQ, null, 'box:marking');
+      for (const side of [-1, 1]) {
+        const head = yawQuaternion(tangent).multiply(new THREE.Quaternion().setFromAxisAngle(UP, side * 0.85));
+        this._instance(at(u + 0.75, aisleV + side * 0.42, 0.065), vec(0.3, 0.02, 1.5), head, null, 'box:marking');
+      }
+    }
+  }
+
   _buildGarageExterior(area) {
     // Building, shutter and fascia sign stay on the LOT anchor; the pulsing
     // transition ring + beacon follow the functional entrance trigger, which
     // sits on the mainline shoulder while the access lane is disabled. A
-    // bare lot (area.dressingMinimal — the Tatsumi deck) keeps only the
-    // functional ring + beacon.
-    if (!area.dressingMinimal) {
+    // bare lot (area.dressingMinimal) and the Tatsumi deck (no building
+    // fits between the stall rows) keep only the functional ring + beacon.
+    if (!area.dressingMinimal && area.dressing !== 'tatsumi') {
       const lotAnchor = area.garageLotAnchor || area.garageEntrance;
       const frontNormal = area.normal.clone();
       const orientation = yawQuaternion(frontNormal);
