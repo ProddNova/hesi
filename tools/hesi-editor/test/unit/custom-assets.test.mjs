@@ -59,7 +59,7 @@ test('a realistic document validates and bad references are rejected', () => {
 
 test('every primitive kind builds geometry with one group per named face', () => {
   for (const [kind, meta] of Object.entries(PART_KINDS)) {
-    if (kind === 'asset') continue;
+    if (kind === 'asset' || kind === 'mesh') continue; // no static geometry: assembled/data-driven
     const geometry = partGeometry({ kind });
     assert.ok(geometry, `${kind} builds`);
     assert.equal(geometry.groups.length, meta.faces.length, `${kind} groups match faces`);

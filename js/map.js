@@ -73,6 +73,13 @@ export const ROAD_NETWORK_Y_OFFSET = ROAD_NETWORK_BASE_Y_OFFSET + ROAD_NETWORK_E
 // height-dependent rooftop details in proportion.
 export const CITY_BUILDING_HEIGHT_SCALE = 1.8;
 
+// One repeat of the road texture covers this many metres of asphalt — on
+// every road surface, whatever the underlying quad/triangle happens to be.
+export const ROAD_TEXTURE_TILE_METERS = 12;
+// Material buckets that ARE drivable asphalt and therefore get the
+// world-anchored UVs below (see WORLD_TEXTURE_SLOTS in js/custom-assets.js).
+export const ROAD_SURFACE_MATERIAL_NAMES = Object.freeze(['road', 'roadAlt', 'roadService']);
+
 // TEMPORARY (lateral-junction rebuild): the synthesized PA access lanes —
 // the decel/accel legs and descent spirals _defineServiceAreas builds around
 // each parking area — are broken and will be rebuilt in their own pass.
@@ -130,6 +137,95 @@ function mulberry32(seed) {
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/**
+ * World-anchored UVs for road surfaces: every triangle is mapped by a planar
+ * projection along its dominant world axis at a fixed metres-per-tile scale,
+ * so the road texture keeps ONE visual density everywhere — independent of
+ * segment length, deck width, orientation, curvature, or how the generator
+ * happened to triangulate (full quads, junction-mouth clips, flap strips,
+ * apex triangles, the PA slab box). Because the uv is a pure function of the
+ * world position, texture tiles also stay continuous across neighbouring
+ * quads, chunks, and route boundaries.
+ *
+ * Near-horizontal geometry (the asphalt itself) projects onto XZ; the rare
+ * steep faces of road-material geometry project onto their own dominant
+ * plane so they never smear. `matrixWorld` maps positions into world space
+ * when the geometry is not already baked there (the service-area deck box).
+ */
+export function applyWorldSurfaceUVs(geometry, matrixWorld = null, tileMeters = ROAD_TEXTURE_TILE_METERS) {
+  const position = geometry.getAttribute('position');
+  if (!position || !(tileMeters > 0)) return geometry;
+  const index = geometry.index;
+  const cornerCount = index ? index.count : position.count;
+  const a = TMP_A;
+  const b = TMP_B;
+  const c = TMP_C;
+
+  // Vertices shared between triangles must agree on one projection plane, or
+  // a badly warped quad (a flat deck triangle + a diving flap triangle) gets
+  // corners mapped on DIFFERENT planes — visible as an extreme smear. Union
+  // the index-connected vertices, accumulate each component's area-weighted
+  // |normal|, and let the whole component project along its dominant axis.
+  const parent = new Int32Array(position.count);
+  for (let vertex = 0; vertex < position.count; vertex += 1) parent[vertex] = vertex;
+  const find = (vertex) => {
+    let root = vertex;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[vertex] !== root) { const next = parent[vertex]; parent[vertex] = root; vertex = next; }
+    return root;
+  };
+  const union = (left, right) => { parent[find(left)] = find(right); };
+
+  const world = new Float64Array(position.count * 3);
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    a.fromBufferAttribute(position, vertex);
+    if (matrixWorld) a.applyMatrix4(matrixWorld);
+    world[vertex * 3] = a.x;
+    world[vertex * 3 + 1] = a.y;
+    world[vertex * 3 + 2] = a.z;
+  }
+  for (let corner = 0; corner + 2 < cornerCount; corner += 3) {
+    const i0 = index ? index.getX(corner) : corner;
+    const i1 = index ? index.getX(corner + 1) : corner + 1;
+    const i2 = index ? index.getX(corner + 2) : corner + 2;
+    union(i0, i1);
+    union(i1, i2);
+  }
+  const normalByRoot = new Map();
+  for (let corner = 0; corner + 2 < cornerCount; corner += 3) {
+    const i0 = index ? index.getX(corner) : corner;
+    const i1 = index ? index.getX(corner + 1) : corner + 1;
+    const i2 = index ? index.getX(corner + 2) : corner + 2;
+    a.set(world[i0 * 3], world[i0 * 3 + 1], world[i0 * 3 + 2]);
+    b.set(world[i1 * 3], world[i1 * 3 + 1], world[i1 * 3 + 2]);
+    c.set(world[i2 * 3], world[i2 * 3 + 1], world[i2 * 3 + 2]);
+    b.sub(a);
+    c.sub(a);
+    a.crossVectors(b, c); // area-weighted face normal
+    const root = find(i0);
+    const sum = normalByRoot.get(root) || [0, 0, 0];
+    sum[0] += Math.abs(a.x);
+    sum[1] += Math.abs(a.y);
+    sum[2] += Math.abs(a.z);
+    normalByRoot.set(root, sum);
+  }
+
+  const uvArray = new Float32Array(position.count * 2);
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    const [nx, ny, nz] = normalByRoot.get(find(vertex)) || [0, 1, 0];
+    const x = world[vertex * 3];
+    const y = world[vertex * 3 + 1];
+    const z = world[vertex * 3 + 2];
+    let u;
+    let v;
+    if (ny >= nx && ny >= nz) { u = x; v = z; } else if (nx >= nz) { u = z; v = y; } else { u = x; v = y; }
+    uvArray[vertex * 2] = u / tileMeters;
+    uvArray[vertex * 2 + 1] = v / tileMeters;
+  }
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvArray, 2));
+  return geometry;
 }
 
 /**
@@ -4538,6 +4634,9 @@ export class HighwayMap {
         geometry.setIndex(bucket.indices.length > 65535 * 3 || bucket.positions.length / 3 > 65535
           ? new THREE.Uint32BufferAttribute(bucket.indices, 1)
           : new THREE.Uint16BufferAttribute(bucket.indices, 1));
+        // Asphalt buckets replace their per-quad 0..1 UVs with world-anchored
+        // ones: uniform texture density on every deck, clip, and flap.
+        if (ROAD_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWorldSurfaceUVs(geometry);
         geometry.computeVertexNormals();
         geometry.computeBoundingSphere();
         const mesh = new THREE.Mesh(geometry, this.materials[materialName] || this.materials.concrete);
@@ -6942,6 +7041,11 @@ export class HighwayMap {
       slab.position.copy(slabCenter);
       slab.quaternion.copy(orientation); // local +Z (length) runs along the lot tangent
       slab.name = `${area.name} deck`;
+      // BoxGeometry maps 0..1 per face; re-map at the shared world scale so
+      // the lot asphalt matches the road density (chunk groups sit at the
+      // origin, so the local matrix IS the world matrix).
+      slab.updateMatrix();
+      applyWorldSurfaceUVs(slab.geometry, slab.matrix);
       this._addChunkMesh(slab, slabCenter);
 
       // support pillars when elevated; a lot straddling live carriageways

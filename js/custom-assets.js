@@ -17,10 +17,11 @@ export const CUSTOM_ASSET_ID_PATTERN = /^custom:[a-z0-9][a-z0-9_-]{0,80}$/i;
 export const CUSTOM_TEXTURE_ID_PATTERN = /^tex:[a-z0-9][a-z0-9_-]{0,80}$/i;
 
 // Generated-map materials that accept a repeated texture override. Every key
-// exists in HighwayMap._createMaterials(); road surfaces tile one image per
-// generated quad, which is exactly the PS1-era repeat the map is built from.
+// exists in HighwayMap._createMaterials(); road surfaces carry world-anchored
+// UVs (see applyWorldSurfaceUVs in js/map.js) so one image repeat covers a
+// fixed number of metres of asphalt everywhere.
 export const WORLD_TEXTURE_SLOTS = Object.freeze({
-  road: { label: 'Road asphalt', description: 'Main highway surface (repeated per road segment)' },
+  road: { label: 'Road asphalt', description: 'Main highway surface (tiled at one fixed world scale)' },
   roadAlt: { label: 'Road asphalt (alt)', description: 'Alternate asphalt used by some routes' },
   roadService: { label: 'Service area asphalt', description: 'Parking-area surface at Tatsumi/Shibaura PA' },
   concrete: { label: 'Concrete', description: 'Concrete walls and structures' },
@@ -37,8 +38,28 @@ export const PART_KINDS = Object.freeze({
   wedge: { label: 'Wedge', faces: ['slope', 'bottom', 'back', 'left', 'right'] },
   plane: { label: 'Plane', faces: ['face'] },
   sphere: { label: 'Sphere', faces: ['surface'] },
+  // Free-form triangle mesh: explicit vertices + triangles. Created by
+  // converting a primitive the first time its topology is edited (right-click
+  // vertex add/remove in the modeler); its face names are dynamic — they are
+  // carried over from the source primitive so textures survive conversion.
+  mesh: { label: 'Mesh', faces: [] },
   asset: { label: 'Assembled asset', faces: [] },
 });
+
+export const MESH_MAX_VERTICES = 2000;
+export const MESH_MAX_TRIANGLES = 4000;
+
+/**
+ * Face (material slot) names of a part. Static per kind for primitives;
+ * mesh parts carry their own list (inherited from the primitive they were
+ * converted from) and fall back to a single 'surface' slot.
+ */
+export function partFaceNames(part) {
+  if (part?.kind === 'mesh') {
+    return Array.isArray(part.faceNames) && part.faceNames.length ? part.faceNames : ['surface'];
+  }
+  return PART_KINDS[part?.kind]?.faces || [];
+}
 
 export function blankCustomAssetsDocument() {
   return { version: CUSTOM_ASSETS_VERSION, assets: {}, textures: {}, worldTextures: {} };
@@ -94,9 +115,44 @@ export function customAssetsDocumentErrors(document) {
           });
         }
       } else {
+        if (part.kind === 'mesh') {
+          const vertexCount = Array.isArray(part.vertices) ? part.vertices.length : 0;
+          if (!Array.isArray(part.vertices) || vertexCount < 3 || vertexCount > MESH_MAX_VERTICES) {
+            errors.push(`${path}.vertices must be an array of 3-${MESH_MAX_VERTICES} points`);
+          } else if (!part.vertices.every((vertex) => finiteVector(vertex, 3))) {
+            errors.push(`${path}.vertices entries must contain 3 finite numbers`);
+          }
+          if (!Array.isArray(part.triangles) || !part.triangles.length || part.triangles.length > MESH_MAX_TRIANGLES) {
+            errors.push(`${path}.triangles must be an array of 1-${MESH_MAX_TRIANGLES} triangles`);
+          } else {
+            const faceCount = partFaceNames(part).length;
+            part.triangles.forEach((triangle, triangleIndex) => {
+              const triPath = `${path}.triangles[${triangleIndex}]`;
+              if (!isRecord(triangle) || !Array.isArray(triangle.v) || triangle.v.length !== 3
+                || !triangle.v.every((vertex) => Number.isInteger(vertex) && vertex >= 0 && vertex < vertexCount)) {
+                errors.push(`${triPath}.v must be 3 vertex indices`);
+                return;
+              }
+              if (new Set(triangle.v).size !== 3) errors.push(`${triPath}.v must reference 3 distinct vertices`);
+              if (triangle.face !== undefined && (!Number.isInteger(triangle.face) || triangle.face < 0 || triangle.face >= faceCount)) {
+                errors.push(`${triPath}.face must index into the part's face names`);
+              }
+              if (triangle.uv !== undefined && (!Array.isArray(triangle.uv) || triangle.uv.length !== 3
+                || !triangle.uv.every((uv) => finiteVector(uv, 2)))) {
+                errors.push(`${triPath}.uv must be 3 [u, v] pairs`);
+              }
+            });
+          }
+          if (part.faceNames !== undefined && (!Array.isArray(part.faceNames) || !part.faceNames.length
+            || part.faceNames.length > 16
+            || new Set(part.faceNames).size !== part.faceNames.length
+            || !part.faceNames.every((name) => typeof name === 'string' && /^[a-z0-9_ -]{1,40}$/i.test(name)))) {
+            errors.push(`${path}.faceNames must be short unique names`);
+          }
+        }
         if (part.faces !== undefined && !isRecord(part.faces)) errors.push(`${path}.faces must be an object`);
         for (const [face, style] of Object.entries(part.faces || {})) {
-          if (!PART_KINDS[part.kind].faces.includes(face)) errors.push(`${path}.faces.${face} is not a face of ${part.kind}`);
+          if (!partFaceNames(part).includes(face)) errors.push(`${path}.faces.${face} is not a face of ${part.kind}`);
           if (!isRecord(style)) errors.push(`${path}.faces.${face} must be an object`);
           else if (style.texture !== undefined && style.texture !== null && !document.textures[style.texture]) {
             errors.push(`${path}.faces.${face}.texture references missing texture ${style.texture}`);
@@ -182,6 +238,59 @@ function singleGroup(geometry) {
   return geometry;
 }
 
+// Planar fallback UVs for hand-authored mesh triangles that carry no stored
+// uv: project along the triangle's dominant normal axis. Unit primitives are
+// centered, so +0.5 keeps a unit face inside 0..1.
+function triangleFallbackUv(a, b, c) {
+  const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  const normal = [
+    ab[1] * ac[2] - ab[2] * ac[1],
+    ab[2] * ac[0] - ab[0] * ac[2],
+    ab[0] * ac[1] - ab[1] * ac[0],
+  ].map(Math.abs);
+  const dominant = normal.indexOf(Math.max(...normal));
+  const [uAxis, vAxis] = dominant === 0 ? [2, 1] : (dominant === 1 ? [0, 2] : [0, 1]);
+  return [a, b, c].map((vertex) => [vertex[uAxis] + 0.5, vertex[vAxis] + 0.5]);
+}
+
+/**
+ * Non-indexed geometry for a kind:'mesh' part: triangles grouped per face
+ * name (material slot) in `partFaceNames` order, with stored per-corner UVs
+ * (barycentric-interpolated through edits, so textures stay continuous).
+ */
+function meshGeometry(part) {
+  if (!Array.isArray(part.vertices) || !Array.isArray(part.triangles)) return null;
+  const faceCount = partFaceNames(part).length;
+  const positions = [];
+  const uvs = [];
+  const groups = [];
+  for (let group = 0; group < faceCount; group += 1) {
+    const start = positions.length / 3;
+    for (const triangle of part.triangles) {
+      if ((triangle.face || 0) !== group) continue;
+      const corners = triangle.v.map((index) => part.vertices[index]);
+      if (corners.some((corner) => !finiteVector(corner, 3))) continue;
+      const uv = Array.isArray(triangle.uv) && triangle.uv.length === 3
+        ? triangle.uv
+        : triangleFallbackUv(...corners);
+      for (let k = 0; k < 3; k += 1) {
+        positions.push(...corners[k]);
+        uvs.push(uv[k][0], uv[k][1]);
+      }
+    }
+    const count = positions.length / 3 - start;
+    if (count) groups.push({ start, count, materialIndex: group });
+  }
+  if (!positions.length) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  for (const group of groups) geometry.addGroup(group.start, group.count, group.materialIndex);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 /**
  * Builds the base geometry for a primitive part with one material group per
  * named face (see PART_KINDS). Low segment counts keep the PSX look.
@@ -213,6 +322,9 @@ export function partGeometry(part) {
     }
     case 'sphere': {
       return singleGroup(new THREE.SphereGeometry(0.5, segments || 8, Math.max(3, Math.round((segments || 8) * 0.75))));
+    }
+    case 'mesh': {
+      return meshGeometry(part);
     }
     default:
       return null;
@@ -260,6 +372,183 @@ export function applyVertexOffsets(geometry, vertexOffsets) {
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+// ---------------------------------------------------------------------------
+// Mesh conversion and manual vertex management
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts a primitive part into an equivalent kind:'mesh' part so its
+ * topology becomes editable (right-click vertex add/remove in the modeler).
+ *
+ * The mesh vertices are the primitive's welded corners IN WELD ORDER — the
+ * same index space the modeler's vertex handles use — with any stored
+ * `vertexOffsets` baked in. Triangles keep their material group (face name)
+ * and their exact source UVs, so textures survive the conversion. Planes are
+ * rendered double-sided via their kind; a converted plane keeps that through
+ * the `doubleSide` face-style flag instead. Returns the new part (the input
+ * is not mutated), the part itself when it is already a mesh, or null for
+ * kinds without editable geometry (assembled assets).
+ */
+export function convertPartToMesh(part) {
+  if (!part || part.kind === 'asset') return null;
+  if (part.kind === 'mesh') return part;
+  const geometry = partGeometry(part);
+  if (!geometry) return null;
+  const { welded, weldIndexOf } = weldedVertices(geometry);
+  const offsets = new Map((part.vertexOffsets || []).map((entry) => [entry.i, entry.o]));
+  const vertices = welded.map((vertex, index) => {
+    const offset = offsets.get(index);
+    return offset ? [vertex[0] + offset[0], vertex[1] + offset[1], vertex[2] + offset[2]] : [...vertex];
+  });
+  const uvAttribute = geometry.getAttribute('uv');
+  const index = geometry.index;
+  const cornerCount = index ? index.count : geometry.getAttribute('position').count;
+  const groups = geometry.groups.length ? geometry.groups : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+  const triangles = [];
+  for (const group of groups) {
+    for (let corner = group.start; corner + 2 < group.start + group.count; corner += 3) {
+      const corners = [corner, corner + 1, corner + 2].map((entry) => index ? index.getX(entry) : entry);
+      const v = corners.map((entry) => weldIndexOf[entry]);
+      if (v[0] === v[1] || v[1] === v[2] || v[0] === v[2]) continue; // welded-degenerate (cone tips)
+      const triangle = { v, face: group.materialIndex || 0 };
+      if (uvAttribute) triangle.uv = corners.map((entry) => [uvAttribute.getX(entry), uvAttribute.getY(entry)]);
+      triangles.push(triangle);
+    }
+  }
+  geometry.dispose();
+  if (vertices.length < 3 || !triangles.length) return null;
+  const faceNames = [...PART_KINDS[part.kind].faces];
+  const faces = structuredClone(part.faces || {});
+  if (part.kind === 'plane') {
+    for (const name of faceNames) faces[name] = { ...(faces[name] || {}), doubleSide: true };
+  }
+  return {
+    kind: 'mesh',
+    name: part.name || PART_KINDS[part.kind].label,
+    position: [...(part.position || [0, 0, 0])],
+    rotation: [...(part.rotation || [0, 0, 0])],
+    scale: [...(part.scale || [1, 1, 1])],
+    color: part.color || '#9aa7b5',
+    vertices,
+    triangles,
+    faceNames,
+    faces,
+  };
+}
+
+const TRI_A = new THREE.Vector3();
+const TRI_B = new THREE.Vector3();
+const TRI_C = new THREE.Vector3();
+const TRI_POINT = new THREE.Vector3();
+const TRI_CLOSEST = new THREE.Vector3();
+const TRI_BARY = new THREE.Vector3();
+const TRIANGLE = new THREE.Triangle();
+
+const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+/**
+ * Adds a vertex to a kind:'mesh' part at the given part-local point (an
+ * [x, y, z] triple, e.g. a viewport raycast hit mapped through worldToLocal).
+ *
+ * The nearest triangle decides how: a hit near one of its edges splits that
+ * edge — including EVERY triangle sharing it, keeping the mesh watertight —
+ * while an interior hit fans the triangle into three around the new vertex.
+ * Stored UVs are interpolated (linearly on edges, barycentrically inside), so
+ * face textures stay continuous. Returns { vertexIndex, split: 'edge'|'face' }
+ * or null when nothing could be added.
+ */
+export function meshInsertVertexAtPoint(part, point, { edgeEpsilon = 0.12 } = {}) {
+  if (part?.kind !== 'mesh' || !finiteVector(point, 3)) return null;
+  if (!Array.isArray(part.vertices) || !Array.isArray(part.triangles)) return null;
+  if (part.vertices.length >= MESH_MAX_VERTICES || part.triangles.length + 2 > MESH_MAX_TRIANGLES) return null;
+  TRI_POINT.fromArray(point);
+  let best = null;
+  part.triangles.forEach((triangle, triangleIndex) => {
+    const [a, b, c] = triangle.v.map((vertex) => part.vertices[vertex]);
+    if (!finiteVector(a, 3) || !finiteVector(b, 3) || !finiteVector(c, 3)) return;
+    TRIANGLE.set(TRI_A.fromArray(a), TRI_B.fromArray(b), TRI_C.fromArray(c));
+    TRIANGLE.closestPointToPoint(TRI_POINT, TRI_CLOSEST);
+    const distance = TRI_CLOSEST.distanceTo(TRI_POINT);
+    if (best && distance >= best.distance) return;
+    TRIANGLE.getBarycoord(TRI_CLOSEST, TRI_BARY);
+    best = { triangleIndex, distance, closest: TRI_CLOSEST.toArray(), bary: TRI_BARY.toArray() };
+  });
+  if (!best) return null;
+  const triangle = part.triangles[best.triangleIndex];
+  const weights = best.bary;
+  const smallest = weights.indexOf(Math.min(...weights));
+  if (weights[smallest] < edgeEpsilon) {
+    // Near an edge: split the edge opposite the smallest-weight corner in
+    // every triangle that shares it.
+    const endA = triangle.v[(smallest + 1) % 3];
+    const endB = triangle.v[(smallest + 2) % 3];
+    const wA = weights[(smallest + 1) % 3];
+    const wB = weights[(smallest + 2) % 3];
+    const t = wB / Math.max(wA + wB, 1e-9); // parameter along endA -> endB
+    const vertexIndex = part.vertices.length;
+    part.vertices.push(lerp3(part.vertices[endA], part.vertices[endB], t));
+    const nextTriangles = [];
+    for (const candidate of part.triangles) {
+      const cornerA = candidate.v.indexOf(endA);
+      const cornerB = candidate.v.indexOf(endB);
+      if (cornerA === -1 || cornerB === -1) { nextTriangles.push(candidate); continue; }
+      // Split candidate (p, q, r) on the shared edge: the new vertex replaces
+      // one edge end per half, preserving the original winding.
+      const uvNew = candidate.uv ? lerp2(candidate.uv[cornerA], candidate.uv[cornerB], t) : null;
+      for (const replaceCorner of [cornerB, cornerA]) {
+        const half = { v: [...candidate.v], face: candidate.face || 0 };
+        half.v[replaceCorner] = vertexIndex;
+        if (candidate.uv) {
+          half.uv = candidate.uv.map((uv) => [...uv]);
+          half.uv[replaceCorner] = [...uvNew];
+        }
+        nextTriangles.push(half);
+      }
+    }
+    if (nextTriangles.length > MESH_MAX_TRIANGLES) { part.vertices.pop(); return null; }
+    part.triangles = nextTriangles;
+    return { vertexIndex, split: 'edge' };
+  }
+  // Interior: fan the triangle into three around the new vertex.
+  const vertexIndex = part.vertices.length;
+  part.vertices.push([...best.closest]);
+  const uvNew = triangle.uv
+    ? [0, 1].map((axis) => triangle.uv[0][axis] * weights[0]
+      + triangle.uv[1][axis] * weights[1] + triangle.uv[2][axis] * weights[2])
+    : null;
+  const fan = [0, 1, 2].map((corner) => {
+    const next = (corner + 1) % 3;
+    const half = { v: [triangle.v[corner], triangle.v[next], vertexIndex], face: triangle.face || 0 };
+    if (triangle.uv) half.uv = [triangle.uv[corner].slice(), triangle.uv[next].slice(), [...uvNew]];
+    return half;
+  });
+  part.triangles.splice(best.triangleIndex, 1, ...fan);
+  return { vertexIndex, split: 'face' };
+}
+
+/**
+ * Removes one vertex from a kind:'mesh' part: triangles using it are dropped
+ * and vertices left unreferenced are compacted away. Refuses (returns false,
+ * mesh untouched) when the removal would leave fewer than 3 vertices or no
+ * triangles at all.
+ */
+export function meshRemoveVertex(part, vertexIndex) {
+  if (part?.kind !== 'mesh' || !Number.isInteger(vertexIndex)) return false;
+  if (!Array.isArray(part.vertices) || !part.vertices[vertexIndex]) return false;
+  const kept = part.triangles.filter((triangle) => !triangle.v.includes(vertexIndex));
+  if (!kept.length) return false;
+  const used = new Set();
+  for (const triangle of kept) for (const vertex of triangle.v) used.add(vertex);
+  if (used.size < 3) return false;
+  const remap = new Map([...used].sort((a, b) => a - b).map((oldIndex, newIndex) => [oldIndex, newIndex]));
+  part.vertices = [...remap.keys()].map((oldIndex) => part.vertices[oldIndex]);
+  part.triangles = kept.map((triangle) => ({ ...triangle, v: triangle.v.map((vertex) => remap.get(vertex)) }));
+  // Offsets index the old welded topology; they no longer apply.
+  delete part.vertexOffsets;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +610,7 @@ export function buildPartObject(part, texturesById, { resolveAssetPart = () => n
     const geometry = partGeometry(part);
     if (!geometry) return null;
     applyVertexOffsets(geometry, part.vertexOffsets);
-    const materials = PART_KINDS[part.kind].faces.map((faceName) => faceMaterial(part, faceName, texturesById));
+    const materials = partFaceNames(part).map((faceName) => faceMaterial(part, faceName, texturesById));
     node = new THREE.Mesh(geometry, materials.length === 1 ? materials[0] : materials);
   }
   node.name = part.name || PART_KINDS[part.kind].label;

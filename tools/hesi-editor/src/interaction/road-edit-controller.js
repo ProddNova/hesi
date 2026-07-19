@@ -28,11 +28,12 @@ const STATUS_HINT = 'Road draft · realistic asphalt preview is live · drag poi
  * handle/line interaction is in progress.
  */
 export class RoadEditController {
-  constructor({ viewport, history, selection, adapter, onStatus = () => {}, onDirty = () => {} }) {
+  constructor({ viewport, history, selection, adapter, gridSnap = null, onStatus = () => {}, onDirty = () => {} }) {
     this.viewport = viewport;
     this.history = history;
     this.selection = selection;
     this.adapter = adapter;
+    this.gridSnap = gridSnap;
     this.onStatus = onStatus;
     this.onDirty = onDirty;
     this.activeEntity = null;
@@ -105,6 +106,7 @@ export class RoadEditController {
       this._setPointer(event);
       const target = new THREE.Vector3();
       if (!this.raycaster.ray.intersectPlane(this.drag.plane, target)) return;
+      this.gridSnap?.snapPosition(target);
       const point = this.route.points[this.drag.index];
       const worldPoint = this._worldPoint(point);
       this.drag.moved = true;
@@ -273,6 +275,10 @@ export class RoadEditController {
     const synthetic = this.synthetic;
     const index = segment.index;
     const point = [...segment.point];
+    if (this.gridSnap?.enabled) {
+      point[0] = this.gridSnap.snapValue(point[0]);
+      point[2] = this.gridSnap.snapValue(point[2]);
+    }
     this.activeHandle = index + 1;
     this.history.execute({
       label: `Insert road point · ${route.name}`,
