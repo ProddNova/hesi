@@ -59,9 +59,10 @@ code.
 
 Road curves have an additional explicit publish step:
 
-1. Select a road route, drag its orange control points, double-click the orange
-   centreline to insert a point, or select an interior point and press
-   `Delete`.
+1. Click a rendered asphalt surface (the editor resolves its merged chunk to
+   the nearest route), or select a road route in the hierarchy. Drag its orange
+   control points, double-click the orange centreline to insert a point, or
+   select an interior point and press `Delete`.
 2. Press **Save**. Changed routes are stored deterministically in
    `data/editor/road-route-overrides.json`; production route files are not
    changed yet. Saved curve edits reload into the editor automatically.

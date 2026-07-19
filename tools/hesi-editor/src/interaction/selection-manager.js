@@ -3,6 +3,20 @@ import { instanceWorldMatrix } from '../world/world-metadata.js';
 
 const MAX_OVERLAY_COMPONENTS = 16;
 const MAX_EDGE_VERTICES = 60000;
+const ROAD_SURFACE_TYPES = new Set(['road-surface', 'service-road-surface']);
+const ROUTE_ENTITY_TYPES = new Set(['road-route', 'service-route']);
+const ROAD_PICK_MAX_DISTANCE = 80;
+
+/**
+ * Rendered asphalt is merged into chunk meshes, while editable routes are
+ * semantic entities. Resolve a surface hit through HighwayMap's 3D nearest
+ * route query so clicking the visible road activates its centreline editor.
+ */
+export function resolveRoadSurfaceRoute(entity, hitPoint, adapter, routeEntitiesById) {
+  if (!ROAD_SURFACE_TYPES.has(entity?.type) || !hitPoint || !adapter?.map?.getNearestRoute) return entity;
+  const nearest = adapter.map.getNearestRoute(hitPoint, { maxDistance: ROAD_PICK_MAX_DISTANCE });
+  return routeEntitiesById?.get(nearest?.route?.id) || entity;
+}
 
 export function isEditorHelper(object) {
   let current = object;
@@ -31,6 +45,11 @@ export class SelectionManager {
     this.onStatus = onStatus;
     this.selected = null;
     this.selectedEntities = [];
+    this.routeEntitiesById = new Map(
+      registry.list()
+        .filter((entity) => ROUTE_ENTITY_TYPES.has(entity.type) && typeof entity.metadata?.routeId === 'string')
+        .map((entity) => [entity.metadata.routeId, entity]),
+    );
     this.inspectLocked = false;
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -121,7 +140,8 @@ export class SelectionManager {
     const seen = new Set();
     for (const hit of hits) {
       if (isEditorHelper(hit.object) || !isActuallyVisible(hit.object)) continue;
-      const entity = this.adapter.resolveSelection?.(hit.object, hit.instanceId);
+      const pickedEntity = this.adapter.resolveSelection?.(hit.object, hit.instanceId);
+      const entity = resolveRoadSurfaceRoute(pickedEntity, hit.point, this.adapter, this.routeEntitiesById);
       if (!this.canSelect(entity) || seen.has(entity.id)) continue;
       seen.add(entity.id);
       candidates.push(entity);
