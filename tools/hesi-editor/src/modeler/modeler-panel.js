@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { PART_KINDS, WORLD_TEXTURE_SLOTS, buildPartObject, partGeometry, applyVertexOffsets, weldedVertices } from '/js/custom-assets.js';
+import {
+  PART_KINDS, WORLD_TEXTURE_SLOTS, applyVertexOffsets, buildPartObject, convertPartToMesh,
+  meshInsertVertexAtPoint, meshRemoveVertex, partFaceNames, partGeometry, weldedVertices,
+} from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
 const clone = (value) => value == null ? value : structuredClone(value);
@@ -67,6 +70,7 @@ export class ModelerPanel {
     this.carRefVisible = false;
     this.history = [];
     this.historyIndex = -1;
+    this._rightDownAt = null;
 
     this._buildDom(host);
     this._buildScene();
@@ -298,10 +302,28 @@ export class ModelerPanel {
     }));
 
     this._onPointerDown = (event) => {
+      if (event.button === 2) {
+        // Remember where the right button went down: a right-DRAG is an
+        // orbit pan and must not edit vertices when contextmenu fires.
+        this._rightDownAt = { x: event.clientX, y: event.clientY };
+        return;
+      }
       if (event.button !== 0 || this.gizmo.dragging) return;
       this._pick(event);
     };
     this.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
+
+    this._onContextMenu = (event) => {
+      // Never show the browser context menu over the modeler viewport —
+      // right click is a modeling action here.
+      event.preventDefault();
+      event.stopPropagation();
+      const downAt = this._rightDownAt;
+      this._rightDownAt = null;
+      if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 5) return; // was a pan
+      this._rightClick(event);
+    };
+    this.renderer.domElement.addEventListener('contextmenu', this._onContextMenu);
 
     this._onKeyDown = (event) => {
       if (!this.openState) return;
@@ -494,6 +516,7 @@ export class ModelerPanel {
     const node = this.partNodes[index];
     if (!part || !node?.isMesh || part.kind === 'asset') return;
     const geometry = partGeometry(part);
+    if (!geometry) return;
     applyVertexOffsets(geometry, part.vertexOffsets);
     node.geometry.dispose();
     node.geometry = geometry;
@@ -506,10 +529,19 @@ export class ModelerPanel {
     const part = this.definition?.parts[this.selectedPart];
     const node = this.partNodes[this.selectedPart];
     if (!part || part.kind === 'asset' || !node?.isMesh) return;
-    const base = partGeometry(part);
-    const { welded } = weldedVertices(base);
-    base.dispose();
-    const offsets = new Map((part.vertexOffsets || []).map((entry) => [entry.i, entry.o]));
+    // Mesh parts manage vertices directly (handle index == part.vertices
+    // index); primitives keep the welded-corner + offset system.
+    let welded;
+    let offsets;
+    if (part.kind === 'mesh') {
+      welded = part.vertices;
+      offsets = new Map();
+    } else {
+      const base = partGeometry(part);
+      ({ welded } = weldedVertices(base));
+      base.dispose();
+      offsets = new Map((part.vertexOffsets || []).map((entry) => [entry.i, entry.o]));
+    }
     const handleGeometry = new THREE.SphereGeometry(0.045, 8, 6);
     node.updateWorldMatrix(true, false);
     welded.forEach((position, weldIndex) => {
@@ -671,6 +703,10 @@ export class ModelerPanel {
         reset.addEventListener('click', () => { delete part.vertexOffsets; this._markDirty(); this._rebuildObject(); this._renderInspector(); });
         this.inspector.append(reset);
       }
+      if (part.kind === 'mesh') {
+        this.inspector.append(element('p', 'modeler-help',
+          `Editable mesh · ${part.vertices?.length || 0} vertices · ${part.triangles?.length || 0} triangles. In Vertices mode: right-click the surface or an edge to add a vertex, right-click a vertex handle to remove it.`));
+      }
       this._renderFacePanel(part);
     } else {
       this.inspector.append(element('p', 'modeler-help', `Assembled from catalog asset ${part.assetRef}. Move, rotate, and scale it like any part.`));
@@ -678,7 +714,7 @@ export class ModelerPanel {
   }
 
   _renderFacePanel(part) {
-    const faces = PART_KINDS[part.kind]?.faces || [];
+    const faces = partFaceNames(part);
     if (!faces.length) return;
     this.inspector.append(element('h3', '', 'Faces & textures'));
     this.inspector.append(element('p', 'modeler-help', 'Pick a face here (or click it in Faces mode), then attach an image: top, bottom, every side — like wrapping a photo around a bin.'));
@@ -790,7 +826,7 @@ export class ModelerPanel {
     this.modeHint.textContent = {
       part: 'Click a part to select · W/E/R move/rotate/scale · G snap · Del removes · Ctrl+Z/Y undo/redo',
       face: 'Click a face of the object, then attach an image from the panel on the right',
-      vertex: 'Click a vertex handle, then drag the gizmo · + Vertices adds detail · G snaps to the grid',
+      vertex: 'Drag a vertex via the gizmo · right-click surface/edge adds a vertex · right-click a handle removes it · G snaps',
     }[this.mode] || '';
   }
 
@@ -880,7 +916,9 @@ export class ModelerPanel {
     if (!SUBDIVIDABLE_KINDS.includes(part.kind)) {
       this.onStatus(part.kind === 'sphere'
         ? 'Spheres gain vertices through the Segments field in the inspector'
-        : `${PART_KINDS[part.kind]?.label || part.kind} parts cannot be subdivided`);
+        : (part.kind === 'mesh'
+          ? 'Right-click the surface or an edge to add a vertex exactly there'
+          : `${PART_KINDS[part.kind]?.label || part.kind} parts cannot be subdivided`));
       return;
     }
     const current = Number.isInteger(part.subdivisions) ? part.subdivisions : 1;
@@ -947,9 +985,15 @@ export class ModelerPanel {
       const node = this.partNodes[this.selectedPart];
       if (!handle?.userData?.basePosition || !node?.isMesh) return;
       const local = node.worldToLocal(handle.position.clone());
+      const weldIndex = handle.userData.weldIndex;
+      if (part.kind === 'mesh') {
+        // Manual vertices: the drag writes the position itself.
+        part.vertices[weldIndex] = [local.x, local.y, local.z];
+        this._rebuildPartGeometry(this.selectedPart);
+        return;
+      }
       const base = handle.userData.basePosition;
       const offset = [local.x - base[0], local.y - base[1], local.z - base[2]];
-      const weldIndex = handle.userData.weldIndex;
       part.vertexOffsets = (part.vertexOffsets || []).filter((entry) => entry.i !== weldIndex);
       if (offset.some((value) => Math.abs(value) > 1e-5)) part.vertexOffsets.push({ i: weldIndex, o: offset });
       if (!part.vertexOffsets.length) delete part.vertexOffsets;
@@ -973,37 +1017,123 @@ export class ModelerPanel {
     this._rebuildVertexHandles();
   }
 
-  _pick(event) {
-    if (!this.definition) return;
+  /**
+   * Shared viewport raycast for left- and right-click interactions:
+   * `handleHit` is the nearest vertex handle (vertex mode only), `partHit`
+   * the nearest object surface belonging to a part.
+   */
+  _raycast(event) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
       -((event.clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    if (this.mode === 'vertex') {
-      const handleHits = this.raycaster.intersectObjects(this.vertexHandles, false);
-      if (handleHits.length) {
-        this.selectedVertex = handleHits[0].object.userData.weldIndex;
-        this._rebuildVertexHandles();
-        this._attachGizmoToSelection();
-        return;
-      }
+    const handleHit = this.mode === 'vertex'
+      ? this.raycaster.intersectObjects(this.vertexHandles, false)[0] || null
+      : null;
+    const partHit = this.raycaster.intersectObject(this.assetGroup, true)
+      .find((candidate) => Number.isInteger(candidate.object.userData.partIndex)) || null;
+    return { handleHit, partHit };
+  }
+
+  _pick(event) {
+    if (!this.definition) return;
+    const { handleHit, partHit } = this._raycast(event);
+    if (handleHit) {
+      this.selectedVertex = handleHit.object.userData.weldIndex;
+      this._rebuildVertexHandles();
+      this._attachGizmoToSelection();
+      return;
     }
-    const hits = this.raycaster.intersectObject(this.assetGroup, true);
-    const hit = hits.find((candidate) => Number.isInteger(candidate.object.userData.partIndex));
-    if (!hit) return;
-    const partIndex = hit.object.userData.partIndex;
+    if (!partHit) return;
+    const partIndex = partHit.object.userData.partIndex;
     if (this.mode === 'face') {
       if (partIndex !== this.selectedPart) this._selectPart(partIndex);
       const part = this.definition.parts[partIndex];
-      const faces = PART_KINDS[part.kind]?.faces || [];
-      const materialIndex = hit.face?.materialIndex ?? 0;
+      const faces = partFaceNames(part);
+      const materialIndex = partHit.face?.materialIndex ?? 0;
       this.selectedFace = faces[materialIndex] || faces[0] || null;
       this._renderInspector();
       return;
     }
     if (partIndex !== this.selectedPart) this._selectPart(partIndex);
+  }
+
+  // ------------------------------------------- right-click vertex editing --
+  /**
+   * Vertex-mode right click: a vertex handle removes that vertex; an empty
+   * spot on a part surface or edge adds one there. The part converts from a
+   * primitive into a kind:'mesh' part on the first topology edit.
+   */
+  _rightClick(event) {
+    if (!this.definition) return;
+    if (this.mode !== 'vertex') {
+      this.onStatus('Right-click manages vertices in Vertices mode — switch modes first');
+      return;
+    }
+    const { handleHit, partHit } = this._raycast(event);
+    if (handleHit) {
+      this._removeVertexAt(handleHit.object.userData.weldIndex);
+      return;
+    }
+    if (!partHit) {
+      this.onStatus('Right-click a surface or edge to add a vertex · right-click a vertex handle to remove it');
+      return;
+    }
+    this._addVertexAtHit(partHit);
+  }
+
+  /** Converts the part at `index` into an editable mesh in place (idempotent). */
+  _ensureMeshPart(index) {
+    const part = this.definition?.parts[index];
+    if (!part || part.kind === 'asset') return null;
+    if (part.kind === 'mesh') return part;
+    const converted = convertPartToMesh(part);
+    if (converted) this.definition.parts[index] = converted;
+    return converted;
+  }
+
+  _addVertexAtHit(partHit) {
+    const partIndex = partHit.object.userData.partIndex;
+    if (partIndex !== this.selectedPart) this._selectPart(partIndex);
+    const part = this._ensureMeshPart(partIndex);
+    if (!part) {
+      this.onStatus('Assembled asset parts have no editable vertices');
+      return;
+    }
+    const node = this.partNodes[partIndex];
+    if (!node) return;
+    const local = node.worldToLocal(partHit.point.clone());
+    const added = meshInsertVertexAtPoint(part, [local.x, local.y, local.z]);
+    if (!added) {
+      this.onStatus('Could not add a vertex there (mesh vertex limit reached?)');
+      return;
+    }
+    this.selectedVertex = added.vertexIndex;
+    this._markDirty();
+    this._rebuildObject();
+    this._renderInspector();
+    this.onStatus(added.split === 'edge'
+      ? 'Vertex added on the edge · drag the gizmo to move it · right-click it to remove'
+      : 'Vertex added · drag the gizmo to move it · right-click it to remove');
+  }
+
+  _removeVertexAt(weldIndex) {
+    const part = this._ensureMeshPart(this.selectedPart);
+    if (!part) {
+      this.onStatus('Assembled asset parts have no editable vertices');
+      return;
+    }
+    if (!meshRemoveVertex(part, weldIndex)) {
+      this.onStatus('Cannot remove this vertex — a mesh keeps at least 3 vertices and one face');
+      return;
+    }
+    this.selectedVertex = -1;
+    this._markDirty();
+    this._rebuildObject();
+    this._renderInspector();
+    this.onStatus('Vertex removed · faces using it were dropped');
   }
 
   _addPart(kind) {
@@ -1160,6 +1290,7 @@ export class ModelerPanel {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener('keydown', this._onKeyDown);
     this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
+    this.renderer.domElement.removeEventListener('contextmenu', this._onContextMenu);
     this.resizeObserver.disconnect();
     this.gizmo.dispose();
     this.orbit.dispose();
