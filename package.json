@@ -7,5 +7,8 @@
     "editor:test": "node --test \"tools/hesi-editor/test/unit/*.test.mjs\" tools/hesi-editor/test/server.test.mjs",
     "editor:smoke": "node tools/hesi-editor/test/smoke/editor.smoke.mjs",
     "start": "python -m http.server 8080"
+  },
+  "dependencies": {
+    "three": "^0.166.1"
   }
 }

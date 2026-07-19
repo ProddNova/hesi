@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
 
 // Applies HESI world-editor builds to the running game.
 //
@@ -6,6 +7,11 @@ import * as THREE from 'three';
 // flat list of operations addressed by stable names/indices — so the game can
 // replay edits on its freshly generated world without importing editor code.
 // Missing build files simply mean "no edits": the game runs untouched.
+//
+// Modeler-built objects and world texture overrides live in the shared
+// data/editor/custom-assets.json document (js/custom-assets.js): `place-custom`
+// operations rebuild those objects here, and saved road/wall texture overrides
+// are applied to the generated map materials even when no build file exists.
 
 const BUILD_URLS = Object.freeze({
   highway: 'data/editor/hesi-world-build.json',
@@ -56,10 +62,45 @@ function placedGroup(parent) {
   return group;
 }
 
-function buildPlacedObject(op, donorForMaterialKey) {
+// Rebuilds one assembled/custom part tree. World-asset parts resolve through
+// generated donor meshes; nested custom assets recurse through the document.
+function customAssetPartResolver(customAssets, donorForMaterialKey, depth = 0) {
+  return (part) => {
+    if (typeof part.assetRef === 'string' && part.assetRef.startsWith('custom:')) {
+      const nested = customAssets?.assets?.[part.assetRef];
+      if (!nested || depth >= 4) return null;
+      return buildCustomAssetGroup(nested, customAssets.textures, {
+        resolveAssetPart: customAssetPartResolver(customAssets, donorForMaterialKey, depth + 1),
+      });
+    }
+    const root = new THREE.Group();
+    for (const component of part.components || []) {
+      const donor = donorForMaterialKey(component.materialKey);
+      if (!donor) return null; // never place half an assembled asset
+      const mesh = new THREE.Mesh(donor.geometry, donor.material);
+      mesh.name = component.materialKey;
+      mesh.castShadow = donor.castShadow;
+      mesh.receiveShadow = donor.receiveShadow;
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.fromArray(component.matrix);
+      root.add(mesh);
+    }
+    return root.children.length ? root : null;
+  };
+}
+
+function buildPlacedObject(op, donorForMaterialKey, customAssets = null) {
   const root = new THREE.Group();
   root.name = op.name || 'Editor placed object';
-  if (op.op === 'place-primitive') {
+  if (op.op === 'place-custom') {
+    const definition = customAssets?.assets?.[op.assetId];
+    if (!definition) return null;
+    const built = buildCustomAssetGroup(definition, customAssets.textures, {
+      resolveAssetPart: customAssetPartResolver(customAssets, donorForMaterialKey),
+    });
+    if (!built.children.length) return null;
+    root.add(built);
+  } else if (op.op === 'place-primitive') {
     const geometry = PRIMITIVE_GEOMETRY[op.primitive]?.();
     if (!geometry) return null;
     root.add(new THREE.Mesh(geometry, primitiveMaterial()));
@@ -81,7 +122,7 @@ function buildPlacedObject(op, donorForMaterialKey) {
   return root;
 }
 
-export function applyHighwayBuild(map, build) {
+export function applyHighwayBuild(map, build, customAssets = null) {
   const summary = { applied: 0, skipped: 0 };
   if (!map?.group || !build) return summary;
 
@@ -121,8 +162,8 @@ export function applyHighwayBuild(map, build) {
       summary.applied += 1;
       continue;
     }
-    if (op.op === 'place' || op.op === 'place-primitive') {
-      const placed = buildPlacedObject(op, donorForMaterialKey);
+    if (op.op === 'place' || op.op === 'place-primitive' || op.op === 'place-custom') {
+      const placed = buildPlacedObject(op, donorForMaterialKey, customAssets);
       if (!placed) { summary.skipped += 1; continue; }
       placedGroup(map.group).add(placed);
       summary.applied += 1;
@@ -138,7 +179,7 @@ export function applyHighwayBuild(map, build) {
   return summary;
 }
 
-export function applyGarageBuild(garageRoot, build) {
+export function applyGarageBuild(garageRoot, build, customAssets = null) {
   const summary = { applied: 0, skipped: 0 };
   if (!garageRoot || !build) return summary;
   // Garage children are addressed by build-order index, so this must run right
@@ -152,8 +193,8 @@ export function applyGarageBuild(garageRoot, build) {
       summary.applied += 1;
       continue;
     }
-    if (op.op === 'place-primitive') {
-      const placed = buildPlacedObject(op, () => null);
+    if (op.op === 'place-primitive' || op.op === 'place-custom') {
+      const placed = buildPlacedObject(op, () => null, customAssets);
       if (!placed) { summary.skipped += 1; continue; }
       placedGroup(garageRoot).add(placed);
       summary.applied += 1;
@@ -171,13 +212,20 @@ export async function applyEditorBuilds({ map = null, garageRoot = null } = {}) 
     summary.skipped += partial.skipped;
     if (partial.applied || partial.skipped) summary.scenes.push({ scene, ...partial });
   };
+  const customAssets = await fetchCustomAssetsDocument();
   if (map) {
+    // Saved world texture overrides (custom road asphalt, walls, ...) apply
+    // even when no build file exists yet.
+    if (customAssets && map.materials) {
+      const textures = applyWorldTextureOverrides(map.materials, customAssets);
+      if (textures.applied) summary.scenes.push({ scene: 'world-textures', ...textures });
+    }
     const build = await fetchBuild('highway');
-    if (build) merge('highway', applyHighwayBuild(map, build));
+    if (build) merge('highway', applyHighwayBuild(map, build, customAssets));
   }
   if (garageRoot) {
     const build = await fetchBuild('garage');
-    if (build) merge('garage', applyGarageBuild(garageRoot, build));
+    if (build) merge('garage', applyGarageBuild(garageRoot, build, customAssets));
   }
   return summary;
 }

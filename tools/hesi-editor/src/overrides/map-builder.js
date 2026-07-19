@@ -119,6 +119,10 @@ function placedOperations({ assetRegistry, projectDocument }) {
       operations.push({ op: 'place-primitive', primitive: placed.assetId.split(':').pop(), ...base });
       continue;
     }
+    if (asset.kind === 'custom') {
+      operations.push({ op: 'place-custom', assetId: placed.assetId, ...base });
+      continue;
+    }
     const baseInverse = asset.baseWorldMatrix.clone().invert();
     operations.push({
       op: 'place',
