@@ -43,7 +43,7 @@ const CUSTOM_ASSETS_PATH = 'data/editor/custom-assets.json';
 const COMMITS_DIR = 'data/editor/commits';
 const MAX_PROJECT_BYTES = 2 * 1024 * 1024;
 // Custom assets embed face textures as data URLs, so they get a larger budget.
-const MAX_ASSETS_BYTES = 24 * 1024 * 1024;
+const MAX_ASSETS_BYTES = 128 * 1024 * 1024;
 const MAX_COMMITS_LISTED = 200;
 
 const MIME = {

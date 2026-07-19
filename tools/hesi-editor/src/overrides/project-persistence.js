@@ -56,8 +56,8 @@ async function responseJson(response) {
 }
 
 export class ProjectPersistence {
-  constructor({ projectState, registry, assetRegistry, adapter, selection, transformManager, history, scene = FALLBACK_SCENE, onStatus = () => {}, onProjectChange = () => {}, onRecovery = () => {} }) {
-    Object.assign(this, { projectState, registry, assetRegistry, adapter, selection, transformManager, history, scene, onStatus, onProjectChange, onRecovery });
+  constructor({ projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore = null, scene = FALLBACK_SCENE, onStatus = () => {}, onProjectChange = () => {}, onRecovery = () => {} }) {
+    Object.assign(this, { projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore, scene, onStatus, onProjectChange, onRecovery });
     this.currentPath = scene.projectPath || DEFAULT_PROJECT_PATH;
     this.lastSavedDocument = blankProjectDocument(scene.projectName);
     this.lastSavedModifiedMs = 0;
@@ -293,6 +293,9 @@ export class ProjectPersistence {
   async save({ path = this.currentPath, name = null, markSaved = true, build = true } = {}) {
     const normalized = normalizeProjectPath(path);
     if (name?.trim()) this.projectState.updateProject({ name: name.trim() });
+    // Face texture IDs live in custom-assets.json. Persist that dependency
+    // before validating/writing any project, commit, or Apply-to-Game output.
+    if (this.customAssetStore?.dirty) await this.customAssetStore.save();
     const document = this.toPersistedDocument();
     const result = await this.write(normalized, document);
     if (markSaved) {

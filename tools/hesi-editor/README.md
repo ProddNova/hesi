@@ -110,8 +110,9 @@ full-screen modeling section that is always available inside the editor:
   making a bin means uploading the photos of its top, bottom, and sides;
   textures use nearest filtering for the PSX look, and one uploaded image can
   be reused across faces and objects. Each face can use **Stretch** or
-  **Fit & crop** (aspect-preserving, automatically clipped by the current face
-  silhouette), plus independent horizontal and vertical flips
+  **Fit & crop** (aspect-preserving: it freezes the image projection when
+  selected, then later vertex edits clip that same stationary image through
+  the new face silhouette), plus independent horizontal and vertical flips
 - **Vertices mode**: drag welded vertex handles to deform primitives into
   hand-made low-poly shapes (offsets are saved with the object); **+ Vertices**
   (or the *Vertex detail* field) subdivides a part for more editable vertices

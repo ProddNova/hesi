@@ -1,4 +1,4 @@
-import { applyObjectFaceStyles, objectFaceSlots } from '/js/custom-assets.js';
+import { applyObjectFaceStyles, objectFaceSlots } from '../../../../js/custom-assets.js';
 
 const clone = (value) => value == null ? value : structuredClone(value);
 
@@ -40,9 +40,11 @@ export class FaceTextureController {
   }
 
   async assignTexture(entity, slotKey, textureId) {
-    const changed = this.setStyle(entity, slotKey, { texture: textureId });
-    if (changed && textureId && this.store.dirty) await this.store.save();
-    return changed;
+    if (textureId && !this.store.getTexture(textureId)) throw new Error(`Texture ${textureId} is no longer in the shared library`);
+    // Persist the dependency first. A failed/oversized library save must never
+    // leave the map project pointing at an image that exists only in memory.
+    if (textureId && this.store.dirty) await this.store.save();
+    return this.setStyle(entity, slotKey, { texture: textureId });
   }
 
   async assignFile(entity, slotKey, file) {

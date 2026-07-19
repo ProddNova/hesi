@@ -72,6 +72,16 @@ function finiteVector(value, length) {
   return Array.isArray(value) && value.length === length && value.every((item) => Number.isFinite(item));
 }
 
+function validFaceProjection(value) {
+  return isRecord(value)
+    && finiteVector(value.origin, 3)
+    && finiteVector(value.uvOrigin, 2)
+    && finiteVector(value.uVector, 3)
+    && finiteVector(value.vVector, 3)
+    && Number.isFinite(value.surfaceAspect)
+    && value.surfaceAspect > 0;
+}
+
 /** Validates a whole custom-assets document. Returns a list of error strings. */
 export function customAssetsDocumentErrors(document) {
   const errors = [];
@@ -165,6 +175,9 @@ export function customAssetsDocumentErrors(document) {
               if (style[key] !== undefined && typeof style[key] !== 'boolean') errors.push(`${path}.faces.${face}.${key} must be boolean`);
             }
             if (style.repeat !== undefined && !finiteVector(style.repeat, 2)) errors.push(`${path}.faces.${face}.repeat must contain 2 finite numbers`);
+            if (style.projection !== undefined && !validFaceProjection(style.projection)) {
+              errors.push(`${path}.faces.${face}.projection must describe a finite planar texture projection`);
+            }
           }
         }
         if (part.vertexOffsets !== undefined) {
@@ -411,6 +424,8 @@ export function convertPartToMesh(part) {
     const offset = offsets.get(index);
     return offset ? [vertex[0] + offset[0], vertex[1] + offset[1], vertex[2] + offset[2]] : [...vertex];
   });
+  applyVertexOffsets(geometry, part.vertexOffsets);
+  applyPartFaceProjections(geometry, part);
   const uvAttribute = geometry.getAttribute('uv');
   const index = geometry.index;
   const cornerCount = index ? index.count : geometry.getAttribute('position').count;
@@ -656,6 +671,101 @@ function geometryMaterialAspect(geometry, materialIndex = 0, scale = [1, 1, 1]) 
   return Math.min(1000, Math.max(0.001, uLength / vLength));
 }
 
+/**
+ * Captures the current UV plane of one face. A cover texture keeps this plane
+ * after later vertex edits, so reshaping the mesh reveals/crops the same image
+ * instead of pulling the image along with every moved vertex.
+ */
+export function capturePartFaceProjection(part, faceName) {
+  if (!part || part.kind === 'asset') return null;
+  const materialIndex = partFaceNames(part).indexOf(faceName);
+  if (materialIndex < 0) return null;
+  const geometry = partGeometry(part);
+  if (!geometry) return null;
+  applyVertexOffsets(geometry, part.vertexOffsets);
+  try {
+    const position = geometry.getAttribute('position');
+    const uv = geometry.getAttribute('uv');
+    if (!position || !uv) return null;
+    const index = geometry.index;
+    const cornerCount = index ? index.count : position.count;
+    const groups = geometry.groups?.length
+      ? geometry.groups
+      : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+    const point = (corner) => {
+      const vertex = index ? index.getX(corner) : corner;
+      return new THREE.Vector3(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
+    };
+    for (const group of groups.filter((entry) => (entry.materialIndex || 0) === materialIndex)) {
+      for (let corner = group.start; corner + 2 < group.start + group.count; corner += 3) {
+        const vertices = [corner, corner + 1, corner + 2].map((entry) => index ? index.getX(entry) : entry);
+        const p0 = point(corner), p1 = point(corner + 1), p2 = point(corner + 2);
+        const e1 = p1.clone().sub(p0), e2 = p2.clone().sub(p0);
+        const du1 = uv.getX(vertices[1]) - uv.getX(vertices[0]);
+        const dv1 = uv.getY(vertices[1]) - uv.getY(vertices[0]);
+        const du2 = uv.getX(vertices[2]) - uv.getX(vertices[0]);
+        const dv2 = uv.getY(vertices[2]) - uv.getY(vertices[0]);
+        const determinant = du1 * dv2 - du2 * dv1;
+        if (Math.abs(determinant) < 1e-8) continue;
+        const uVector = e1.clone().multiplyScalar(dv2).addScaledVector(e2, -dv1).multiplyScalar(1 / determinant);
+        const vVector = e1.clone().multiplyScalar(-du2).addScaledVector(e2, du1).multiplyScalar(1 / determinant);
+        if (uVector.clone().cross(vVector).lengthSq() < 1e-12) continue;
+        return {
+          origin: p0.toArray(),
+          uvOrigin: [uv.getX(vertices[0]), uv.getY(vertices[0])],
+          uVector: uVector.toArray(),
+          vVector: vVector.toArray(),
+          surfaceAspect: geometryMaterialAspect(geometry, materialIndex, part.scale || [1, 1, 1]),
+        };
+      }
+    }
+    return null;
+  } finally {
+    geometry.dispose();
+  }
+}
+
+/** Reprojects cover-textured faces through their captured, fixed UV planes. */
+export function applyPartFaceProjections(geometry, part) {
+  const position = geometry?.getAttribute?.('position');
+  const uv = geometry?.getAttribute?.('uv');
+  if (!position || !uv || !part) return geometry;
+  const index = geometry.index;
+  const cornerCount = index ? index.count : position.count;
+  const groups = geometry.groups?.length
+    ? geometry.groups
+    : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+  let changed = false;
+  partFaceNames(part).forEach((faceName, materialIndex) => {
+    const style = part.faces?.[faceName];
+    const projection = style?.projection;
+    if (style?.fit !== 'cover' || !validFaceProjection(projection)) return;
+    const origin = new THREE.Vector3().fromArray(projection.origin);
+    const uVector = new THREE.Vector3().fromArray(projection.uVector);
+    const vVector = new THREE.Vector3().fromArray(projection.vVector);
+    const uu = uVector.dot(uVector), uvDot = uVector.dot(vVector), vv = vVector.dot(vVector);
+    const determinant = uu * vv - uvDot * uvDot;
+    if (Math.abs(determinant) < 1e-12) return;
+    for (const group of groups.filter((entry) => (entry.materialIndex || 0) === materialIndex)) {
+      for (let corner = group.start; corner < group.start + group.count; corner += 1) {
+        const vertex = index ? index.getX(corner) : corner;
+        const delta = new THREE.Vector3(
+          position.getX(vertex) - origin.x,
+          position.getY(vertex) - origin.y,
+          position.getZ(vertex) - origin.z,
+        );
+        const du = delta.dot(uVector), dv = delta.dot(vVector);
+        const u = (du * vv - dv * uvDot) / determinant;
+        const v = (dv * uu - du * uvDot) / determinant;
+        uv.setXY(vertex, projection.uvOrigin[0] + u, projection.uvOrigin[1] + v);
+        changed = true;
+      }
+    }
+  });
+  if (changed) uv.needsUpdate = true;
+  return geometry;
+}
+
 function faceMaterial(part, faceName, texturesById, surfaceAspect = 1) {
   const style = part.faces?.[faceName] || {};
   const color = style.color || part.color || '#9aa7b5';
@@ -696,8 +806,14 @@ export function buildPartObject(part, texturesById, { resolveAssetPart = () => n
     const geometry = partGeometry(part);
     if (!geometry) return null;
     applyVertexOffsets(geometry, part.vertexOffsets);
+    applyPartFaceProjections(geometry, part);
     const materials = partFaceNames(part).map((faceName, materialIndex) => faceMaterial(
-      part, faceName, texturesById, geometryMaterialAspect(geometry, materialIndex, part.scale || [1, 1, 1]),
+      part,
+      faceName,
+      texturesById,
+      part.faces?.[faceName]?.fit === 'cover' && validFaceProjection(part.faces[faceName].projection)
+        ? part.faces[faceName].projection.surfaceAspect
+        : geometryMaterialAspect(geometry, materialIndex, part.scale || [1, 1, 1]),
     ));
     node = new THREE.Mesh(geometry, materials.length === 1 ? materials[0] : materials);
   }

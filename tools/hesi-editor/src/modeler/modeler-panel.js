@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
-  PART_KINDS, WORLD_TEXTURE_SLOTS, applyVertexOffsets, buildPartObject, convertPartToMesh,
-  meshInsertVertexAtPoint, meshRemoveVertex, partFaceNames, partGeometry, weldedVertices,
+  PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets, buildPartObject,
+  capturePartFaceProjection, convertPartToMesh, meshInsertVertexAtPoint, meshRemoveVertex,
+  partFaceNames, partGeometry, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -499,6 +500,14 @@ export class ModelerPanel {
     if (!this.definition) return;
     const resolver = assetPartResolver(this.assetRegistry);
     this.definition.parts.forEach((part, index) => {
+      // Documents saved before fixed cover projections existed are upgraded in
+      // memory before the first possible vertex drag.
+      for (const faceName of partFaceNames(part)) {
+        const style = part.faces?.[faceName];
+        if (style?.fit !== 'cover' || style.projection) continue;
+        const projection = capturePartFaceProjection(part, faceName);
+        if (projection) part.faces[faceName] = { ...style, projection };
+      }
       const node = buildPartObject(part, this.store.texturesById(), { resolveAssetPart: resolver });
       if (node) {
         node.userData.partIndex = index;
@@ -519,6 +528,7 @@ export class ModelerPanel {
     const geometry = partGeometry(part);
     if (!geometry) return;
     applyVertexOffsets(geometry, part.vertexOffsets);
+    applyPartFaceProjections(geometry, part);
     node.geometry.dispose();
     node.geometry = geometry;
   }
@@ -752,7 +762,15 @@ export class ModelerPanel {
       const allFaces = button('All faces', 'tool-button small', 'Copy this face style to every face of the part');
       allFaces.addEventListener('click', () => {
         part.faces = part.faces || {};
-        for (const name of faces) part.faces[name] = clone(style);
+        for (const name of faces) {
+          const copiedStyle = clone(style);
+          delete copiedStyle.projection;
+          if (copiedStyle.fit === 'cover') {
+            const projection = capturePartFaceProjection(part, name);
+            if (projection) copiedStyle.projection = projection;
+          }
+          part.faces[name] = copiedStyle;
+        }
         this._markDirty();
         this._rebuildObject();
         this._renderInspector();
@@ -769,7 +787,13 @@ export class ModelerPanel {
         fit.add(new Option('Fit & crop', 'cover'));
         fit.value = style.fit === 'cover' ? 'cover' : 'stretch';
         fit.addEventListener('change', () => {
-          part.faces[faceName] = { ...style, fit: fit.value };
+          const nextStyle = { ...style, fit: fit.value };
+          delete nextStyle.projection;
+          if (fit.value === 'cover') {
+            const projection = capturePartFaceProjection(part, faceName);
+            if (projection) nextStyle.projection = projection;
+          }
+          part.faces[faceName] = nextStyle;
           this._markDirty();
           this._rebuildObject();
           this._renderInspector();
@@ -1224,7 +1248,12 @@ export class ModelerPanel {
     const textures = this.store.textures();
     const useTexture = (textureId) => {
       part.faces = part.faces || {};
-      part.faces[faceName] = { ...(part.faces[faceName] || {}), texture: textureId };
+      const nextStyle = { ...(part.faces[faceName] || {}), texture: textureId };
+      if (nextStyle.fit === 'cover') {
+        const projection = capturePartFaceProjection(part, faceName);
+        if (projection) nextStyle.projection = projection;
+      }
+      part.faces[faceName] = nextStyle;
       this.selectedFace = faceName;
       this._markDirty();
       this._rebuildObject();

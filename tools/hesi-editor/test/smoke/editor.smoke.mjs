@@ -596,6 +596,13 @@ try {
     const style = window.hesiEditor.registry.list().find((entity) => entity.type === 'garage-floor')?.metadata?.faceTextures?.['0:0'];
     return style?.fit === 'cover' && style?.flipX === true;
   });
+  const persistedFaceTexture = await garage.evaluate(() => {
+    const floor = window.hesiEditor.registry.list().find((entity) => entity.type === 'garage-floor');
+    return window.hesiEditor.persistence.toPersistedDocument().entityOverrides[floor.id]?.faceTextures?.['0:0'] || null;
+  });
+  if (persistedFaceTexture?.texture !== libraryTexture) {
+    throw new Error(`Garage face texture failed project validation/persistence: ${JSON.stringify(persistedFaceTexture)}`);
+  }
   await garage.locator('[data-action="open-modeler"]').click();
   await garage.waitForSelector('[data-testid="modeler-overlay"]:not([hidden])');
   await garage.locator('.modeler-face-row button').filter({ hasText: 'Image' }).first().click();
@@ -610,6 +617,18 @@ try {
     || !textureControls.buttons.includes('Flip H') || !textureControls.buttons.includes('Flip V')) {
     throw new Error(`Modeler texture controls are incomplete: ${JSON.stringify(textureControls)}`);
   }
+  await garage.locator('.modeler-face-options select').first().selectOption('cover');
+  const fixedProjection = await garage.evaluate(() => {
+    const modeler = window.hesiEditor.modeler;
+    const part = modeler.definition?.parts?.[modeler.selectedPart];
+    const style = Object.values(part?.faces || {}).find((faceStyle) => faceStyle?.texture && faceStyle.fit === 'cover');
+    return style?.projection || null;
+  });
+  if (!fixedProjection || fixedProjection.origin?.length !== 3 || fixedProjection.uvOrigin?.length !== 2
+    || fixedProjection.uVector?.length !== 3 || fixedProjection.vVector?.length !== 3
+    || !(fixedProjection.surfaceAspect > 0)) {
+    throw new Error(`Modeler Fit & crop did not capture a fixed image projection: ${JSON.stringify(fixedProjection)}`);
+  }
   if (garageErrors.length) throw new Error(`Garage browser console errors: ${garageErrors.join(' | ')}`);
   await garage.close();
 
@@ -619,7 +638,7 @@ try {
   });
   if (disposed.entities !== 0 || disposed.canvasPresent) throw new Error('Editor disposal left live registry or canvas state');
   if (errors.length) throw new Error(`Browser console errors: ${errors.join(' | ')}`);
-  console.log(`PASS real map default (${state.entities} semantic entities), aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, garage floor/face textures/modeler crop+flip, explicit demo, disposal`);
+  console.log(`PASS real map default (${state.entities} semantic entities), aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, garage floor/face textures/modeler fixed crop+flip, explicit demo, disposal`);
   console.log(`ROAD SCREENSHOT ${path.join(OUT, 'checkpoint-road-tatsumi-editing.png')}`);
   console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-3-real-lamp-editing.png')}`);
 } finally {

@@ -4,11 +4,13 @@ import {
   PART_KINDS,
   WORLD_TEXTURE_SLOTS,
   applyObjectFaceStyles,
+  applyPartFaceProjections,
   applyVertexOffsets,
   applyWorldTextureOverrides,
   blankCustomAssetsDocument,
   buildCustomAssetGroup,
   buildPartObject,
+  capturePartFaceProjection,
   customAssetsDocumentErrors,
   faceTextureTransform,
   clearObjectFaceStyles,
@@ -138,6 +140,46 @@ test('face texture cover preserves aspect, crops centrally, and flips per axis',
   });
 });
 
+test('Fit & crop keeps a fixed image plane while moved vertices crop it', () => {
+  const part = {
+    kind: 'mesh',
+    scale: [1, 1, 1],
+    vertices: [[-1, -0.5, 0], [1, -0.5, 0], [1, 0.5, 0], [-1, 0.5, 0]],
+    triangles: [
+      { v: [0, 1, 2], face: 0, uv: [[0, 0], [1, 0], [1, 1]] },
+      { v: [0, 2, 3], face: 0, uv: [[0, 0], [1, 1], [0, 1]] },
+    ],
+    faceNames: ['side'],
+    faces: { side: { texture: 'tex:0001', fit: 'cover' } },
+  };
+  const projection = capturePartFaceProjection(part, 'side');
+  assert.ok(projection, 'the original image plane is captured');
+  assert.ok(Math.abs(projection.surfaceAspect - 2) < 1e-6);
+  part.faces.side.projection = projection;
+
+  // Pull the upper-right corner halfway into the original rectangle. Its UV
+  // must become 0.5 (same stationary image at x=0), not stay at 1 (stretch).
+  part.vertices[2] = [0, 0.5, 0];
+  const geometry = partGeometry(part);
+  applyPartFaceProjections(geometry, part);
+  const position = geometry.getAttribute('position');
+  const uv = geometry.getAttribute('uv');
+  const movedCornerUvs = [];
+  for (let index = 0; index < position.count; index += 1) {
+    if (Math.abs(position.getX(index)) < 1e-6 && Math.abs(position.getY(index) - 0.5) < 1e-6) {
+      movedCornerUvs.push([uv.getX(index), uv.getY(index)]);
+    }
+  }
+  assert.equal(movedCornerUvs.length, 2);
+  assert.ok(movedCornerUvs.every(([u, v]) => Math.abs(u - 0.5) < 1e-6 && Math.abs(v - 1) < 1e-6));
+  geometry.dispose();
+
+  const mesh = buildPartObject(part, { 'tex:0001': { dataUrl: PIXEL_PNG } });
+  assert.ok(Math.abs(mesh.material.map.repeat.y - 0.5) < 1e-6, 'crop aspect remains frozen at capture time');
+  mesh.geometry.dispose();
+  mesh.material.dispose();
+});
+
 test('Map Editor face slots split a box material and restore it cleanly', () => {
   const original = new THREE.MeshLambertMaterial({ color: 0x334455, name: 'wall' });
   const box = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1), original);
@@ -157,12 +199,21 @@ test('Map Editor face slots split a box material and restore it cleanly', () => 
 
 test('custom asset face styles validate fit and flips', () => {
   const document = validDocument();
-  document.assets['custom:0001'].parts[0].faces.top = { texture: 'tex:0001', fit: 'cover', flipX: true, flipY: false };
+  const part = document.assets['custom:0001'].parts[0];
+  part.faces.top = {
+    texture: 'tex:0001',
+    fit: 'cover',
+    flipX: true,
+    flipY: false,
+    projection: capturePartFaceProjection(part, 'top'),
+  };
   assert.deepEqual(customAssetsDocumentErrors(document), []);
-  document.assets['custom:0001'].parts[0].faces.top.fit = 'contain';
-  document.assets['custom:0001'].parts[0].faces.top.flipX = 'yes';
+  part.faces.top.fit = 'contain';
+  part.faces.top.flipX = 'yes';
+  part.faces.top.projection.uVector = [1, 0];
   assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.fit')));
   assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.flipX')));
+  assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.projection')));
 });
 
 test('buildCustomAssetGroup skips unresolvable assembled parts without throwing', () => {
