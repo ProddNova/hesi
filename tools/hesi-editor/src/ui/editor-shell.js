@@ -655,7 +655,7 @@ export function createEditorShell(root) {
       const reference = element('div', 'control-reference');
       [
         ['Select', 'Click an object in the viewport · click again to cycle overlapping hits · Shift+click adds/removes objects · Esc clears'],
-        ['Roads', 'Select a road in the hierarchy → drag its centreline points · double-click the line inserts · Del removes · Save stores source · Rebuild Map publishes'],
+        ['Roads', 'Click asphalt or select a road → drag orange points · right-click orange road adds · right-click point removes · Save stores source · Rebuild Map regenerates asphalt'],
         ['Camera', 'Orbit: drag / wheel · Fly: click viewport, then WASD + Q/E, wheel speed, Shift boost'],
         ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
         ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],

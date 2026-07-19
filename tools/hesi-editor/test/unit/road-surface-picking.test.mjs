@@ -21,6 +21,12 @@ test('road surface hits resolve to the nearest semantic route entity', () => {
   assert.equal(resolveRoadSurfaceRoute(surface, point, adapter, routes), route);
   assert.deepEqual(received, { hitPoint: point, options: { maxDistance: 80 } });
   assert.equal(resolveRoadSurfaceRoute(serviceSurface, point, adapter, routes), route);
+  assert.equal(resolveRoadSurfaceRoute({ id: 'deck', type: 'generated-prop-batch', name: 'Tatsumi PA deck' }, point, adapter, routes), route);
+  assert.equal(resolveRoadSurfaceRoute({
+    id: 'generated-prop-batch:6-n7-unknown-tatsumi-pa-deck-6',
+    name: 'Generated props · chunk 6,-7',
+    type: 'generated-prop-batch',
+  }, point, adapter, routes), route);
 });
 
 test('road surface resolution safely falls back when no matching route exists', () => {

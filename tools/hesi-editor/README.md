@@ -59,10 +59,12 @@ code.
 
 Road curves have an additional explicit publish step:
 
-1. Click a rendered asphalt surface (the editor resolves its merged chunk to
-   the nearest route), or select a road route in the hierarchy. Drag its orange
-   control points, double-click the orange centreline to insert a point, or
-   select an interior point and press `Delete`.
+1. Click a rendered asphalt surface or the Tatsumi PA deck (the editor gives
+   the nearest road route priority over markings and props), or select a road
+   route in the hierarchy. Orange controls are placed on the runtime road and
+   collision elevation. Drag a point, right-click the orange road preview to
+   add a point, or right-click an interior point to remove it. Double-click to
+   add and `Delete`/`Backspace` to remove remain available as shortcuts.
 2. Press **Save**. Changed routes are stored deterministically in
    `data/editor/road-route-overrides.json`; production route files are not
    changed yet. Saved curve edits reload into the editor automatically.
@@ -70,13 +72,21 @@ Road curves have an additional explicit publish step:
    `data/routes-smoothed.json` and `data/routes-smoothed.js`, without replacing
    unrelated routes or metadata. Reload the game to use the rebuilt roads.
 
+While editing, the wide translucent orange strip and analytic collision curve
+update immediately so the changed trajectory is visible. The merged asphalt,
+markings, barriers, and chunk meshes are regenerated only by **Rebuild Map**;
+that command publishes the source and reloads the editor with the final road.
+Runtime-generated access lanes such as `tatsumi_pa_entry` and
+`tatsumi_pa_exit` are saved separately and published as validated synthetic
+route metadata.
+
 The road editor changes the existing smoothed centreline in XZ only: elevation
 (Y), route IDs, endpoints, and junction connectivity are protected. It does
 not edit lanes, widths, junction topology, markings, barriers, or tunnels, and
-it does not recalculate distance-based metadata. Keep edits local and away
-from junction boundaries. If the normal raw-route smoothing pipeline later
-regenerates `data/routes-smoothed.*`, press **Rebuild Map** again to reapply the
-saved editor source.
+does not recalculate distance-based metadata. Keep edits local and away from
+junction boundaries. If the normal raw-route smoothing pipeline later
+regenerates `data/routes-smoothed.*`, press **Rebuild Map** again to reapply
+the saved editor source.
 
 ## Commits (map versions)
 

@@ -11,6 +11,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const PROJECT_PATH = 'data/editor/.test-smoke-project.json';
 const BUILD_PATH = path.join(ROOT, 'data', 'editor', 'hesi-world-build.json');
 const BUILD_BACKUP_PATH = `${BUILD_PATH}.bak`;
+const ROAD_SOURCE_PATH = path.join(ROOT, 'data', 'editor', 'road-route-overrides.json');
+const ROAD_SOURCE_BACKUP_PATH = `${ROAD_SOURCE_PATH}.bak`;
 await mkdir(OUT, { recursive: true });
 
 const snapshotFile = async (file) => {
@@ -22,6 +24,8 @@ const restoreFile = async (file, snapshot) => {
 };
 const buildSnapshot = await snapshotFile(BUILD_PATH);
 const buildBackupSnapshot = await snapshotFile(BUILD_BACKUP_PATH);
+const roadSourceSnapshot = await snapshotFile(ROAD_SOURCE_PATH);
+const roadSourceBackupSnapshot = await snapshotFile(ROAD_SOURCE_BACKUP_PATH);
 
 const child = spawn(process.execPath, ['tools/hesi-editor/server.mjs'], {
   cwd: ROOT,
@@ -111,6 +115,134 @@ try {
   if (!clickedRoad.active || clickedRoad.type !== 'road-route') {
     throw new Error(`Road surface click did not activate route editing: ${JSON.stringify({ roadPickPoint, clickedRoad })}`);
   }
+
+  const alignedRoadControls = await page.evaluate(() => {
+    const controller = window.hesiEditor.roadEdit;
+    const handle = controller.handles[0];
+    const sourcePoint = controller.route.points[handle?.userData?.pointIndex];
+    return {
+      handleCount: controller.handles.length,
+      previewVertices: controller.previewMesh?.geometry?.getAttribute('position')?.count || 0,
+      yOffset: controller.yOffset,
+      alignmentError: handle && sourcePoint
+        ? Math.abs(handle.position.y - (sourcePoint[1] + controller.yOffset + 0.28))
+        : Infinity,
+    };
+  });
+  if (!alignedRoadControls.handleCount || alignedRoadControls.previewVertices < 4
+    || alignedRoadControls.alignmentError > 0.001) {
+    throw new Error(`Road controls are not aligned with the live road preview: ${JSON.stringify(alignedRoadControls)}`);
+  }
+
+  // Runtime-generated Tatsumi connectors must expose the same editing UX as
+  // production routes. Exercise real right-click events: point removes,
+  // orange road surface adds, and both rebuild the analytic collision curve.
+  await page.getByTestId('hierarchy-search').fill('Tatsumi PA exit');
+  await page.locator('[data-entity-id="road:tatsumi-pa-exit"]').click();
+  await page.waitForFunction(() => window.hesiEditor.roadEdit?.route?.id === 'tatsumi_pa_exit'
+    && window.hesiEditor.roadEdit?.synthetic === true);
+  const syntheticBaseline = await page.evaluate(() => {
+    const app = window.hesiEditor;
+    const controller = app.roadEdit;
+    const camera = app.viewport.camera;
+    const rect = app.viewport.canvas.getBoundingClientRect();
+    camera.updateMatrixWorld(true);
+    controller.group.updateMatrixWorld(true);
+    const Vector3 = camera.position.constructor;
+    const visibleInterior = controller.handles
+      .filter((handle) => handle.userData.pointIndex > 0
+        && handle.userData.pointIndex < controller.route.points.length - 1)
+      .map((handle) => {
+        const projected = handle.getWorldPosition(new Vector3()).project(camera);
+        return {
+          index: handle.userData.pointIndex,
+          x: rect.left + (projected.x + 1) * rect.width * 0.5,
+          y: rect.top + (1 - projected.y) * rect.height * 0.5,
+          depth: projected.z,
+        };
+      })
+      .filter((point) => point.depth > -1 && point.depth < 1
+        && point.x > rect.left + 4 && point.x < rect.right - 4
+        && point.y > rect.top + 4 && point.y < rect.bottom - 4)
+      .sort((a, b) => Math.hypot(a.x - (rect.left + rect.width / 2), a.y - (rect.top + rect.height / 2))
+        - Math.hypot(b.x - (rect.left + rect.width / 2), b.y - (rect.top + rect.height / 2)))[0];
+    return {
+      pointCount: controller.route.points.length,
+      runtimePointCount: controller.runtimeRoute.points.length,
+      previewVertices: controller.previewMesh.geometry.getAttribute('position').count,
+      synthetic: controller.synthetic,
+      yOffset: controller.yOffset,
+      handleTarget: visibleInterior || null,
+    };
+  });
+  if (!syntheticBaseline.synthetic || syntheticBaseline.yOffset !== 0 || !syntheticBaseline.handleTarget) {
+    throw new Error(`Tatsumi PA exit did not enter editable synthetic-route mode: ${JSON.stringify(syntheticBaseline)}`);
+  }
+  await page.mouse.click(syntheticBaseline.handleTarget.x, syntheticBaseline.handleTarget.y, { button: 'right' });
+  await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count - 1,
+    syntheticBaseline.pointCount);
+  const deletedSynthetic = await page.evaluate(() => ({
+    source: window.hesiEditor.roadEdit.route.points.length,
+    runtime: window.hesiEditor.roadEdit.runtimeRoute.points.length,
+  }));
+  if (deletedSynthetic.source !== syntheticBaseline.pointCount - 1
+    || deletedSynthetic.runtime !== deletedSynthetic.source) {
+    throw new Error(`Right-click point deletion did not update live collision: ${JSON.stringify({ syntheticBaseline, deletedSynthetic })}`);
+  }
+  await page.keyboard.press('Control+Z');
+  await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count,
+    syntheticBaseline.pointCount);
+  await page.evaluate(() => window.hesiEditor.roadEdit.clearDirty());
+
+  const addTarget = await page.evaluate(() => {
+    const app = window.hesiEditor;
+    const controller = app.roadEdit;
+    const camera = app.viewport.camera;
+    const rect = app.viewport.canvas.getBoundingClientRect();
+    const Vector3 = camera.position.constructor;
+    camera.updateMatrixWorld(true);
+    controller.group.updateMatrixWorld(true);
+    const project = (point) => {
+      const projected = point.clone().project(camera);
+      return {
+        x: rect.left + (projected.x + 1) * rect.width * 0.5,
+        y: rect.top + (1 - projected.y) * rect.height * 0.5,
+        depth: projected.z,
+      };
+    };
+    const handleScreens = controller.handles.map((handle) => project(handle.getWorldPosition(new Vector3())));
+    const position = controller.previewMesh.geometry.getAttribute('position');
+    const candidates = [];
+    // Use either ribbon edge rather than its centreline: this remains on the
+    // clickable orange surface while staying clear of dense point handles.
+    for (let index = 0; index < position.count; index += 6) {
+      const screen = project(new Vector3().fromBufferAttribute(position, index));
+      if (screen.depth <= -1 || screen.depth >= 1
+        || screen.x <= rect.left + 4 || screen.x >= rect.right - 4
+        || screen.y <= rect.top + 4 || screen.y >= rect.bottom - 4) continue;
+      screen.handleClearance = Math.min(...handleScreens.map((handle) => Math.hypot(screen.x - handle.x, screen.y - handle.y)));
+      candidates.push(screen);
+    }
+    return candidates.sort((a, b) => b.handleClearance - a.handleClearance)[0] || null;
+  });
+  if (!addTarget || addTarget.handleClearance < 5) throw new Error(`Could not find a clear orange road-preview target: ${JSON.stringify(addTarget)}`);
+  await page.mouse.click(addTarget.x, addTarget.y, { button: 'right' });
+  await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count + 1,
+    syntheticBaseline.pointCount);
+  const addedSynthetic = await page.evaluate(() => ({
+    source: window.hesiEditor.roadEdit.route.points.length,
+    runtime: window.hesiEditor.roadEdit.runtimeRoute.points.length,
+    dirty: window.hesiEditor.roadEdit.hasDirty(),
+    previewVertices: window.hesiEditor.roadEdit.previewMesh.geometry.getAttribute('position').count,
+  }));
+  if (addedSynthetic.runtime !== addedSynthetic.source || !addedSynthetic.dirty || addedSynthetic.previewVertices < 4) {
+    throw new Error(`Right-click insertion did not update the live surface/collision preview: ${JSON.stringify(addedSynthetic)}`);
+  }
+  await page.screenshot({ path: path.join(OUT, 'checkpoint-road-tatsumi-editing.png'), fullPage: true });
+  await page.keyboard.press('Control+Z');
+  await page.waitForFunction((count) => window.hesiEditor.roadEdit.route.points.length === count,
+    syntheticBaseline.pointCount);
+  await page.evaluate(() => window.hesiEditor.roadEdit.clearDirty());
 
   await page.getByTestId('hierarchy-search').fill('lamp:wangan-0:0042');
   await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
@@ -257,7 +389,8 @@ try {
   });
   if (disposed.entities !== 0 || disposed.canvasPresent) throw new Error('Editor disposal left live registry or canvas state');
   if (errors.length) throw new Error(`Browser console errors: ${errors.join(' | ')}`);
-  console.log(`PASS real map default (${state.entities} semantic entities), fly/orbit, transform overrides, undo/redo, declarative duplication, explicit demo, disposal`);
+  console.log(`PASS real map default (${state.entities} semantic entities), aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, explicit demo, disposal`);
+  console.log(`ROAD SCREENSHOT ${path.join(OUT, 'checkpoint-road-tatsumi-editing.png')}`);
   console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-3-real-lamp-editing.png')}`);
 } finally {
   await browser?.close();
@@ -267,4 +400,6 @@ try {
   await rm(path.join(ROOT, PROJECT_PATH.replace(/\.json$/i, '.autosave.json')), { force: true });
   await restoreFile(BUILD_PATH, buildSnapshot);
   await restoreFile(BUILD_BACKUP_PATH, buildBackupSnapshot);
+  await restoreFile(ROAD_SOURCE_PATH, roadSourceSnapshot);
+  await restoreFile(ROAD_SOURCE_BACKUP_PATH, roadSourceBackupSnapshot);
 }

@@ -13,7 +13,9 @@ const ROAD_PICK_MAX_DISTANCE = 80;
  * route query so clicking the visible road activates its centreline editor.
  */
 export function resolveRoadSurfaceRoute(entity, hitPoint, adapter, routeEntitiesById) {
-  if (!ROAD_SURFACE_TYPES.has(entity?.type) || !hitPoint || !adapter?.map?.getNearestRoute) return entity;
+  const paDeckIdentity = `${entity?.id || ''} ${entity?.name || ''} ${entity?.assetId || ''}`;
+  const isPaDeck = /(?:tatsumi[-_ ]*)?pa[-_ ]*deck/i.test(paDeckIdentity);
+  if ((!ROAD_SURFACE_TYPES.has(entity?.type) && !isPaDeck) || !hitPoint || !adapter?.map?.getNearestRoute) return entity;
   const nearest = adapter.map.getNearestRoute(hitPoint, { maxDistance: ROAD_PICK_MAX_DISTANCE });
   return routeEntitiesById?.get(nearest?.route?.id) || entity;
 }
@@ -146,6 +148,11 @@ export class SelectionManager {
       seen.add(entity.id);
       candidates.push(entity);
     }
+    // Road surfaces are often behind markings, signs, or the Tatsumi PA deck
+    // in the ray hit list. If the ray reaches a route, make that semantic
+    // route the primary click result; props remain selectable via hierarchy.
+    const routeIndex = candidates.findIndex((entity) => ROUTE_ENTITY_TYPES.has(entity.type));
+    if (routeIndex > 0) candidates.unshift(...candidates.splice(routeIndex, 1));
     if (!candidates.length) {
       // Shift+click on empty space keeps the current multi-selection.
       if (!additive) this.clear('viewport');

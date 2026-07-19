@@ -35,8 +35,22 @@ test('publishing replaces only named route points and preserves unrelated source
   assert.deepEqual(base.routes[0].points, [[0, 1, 0], [10, 1, 0], [20, 1, 0]], 'input is not mutated');
 });
 
+test('runtime-generated routes persist separately and publish into production metadata', () => {
+  const base = production();
+  const points = [[2, 30, 4], [8, 31, 12], [14, 30, 20]];
+  const overrides = mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{
+    id: 'tatsumi_pa_exit', synthetic: true, points,
+  }], base);
+  assert.deepEqual(overrides.syntheticRoutes.tatsumi_pa_exit.points, points);
+  assert.deepEqual(overrides.routes, {});
+  const output = applyRoadRouteOverrides(base, overrides);
+  assert.deepEqual(output.routes, base.routes, 'synthetic overrides do not impersonate production routes');
+  assert.deepEqual(output.meta.editorRoadOverrides.syntheticRoutes.tatsumi_pa_exit.points, points);
+});
+
 test('road route schema rejects malformed, duplicate, and unknown updates readably', () => {
   assert.throws(() => mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{ id: 'missing', points: [[0, 0, 0], [1, 0, 1]] }], production()), /unknown production route/);
+  assert.throws(() => mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{ id: '../bad', synthetic: true, points: [[0, 0, 0], [1, 0, 1]] }], production()), /invalid id/);
   assert.throws(() => mergeRoadRouteUpdates(blankRoadRouteOverrides(), [
     { id: 'a', points: [[0, 0, 0], [1, 0, 1]] },
     { id: 'a', points: [[0, 0, 0], [1, 0, 1]] },

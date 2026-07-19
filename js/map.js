@@ -222,6 +222,7 @@ export class HighwayMap {
     this._signMaterials = new Map();
     this._ownedTextures = new Set();
     this._disposed = false;
+    this.roadNetworkYOffset = ROAD_NETWORK_Y_OFFSET;
 
     // Spatial index: cell key -> [{route, sampleIndex}]
     this._grid = new Map();
@@ -237,6 +238,7 @@ export class HighwayMap {
     this.materials = this._createMaterials();
     this._defineNetwork();
     this._defineServiceAreas();
+    this._applyEditorSyntheticRouteOverrides();
     this._finalizeNetwork();
     this._buildWorld();
     if (this.options.progressiveCorridorDebug) this._buildProgressiveCorridorDebugOverlay();
@@ -964,6 +966,66 @@ export class HighwayMap {
     return route;
   }
 
+  /**
+   * Replace one runtime route curve without rebuilding the whole map. The
+   * editor uses this for collision-accurate live previews; published
+   * synthetic-route overrides run here before world geometry is generated.
+   * Endpoints stay immutable so connectivity cannot be disconnected.
+   */
+  applyEditorRouteOverride(routeId, pointArrays, { endpointTolerance = 0.35 } = {}) {
+    const route = this.routes.get(routeId);
+    if (!route || !Array.isArray(pointArrays) || pointArrays.length < 2) return false;
+    const points = pointArrays.map((point) => {
+      if (!Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) return null;
+      return vec(point[0], point[1], point[2]);
+    });
+    if (points.some((point) => !point)) return false;
+    if (route.points[0].distanceTo(points[0]) > endpointTolerance
+      || route.points.at(-1).distanceTo(points.at(-1)) > endpointTolerance) {
+      console.warn(`Shutoko map: ignored editor override with moved endpoints: ${routeId}`);
+      return false;
+    }
+
+    const previousLength = route.length;
+    for (const [key, entries] of this._grid) {
+      const filtered = entries.filter((entry) => entry.route !== route);
+      if (filtered.length) this._grid.set(key, filtered);
+      else this._grid.delete(key);
+    }
+    route.points = points.map((point) => point.clone());
+    route.curve = new THREE.CatmullRomCurve3(route.points, !!route.closed, 'centripetal');
+    route.curve.arcLengthDivisions = Math.max(240, Math.ceil(this._polylineLength(route.points, !!route.closed) / 14));
+    route.curve.updateArcLengths();
+    route.length = route.curve.getLength();
+    const wasEnd = (distance) => Math.abs(distance - previousLength) <= 0.5;
+    for (const edge of this.edges) {
+      if (edge.from.routeId === routeId && wasEnd(edge.from.distance)) edge.from.distance = route.length;
+      if (edge.to.routeId === routeId && wasEnd(edge.to.distance)) edge.to.distance = route.length;
+    }
+    for (const [fromRouteId, connections] of this.connections) {
+      for (const connection of connections) {
+        if (connection.routeId === routeId && wasEnd(connection.toDistance)) connection.toDistance = route.length;
+        if (fromRouteId === routeId && wasEnd(connection.fromDistance)) connection.fromDistance = route.length;
+      }
+    }
+    route.bankTable = null;
+    route.renderFrames.length = 0;
+    route.surfaceFrames.length = 0;
+    this._prepareRouteSamples(route);
+    this._buildBankTable(route);
+    return true;
+  }
+
+  _applyEditorSyntheticRouteOverrides() {
+    const overrides = ROUTE_DATA.meta?.editorRoadOverrides?.syntheticRoutes;
+    if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return;
+    for (const [routeId, entry] of Object.entries(overrides)) {
+      if (!this.applyEditorRouteOverride(routeId, entry?.points)) {
+        console.warn(`Shutoko map: synthetic editor route override was not applied: ${routeId}`);
+      }
+    }
+  }
+
   _polylineLength(points, closed) {
     let total = 0;
     for (let i = 1; i < points.length; i += 1) total += points[i].distanceTo(points[i - 1]);
@@ -1238,7 +1300,7 @@ export class HighwayMap {
 
       const accessRoute = this._registerRoute({
         id: `${def.id}_access`, code: 'PA', name: `${def.name} lane`, kind: 'service',
-        group: def.id,
+        group: def.id, synthetic: true,
         points: accessPoints, lanes: 1, laneWidth: 4.6, oneWay: true, bidirectional: false,
         speedLimit: 30, traffic: false, shoulder: 1.0,
         destinations: [[def.name.toUpperCase(), 'パーキング']],

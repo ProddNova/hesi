@@ -16,7 +16,7 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
   };
 
   return {
-    async loadIntoModule() {
+    async loadIntoModule(runtimeMap = null) {
       const payload = await responseJson(await fetch(ROUTES_ENDPOINT, { cache: 'no-store' }));
       const module = await import(ROUTES_MODULE_URL);
       const production = module.default;
@@ -30,7 +30,14 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
         if (!route) throw new Error(`Saved road route is missing from production data: ${id}`);
         route.points = structuredClone(entry.points);
       }
-      const ids = Object.keys(savedRoutes).sort();
+      const savedSyntheticRoutes = payload.document?.syntheticRoutes || {};
+      for (const [id, entry] of Object.entries(savedSyntheticRoutes)) {
+        if (!runtimeMap?.routes?.has(id)) throw new Error(`Saved synthetic road route is missing from the runtime map: ${id}`);
+        if (!runtimeMap.applyEditorRouteOverride?.(id, entry.points)) {
+          throw new Error(`Saved synthetic road route endpoints no longer match the generated route: ${id}`);
+        }
+      }
+      const ids = [...Object.keys(savedRoutes), ...Object.keys(savedSyntheticRoutes)].sort();
       if (ids.length) onStatus(`Loaded ${ids.length} saved road route${ids.length === 1 ? '' : 's'} pending/used for publish`);
       return { ...payload, routes: ids };
     },
