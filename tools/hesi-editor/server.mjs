@@ -164,7 +164,7 @@ async function saveRoadRouteUpdates(updates) {
   return {
     path: ROAD_ROUTE_PATHS.source,
     bytes: Buffer.byteLength(serialized),
-    routes: Object.keys(document.routes).sort(),
+    routes: [...Object.keys(document.routes), ...Object.keys(document.syntheticRoutes)].sort(),
   };
 }
 
@@ -174,7 +174,8 @@ async function saveRoadRouteUpdates(updates) {
 async function publishRoadRoutes() {
   const production = await readProductionRoutes();
   const overrides = await readRoadRouteOverrides(production);
-  if (!Object.keys(overrides.routes).length) throw new Error(`No saved road route edits found in ${ROAD_ROUTE_PATHS.source}; edit and Save a road first`);
+  const routeIds = [...Object.keys(overrides.routes), ...Object.keys(overrides.syntheticRoutes)].sort();
+  if (!routeIds.length) throw new Error(`No saved road route edits found in ${ROAD_ROUTE_PATHS.source}; edit and Save a road first`);
   const output = applyRoadRouteOverrides(production, overrides);
   const json = serializeProductionRoutes(output);
   const moduleSource = productionRouteModuleSource(json);
@@ -185,7 +186,7 @@ async function publishRoadRoutes() {
     jsonPath: ROAD_ROUTE_PATHS.productionJson,
     modulePath: ROAD_ROUTE_PATHS.productionModule,
     bytes: Buffer.byteLength(json),
-    routes: Object.keys(overrides.routes).sort(),
+    routes: routeIds,
   };
 }
 

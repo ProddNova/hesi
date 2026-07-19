@@ -131,11 +131,13 @@ export function discoverHesiEntities(map) {
     const id = `road:${stableSlug(route.id)}`;
     const entity = add({
       id, name: `${route.code ? `${route.code} · ` : ''}${route.name}`, type: route.kind === 'service' ? 'service-route' : 'road-route',
-      layer: 'Roads', object3D: null, source: 'data/routes-smoothed.json', editable: true, generated: true,
+      layer: 'Roads', object3D: null,
+      source: route.synthetic ? 'js/map.js:runtime synthetic route' : 'data/routes-smoothed.json', editable: true, generated: true,
       assetId: null, parentId: route.group ? `road-group:${stableSlug(route.group)}` : null,
       metadata: {
         routeId: route.id, routeName: route.name, groupId: route.group || null, code: route.code || null,
         kind: route.kind, lanes: route.lanes, laneWidth: route.laneWidth, speedLimit: route.speedLimit,
+        runtimeSynthetic: Boolean(route.synthetic),
         lengthMetres: route.length, closed: route.closed, static: true, semanticOnly: true,
         collisionAvailable: true, collisionSource: 'HighwayMap analytic route corridor', collisionType: 'analytic swept corridor',
         sourceKind: 'PROCEDURAL RULE',

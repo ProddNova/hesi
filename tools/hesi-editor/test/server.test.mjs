@@ -185,6 +185,17 @@ test('road route endpoint saves isolated source updates, rejects malformed data,
     assert.equal(malformed.status, 400);
     assert.match((await malformed.json()).error, /finite number/);
 
+    const syntheticPoints = [[10, 30, 20], [15, 31, 25], [20, 30, 30]];
+    const syntheticSave = await fetch(`${BASE}/__hesi_editor_routes`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ updates: [{ id: 'tatsumi_pa_exit', synthetic: true, points: syntheticPoints }] }),
+    });
+    assert.equal(syntheticSave.status, 200);
+    assert.deepEqual((await syntheticSave.json()).routes, [target.id, 'tatsumi_pa_exit'].sort());
+    const syntheticRead = await (await fetch(`${BASE}/__hesi_editor_routes`)).json();
+    assert.deepEqual(syntheticRead.document.syntheticRoutes.tatsumi_pa_exit.points, syntheticPoints);
+
     const publish = await fetch(`${BASE}/__hesi_editor_routes`, { method: 'POST' });
     assert.equal(publish.status, 200);
     const published = await publish.json();
@@ -193,6 +204,7 @@ test('road route endpoint saves isolated source updates, rejects malformed data,
     assert.equal(productionAfter.routes[0].points[pointIndex][0], target.points[pointIndex][0]);
     assert.deepEqual(productionAfter.routes[1], productionBefore.routes[1], 'an unrelated route is byte-for-byte equivalent as JSON data');
     assert.deepEqual(productionAfter.meta.editorRoadOverrides.routes, [target.id]);
+    assert.deepEqual(productionAfter.meta.editorRoadOverrides.syntheticRoutes.tatsumi_pa_exit.points, syntheticPoints);
     assert.match(await readFile(ROUTE_FILES[4], 'utf8'), new RegExp(`editorRoadOverrides.*${target.id}`));
   } finally {
     await Promise.all(ROUTE_FILES.map((file, index) => restoreOptional(file, snapshots[index])));

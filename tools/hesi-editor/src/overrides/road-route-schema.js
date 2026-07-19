@@ -45,7 +45,7 @@ export function validateProductionRouteDocument(document) {
 }
 
 export function blankRoadRouteOverrides() {
-  return { version: 1, source: PRODUCTION_JSON_PATH, routes: {} };
+  return { version: 1, source: PRODUCTION_JSON_PATH, routes: {}, syntheticRoutes: {} };
 }
 
 export function canonicalizeRoadRouteOverrides(document, { production = null } = {}) {
@@ -53,11 +53,14 @@ export function canonicalizeRoadRouteOverrides(document, { production = null } =
   if (document.version !== 1) throw new TypeError('Road route overrides version must be 1');
   if (document.source !== PRODUCTION_JSON_PATH) throw new TypeError(`Road route overrides source must be ${PRODUCTION_JSON_PATH}`);
   if (!isRecord(document.routes)) throw new TypeError('Road route overrides routes must be an object keyed by route id');
+  const syntheticDocument = document.syntheticRoutes ?? {};
+  if (!isRecord(syntheticDocument)) throw new TypeError('Road route overrides syntheticRoutes must be an object keyed by runtime route id');
   const productionRoutes = production
     ? new Map(validateProductionRouteDocument(production).routes.map((route) => [route.id, route]))
     : null;
   const ids = Object.keys(document.routes).sort();
-  if (ids.length > MAX_ROUTES) throw new TypeError(`Road route overrides exceed ${MAX_ROUTES} routes`);
+  const syntheticIds = Object.keys(syntheticDocument).sort();
+  if (ids.length + syntheticIds.length > MAX_ROUTES) throw new TypeError(`Road route overrides exceed ${MAX_ROUTES} routes`);
   const routes = {};
   for (const id of ids) {
     if (!id.trim()) throw new TypeError('Road route override id cannot be empty');
@@ -74,7 +77,15 @@ export function canonicalizeRoadRouteOverrides(document, { production = null } =
     }
     routes[id] = { points };
   }
-  return { version: 1, source: PRODUCTION_JSON_PATH, routes };
+  const syntheticRoutes = {};
+  for (const id of syntheticIds) {
+    if (!/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(id)) throw new TypeError(`Synthetic road route override has an invalid id: ${id}`);
+    if (productionRoutes?.has(id)) throw new TypeError(`Synthetic road route override duplicates a production route: ${id}`);
+    const entry = syntheticDocument[id];
+    if (!isRecord(entry)) throw new TypeError(`Synthetic road route override ${id} must be an object`);
+    syntheticRoutes[id] = { points: canonicalPoints(entry.points, `Synthetic road route override ${id}.points`) };
+  }
+  return { version: 1, source: PRODUCTION_JSON_PATH, routes, syntheticRoutes };
 }
 
 export function mergeRoadRouteUpdates(previous, updates, production) {
@@ -82,15 +93,18 @@ export function mergeRoadRouteUpdates(previous, updates, production) {
   if (!Array.isArray(updates) || !updates.length) throw new TypeError('Road route save requires at least one route update');
   const seen = new Set();
   const routes = { ...base.routes };
+  const syntheticRoutes = { ...base.syntheticRoutes };
   const productionIds = new Set(validateProductionRouteDocument(production).routes.map((route) => route.id));
   for (const update of updates) {
     if (!isRecord(update) || typeof update.id !== 'string' || !update.id.trim()) throw new TypeError('Every road route update needs a non-empty string id');
     if (seen.has(update.id)) throw new TypeError(`Duplicate road route update: ${update.id}`);
-    if (!productionIds.has(update.id)) throw new TypeError(`Road route update references unknown production route: ${update.id}`);
     seen.add(update.id);
-    routes[update.id] = { points: canonicalPoints(update.points, `Road route update ${update.id}.points`) };
+    const entry = { points: canonicalPoints(update.points, `Road route update ${update.id}.points`) };
+    if (productionIds.has(update.id)) routes[update.id] = entry;
+    else if (update.synthetic === true) syntheticRoutes[update.id] = entry;
+    else throw new TypeError(`Road route update references unknown production route: ${update.id}`);
   }
-  return canonicalizeRoadRouteOverrides({ ...base, routes }, { production });
+  return canonicalizeRoadRouteOverrides({ ...base, routes, syntheticRoutes }, { production });
 }
 
 export function applyRoadRouteOverrides(production, overrides) {
@@ -100,7 +114,11 @@ export function applyRoadRouteOverrides(production, overrides) {
   const byId = new Map(output.routes.map((route) => [route.id, route]));
   for (const [id, entry] of Object.entries(source.routes)) byId.get(id).points = structuredClone(entry.points);
   output.meta = isRecord(output.meta) ? output.meta : {};
-  output.meta.editorRoadOverrides = { source: SOURCE_PATH, routes: Object.keys(source.routes).sort() };
+  output.meta.editorRoadOverrides = {
+    source: SOURCE_PATH,
+    routes: Object.keys(source.routes).sort(),
+    syntheticRoutes: structuredClone(source.syntheticRoutes),
+  };
   return output;
 }
 

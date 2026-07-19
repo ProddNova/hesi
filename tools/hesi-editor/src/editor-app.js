@@ -294,13 +294,13 @@ export async function createEditorApp(root) {
       onStatus: (message) => shell.setStatus(message),
     });
     try {
-      await routePersistence.loadIntoModule();
+      await routePersistence.loadIntoModule(adapter.map);
     } catch (error) {
       shell.setStatus(`Saved road routes unavailable · ${error.message}`);
       shell.showError(error, 'Saved road routes unavailable');
     }
     roadEdit = new RoadEditController({
-      viewport, history, selection,
+      viewport, history, selection, adapter,
       onStatus: (message) => shell.setStatus(message),
     });
     shell.setAssets(assetRegistry.catalog());
