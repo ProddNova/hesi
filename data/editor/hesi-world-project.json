@@ -10,11 +10,30 @@
     "barrier-instance-batch:6-n7-box-fence": {
       "visible": false
     },
+    "generated-prop-batch:6-n7-unknown-garage-transition-marker-10": {
+      "transform": {
+        "position": [
+          3633.85369,
+          58.12171,
+          -4062.65486
+        ],
+        "rotation": [
+          1.5708,
+          0,
+          0.79351
+        ],
+        "scale": [
+          0.88135,
+          0.88135,
+          0.88135
+        ]
+      }
+    },
     "generated-prop-batch:6-n7-unknown-tatsumi-pa-deck-6": {
       "transform": {
         "position": [
           3646.5151,
-          57.24115,
+          57.1103,
           -4056.63133
         ],
         "rotation": [

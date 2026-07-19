@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-19T13:36:02.534Z",
+  "generatedAt": "2026-07-19T17:18:46.707Z",
   "project": {
-    "draftSignature": "fnv1a32:16988f9f",
+    "draftSignature": "fnv1a32:7773c414",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -53,12 +53,34 @@
       "visible": false
     },
     {
+      "name": "Garage transition marker",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        3633.85369,
+        58.12171,
+        -4062.65486
+      ],
+      "quaternion": [
+        0.65218,
+        -0.27325,
+        0.27324,
+        0.65218
+      ],
+      "scale": [
+        0.88135,
+        0.88135,
+        0.88135
+      ],
+      "visible": true
+    },
+    {
       "name": "Tatsumi PA deck",
       "nameIndex": 0,
       "op": "object",
       "position": [
         3646.5151,
-        57.24115,
+        57.1103,
         -4056.63133
       ],
       "quaternion": [
@@ -121,52 +143,6 @@
       "op": "instance"
     },
     {
-      "index": 12,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3699.32007,
-        48.83358,
-        -4029.04785,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightPool",
-      "op": "instance"
-    },
-    {
-      "index": 12,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3699.46729,
-        48.86354,
-        -4029.41968,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightStreak",
-      "op": "instance"
-    },
-    {
       "index": 13,
       "matrix": [
         0,
@@ -213,52 +189,6 @@
       "op": "instance"
     },
     {
-      "index": 13,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3660.27271,
-        48.81621,
-        -4044.51855,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightPool",
-      "op": "instance"
-    },
-    {
-      "index": 13,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3660.41992,
-        48.84696,
-        -4044.89038,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightStreak",
-      "op": "instance"
-    },
-    {
       "index": 14,
       "matrix": [
         0,
@@ -302,52 +232,6 @@
         1
       ],
       "mesh": "chunk 6,-7 box:lampSodium",
-      "op": "instance"
-    },
-    {
-      "index": 14,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3621.22388,
-        48.79463,
-        -4059.98975,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightPool",
-      "op": "instance"
-    },
-    {
-      "index": 14,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3621.37109,
-        48.8253,
-        -4060.36182,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightStreak",
       "op": "instance"
     },
     {
@@ -489,52 +373,6 @@
       "op": "instance"
     },
     {
-      "index": 15,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3616.39063,
-        48.69107,
-        -4075.36646,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightPool",
-      "op": "instance"
-    },
-    {
-      "index": 15,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3616.24463,
-        48.71992,
-        -4074.9939,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightStreak",
-      "op": "instance"
-    },
-    {
       "index": 16,
       "matrix": [
         0,
@@ -581,52 +419,6 @@
       "op": "instance"
     },
     {
-      "index": 16,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3655.48828,
-        48.72958,
-        -4060.02515,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightPool",
-      "op": "instance"
-    },
-    {
-      "index": 16,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3655.34229,
-        48.7605,
-        -4059.65259,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightStreak",
-      "op": "instance"
-    },
-    {
       "index": 17,
       "matrix": [
         0,
@@ -670,52 +462,6 @@
         1
       ],
       "mesh": "chunk 6,-7 box:lampSodium",
-      "op": "instance"
-    },
-    {
-      "index": 17,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3694.5896,
-        48.75403,
-        -4044.69531,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightPool",
-      "op": "instance"
-    },
-    {
-      "index": 17,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3694.44336,
-        48.78368,
-        -4044.323,
-        1
-      ],
-      "mesh": "chunk 6,-7 pool:lightStreak",
       "op": "instance"
     }
   ]
