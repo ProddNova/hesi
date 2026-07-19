@@ -5,6 +5,9 @@ const MAX_OVERLAY_COMPONENTS = 16;
 const MAX_EDGE_VERTICES = 60000;
 const ROAD_SURFACE_TYPES = new Set(['road-surface', 'service-road-surface']);
 const ROUTE_ENTITY_TYPES = new Set(['road-route', 'service-route']);
+// Paint batches sit directly on the asphalt: a click that lands on them means
+// "the road". Everything else (lamps, signs, decks, props) is its own target.
+const ROAD_PAINT_TYPES = new Set(['road-marking-batch', 'amber-marking-batch', 'marking-instance-batch']);
 const ROAD_PICK_MAX_DISTANCE = 80;
 
 /**
@@ -13,9 +16,7 @@ const ROAD_PICK_MAX_DISTANCE = 80;
  * route query so clicking the visible road activates its centreline editor.
  */
 export function resolveRoadSurfaceRoute(entity, hitPoint, adapter, routeEntitiesById) {
-  const paDeckIdentity = `${entity?.id || ''} ${entity?.name || ''} ${entity?.assetId || ''}`;
-  const isPaDeck = /(?:tatsumi[-_ ]*)?pa[-_ ]*deck/i.test(paDeckIdentity);
-  if ((!ROAD_SURFACE_TYPES.has(entity?.type) && !isPaDeck) || !hitPoint || !adapter?.map?.getNearestRoute) return entity;
+  if (!ROAD_SURFACE_TYPES.has(entity?.type) || !hitPoint || !adapter?.map?.getNearestRoute) return entity;
   const nearest = adapter.map.getNearestRoute(hitPoint, { maxDistance: ROAD_PICK_MAX_DISTANCE });
   return routeEntitiesById?.get(nearest?.route?.id) || entity;
 }
@@ -148,11 +149,14 @@ export class SelectionManager {
       seen.add(entity.id);
       candidates.push(entity);
     }
-    // Road surfaces are often behind markings, signs, or the Tatsumi PA deck
-    // in the ray hit list. If the ray reaches a route, make that semantic
-    // route the primary click result; props remain selectable via hierarchy.
+    // Asphalt clicks often hit lane paint first. Promote the resolved route
+    // over paint batches only, so clicking markings still selects the road
+    // while lamps, signs, the Tatsumi PA deck, and other props keep natural
+    // depth order and stay directly clickable.
     const routeIndex = candidates.findIndex((entity) => ROUTE_ENTITY_TYPES.has(entity.type));
-    if (routeIndex > 0) candidates.unshift(...candidates.splice(routeIndex, 1));
+    if (routeIndex > 0 && candidates.slice(0, routeIndex).every((entity) => ROAD_PAINT_TYPES.has(entity.type))) {
+      candidates.unshift(...candidates.splice(routeIndex, 1));
+    }
     if (!candidates.length) {
       // Shift+click on empty space keeps the current multi-selection.
       if (!additive) this.clear('viewport');

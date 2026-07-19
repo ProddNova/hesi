@@ -56,12 +56,39 @@ test('road route schema rejects malformed, duplicate, and unknown updates readab
     { id: 'a', points: [[0, 0, 0], [1, 0, 1]] },
   ], production()), /Duplicate road route update/);
   assert.throws(() => canonicalizeRoadRouteOverrides({ version: 1, source: 'data/routes-smoothed.json', routes: { a: { points: [[0, 0, 0], [Number.NaN, 0, 1]] } } }, { production: production() }), /finite number/);
-  assert.throws(() => mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{
-    id: 'a', points: [[1, 1, 0], [10, 1, 0], [20, 1, 0]],
-  }], production()), /cannot move or remove production route endpoints/);
-  assert.throws(() => canonicalizeRoadRouteOverrides({
+});
+
+test('endpoint moves and endpoint deletion are legal route edits', () => {
+  const moved = mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{
+    id: 'a', points: [[1, 1, 0], [10, 1, 0], [22, 1, 4]],
+  }], production());
+  assert.deepEqual(moved.routes.a.points, [[1, 1, 0], [10, 1, 0], [22, 1, 4]]);
+  const shortened = canonicalizeRoadRouteOverrides({
     version: 1,
     source: 'data/routes-smoothed.json',
     routes: { a: { points: [[0, 1, 0], [10, 1, 0]] } },
-  }, { production: production() }), /cannot move or remove production route endpoints/);
+  }, { production: production() });
+  assert.deepEqual(shortened.routes.a.points, [[0, 1, 0], [10, 1, 0]]);
+  const published = applyRoadRouteOverrides(production(), moved);
+  assert.deepEqual(published.routes[0].points, [[1, 1, 0], [10, 1, 0], [22, 1, 4]]);
+});
+
+test('stale overrides for removed production routes are dropped, not fatal', () => {
+  const stale = {
+    version: 1,
+    source: 'data/routes-smoothed.json',
+    routes: {
+      a: { points: [[0, 1, 0], [11, 1, 0], [20, 1, 0]] },
+      removed_route: { points: [[0, 0, 0], [5, 0, 5]] },
+    },
+    syntheticRoutes: {},
+  };
+  assert.throws(() => canonicalizeRoadRouteOverrides(stale, { production: production() }), /unknown production route/);
+  const dropped = canonicalizeRoadRouteOverrides(stale, { production: production(), dropUnknown: true });
+  assert.deepEqual(Object.keys(dropped.routes), ['a']);
+  const merged = mergeRoadRouteUpdates(stale, [{ id: 'b', points: [[0, 2, 10], [11, 2, 10]] }], production());
+  assert.deepEqual(Object.keys(merged.routes).sort(), ['a', 'b']);
+  const published = applyRoadRouteOverrides(production(), stale);
+  assert.deepEqual(published.routes[0].points, [[0, 1, 0], [11, 1, 0], [20, 1, 0]]);
+  assert.deepEqual(published.meta.editorRoadOverrides.routes, ['a']);
 });

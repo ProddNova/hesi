@@ -84,12 +84,6 @@ export class RoadEditController {
       const mesh = hit.object;
       const index = mesh.userData.pointIndex;
       this._setActiveHandle(index);
-      if (index === 0 || index === this.route.points.length - 1) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        this.onStatus('Route endpoints are protected to keep junctions connected');
-        return;
-      }
       const point = this.route.points[index];
       const worldPoint = this._worldPoint(point);
       this.drag = {
@@ -136,16 +130,16 @@ export class RoadEditController {
       this.viewport.setNavigationBlocked(false);
       if (!drag.moved || !this.route) return;
       const route = this.route;
+      const synthetic = this.synthetic;
       const index = drag.index;
       const before = drag.before;
       const after = [drag.mesh.position.x, drag.mesh.position.z];
       this.history.execute({
         label: `Move road point · ${route.name}`,
-        redo: () => { movePoint(route, index, after); this._afterRouteMutation(); },
-        undo: () => { movePoint(route, index, before); this._afterRouteMutation(); },
+        redo: () => { movePoint(route, index, after); this._afterRouteMutation(route, synthetic); },
+        undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
       });
-      this._markDirty(route.id);
-      this.onStatus('Road draft updated · realistic asphalt/collision preview is live · Save Draft keeps it out of the game · Apply to Game publishes it');
+      this.onStatus('Road draft updated · Save Draft applies it to the editor map only · Apply to Game publishes it');
     };
     this._onDblClick = (event) => {
       if (!this.active || event.target !== this.viewport.canvas || !this.line) return;
@@ -225,10 +219,10 @@ export class RoadEditController {
     }
   }
 
-  _markDirty(routeId) {
-    this.dirty.add(routeId);
-    this.dirtyRoutes.set(routeId, { route: this.route, synthetic: this.synthetic });
-    this.onDirty(routeId, true);
+  _markDirty(route, synthetic = this.synthetic) {
+    this.dirty.add(route.id);
+    this.dirtyRoutes.set(route.id, { route, synthetic });
+    this.onDirty(route.id, true);
   }
 
   _loadRouteData() {
@@ -240,15 +234,15 @@ export class RoadEditController {
     const segment = nearestSegment(this.route.points, worldPoint.x, worldPoint.z);
     if (!segment) return false;
     const route = this.route;
+    const synthetic = this.synthetic;
     const index = segment.index;
     const point = [...segment.point];
     this.activeHandle = index + 1;
     this.history.execute({
       label: `Insert road point · ${route.name}`,
-      redo: () => { insertPointAfter(route, index, point); this._afterRouteMutation(); },
-      undo: () => { deletePoint(route, index + 1); this._afterRouteMutation(); },
+      redo: () => { insertPointAfter(route, index, point); this._afterRouteMutation(route, synthetic); },
+      undo: () => { deletePoint(route, index + 1); this._afterRouteMutation(route, synthetic); },
     });
-    this._markDirty(route.id);
     this.onStatus('Road draft point added · realistic preview updated · Save Draft keeps the game unchanged');
     return true;
   }
@@ -260,18 +254,14 @@ export class RoadEditController {
       this.onStatus('A road needs at least 2 points');
       return false;
     }
-    if (index === 0 || index === route.points.length - 1) {
-      this.onStatus('Route endpoints are protected to keep junctions connected');
-      return false;
-    }
     const snapshot = [...route.points[index]];
+    const synthetic = this.synthetic;
     this.activeHandle = null;
     this.history.execute({
       label: `Delete road point · ${route.name}`,
-      redo: () => { deletePoint(route, index); this._afterRouteMutation(); },
-      undo: () => { route.points.splice(index, 0, [...snapshot]); this._afterRouteMutation(); },
+      redo: () => { deletePoint(route, index); this._afterRouteMutation(route, synthetic); },
+      undo: () => { route.points.splice(index, 0, [...snapshot]); this._afterRouteMutation(route, synthetic); },
     });
-    this._markDirty(route.id);
     this.onStatus('Road draft point removed · realistic preview updated · Save Draft keeps the game unchanged');
     return true;
   }
@@ -297,16 +287,20 @@ export class RoadEditController {
   _applyRuntimePreview() {
     if (!this.runtimeRoute || !this.adapter?.map?.applyEditorRouteOverride) return false;
     const points = this._runtimePointArrays();
-    const first = new THREE.Vector3().fromArray(points[0]);
-    const last = new THREE.Vector3().fromArray(points.at(-1));
-    if (this.runtimeRoute.points[0].distanceTo(first) > 0.35
-      || this.runtimeRoute.points.at(-1).distanceTo(last) > 0.35) return false;
-    return this.adapter.map.applyEditorRouteOverride(this.route.id, points);
+    return this.adapter.map.applyEditorRouteOverride(this.route.id, points, { endpointTolerance: Infinity });
   }
 
-  _afterRouteMutation() {
-    this._applyRuntimePreview();
-    this._refreshHelpers();
+  /**
+   * Runs after every committed route mutation, including undo/redo replays.
+   * Marking dirty here keeps Save Draft correct when a change is undone after
+   * a save: the reverted geometry still needs to reach the draft on disk.
+   */
+  _afterRouteMutation(route = this.route, synthetic = this.synthetic) {
+    if (route) this._markDirty(route, synthetic);
+    if (!route || route === this.route) {
+      this._applyRuntimePreview();
+      this._refreshHelpers();
+    }
   }
 
   async _activate(routeId) {

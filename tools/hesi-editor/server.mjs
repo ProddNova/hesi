@@ -146,7 +146,9 @@ async function readRoadRouteOverrides(production) {
   const file = resolve(ROOT, ROAD_ROUTE_PATHS.source);
   try {
     const document = JSON.parse(await readFile(file, 'utf8'));
-    return canonicalizeRoadRouteOverrides(document, { production });
+    // Stale overrides (routes removed by a data rebuild) are dropped rather
+    // than turning every future save/publish into an error.
+    return canonicalizeRoadRouteOverrides(document, { production, dropUnknown: true });
   } catch (error) {
     if (error.code === 'ENOENT') return blankRoadRouteOverrides();
     throw new Error(`Saved road route overrides are unreadable: ${error.message}`);
