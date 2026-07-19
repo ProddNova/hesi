@@ -78,6 +78,40 @@ try {
   await page.getByRole('button', { name: 'Orbit', exact: true }).click();
   await page.selectOption('.preset-select', 'tatsumi-pa');
   await page.waitForTimeout(800);
+
+  // A rendered road surface is a merged chunk mesh, but clicking it must
+  // resolve to the nearest semantic route and activate orange curve editing.
+  const roadPickPoint = await page.evaluate(() => {
+    const app = window.hesiEditor;
+    const selection = app.selection;
+    const rect = app.viewport.canvas.getBoundingClientRect();
+    for (let y = 60; y < rect.height - 40; y += 45) {
+      for (let x = 30; x < rect.width - 30; x += 45) {
+        selection.pointer.set((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1);
+        selection.raycaster.setFromCamera(selection.pointer, app.viewport.camera);
+        const hits = selection.raycaster.intersectObject(app.adapter.group, true);
+        const firstSelectable = hits
+          .map((hit) => ({ hit, entity: app.adapter.resolveSelection?.(hit.object, hit.instanceId) }))
+          .find(({ entity }) => selection.canSelect(entity));
+        if (firstSelectable?.entity?.type === 'road-surface') {
+          return { x: rect.left + x, y: rect.top + y, rawId: firstSelectable.entity.id };
+        }
+      }
+    }
+    return null;
+  });
+  if (!roadPickPoint) throw new Error('Could not find a visible road-surface pixel for click-to-route smoke coverage');
+  await page.mouse.click(roadPickPoint.x, roadPickPoint.y);
+  await page.waitForFunction(() => window.hesiEditor.selection.selected?.type === 'road-route' && Boolean(window.hesiEditor.roadEdit?.line));
+  const clickedRoad = await page.evaluate(() => ({
+    id: window.hesiEditor.selection.selected.id,
+    type: window.hesiEditor.selection.selected.type,
+    active: window.hesiEditor.roadEdit.active,
+  }));
+  if (!clickedRoad.active || clickedRoad.type !== 'road-route') {
+    throw new Error(`Road surface click did not activate route editing: ${JSON.stringify({ roadPickPoint, clickedRoad })}`);
+  }
+
   await page.getByTestId('hierarchy-search').fill('lamp:wangan-0:0042');
   await page.locator('[data-entity-id="lamp:wangan-0:0042"]').click();
   if (await page.getByTestId('selected-entity-id').textContent() !== 'lamp:wangan-0:0042') throw new Error('Hierarchy and inspector selection are not synchronized');
