@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-19T22:11:05.621Z",
+  "generatedAt": "2026-07-19T22:54:20.042Z",
   "project": {
-    "draftSignature": "fnv1a32:3dcf1f57",
+    "draftSignature": "fnv1a32:c570ef91",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -1688,9 +1688,9 @@
       "name": "Macchinetta_primo_test",
       "op": "place-custom",
       "position": [
-        3625.88785,
-        57.67484,
-        -4052.00744
+        3626.01176,
+        57.67663,
+        -4052.31874
       ],
       "quaternion": [
         0.00015,
@@ -1710,9 +1710,9 @@
       "name": "Macchinetta_primo_test copy",
       "op": "place-custom",
       "position": [
-        3624.30866,
-        57.67484,
-        -4052.59217
+        3624.49324,
+        57.67383,
+        -4053.06997
       ],
       "quaternion": [
         0.00057,
