@@ -113,6 +113,9 @@ export function customAssetsDocumentErrors(document) {
         if (part.segments !== undefined && (!Number.isInteger(part.segments) || part.segments < 3 || part.segments > 32)) {
           errors.push(`${path}.segments must be an integer between 3 and 32`);
         }
+        if (part.subdivisions !== undefined && (!Number.isInteger(part.subdivisions) || part.subdivisions < 1 || part.subdivisions > 8)) {
+          errors.push(`${path}.subdivisions must be an integer between 1 and 8`);
+        }
         if (part.color !== undefined && !/^#[0-9a-f]{6}$/i.test(String(part.color))) errors.push(`${path}.color must be #rrggbb`);
       }
     });
@@ -182,29 +185,31 @@ function singleGroup(geometry) {
 /**
  * Builds the base geometry for a primitive part with one material group per
  * named face (see PART_KINDS). Low segment counts keep the PSX look.
+ * `part.subdivisions` (1–8) splits faces/heights into extra editable vertices.
  */
 export function partGeometry(part) {
   const segments = Number.isInteger(part.segments) ? part.segments : null;
+  const subdivisions = Number.isInteger(part.subdivisions) ? Math.min(8, Math.max(1, part.subdivisions)) : 1;
   switch (part.kind) {
     case 'box': {
       // BoxGeometry group order is px,nx,py,ny,pz,nz = right,left,top,bottom,front,back.
-      return new THREE.BoxGeometry(1, 1, 1);
+      return new THREE.BoxGeometry(1, 1, 1, subdivisions, subdivisions, subdivisions);
     }
     case 'cylinder': {
-      const geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, segments || 8);
+      const geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, segments || 8, subdivisions);
       return geometry; // groups: side, top, bottom
     }
     case 'pyramid': {
-      return new THREE.ConeGeometry(0.5, 1, 4, 1); // groups: side, bottom
+      return new THREE.ConeGeometry(0.5, 1, 4, subdivisions); // groups: side, bottom
     }
     case 'cone': {
-      return new THREE.ConeGeometry(0.5, 1, segments || 8, 1);
+      return new THREE.ConeGeometry(0.5, 1, segments || 8, subdivisions);
     }
     case 'wedge': {
       return wedgeGeometry();
     }
     case 'plane': {
-      return singleGroup(new THREE.PlaneGeometry(1, 1));
+      return singleGroup(new THREE.PlaneGeometry(1, 1, subdivisions, subdivisions));
     }
     case 'sphere': {
       return singleGroup(new THREE.SphereGeometry(0.5, segments || 8, Math.max(3, Math.round((segments || 8) * 0.75))));

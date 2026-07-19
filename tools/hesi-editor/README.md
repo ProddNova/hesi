@@ -111,7 +111,16 @@ full-screen modeling section that is always available inside the editor:
   textures use nearest filtering for the PSX look, and one uploaded image can
   be reused across faces and objects
 - **Vertices mode**: drag welded vertex handles to deform primitives into
-  hand-made low-poly shapes (offsets are saved with the object)
+  hand-made low-poly shapes (offsets are saved with the object); **+ Vertices**
+  (or the *Vertex detail* field) subdivides a part for more editable vertices
+- **Snap to grid** (`G` or the Snap toggle): part and vertex dragging lands on
+  a configurable step (0.05–1 m) with 15° rotations, for clean alignment
+- **Undo/redo** with `Ctrl+Z` / `Ctrl+Y` (or the ⟲/⟳ buttons) across part,
+  face, and vertex edits of the object being modeled
+- **Car scale reference**: the 🚗 Car toggle parks the player car
+  (4.25 × 1.7 × 1.3 m) beside the object to judge real-world proportions
+- **Object scale**: ×½ / ×2 / custom-factor buttons resize the whole object
+  (every part's position and size) in one step, no per-vertex work needed
 - **Assembly**: add any existing catalog asset (lamp, sign, barrier segment,
   or another custom object) as a part, so split map elements become one
   object. In the map editor, `Shift`-select several objects (e.g. a sign and

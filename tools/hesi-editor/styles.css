@@ -539,6 +539,10 @@ input, select { accent-color: var(--accent); }
 .modeler-body {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 340px;
+  /* Pin the single row to the overlay height: without this the implicit row
+     grows with panel content past the viewport and the side panels never
+     scroll (world textures end up unreachable below the fold). */
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 .modeler-panel {
@@ -550,6 +554,8 @@ input, select { accent-color: var(--accent); }
   overflow-y: auto;
   min-height: 0;
 }
+/* Panel content overflows into the scrollbar instead of squishing. */
+.modeler-panel > * { flex-shrink: 0; }
 .modeler-left { border-right: 1px solid var(--line); }
 .modeler-right { border-left: 1px solid var(--line); }
 .modeler-panel h3 { margin: 6px 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
@@ -558,6 +564,18 @@ input, select { accent-color: var(--accent); }
 .modeler-modebar { display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--surface-raised); border-bottom: 1px solid var(--line); }
 .modeler-modebar .tool-button[aria-pressed="true"] { background: var(--selection); border-color: var(--accent); color: #d7ebfc; }
 .modeler-mode-hint { margin-left: 10px; color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modeler-modebar-sep { width: 1px; align-self: stretch; margin: 6px 2px; background: var(--line); }
+.modeler-snap-step { background: var(--surface-input); border: 1px solid var(--line); border-radius: 2px; color: var(--text); padding: 2px 3px; }
+.modeler-object-scale { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.modeler-object-scale small { flex-basis: 100%; color: var(--text-muted); }
+.modeler-object-scale input {
+  width: 64px;
+  background: var(--surface-input);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--text);
+  padding: 3px 4px;
+}
 .modeler-viewport { position: relative; min-height: 0; }
 .modeler-viewport canvas { display: block; width: 100%; height: 100%; }
 .modeler-asset-list { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow-y: auto; }
