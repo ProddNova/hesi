@@ -1,56 +1,35 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-19T17:18:46.707Z",
+  "generatedAt": "2026-07-19T20:07:59.496Z",
   "project": {
-    "draftSignature": "fnv1a32:7773c414",
+    "draftSignature": "fnv1a32:185d83d8",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
   "operations": [
     {
-      "name": "chunk 5,-7 box:fence",
-      "nameIndex": 0,
-      "op": "object",
-      "position": [
-        0,
-        0,
-        0
-      ],
-      "quaternion": [
+      "index": 0,
+      "matrix": [
         0,
         0,
         0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3604.6084,
+        58.52171,
+        -4084.20972,
         1
       ],
-      "scale": [
-        1,
-        1,
-        1
-      ],
-      "visible": false
-    },
-    {
-      "name": "chunk 6,-7 box:fence",
-      "nameIndex": 0,
-      "op": "object",
-      "position": [
-        0,
-        0,
-        0
-      ],
-      "quaternion": [
-        0,
-        0,
-        0,
-        1
-      ],
-      "scale": [
-        1,
-        1,
-        1
-      ],
-      "visible": false
+      "mesh": "chunk 6,-7 box:fence",
+      "op": "instance"
     },
     {
       "name": "Garage transition marker",
@@ -72,7 +51,29 @@
         0.88135,
         0.88135
       ],
-      "visible": true
+      "visible": false
+    },
+    {
+      "name": "sign トイレ|TOILET",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        3623.03924,
+        60.22171,
+        -4073.21734
+      ],
+      "quaternion": [
+        0,
+        -0.18983,
+        0,
+        0.98182
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
     },
     {
       "name": "Tatsumi PA deck",
@@ -95,6 +96,29 @@
         1.05421
       ],
       "visible": true
+    },
+    {
+      "index": 0,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3583.27197,
+        48.71631,
+        -4078.22217,
+        1
+      ],
+      "mesh": "chunk 5,-7 lamppost:concrete",
+      "op": "instance"
     },
     {
       "index": 12,
@@ -341,6 +365,29 @@
         0,
         0,
         0,
+        3576.19995,
+        48.64211,
+        -4087.92017,
+        1
+      ],
+      "mesh": "chunk 5,-7 lamppost:concrete",
+      "op": "instance"
+    },
+    {
+      "index": 15,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
         3615.30273,
         48.62246,
         -4072.59204,
@@ -462,6 +509,558 @@
         1
       ],
       "mesh": "chunk 6,-7 box:lampSodium",
+      "op": "instance"
+    },
+    {
+      "index": 0,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3584.84863,
+        57.73671,
+        -4083.04077,
+        1
+      ],
+      "mesh": "chunk 5,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 1,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3583.16089,
+        57.73671,
+        -4083.26611,
+        1
+      ],
+      "mesh": "chunk 5,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 2,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3583.47412,
+        57.73671,
+        -4084.04565,
+        1
+      ],
+      "mesh": "chunk 5,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 49,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3634.12524,
+        57.69971,
+        -4071.97559,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 50,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3628.59814,
+        57.70171,
+        -4070.15454,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 51,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3629.0083,
+        57.70171,
+        -4071.17529,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 52,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3629.41821,
+        57.70171,
+        -4072.19604,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 53,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3629.82837,
+        57.70171,
+        -4073.2168,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 59,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3677.64185,
+        57.73671,
+        -4045.76587,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 60,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3675.95435,
+        57.73671,
+        -4045.99121,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 61,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3676.26733,
+        57.73671,
+        -4046.77075,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 62,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3623.82178,
+        57.73671,
+        -4067.38525,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 63,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3622.13403,
+        57.73671,
+        -4067.6106,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 64,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3622.44727,
+        57.73671,
+        -4068.39014,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 69,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3708.57178,
+        57.70171,
+        -4040.93921,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 70,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3706.34473,
+        57.70171,
+        -4041.83374,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:marking",
+      "op": "instance"
+    },
+    {
+      "index": 84,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3603.01489,
+        57.95171,
+        -4086.68164,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:concreteDark",
+      "op": "instance"
+    },
+    {
+      "index": 0,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3616.87793,
+        58.82171,
+        -4080.95117,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:vending",
+      "op": "instance"
+    },
+    {
+      "index": 1,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3615.02222,
+        58.82171,
+        -4081.69678,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:vending",
+      "op": "instance"
+    },
+    {
+      "index": 2,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3613.16626,
+        58.82171,
+        -4082.44238,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:vending",
+      "op": "instance"
+    },
+    {
+      "index": 3,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3611.31055,
+        58.82171,
+        -4083.18774,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:vending",
+      "op": "instance"
+    },
+    {
+      "index": 4,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3609.45459,
+        58.82171,
+        -4083.93335,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:vending",
+      "op": "instance"
+    },
+    {
+      "index": 24,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3603.38306,
+        58.12171,
+        -4084.37842,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedBody",
+      "op": "instance"
+    },
+    {
+      "index": 0,
+      "matrix": [
+        -0.07455,
+        0,
+        0.18559,
+        0,
+        0,
+        1.6941,
+        0,
+        0,
+        -0.9697,
+        0,
+        -0.38952,
+        0,
+        3623.20435,
+        58.89376,
+        -4073.21558,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:konbini",
       "op": "instance"
     }
   ]

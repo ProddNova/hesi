@@ -4,6 +4,9 @@
     "name": "HESI Main World"
   },
   "entityOverrides": {
+    "barrier:tatsumi-pa-exit:0003": {
+      "visible": false
+    },
     "generated-prop-batch:6-n7-unknown-garage-transition-marker-10": {
       "transform": {
         "position": [
@@ -21,7 +24,11 @@
           0.88135,
           0.88135
         ]
-      }
+      },
+      "visible": false
+    },
+    "generated-prop-batch:6-n7-unknown-sign-toilet-7": {
+      "visible": false
     },
     "generated-prop-batch:6-n7-unknown-tatsumi-pa-deck-6": {
       "transform": {
@@ -42,6 +49,9 @@
         ]
       }
     },
+    "lamp:wangan-0:0627": {
+      "visible": false
+    },
     "lamp:wangan-0:0647": {
       "visible": false
     },
@@ -54,6 +64,9 @@
     "lamp:wangan-0:0650": {
       "visible": false
     },
+    "lamp:wangan-1:0642": {
+      "visible": false
+    },
     "lamp:wangan-1:0643": {
       "visible": false
     },
@@ -62,6 +75,94 @@
     },
     "lamp:wangan-1:0645": {
       "visible": false
+    },
+    "marking:tatsumi-pa-exit:0001": {
+      "visible": false
+    },
+    "marking:tatsumi-pa-exit:0002": {
+      "visible": false
+    },
+    "marking:tatsumi-pa-exit:0003": {
+      "visible": false
+    },
+    "marking:wangan-1:0032": {
+      "visible": false
+    },
+    "marking:wangan-1:0033": {
+      "visible": false
+    },
+    "marking:wangan-1:0034": {
+      "visible": false
+    },
+    "marking:wangan-1:0035": {
+      "visible": false
+    },
+    "marking:wangan-1:0036": {
+      "visible": false
+    },
+    "marking:wangan-1:0038": {
+      "visible": false
+    },
+    "marking:wangan-1:0039": {
+      "visible": false
+    },
+    "marking:wangan-1:0040": {
+      "visible": false
+    },
+    "marking:wangan-1:0041": {
+      "visible": false
+    },
+    "marking:wangan-1:0042": {
+      "visible": false
+    },
+    "marking:wangan-1:0043": {
+      "visible": false
+    },
+    "marking:wangan-1:0044": {
+      "visible": false
+    },
+    "marking:wangan-1:0045": {
+      "visible": false
+    },
+    "pillar:ramp-9:0004": {
+      "visible": false
+    },
+    "prop:ramp-9:0081": {
+      "visible": false
+    },
+    "prop:ramp-9:0082": {
+      "visible": false
+    },
+    "prop:ramp-9:0083": {
+      "visible": false
+    },
+    "prop:ramp-9:0084": {
+      "visible": false
+    },
+    "prop:ramp-9:0085": {
+      "visible": false
+    },
+    "prop:tatsumi-pa-exit:0005": {
+      "visible": false
+    },
+    "prop:wangan-1:3211": {
+      "transform": {
+        "position": [
+          3623.20426,
+          58.89376,
+          -4073.21561
+        ],
+        "rotation": [
+          3.14159,
+          -1.18883,
+          3.14159
+        ],
+        "scale": [
+          0.2,
+          1.6941,
+          1.04501
+        ]
+      }
     }
   },
   "placedObjects": [],
