@@ -127,7 +127,7 @@ const deckCamera = async (spec) => page.evaluate((s) => {
 
 // --- 1. top-down ---------------------------------------------------------------
 if (want('top-down')) {
-  await place(await deckCamera({ up: 230 }), -1.55);
+  await place(await deckCamera({ up: 320 }), -1.55);
   await shoot('top-down');
 }
 
