@@ -25,12 +25,17 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
       }
       const byId = new Map(production.routes.map((route) => [route.id, route]));
       const savedRoutes = payload.document?.routes || {};
+      const samePoints = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+      let pending = Object.entries(savedRoutes).some(([id, entry]) => !samePoints(byId.get(id)?.points, entry.points));
       for (const [id, entry] of Object.entries(savedRoutes)) {
         const route = byId.get(id);
         if (!route) throw new Error(`Saved road route is missing from production data: ${id}`);
         route.points = structuredClone(entry.points);
       }
       const savedSyntheticRoutes = payload.document?.syntheticRoutes || {};
+      const publishedSyntheticRoutes = production.meta?.editorRoadOverrides?.syntheticRoutes || {};
+      pending ||= Object.entries(savedSyntheticRoutes)
+        .some(([id, entry]) => !samePoints(publishedSyntheticRoutes[id]?.points, entry.points));
       for (const [id, entry] of Object.entries(savedSyntheticRoutes)) {
         if (!runtimeMap?.routes?.has(id)) throw new Error(`Saved synthetic road route is missing from the runtime map: ${id}`);
         if (!runtimeMap.applyEditorRouteOverride?.(id, entry.points)) {
@@ -39,7 +44,7 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
       }
       const ids = [...Object.keys(savedRoutes), ...Object.keys(savedSyntheticRoutes)].sort();
       if (ids.length) onStatus(`Loaded ${ids.length} saved road route${ids.length === 1 ? '' : 's'} pending/used for publish`);
-      return { ...payload, routes: ids };
+      return { ...payload, routes: ids, pending };
     },
 
     async save(updates) {
@@ -48,13 +53,13 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ updates }),
       }));
-      onStatus(`Saved road route source · ${payload.path} · ${payload.routes.length} route${payload.routes.length === 1 ? '' : 's'}`);
+      onStatus(`Saved road draft · ${payload.path} · playable game unchanged`);
       return payload;
     },
 
     async publish() {
       const payload = await responseJson(await fetch(ROUTES_ENDPOINT, { method: 'POST' }));
-      onStatus(`Published ${payload.routes.length} road route${payload.routes.length === 1 ? '' : 's'} · ${payload.modulePath}`);
+      onStatus(`Applied ${payload.routes.length} road route${payload.routes.length === 1 ? '' : 's'} to the playable game · ${payload.modulePath}`);
       return payload;
     },
   };

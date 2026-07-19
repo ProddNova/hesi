@@ -96,6 +96,9 @@ export function validateBuildDocument(document) {
     errors.push('project.name must be a non-empty string');
   } else if (typeof document.project.path !== 'string' || !document.project.path.startsWith('data/editor/')) {
     errors.push('project.path must point under data/editor/');
+  } else if (document.project.draftSignature !== undefined
+    && !/^fnv1a32:[0-9a-f]{8}$/.test(document.project.draftSignature)) {
+    errors.push('project.draftSignature must be an fnv1a32 fingerprint');
   }
   if (!Array.isArray(document.operations)) errors.push('operations must be an array');
   else if (document.operations.length > 20000) errors.push('operations exceeds the 20000 entry limit');
@@ -119,6 +122,19 @@ function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+// A compact deterministic fingerprint of the saved editor draft. Builds use
+// it only to tell whether the currently loaded draft is the one that was last
+// applied to the playable game; the game itself does not need to interpret it.
+export function buildDraftSignature(document) {
+  const text = JSON.stringify(stableValue(document));
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
 export function serializeBuildDocument(document) {

@@ -133,7 +133,7 @@ input, select { accent-color: var(--accent); }
 .toolbar-spacer { flex: 1; }
 
 /* Status badges with a colored state dot. */
-.adapter-chip, .dirty-chip {
+.adapter-chip, .dirty-chip, .publish-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -145,11 +145,13 @@ input, select { accent-color: var(--accent); }
   font-size: 11px;
   white-space: nowrap;
 }
-.adapter-chip::before, .dirty-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+.adapter-chip::before, .dirty-chip::before, .publish-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
 .adapter-chip.warning { color: var(--warning-text); border-color: #6b5a1e; }
 .adapter-chip.warning::before { background: var(--warning); }
 .dirty-chip.dirty { color: var(--warning-text); border-color: #6b5a1e; }
 .dirty-chip.dirty::before { background: var(--warning); }
+.publish-chip.pending { color: var(--warning-text); border-color: #6b5a1e; }
+.publish-chip.pending::before { background: var(--warning); }
 
 .preset-select {
   min-width: 150px;
@@ -492,7 +494,7 @@ input, select { accent-color: var(--accent); }
       "left splitl bottom";
   }
   .panel-right, .splitter-right { display: none; }
-  .brand span, .adapter-chip { display: none; }
+  .brand span, .adapter-chip, .publish-chip { display: none; }
 }
 
 @media (max-width: 1400px) {

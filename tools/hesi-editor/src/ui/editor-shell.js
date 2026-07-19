@@ -74,8 +74,8 @@ export function createEditorShell(root) {
     element('span', 'toolbar-divider'),
     button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
     button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
-    button('Save', 'save-project', { title: 'Save the project AND build the map the game loads (Ctrl+S)' }),
-    button('Rebuild Map', 'rebuild-world', { title: 'Save and publish road curves to the production route assets, then reload' }),
+    button('Save Draft', 'save-project', { title: 'Save editor changes only; the playable game stays unchanged (Ctrl+S)' }),
+    button('Apply to Game', 'rebuild-world', { title: 'Save the draft, generate game files, publish road curves, then reload' }),
     button('Commit', 'commit-project', { title: 'Snapshot the current map as a named version (Project tab)' }),
     element('span', 'toolbar-divider'),
     button('Focus', 'focus-selected', { title: 'Frame the selected object (F)' }),
@@ -177,9 +177,11 @@ export function createEditorShell(root) {
   toolbar.append(element('span', 'toolbar-spacer'));
   const adapterChip = element('span', 'adapter-chip', 'World: loading');
   adapterChip.dataset.testid = 'world-mode';
-  const dirtyChip = element('span', 'dirty-chip', 'Saved');
+  const dirtyChip = element('span', 'dirty-chip', 'Draft: Saved');
   dirtyChip.dataset.testid = 'dirty-state';
-  toolbar.append(adapterChip, dirtyChip);
+  const publishChip = element('span', 'publish-chip', 'Game: Current');
+  publishChip.dataset.testid = 'publish-state';
+  toolbar.append(adapterChip, dirtyChip, publishChip);
 
   const workspace = element('main', 'editor-workspace');
 
@@ -384,11 +386,20 @@ export function createEditorShell(root) {
   let actionHandler = () => {};
   let transformState = { mode: 'translate', space: 'world', axes: { x: true, y: true, z: true }, translateSnap: null, rotateSnapDegrees: null, scaleSnap: null, attached: false };
   let historyState = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null, dirty: false };
+  let roadDraftDirty = false;
+  let gamePending = false;
   let projectInfo = { name: 'HESI Main World', path: 'data/editor/hesi-world-project.json', recent: [], autosavePath: '' };
   let currentTab = 'assets';
   let currentScene = null;
   let commitList = [];
   let commitsLoaded = false;
+  const syncSaveState = () => {
+    const draftDirty = historyState.dirty || roadDraftDirty;
+    dirtyChip.textContent = draftDirty ? 'Draft: Unsaved' : 'Draft: Saved';
+    dirtyChip.classList.toggle('dirty', draftDirty);
+    publishChip.textContent = gamePending ? 'Game: Update pending' : 'Game: Current';
+    publishChip.classList.toggle('pending', gamePending);
+  };
   const triggerAction = (action, detail = null) => actionHandler(action, detail);
   const editButton = (label, action, title = '') => {
     const node = button(label, action, { title });
@@ -426,7 +437,7 @@ export function createEditorShell(root) {
     message.maxLength = 400;
     message.dataset.testid = 'commit-message';
     message.setAttribute('aria-label', 'Commit message');
-    const commitButton = button('Commit version', 'project-commit', { title: 'Save the project, build the map, and snapshot this version to disk' });
+    const commitButton = button('Commit draft version', 'project-commit', { title: 'Save and snapshot this draft without changing the playable game' });
     commitButton.classList.add('accent');
     const submit = () => {
       if (!message.value.trim()) { message.focus(); return; }
@@ -450,9 +461,9 @@ export function createEditorShell(root) {
       const placed = commit.placedObjectCount ?? 0;
       info.append(element('small', '', `${formatCommitDate(commit.createdAt)} · ${overrides} override${overrides === 1 ? '' : 's'} · ${placed} placed object${placed === 1 ? '' : 's'} · ${commit.id}`));
       const rowActions = element('div', 'commit-actions');
-      const restore = button('Restore', 'project-restore-commit', { title: 'Load this version, then save and rebuild the map' });
+      const restore = button('Restore Draft', 'project-restore-commit', { title: 'Load and save this draft without changing the playable game' });
       restore.addEventListener('click', () => {
-        if (window.confirm(`Restore "${commit.message}"?\n\nThe current map state will be replaced (undoable), saved, and rebuilt.`)) {
+        if (window.confirm(`Restore "${commit.message}"?\n\nThe current editor draft will be replaced and saved. The playable game stays unchanged until Apply to Game.`)) {
           triggerAction('project-restore-commit', commit.id);
         }
       });
@@ -552,8 +563,8 @@ export function createEditorShell(root) {
         return node;
       };
       actions.append(
-        projectButton('Save', 'project-save'),
-        projectButton('Save As', 'project-save-as'),
+        projectButton('Save Draft', 'project-save'),
+        projectButton('Save Draft As', 'project-save-as'),
         projectButton('Load', 'project-load'),
         projectButton('Export Overrides', 'project-export'),
         projectButton('Reset Unsaved Changes', 'project-reset-unsaved'),
@@ -562,9 +573,10 @@ export function createEditorShell(root) {
       );
       const facts = element('div', 'project-summary');
       facts.append(
-        element('b', '', historyState.dirty ? 'Unsaved changes' : 'Saved to disk'),
+        element('b', '', historyState.dirty || roadDraftDirty ? 'Unsaved draft changes' : 'Draft saved to disk'),
         element('span', '', `Current: ${projectInfo.path}`),
-        element('span', '', `Built map: ${currentScene?.buildPath || 'n/a'} (applied by the game at startup)`),
+        element('span', '', `Game output: ${currentScene?.buildPath || 'n/a'} (${gamePending ? 'update pending' : 'current'})`),
+        element('span', '', 'Only Apply to Game updates production routes and game output.'),
         element('span', '', `Recovery: ${projectInfo.autosavePath || 'not configured'}`),
       );
       panel.append(fields, actions, facts, renderCommitsPanel());
@@ -655,13 +667,13 @@ export function createEditorShell(root) {
       const reference = element('div', 'control-reference');
       [
         ['Select', 'Click an object in the viewport · click again to cycle overlapping hits · Shift+click adds/removes objects · Esc clears'],
-        ['Roads', 'Click asphalt or select a road → drag orange points · right-click orange road adds · right-click point removes · Save stores source · Rebuild Map regenerates asphalt'],
+        ['Roads', 'Click asphalt or select a road → realistic draft asphalt appears · drag orange points · right-click road adds · right-click point removes'],
         ['Camera', 'Orbit: drag / wheel · Fly: click viewport, then WASD + Q/E, wheel speed, Shift boost'],
         ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
         ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],
         ['Add Object', '+ Add Object → pick an asset → click a surface to place · Esc cancels placement'],
-        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save project + build map'],
-        ['Save & Build', 'Save writes the project AND the built map file the game applies at startup'],
+        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S saves the editor draft only'],
+        ['Draft vs Game', 'Save Draft preserves experiments without touching the game · Apply to Game performs the one final production update'],
         ['Commits', 'Project tab → Commit version snapshots the map · Restore brings any version back'],
         ['Scenes', 'Toolbar switcher: Highway (real map) or Garage (interior) · each has its own project'],
         ['Fly crosshair', 'Fly mode shows a first-person crosshair; it locks solid while mouse-look is active'],
@@ -922,8 +934,7 @@ export function createEditorShell(root) {
       redo.textContent = 'Redo';
       undo.title = historyState.undoLabel ? `Undo: ${historyState.undoLabel}` : 'Nothing to undo';
       redo.title = historyState.redoLabel ? `Redo: ${historyState.redoLabel}` : 'Nothing to redo';
-      dirtyChip.textContent = historyState.dirty ? 'Unsaved' : 'Saved';
-      dirtyChip.classList.toggle('dirty', historyState.dirty);
+      syncSaveState();
       if (currentTab === 'project') renderBottom();
     },
     setTransformState(state) {
@@ -935,8 +946,14 @@ export function createEditorShell(root) {
       if (currentTab === 'edit') renderBottom();
     },
     setDirty(dirty) {
-      dirtyChip.textContent = dirty ? 'Unsaved' : 'Saved';
-      dirtyChip.classList.toggle('dirty', Boolean(dirty));
+      historyState.dirty = Boolean(dirty);
+      syncSaveState();
+    },
+    setPublishState(state = {}) {
+      if ('roadDirty' in state) roadDraftDirty = Boolean(state.roadDirty);
+      if ('gamePending' in state) gamePending = Boolean(state.gamePending);
+      syncSaveState();
+      if (currentTab === 'project') renderBottom();
     },
     setProject(info) {
       projectInfo = { ...projectInfo, ...info };
