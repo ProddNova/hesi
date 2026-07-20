@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {
   PART_KINDS,
+  applyVertexOffsets,
   buildPartObject,
   convertPartToMesh,
   customAssetsDocumentErrors,
@@ -10,6 +11,7 @@ import {
   meshRemoveVertex,
   partFaceNames,
   partGeometry,
+  translatePartFace,
   weldedVertices,
 } from '../../../../js/custom-assets.js';
 
@@ -178,6 +180,56 @@ test('a right-click near a shared edge splits BOTH adjacent triangles', () => {
     assert.ok(Math.abs(triangle.uv[corner][1] - 0.5) < 1e-6);
   }
   assert.deepEqual(customAssetsDocumentErrors(meshDocument(mesh)), []);
+});
+
+test('a right-click (almost) on an existing vertex snaps instead of adding a sliver', () => {
+  const mesh = squareMesh();
+  const added = meshInsertVertexAtPoint(mesh, [0.98, 0.01, 0]);
+  assert.equal(added.split, 'corner');
+  assert.equal(added.vertexIndex, 1, 'the nearby corner is reused');
+  assert.equal(mesh.vertices.length, 4, 'no vertex was added');
+  assert.equal(mesh.triangles.length, 2, 'topology is untouched');
+});
+
+test('a ridge still forms when the shared face already has custom vertices', () => {
+  const mesh = convertPartToMesh({ kind: 'box' });
+  // Hand-add an interior detail vertex on the top face, away from the ridge.
+  const detail = meshInsertVertexAtPoint(mesh, [0.2, 0.5, 0.35], { faceIndex: 2, mirrorOpposite: false });
+  assert.equal(detail.split, 'face');
+  const added = meshInsertVertexAtPoint(mesh, [0.5, 0.5, 0], { faceIndex: 0 });
+  assert.equal(added.connected, true, 'the ridge is created despite the extra vertex');
+  assert.ok(mesh.triangles.some((triangle) => (triangle.face || 0) === 2
+    && triangle.v.includes(added.vertexIndex)
+    && triangle.v.includes(added.oppositeVertexIndex)), 'the top face contains the new ridge edge');
+  assert.ok(mesh.triangles.some((triangle) => triangle.v.includes(detail.vertexIndex)),
+    'the hand-added vertex survives the retriangulation');
+  assert.deepEqual(customAssetsDocumentErrors(meshDocument(mesh)), []);
+});
+
+test('pulling a whole face moves every vertex of that face', () => {
+  // Primitive: the four welded top corners of a box gain the same offset.
+  const box = { kind: 'box' };
+  assert.equal(translatePartFace(box, 'top', [0, 0.5, 0]), true);
+  assert.equal(box.vertexOffsets.length, 4);
+  assert.ok(box.vertexOffsets.every((entry) => entry.o[1] === 0.5));
+  const geometry = partGeometry(box);
+  applyVertexOffsets(geometry, box.vertexOffsets);
+  const position = geometry.getAttribute('position');
+  let maxY = -Infinity;
+  for (let index = 0; index < position.count; index += 1) maxY = Math.max(maxY, position.getY(index));
+  assert.ok(Math.abs(maxY - 1.0) < 1e-6, 'the top face rose by half a metre');
+  geometry.dispose();
+  // Pulling again accumulates into the same offsets.
+  assert.equal(translatePartFace(box, 'top', [0, 0.25, 0]), true);
+  assert.ok(box.vertexOffsets.every((entry) => Math.abs(entry.o[1] - 0.75) < 1e-9));
+  // Mesh parts move their vertices directly.
+  const mesh = squareMesh();
+  assert.equal(translatePartFace(mesh, 'surface', [1, 0, 0]), true);
+  assert.deepEqual(mesh.vertices[0], [1, 0, 0]);
+  assert.deepEqual(mesh.vertices[3], [2, 1, 0]);
+  // Unknown faces and assembled assets are refused.
+  assert.equal(translatePartFace(box, 'nope', [0, 1, 0]), false);
+  assert.equal(translatePartFace({ kind: 'asset', assetRef: 'x' }, 'top', [0, 1, 0]), false);
 });
 
 test('removing a vertex drops its faces and compacts the mesh; floors hold', () => {
