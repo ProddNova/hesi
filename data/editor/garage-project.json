@@ -542,6 +542,136 @@
         ]
       },
       "visible": true
+    },
+    {
+      "assetId": "custom:0008",
+      "id": "placed:0006",
+      "layer": "Props",
+      "locked": false,
+      "name": "pack2",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -2.75,
+          0.008,
+          9
+        ],
+        "rotation": [
+          0,
+          1.5708,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0007",
+      "id": "placed:0007",
+      "layer": "Props",
+      "locked": false,
+      "name": "pack1",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -4,
+          0.008,
+          8.19515
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "id": "placed:0008",
+      "layer": "Props",
+      "locked": false,
+      "name": "beer",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -1.24291,
+          0.81987,
+          9.19173
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.12699,
+          1.14214,
+          1.09648
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "id": "placed:0009",
+      "layer": "Props",
+      "locked": false,
+      "name": "beer copy",
+      "sourceEntityId": "placed:0008",
+      "transform": {
+        "position": [
+          -1.4,
+          0.81987,
+          9.19173
+        ],
+        "rotation": [
+          3.14159,
+          -1.309,
+          3.14159
+        ],
+        "scale": [
+          1.12699,
+          1.14214,
+          1.09648
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "id": "placed:0010",
+      "layer": "Props",
+      "locked": false,
+      "name": "beer copy copy",
+      "sourceEntityId": "placed:0009",
+      "transform": {
+        "position": [
+          -1.31684,
+          0.81987,
+          9.08096
+        ],
+        "rotation": [
+          -1.75805,
+          -0.18405,
+          -0.80273
+        ],
+        "scale": [
+          1.12699,
+          1.14214,
+          1.09648
+        ]
+      },
+      "visible": true
     }
   ],
   "groups": [],

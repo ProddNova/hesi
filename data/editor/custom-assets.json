@@ -1011,6 +1011,304 @@
         }
       ],
       "updatedAt": "2026-07-20T11:10:39.812Z"
+    },
+    "custom:0007": {
+      "id": "custom:0007",
+      "label": "pack1",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T11:59:40.572Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0055"
+            },
+            "right": {
+              "texture": "tex:0055"
+            },
+            "left": {
+              "texture": "tex:0055"
+            },
+            "bottom": {
+              "texture": "tex:0055"
+            },
+            "back": {
+              "texture": "tex:0055"
+            },
+            "top": {
+              "texture": "tex:0056"
+            }
+          }
+        }
+      ],
+      "updatedAt": "2026-07-20T12:31:52.541Z"
+    },
+    "custom:0008": {
+      "id": "custom:0008",
+      "label": "pack2",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T12:32:01.005Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0058"
+            },
+            "back": {
+              "texture": "tex:0058"
+            },
+            "top": {
+              "texture": "tex:0060"
+            },
+            "right": {
+              "texture": "tex:0059"
+            },
+            "left": {
+              "texture": "tex:0059"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 5,
+              "o": [
+                0,
+                -0.2453458269792974,
+                1.306110963312899
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                0,
+                0,
+                1.306110963312899
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                -0.20284291925783826,
+                -0.2453458269792974,
+                1.306110963312899
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                -0.20284291925783826,
+                0,
+                1.306110963312899
+              ]
+            },
+            {
+              "i": 4,
+              "o": [
+                0,
+                -0.2453458269792974,
+                -1.306110963312899
+              ]
+            },
+            {
+              "i": 6,
+              "o": [
+                0,
+                0,
+                -1.306110963312899
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                -0.20284291925783826,
+                -0.2453458269792974,
+                -1.306110963312899
+              ]
+            },
+            {
+              "i": 3,
+              "o": [
+                -0.20284291925783826,
+                0,
+                -1.306110963312899
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-20T12:35:45.530Z"
+    },
+    "custom:0009": {
+      "id": "custom:0009",
+      "label": "beer",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T12:43:19.953Z",
+      "parts": [
+        {
+          "kind": "cylinder",
+          "name": "Cylinder",
+          "position": [
+            0,
+            0.013530216055839761,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            0.1,
+            0.1,
+            0.1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "side": {
+              "texture": "tex:0061"
+            },
+            "top": {
+              "texture": "tex:0062",
+              "fit": "cover",
+              "projection": {
+                "origin": [
+                  0,
+                  0.5,
+                  0.5
+                ],
+                "uvOrigin": [
+                  1,
+                  0.5
+                ],
+                "uVector": [
+                  0,
+                  0,
+                  1
+                ],
+                "vVector": [
+                  0.9999999157063086,
+                  0,
+                  -8.429369135898627e-8
+                ],
+                "surfaceAspect": 1
+              }
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 0,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 16,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 3,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 4,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 5,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 6,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                0,
+                0.7566699226509161,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-20T12:55:20.946Z"
     }
   },
   "textures": {
@@ -1185,6 +1483,42 @@
     "tex:0053": {
       "name": "bed_side2.png",
       "url": "textures/bed-side2-4a4e772967.png"
+    },
+    "tex:0054": {
+      "name": "pack_face1.png",
+      "url": "textures/pack-face1-c7e2eaf9ea.png"
+    },
+    "tex:0055": {
+      "name": "pack_face1.png",
+      "url": "textures/pack-face1-be7378a986.png"
+    },
+    "tex:0056": {
+      "name": "pack_top1.png",
+      "url": "textures/pack-top1-313a2508f6.png"
+    },
+    "tex:0057": {
+      "name": "pack_face2.png",
+      "url": "textures/pack-face2-e3ab3e9fea.png"
+    },
+    "tex:0058": {
+      "name": "pack_face2.png",
+      "url": "textures/pack-face2-433ad1f88a.png"
+    },
+    "tex:0059": {
+      "name": "pack_side2.png",
+      "url": "textures/pack-side2-d19c38aba7.png"
+    },
+    "tex:0060": {
+      "name": "pack_side2.png",
+      "url": "textures/pack-side2-f1fb67ce81.png"
+    },
+    "tex:0061": {
+      "name": "beer_front.png",
+      "url": "textures/beer-front-0555a1e038.png"
+    },
+    "tex:0062": {
+      "name": "beer_top.png",
+      "url": "textures/beer-top-4c5482025e.png"
     }
   },
   "worldTextures": {
