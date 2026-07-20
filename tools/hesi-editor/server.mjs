@@ -371,6 +371,19 @@ const server = createServer(async (req, res) => {
       sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);
       return;
     }
+    if (path === DIAGNOSTICS_ENDPOINT) {
+      // Modeler topology watchdog dump: the broken asset state plus the state
+      // the offending operation started from, for offline repro and repair.
+      if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method); return; }
+      const payload = await readJsonBody(req, MAX_ASSETS_BYTES);
+      const directory = resolve(ROOT, DIAGNOSTICS_DIR);
+      await mkdir(directory, { recursive: true });
+      const name = `diag-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      await writeFile(resolve(directory, name), JSON.stringify(payload, null, 2));
+      console.log(`[hesi-editor] topology diagnostic saved: ${DIAGNOSTICS_DIR}/${name}`);
+      sendJson(res, 200, { ok: true, path: `${DIAGNOSTICS_DIR}/${name}` }, req.method);
+      return;
+    }
     if (path === COMMITS_ENDPOINT) {
       if (req.method === 'GET' || req.method === 'HEAD') {
         const commits = await listCommits(requestUrl.searchParams.get('scene'));

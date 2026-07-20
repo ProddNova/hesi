@@ -10,3 +10,4 @@ data/editor/*.autosave.json.bak
 data/editor/*.json.bak
 tools/hesi-editor/.devtests/shots/
 tools/hesi-editor/.claude/
+data/editor/diagnostics/

@@ -495,6 +495,10 @@ export class ModelerPanel {
   _resetHistory() {
     this.history = this.definition ? [this._snapshot()] : [];
     this.historyIndex = this.history.length - 1;
+    // A freshly opened asset may already carry broken topology (saved while a
+    // bug was live): report it immediately, not at the first edit.
+    this._lastTopologyReport = undefined;
+    this._auditTopology();
   }
 
   _recordHistory() {

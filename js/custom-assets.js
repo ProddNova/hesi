@@ -1246,6 +1246,17 @@ function mirrorMeshFaceGeometry(part, sourceName, targetName) {
   }
   if (newTriangles.length === otherTriangles.length) return null; // every mirrored triangle degenerated
   if (newVertices.length > MESH_MAX_VERTICES || newTriangles.length > MESH_MAX_TRIANGLES) return null;
+  // A mirrored triangle that degenerated may have been the only user of a
+  // freshly added vertex; compact so no orphan handle floats in the part.
+  const usedVertices = new Set();
+  for (const triangle of newTriangles) for (const vertex of triangle.v) usedVertices.add(vertex);
+  if (usedVertices.size !== newVertices.length) {
+    const compact = new Map([...usedVertices].sort((a, b) => a - b).map((oldIndex, newIndex) => [oldIndex, newIndex]));
+    for (const triangle of newTriangles) triangle.v = triangle.v.map((vertex) => compact.get(vertex));
+    const compactVertices = [...compact.keys()].map((oldIndex) => newVertices[oldIndex]);
+    newVertices.length = 0;
+    newVertices.push(...compactVertices);
+  }
   part.vertices = newVertices;
   part.triangles = newTriangles;
   delete part.vertexOffsets; // offsets indexed the old topology

@@ -9,6 +9,7 @@ import {
   customAssetsDocumentErrors,
   meshInsertVertexAtPoint,
   meshRemoveVertex,
+  meshTopologyIssues,
   partFaceNames,
   partGeometry,
   translatePartFace,
@@ -272,4 +273,19 @@ test('meshes without stored UVs still build with planar fallback UVs', () => {
     assert.ok(uv.getY(index) >= 0 && uv.getY(index) <= 1);
   }
   geometry.dispose();
+});
+
+test('meshTopologyIssues: primitive conversions are sound, corruption is flagged', () => {
+  for (const kind of Object.keys(PART_KINDS).filter((entry) => entry !== 'asset')) {
+    const part = convertPartToMesh({ kind, name: kind, position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999', faces: {} });
+    if (!part) continue;
+    assert.deepEqual(meshTopologyIssues(part), [], `${kind} conversion must be clean`);
+  }
+  const part = convertPartToMesh({ kind: 'box', name: 'b', position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999', faces: {} });
+  part.vertices.push([9, 9, 9]); // orphan handle floating in the void
+  part.triangles[0] = { ...part.triangles[0], v: [0, 0, 1] }; // degenerate
+  const issues = meshTopologyIssues(part);
+  assert.ok(issues.some((issue) => issue.includes('orphaned')));
+  assert.ok(issues.some((issue) => issue.includes('degenerate')));
+  assert.ok(issues.some((issue) => issue.includes('boundary crack')));
 });
