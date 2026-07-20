@@ -7,8 +7,12 @@ import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260713a';
 import { applyEditorBuilds } from './editor-map-patch.js?v=20260720b';
+// Same specifier as editor-map-patch.js so both share one module instance
+// (and one texture cache/budget); a ?v= query here would fork the module.
+import { setTextureSizeBudget } from './custom-assets.js';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
+import { DebugStats } from './debug-stats.js?v=20260720a';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
@@ -35,6 +39,7 @@ class ShutokoNights {
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
     this.setupDebugMenu();
     this.setupDevMap();
+    this.setupDebugStats();
     this.resize();window.addEventListener('resize',()=>this.resize());
     // iOS Safari: orientation changes and browser-chrome show/hide don't always
     // fire a plain resize, so listen to everything and settle late.
@@ -127,6 +132,8 @@ class ShutokoNights {
       const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'');
       if((e.code==='Digit0'||e.code==='Numpad0')&&!typing&&!e.repeat){e.preventDefault();this.toggleDebugMenu();return;}
       if(e.code==='KeyM'&&!typing&&!e.repeat){e.preventDefault();this.toggleDevMap();return;}
+      if(e.code==='KeyI'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggle();return;}
+      if(e.code==='KeyP'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggleRecording();return;}
       // While the developer map is open it owns input (it handles Escape via a
       // capture-phase listener); swallow the rest so no gameplay key leaks through.
       if(this.devMap?.isOpen())return;
@@ -210,7 +217,18 @@ class ShutokoNights {
     },480);
   }
   exitGarage(){
-    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
+    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.releaseGarageTextures();this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
+  }
+  // The garage scene is never rendered while driving, but its textures (the
+  // editor's furniture/wall/poster images) stay uploaded after the first
+  // garage frame — the game boots into the garage, so they otherwise occupy
+  // VRAM for the whole drive. Dropping the GPU copies here (JS images stay
+  // cached) keeps long drives free of that pressure on weak GPUs; three.js
+  // re-uploads them automatically on the next garage render.
+  releaseGarageTextures(){
+    const collect=scene=>{const set=new Set();scene.traverse(o=>{for(const m of(Array.isArray(o.material)?o.material:o.material?[o.material]:[]))for(const key of ['map','emissiveMap','alphaMap','lightMap','aoMap'])if(m[key])set.add(m[key]);});return set;};
+    const keep=collect(this.roadScene);
+    for(const t of collect(this.garageScene))if(!keep.has(t))t.dispose();
   }
 
   getInput(){
@@ -231,10 +249,10 @@ class ShutokoNights {
     let dt=Math.min(.05,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
     // Developer map freezes gameplay (vehicle + drone stay put) while it is open.
     // Freezing is preferable to letting the car/camera drift on stuck input.
-    if(this.devMap?.isOpen()){this.render();this.pressed.clear();return;}
+    if(this.devMap?.isOpen()){this.render();this.debugStats?.frame();this.pressed.clear();return;}
     if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
     this.updateDebugHitboxes(dt);
-    this.render();this.pressed.clear();
+    this.render();this.debugStats?.frame();this.pressed.clear();
   }
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
@@ -296,6 +314,26 @@ class ShutokoNights {
     }catch(e){console.error('Dev map init',e);this.devMap=null;}
   }
   toggleDevMap(){this.devMap?.toggle();}
+  // Debug stats overlay (js/debug-stats.js): I toggles it, P records a stats
+  // log and copies it to the clipboard on stop. Owns no game state; it reads
+  // everything through this snapshot.
+  setupDebugStats(){
+    try{this.debugStats=new DebugStats({renderer:this.renderer,toast:(t,c)=>this.ui?.toast?.(t,c),getSnapshot:()=>this.getDebugStatsSnapshot()});}catch(e){console.error('Debug stats init',e);this.debugStats=null;}
+  }
+  getDebugStatsSnapshot(){
+    const scene=this.mode==='garage'?this.garageScene:this.roadScene;
+    let chunksVisible=0;const chunksTotal=this.map?._chunks?.size??0;
+    if(this.map?._chunks)for(const c of this.map._chunks.values())if(c.group.visible)chunksVisible+=1;
+    let x=0,z=0,speedKmh=0,route=null;
+    try{
+      if(this.debug.noclip){x=this.debug.position.x;z=this.debug.position.z;}
+      else{const s=this.getVehicleState(),p=vec(s.position||s);x=p.x;z=p.z;if(this.mode==='driving')speedKmh=this.getTelemetry().speedKmh||0;}
+      route=this.currentRoadInfo?.routeId||null;
+    }catch(e){}
+    return{scene,mode:this.debug.noclip?'noclip':this.mode,quality:this.renderQuality(),
+      resolution:`${this.canvas.width}x${this.canvas.height}`,dpr:window.devicePixelRatio||1,
+      chunksVisible,chunksTotal,traffic:this.traffic?.active?.length??0,x,z,speedKmh,route};
+  }
   getDevNetwork(){
     const mm=this.map?.getMinimapData?.();if(!mm)return null;
     // Start from the authoritative runtime minimap network (real names, ids,
@@ -566,6 +604,10 @@ class ShutokoNights {
     this.camera.aspect=innerWidth/Math.max(1,innerHeight);this.camera.updateProjectionMatrix();
     this.canvas.style.imageRendering='auto';
     this.map?.setQuality?.(q);
+    // Editor-imported textures are capped to a per-quality size so imported
+    // 1000+ px images cannot blow VRAM on weak GPUs; cached textures re-upload
+    // at the new cap when the player changes quality.
+    setTextureSizeBudget({low:128,medium:256,high:512}[q]||256);
   }
   // The old PSX pass (vertex snap, 31-level posterize, nearest-filter mush) is
   // gone. This pass only normalizes textures for the clean PS2 look: bilinear

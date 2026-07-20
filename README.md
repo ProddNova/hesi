@@ -25,6 +25,7 @@ You can also create a **Static Site** manually with an empty build command and `
 - Phone: F
 - Recover: R
 - Garage: WASD + mouse, E interact, Esc release pointer/exit screens
+- Debug stats: I toggles the overlay (FPS, RAM, renderer/scene counters), P starts/stops a stats log recording — stopping copies the log to the clipboard
 - Mobile driving: on-screen steering, pedals, handbrake, camera, gears, phone and reset
 - Mobile garage: on-screen movement, drag the right side to look, USE to interact
 - Admin unlock: enter `1997` in the phone Admin app

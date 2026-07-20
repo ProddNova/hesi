@@ -24,6 +24,11 @@ const PRIMITIVE_GEOMETRY = {
   sphere: () => new THREE.SphereGeometry(0.5, 24, 16),
 };
 
+// One geometry + material set per part definition, shared by every placement
+// of that asset in either scene. The custom-assets document is fetched once
+// per page load, so part objects are stable WeakMap keys for the whole run.
+const PART_BUILD_CACHE = new WeakMap();
+
 async function fetchBuild(scene) {
   try {
     const response = await fetch(BUILD_URLS[scene], { cache: 'no-store' });
@@ -71,6 +76,7 @@ function customAssetPartResolver(customAssets, donorForMaterialKey, depth = 0) {
       if (!nested || depth >= 4) return null;
       return buildCustomAssetGroup(nested, customAssets.textures, {
         resolveAssetPart: customAssetPartResolver(customAssets, donorForMaterialKey, depth + 1),
+        buildCache: PART_BUILD_CACHE,
       });
     }
     const root = new THREE.Group();
@@ -97,6 +103,7 @@ function buildPlacedObject(op, donorForMaterialKey, customAssets = null) {
     if (!definition) return null;
     const built = buildCustomAssetGroup(definition, customAssets.textures, {
       resolveAssetPart: customAssetPartResolver(customAssets, donorForMaterialKey),
+      buildCache: PART_BUILD_CACHE,
     });
     if (!built.children.length) return null;
     root.add(built);
@@ -167,7 +174,10 @@ export function applyHighwayBuild(map, build, customAssets = null) {
     if (op.op === 'place' || op.op === 'place-primitive' || op.op === 'place-custom') {
       const placed = buildPlacedObject(op, donorForMaterialKey, customAssets);
       if (!placed) { summary.skipped += 1; continue; }
-      placedGroup(map.group).add(placed);
+      // Streamed with the world chunks so far-away placements cost nothing;
+      // the shared group is only the fallback for maps without chunk support.
+      if (typeof map.attachStreamedObject === 'function') map.attachStreamedObject(placed);
+      else placedGroup(map.group).add(placed);
       summary.applied += 1;
       continue;
     }

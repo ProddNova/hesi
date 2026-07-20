@@ -1545,6 +1545,49 @@ export function captureUnionFaceProjection(part, faceNames) {
 
 const textureCache = new Map();
 
+// GPU texture budget: the game caps every editor-imported image to a maximum
+// dimension per quality profile before upload, so player-imported 1000+ px
+// images cannot grow VRAM without bound as the map gains custom content.
+// 0 = no limit (the editor keeps full resolution for authoring).
+let textureSizeBudget = 0;
+
+function applyTextureSizeBudget(texture) {
+  const source = texture.userData?.hesiSourceImage;
+  if (!source) return;
+  const width = source.naturalWidth || source.videoWidth || source.width || 0;
+  const height = source.naturalHeight || source.videoHeight || source.height || 0;
+  const budget = textureSizeBudget;
+  if (!budget || !width || !height || Math.max(width, height) <= budget) {
+    if (texture.image !== source) { texture.image = source; texture.needsUpdate = true; }
+    return;
+  }
+  const scale = budget / Math.max(width, height);
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+  const current = texture.image;
+  if (current && current !== source && current.width === targetWidth && current.height === targetHeight) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  canvas.getContext('2d').drawImage(source, 0, 0, targetWidth, targetHeight);
+  texture.image = canvas;
+  texture.needsUpdate = true;
+}
+
+/**
+ * Caps every cached (and future) custom texture to `maxSize` pixels on its
+ * longest side, downscaling on a canvas before GPU upload. Pass 0 to restore
+ * full resolution. Already-uploaded textures are re-uploaded at the new size,
+ * so the game can apply this when the player changes the quality setting.
+ */
+export function setTextureSizeBudget(maxSize) {
+  const next = Number.isFinite(maxSize) && maxSize > 0 ? Math.floor(maxSize) : 0;
+  if (next === textureSizeBudget) return;
+  textureSizeBudget = next;
+  if (typeof document === 'undefined') return;
+  for (const texture of textureCache.values()) applyTextureSizeBudget(texture);
+}
+
 /**
  * UV transform used by face textures. `cover` preserves the image aspect and
  * samples a centred sub-rectangle, so the mesh itself clips the excess when a
@@ -1597,8 +1640,14 @@ export function textureFromSource(source, {
     texture.repeat.set(...transform.repeat);
     texture.offset.set(...transform.offset);
     // Only flag a GPU upload once image data exists; configure() also runs
-    // synchronously before an async file load has produced pixels.
-    if (texture.image) texture.needsUpdate = true;
+    // synchronously before an async file load has produced pixels. The budget
+    // downscale runs on the freshly decoded image, so oversized imports never
+    // reach the GPU at full size when a budget is active.
+    if (texture.image) {
+      if (!texture.userData.hesiSourceImage) texture.userData.hesiSourceImage = texture.image;
+      applyTextureSizeBudget(texture);
+      texture.needsUpdate = true;
+    }
   };
   const texture = typeof document === 'undefined'
     ? new THREE.Texture()
@@ -1775,26 +1824,36 @@ function faceMaterial(part, faceName, texturesById, surfaceAspect = 1) {
  * `resolveAssetPart(part)` must return a THREE.Object3D for kind:'asset' parts
  * (the editor resolves through its live asset registry; the game rebuilds from
  * the baked components via donor meshes).
+ *
+ * `buildCache` (a WeakMap keyed by part definition) lets repeated placements
+ * of one asset share a single geometry and material set instead of building
+ * per-placement copies. The game passes a persistent cache; the editor omits
+ * it because it mutates part definitions live and rebuilds from scratch.
  */
-export function buildPartObject(part, texturesById, { resolveAssetPart = () => null } = {}) {
+export function buildPartObject(part, texturesById, { resolveAssetPart = () => null, buildCache = null } = {}) {
   let node = null;
   if (part.kind === 'asset') {
     node = resolveAssetPart(part);
     if (!node) return null;
   } else {
-    const geometry = partGeometry(part);
-    if (!geometry) return null;
-    applyVertexOffsets(geometry, part.vertexOffsets);
-    applyPartFaceProjections(geometry, part);
-    const materials = partFaceNames(part).map((faceName, materialIndex) => faceMaterial(
-      part,
-      faceName,
-      texturesById,
-      part.faces?.[faceName]?.fit === 'cover' && validFaceProjection(part.faces[faceName].projection)
-        ? part.faces[faceName].projection.surfaceAspect
-        : geometryMaterialAspect(geometry, materialIndex, part.scale || [1, 1, 1]),
-    ));
-    node = new THREE.Mesh(geometry, materials.length === 1 ? materials[0] : materials);
+    let shared = buildCache?.get(part) || null;
+    if (!shared) {
+      const geometry = partGeometry(part);
+      if (!geometry) return null;
+      applyVertexOffsets(geometry, part.vertexOffsets);
+      applyPartFaceProjections(geometry, part);
+      const materials = partFaceNames(part).map((faceName, materialIndex) => faceMaterial(
+        part,
+        faceName,
+        texturesById,
+        part.faces?.[faceName]?.fit === 'cover' && validFaceProjection(part.faces[faceName].projection)
+          ? part.faces[faceName].projection.surfaceAspect
+          : geometryMaterialAspect(geometry, materialIndex, part.scale || [1, 1, 1]),
+      ));
+      shared = { geometry, materials };
+      buildCache?.set(part, shared);
+    }
+    node = new THREE.Mesh(shared.geometry, shared.materials.length === 1 ? shared.materials[0] : shared.materials);
   }
   node.name = part.name || PART_KINDS[part.kind].label;
   if (finiteVector(part.position, 3)) node.position.fromArray(part.position);
@@ -1909,12 +1968,12 @@ export function applyObjectFaceStyles(root, faceStyles = {}, texturesById = {}) 
  * Builds a full custom asset (all parts) as a THREE.Group anchored at the
  * asset origin. Never throws: unresolvable parts are skipped and counted.
  */
-export function buildCustomAssetGroup(assetDefinition, texturesById, { resolveAssetPart = () => null } = {}) {
+export function buildCustomAssetGroup(assetDefinition, texturesById, { resolveAssetPart = () => null, buildCache = null } = {}) {
   const root = new THREE.Group();
   root.name = assetDefinition.label || assetDefinition.id || 'Custom object';
   let skipped = 0;
   for (const part of assetDefinition.parts || []) {
-    const node = buildPartObject(part, texturesById, { resolveAssetPart });
+    const node = buildPartObject(part, texturesById, { resolveAssetPart, buildCache });
     if (node) root.add(node);
     else skipped += 1;
   }
