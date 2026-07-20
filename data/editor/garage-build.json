@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "garage",
-  "generatedAt": "2026-07-20T13:36:12.922Z",
+  "generatedAt": "2026-07-20T19:16:33.100Z",
   "project": {
-    "draftSignature": "fnv1a32:d6307245",
+    "draftSignature": "fnv1a32:40f1bfd0",
     "name": "HESI Garage Interior",
     "path": "data/editor/garage-project.json"
   },
@@ -635,7 +635,7 @@
       },
       "op": "garage-object",
       "position": [
-        5.7802,
+        5.69509,
         2.07985,
         13.9379
       ],
@@ -1287,7 +1287,7 @@
       "op": "garage-object",
       "position": [
         -2.5,
-        0.03,
+        0.07518,
         11.75
       ],
       "quaternion": [
@@ -1373,7 +1373,7 @@
       "position": [
         -4,
         0.008,
-        -0.08838
+        -0.5
       ],
       "quaternion": [
         0,
@@ -1569,18 +1569,18 @@
       "name": "mobile1",
       "op": "place-custom",
       "position": [
-        10.42357,
+        10.42356,
         0.008,
-        8.25
+        10.75004
       ],
       "quaternion": [
         0,
-        -0.70711,
+        -0.7071,
         0,
         0.70711
       ],
       "scale": [
-        0.9,
+        0.74114,
         1,
         1
       ],
@@ -1671,6 +1671,336 @@
         1.9,
         1.8,
         1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0012",
+      "name": "Barile1 copy",
+      "op": "place-custom",
+      "position": [
+        10.25,
+        0.008,
+        4.25
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        0.7,
+        0.7,
+        0.7
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0007",
+      "name": "pack1 copy",
+      "op": "place-custom",
+      "position": [
+        10.28602,
+        0.008,
+        5.14422
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        0.8,
+        0.6,
+        0.5
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0007",
+      "name": "pack1 copy copy",
+      "op": "place-custom",
+      "position": [
+        10.28082,
+        0.60695,
+        5.14422
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        0.8,
+        0.6,
+        0.5
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "name": "beer copy",
+      "op": "place-custom",
+      "position": [
+        10.32716,
+        1.36859,
+        11.20747
+      ],
+      "quaternion": [
+        0,
+        -0.71812,
+        0,
+        -0.69592
+      ],
+      "scale": [
+        1.12699,
+        1.45386,
+        1.09648
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0016",
+      "name": "repxol_barile",
+      "op": "place-custom",
+      "position": [
+        -1.75,
+        0.008,
+        -2
+      ],
+      "quaternion": [
+        0,
+        -0.94331,
+        0,
+        0.3319
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0007",
+      "name": "pack1 copy copy copy",
+      "op": "place-custom",
+      "position": [
+        -4.09735,
+        1.02151,
+        8.28038
+      ],
+      "quaternion": [
+        0,
+        0.70711,
+        0,
+        0.70711
+      ],
+      "scale": [
+        0.5687,
+        0.40386,
+        0.5
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0017",
+      "name": "table_small",
+      "op": "place-custom",
+      "position": [
+        -1,
+        0.008,
+        6
+      ],
+      "quaternion": [
+        -0.02346,
+        -0.12425,
+        -0.0324,
+        0.99144
+      ],
+      "scale": [
+        1.5,
+        1,
+        1.5
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0018",
+      "name": "poster2",
+      "op": "place-custom",
+      "position": [
+        5.25,
+        2.25,
+        -2.30553
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1.5,
+        1.6,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0019",
+      "name": "game1",
+      "op": "place-custom",
+      "position": [
+        -1.23951,
+        0.60256,
+        5.85388
+      ],
+      "quaternion": [
+        0,
+        0.38489,
+        0,
+        0.92296
+      ],
+      "scale": [
+        0.38349,
+        1,
+        0.35473
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0021",
+      "name": "game2",
+      "op": "place-custom",
+      "position": [
+        -0.89012,
+        0.58648,
+        6.40003
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        0.3957,
+        1,
+        0.33591
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0022",
+      "name": "bbl",
+      "op": "place-custom",
+      "position": [
+        0.13075,
+        4.16415,
+        -2.30167
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1.35359,
+        1.38201,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0023",
+      "name": "quadro_attrezzi",
+      "op": "place-custom",
+      "position": [
+        10.32828,
+        1.32849,
+        9.2158
+      ],
+      "quaternion": [
+        0,
+        -0.70711,
+        0,
+        0.70711
+      ],
+      "scale": [
+        1.3617,
+        1.48796,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "name": "beer copy copy",
+      "op": "place-custom",
+      "position": [
+        10.42801,
+        1.36859,
+        11.05611
+      ],
+      "quaternion": [
+        -0.08128,
+        -0.08129,
+        0.70242,
+        0.70242
+      ],
+      "scale": [
+        1.12699,
+        1.45386,
+        1.09648
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0019",
+      "name": "game1 copy",
+      "op": "place-custom",
+      "position": [
+        -1.59811,
+        1.42782,
+        -2.07231
+      ],
+      "quaternion": [
+        0,
+        0.38489,
+        0,
+        0.92296
+      ],
+      "scale": [
+        0.38349,
+        1,
+        0.35473
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "name": "beer copy copy",
+      "op": "place-custom",
+      "position": [
+        -1.97448,
+        1.48282,
+        -1.96886
+      ],
+      "quaternion": [
+        0,
+        -0.79335,
+        0,
+        0.60876
+      ],
+      "scale": [
+        1.12699,
+        1.42026,
+        1.09648
       ],
       "visible": true
     }

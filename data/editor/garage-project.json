@@ -269,7 +269,7 @@
       },
       "transform": {
         "position": [
-          5.7802,
+          5.69509,
           2.07985,
           13.9379
         ],
@@ -413,7 +413,7 @@
       "transform": {
         "position": [
           -2.5,
-          0.03,
+          0.07518,
           11.75
         ],
         "rotation": [
@@ -450,7 +450,7 @@
         "position": [
           -4,
           0.008,
-          -0.08838
+          -0.5
         ],
         "rotation": [
           0,
@@ -682,17 +682,17 @@
       "sourceEntityId": null,
       "transform": {
         "position": [
-          10.42357,
+          10.42356,
           0.008,
-          8.25
+          10.75004
         ],
         "rotation": [
           0,
-          -1.5708,
+          -1.57079,
           0
         ],
         "scale": [
-          0.9,
+          0.74114,
           1,
           1
         ]
@@ -799,6 +799,396 @@
           1.9,
           1.8,
           1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0012",
+      "id": "placed:0016",
+      "layer": "Props",
+      "locked": false,
+      "name": "Barile1 copy",
+      "sourceEntityId": "placed:0013",
+      "transform": {
+        "position": [
+          10.25,
+          0.008,
+          4.25
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.7,
+          0.7
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0007",
+      "id": "placed:0017",
+      "layer": "Props",
+      "locked": false,
+      "name": "pack1 copy",
+      "sourceEntityId": "placed:0007",
+      "transform": {
+        "position": [
+          10.28602,
+          0.008,
+          5.14422
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.8,
+          0.6,
+          0.5
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0007",
+      "id": "placed:0018",
+      "layer": "Props",
+      "locked": false,
+      "name": "pack1 copy copy",
+      "sourceEntityId": "placed:0017",
+      "transform": {
+        "position": [
+          10.28082,
+          0.60695,
+          5.14422
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.8,
+          0.6,
+          0.5
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "id": "placed:0019",
+      "layer": "Props",
+      "locked": false,
+      "name": "beer copy",
+      "sourceEntityId": "placed:0008",
+      "transform": {
+        "position": [
+          10.32716,
+          1.36859,
+          11.20747
+        ],
+        "rotation": [
+          -3.14159,
+          1.53941,
+          -3.14159
+        ],
+        "scale": [
+          1.12699,
+          1.45386,
+          1.09648
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0016",
+      "id": "placed:0020",
+      "layer": "Props",
+      "locked": false,
+      "name": "repxol_barile",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -1.75,
+          0.008,
+          -2
+        ],
+        "rotation": [
+          3.14159,
+          -0.67664,
+          3.14159
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0007",
+      "id": "placed:0021",
+      "layer": "Props",
+      "locked": false,
+      "name": "pack1 copy copy copy",
+      "sourceEntityId": "placed:0018",
+      "transform": {
+        "position": [
+          -4.09735,
+          1.02151,
+          8.28038
+        ],
+        "rotation": [
+          0,
+          1.5708,
+          0
+        ],
+        "scale": [
+          0.5687,
+          0.40386,
+          0.5
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0017",
+      "id": "placed:0022",
+      "layer": "Props",
+      "locked": false,
+      "name": "table_small",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -1,
+          0.008,
+          6
+        ],
+        "rotation": [
+          -0.05631,
+          -0.24736,
+          -0.07234
+        ],
+        "scale": [
+          1.5,
+          1,
+          1.5
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0018",
+      "id": "placed:0023",
+      "layer": "Props",
+      "locked": false,
+      "name": "poster2",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          5.25,
+          2.25,
+          -2.30553
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.5,
+          1.6,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0019",
+      "id": "placed:0024",
+      "layer": "Props",
+      "locked": false,
+      "name": "game1",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -1.23951,
+          0.60256,
+          5.85388
+        ],
+        "rotation": [
+          0,
+          0.79018,
+          0
+        ],
+        "scale": [
+          0.38349,
+          1,
+          0.35473
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0021",
+      "id": "placed:0025",
+      "layer": "Props",
+      "locked": false,
+      "name": "game2",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -0.89012,
+          0.58648,
+          6.40003
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3957,
+          1,
+          0.33591
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0022",
+      "id": "placed:0026",
+      "layer": "Props",
+      "locked": false,
+      "name": "bbl",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          0.13075,
+          4.16415,
+          -2.30167
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.35359,
+          1.38201,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0023",
+      "id": "placed:0027",
+      "layer": "Props",
+      "locked": false,
+      "name": "quadro_attrezzi",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          10.32828,
+          1.32849,
+          9.2158
+        ],
+        "rotation": [
+          0,
+          -1.5708,
+          0
+        ],
+        "scale": [
+          1.3617,
+          1.48796,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "id": "placed:0028",
+      "layer": "Props",
+      "locked": false,
+      "name": "beer copy copy",
+      "sourceEntityId": "placed:0019",
+      "transform": {
+        "position": [
+          10.42801,
+          1.36859,
+          11.05611
+        ],
+        "rotation": [
+          0.00001,
+          -0.23041,
+          1.5708
+        ],
+        "scale": [
+          1.12699,
+          1.45386,
+          1.09648
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0019",
+      "id": "placed:0029",
+      "layer": "Props",
+      "locked": false,
+      "name": "game1 copy",
+      "sourceEntityId": "placed:0024",
+      "transform": {
+        "position": [
+          -1.59811,
+          1.42782,
+          -2.07231
+        ],
+        "rotation": [
+          0,
+          0.79018,
+          0
+        ],
+        "scale": [
+          0.38349,
+          1,
+          0.35473
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0009",
+      "id": "placed:0030",
+      "layer": "Props",
+      "locked": false,
+      "name": "beer copy copy",
+      "sourceEntityId": "placed:0009",
+      "transform": {
+        "position": [
+          -1.97448,
+          1.48282,
+          -1.96886
+        ],
+        "rotation": [
+          3.14159,
+          -1.309,
+          3.14159
+        ],
+        "scale": [
+          1.12699,
+          1.42026,
+          1.09648
         ]
       },
       "visible": true

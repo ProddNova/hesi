@@ -58,6 +58,9 @@
     "lamp:wangan-0:0627": {
       "visible": false
     },
+    "lamp:wangan-0:0646": {
+      "visible": false
+    },
     "lamp:wangan-0:0647": {
       "visible": false
     },
@@ -92,6 +95,12 @@
       "visible": false
     },
     "marking:tatsumi-pa-exit:0003": {
+      "visible": false
+    },
+    "marking:wangan-0:0001": {
+      "visible": false
+    },
+    "marking:wangan-0:0002": {
       "visible": false
     },
     "marking:wangan-0:0021": {
@@ -188,7 +197,20 @@
           0.00753,
           7.24238
         ]
-      }
+      },
+      "visible": false
+    },
+    "marking:wangan-0:0031": {
+      "visible": false
+    },
+    "marking:wangan-0:0032": {
+      "visible": false
+    },
+    "marking:wangan-0:0033": {
+      "visible": false
+    },
+    "marking:wangan-0:0034": {
+      "visible": false
     },
     "marking:wangan-1:0032": {
       "visible": false
@@ -280,6 +302,9 @@
     "prop:wangan-0:3138": {
       "visible": false
     },
+    "prop:wangan-1:3210": {
+      "visible": false
+    },
     "prop:wangan-1:3211": {
       "transform": {
         "position": [
@@ -300,60 +325,7 @@
       }
     }
   },
-  "placedObjects": [
-    {
-      "assetId": "custom:0001",
-      "id": "placed:0001",
-      "layer": "Props",
-      "locked": false,
-      "name": "Macchinetta_primo_test",
-      "sourceEntityId": null,
-      "transform": {
-        "position": [
-          3626.01176,
-          57.67663,
-          -4052.31874
-        ],
-        "rotation": [
-          -3.13583,
-          0.37882,
-          3.1408
-        ],
-        "scale": [
-          1.32795,
-          1.33195,
-          1
-        ]
-      },
-      "visible": true
-    },
-    {
-      "assetId": "custom:0001",
-      "id": "placed:0002",
-      "layer": "Props",
-      "locked": false,
-      "name": "Macchinetta_primo_test copy",
-      "sourceEntityId": "placed:0001",
-      "transform": {
-        "position": [
-          3624.49324,
-          57.67383,
-          -4053.06997
-        ],
-        "rotation": [
-          3.13947,
-          0.36865,
-          -3.14004
-        ],
-        "scale": [
-          1.32795,
-          1.33195,
-          1
-        ]
-      },
-      "visible": true
-    }
-  ],
+  "placedObjects": [],
   "groups": [],
   "editorState": {}
 }
