@@ -5,7 +5,8 @@ const V = (x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 export class GarageSystem {
   constructor(scene, camera, canvas, callbacks={}) {
     this.scene=scene; this.camera=camera; this.canvas=canvas; this.cb=callbacks;
-    this.enabled=false; this.position=V(0,1.72,7); this.yaw=0; this.pitch=0;
+    this.playerHeight=1.72*1.2;
+    this.enabled=false; this.position=V(0,this.playerHeight,7); this.yaw=0; this.pitch=0;
     this.velocity=V(); this.interactCooldown=0; this.carMesh=null; this.deliveryMeshes=[];
     this.carried=null; this.installing=null; this.mouse={x:0,y:0}; this._pointerHandler=e=>this.onMouse(e);
     this.build(); this.bind();
@@ -87,7 +88,7 @@ export class GarageSystem {
   onMouse(e){if(!this.enabled)return;this.yaw-=e.movementX*.0023;this.pitch=Math.max(-1.35,Math.min(1.25,this.pitch-e.movementY*.0021));}
 
   enter(carSpec,deliveries=[]){
-    this.enabled=true;this.root.visible=true;this.position.set(0,1.72,8);this.yaw=0;this.pitch=0;this.velocity.set(0,0,0);this.carried=null;this.installing=null;this.camera.fov=66;this.camera.updateProjectionMatrix();
+    this.enabled=true;this.root.visible=true;this.position.set(0,this.playerHeight,8);this.yaw=0;this.pitch=0;this.velocity.set(0,0,0);this.carried=null;this.installing=null;this.camera.fov=66;this.camera.updateProjectionMatrix();
     this.refreshCar(carSpec);this.syncDeliveries(deliveries);this.updateCamera();
   }
   leave(){this.enabled=false;document.exitPointerLock?.();this.clearCarry();}

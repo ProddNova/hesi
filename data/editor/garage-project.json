@@ -286,7 +286,34 @@
       "visible": false
     }
   },
-  "placedObjects": [],
+  "placedObjects": [
+    {
+      "assetId": "editor:primitive:box",
+      "id": "placed:0001",
+      "layer": "Props",
+      "locked": false,
+      "name": "Box",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -0.20389,
+          5.19714,
+          -7.45225
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          22.32657,
+          0.31578,
+          13.41529
+        ]
+      },
+      "visible": true
+    }
+  ],
   "groups": [],
   "editorState": {}
 }
