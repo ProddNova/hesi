@@ -16,7 +16,7 @@
   <link rel="stylesheet" href="styles/dev-map.css">
   <link rel="stylesheet" href="styles/debug-stats.css">
   <script type="importmap">
-    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js"}}
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"}}
   </script>
 </head>
 <body>
@@ -125,6 +125,10 @@
       <div class="debug-menu-body">
         <label class="debug-toggle"><span><b>NOCLIP / DRONE</b><small>Fly freely, then respawn the car here</small></span><input id="debug-noclip" type="checkbox"><i></i></label>
         <label class="debug-toggle"><span><b>DISABLE TRAFFIC</b><small>Despawns every AI vehicle</small></span><input id="debug-traffic" type="checkbox"><i></i></label>
+        <div class="debug-custom-car">
+          <label class="debug-toggle"><span><b>AUTO CUSTOM</b><small id="debug-custom-car-status">Toyota Chaser GLB · disattivata</small></span><input id="debug-custom-car" type="checkbox"><i></i></label>
+          <label class="debug-number"><span>SCALA MODELLO</span><input id="debug-custom-car-scale" type="number" min="0.25" max="3" step="0.05" inputmode="decimal" value="1.45"></label>
+        </div>
         <details class="debug-hitboxes">
           <summary><span><b>HITBOXES</b><small>Choose collision and bounds overlays</small></span><em>EDIT</em></summary>
           <label><input type="checkbox" data-debug-hitbox="roads"><span>Road collision surfaces</span></label>
