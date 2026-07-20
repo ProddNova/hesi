@@ -1602,6 +1602,12 @@ export function captureUnionFaceProjection(part, faceNames) {
     const uSpan = uMax - uMin;
     const vSpan = vMax - vMin;
     if (!(uSpan > 1e-6) || !(vSpan > 1e-6)) return null;
+    // Physical aspect: the projection lives in the part's local space, but
+    // cover cropping must reflect metres — a car is a box scaled far wider
+    // than tall, and ignoring that squashed every draped image.
+    const scale = finiteVector(part.scale, 3) ? part.scale : [1, 1, 1];
+    const physical = (vector, span) => Math.hypot(vector[0] * scale[0], vector[1] * scale[1], vector[2] * scale[2]) * span;
+    const aspect = physical(uVector, uSpan) / physical(vVector, vSpan);
     return {
       origin: [
         origin[0] + uMin * uVector[0] + vMin * vVector[0],
@@ -1611,7 +1617,7 @@ export function captureUnionFaceProjection(part, faceNames) {
       uvOrigin: [0, 0],
       uVector: uVector.map((value) => value * uSpan),
       vVector: vVector.map((value) => value * vSpan),
-      surfaceAspect: (uSpan * Math.sqrt(uu)) / (vSpan * Math.sqrt(vv)),
+      surfaceAspect: Number.isFinite(aspect) && aspect > 0 ? aspect : 1,
     };
   } finally {
     geometry.dispose();
@@ -1829,17 +1835,121 @@ export function capturePartFaceProjection(part, faceName) {
 }
 
 /**
- * The projection to store when a face switches to 'cover' fit: a flat face
- * keeps its current UV plane (the picture stays where it is), while a folded
- * face — several flat surfaces merged into one — gets a union-fitted plane so
- * one image drapes continuously across every fold.
+ * The projection to store when a face switches to 'cover' fit. Mesh faces
+ * always get a plane FITTED to the face itself: after folds and splits their
+ * inherited UVs are fragments of the source primitive's square, and keeping
+ * that plane pasted a crop of the image with clamped smears around it — the
+ * fitted plane spreads the whole picture over the face instead (and drapes
+ * the union when the face folds over several flat surfaces). Primitive faces
+ * keep their current UV plane, so toggling fit never moves their picture.
  */
 export function partFaceCoverProjection(part, faceName) {
-  if (part?.kind === 'mesh' && (meshFacePlanarRegions(part, faceName)?.length || 0) > 1) {
+  if (part?.kind === 'mesh') {
     const projection = captureUnionFaceProjection(part, [faceName]);
     if (projection) return projection;
   }
   return capturePartFaceProjection(part, faceName);
+}
+
+/**
+ * Projection that pastes an image exactly as seen from a viewpoint: given the
+ * camera's world-space unit `right`/`up` axes and the part's world matrix,
+ * every vertex of the listed faces receives the UV it has on the camera's
+ * image plane, fitted so the group spans the whole picture. From that view
+ * the result matches the picture like a decal — THE way to lay a photo of a
+ * car front over bonnet + windscreen + bumper at once: orbit to the front,
+ * project, done. Off-view angles show the projection's stretch, exactly like
+ * PSX-era decals. Returns null when no plane can be derived.
+ *
+ * `matrixWorld` is the part node's 16-element column-major world matrix; when
+ * omitted it is composed from the part's own position/rotation/scale.
+ */
+export function captureViewFaceProjection(part, faceNames, { right, up, matrixWorld } = {}) {
+  if (!part || part.kind === 'asset' || !finiteVector(right, 3) || !finiteVector(up, 3)) return null;
+  const names = partFaceNames(part);
+  const wanted = new Set((faceNames || []).map((name) => names.indexOf(name)));
+  wanted.delete(-1);
+  if (!wanted.size) return null;
+  const matrix = new THREE.Matrix4();
+  if (finiteVector(matrixWorld, 16)) {
+    matrix.fromArray(matrixWorld);
+  } else {
+    matrix.compose(
+      new THREE.Vector3().fromArray(finiteVector(part.position, 3) ? part.position : [0, 0, 0]),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...(finiteVector(part.rotation, 3) ? part.rotation : [0, 0, 0]))),
+      new THREE.Vector3().fromArray(finiteVector(part.scale, 3) ? part.scale : [1, 1, 1]),
+    );
+  }
+  if (matrix.determinant() === 0) return null;
+  const rightAxis = new THREE.Vector3().fromArray(right);
+  const upAxis = new THREE.Vector3().fromArray(up);
+  if (rightAxis.lengthSq() < 1e-12 || upAxis.lengthSq() < 1e-12) return null;
+  rightAxis.normalize();
+  upAxis.normalize();
+  const geometry = partGeometry(part);
+  if (!geometry) return null;
+  applyVertexOffsets(geometry, part.vertexOffsets);
+  try {
+    const position = geometry.getAttribute('position');
+    if (!position) return null;
+    const index = geometry.index;
+    const cornerCount = index ? index.count : position.count;
+    const groups = geometry.groups?.length ? geometry.groups : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+    const world = new THREE.Vector3();
+    const viewDirection = new THREE.Vector3().crossVectors(rightAxis, upAxis);
+    let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+    let depth = null;
+    for (const group of groups.filter((entry) => wanted.has(entry.materialIndex || 0))) {
+      for (let corner = group.start; corner < group.start + group.count; corner += 1) {
+        const vertex = index ? index.getX(corner) : corner;
+        world.set(position.getX(vertex), position.getY(vertex), position.getZ(vertex)).applyMatrix4(matrix);
+        const u = world.dot(rightAxis);
+        const v = world.dot(upAxis);
+        uMin = Math.min(uMin, u); uMax = Math.max(uMax, u);
+        vMin = Math.min(vMin, v); vMax = Math.max(vMax, v);
+        if (depth === null) depth = world.dot(viewDirection);
+      }
+    }
+    const uSpan = uMax - uMin;
+    const vSpan = vMax - vMin;
+    if (!(uSpan > 1e-6) || !(vSpan > 1e-6)) return null;
+    // Local covectors: dotting a LOCAL point with (Mᵀ·axis)/span yields its
+    // WORLD view coordinate in [0,1]. The projection reader recovers
+    // coordinates through a Gram solve of the stored uVector/vVector, so we
+    // store the DUAL basis of these covectors — the solve then returns
+    // exactly the view coordinates for every vertex, on-plane or not.
+    const elements = matrix.elements; // column-major
+    const covector = (axis, span) => [
+      (elements[0] * axis.x + elements[1] * axis.y + elements[2] * axis.z) / span,
+      (elements[4] * axis.x + elements[5] * axis.y + elements[6] * axis.z) / span,
+      (elements[8] * axis.x + elements[9] * axis.y + elements[10] * axis.z) / span,
+    ];
+    const a = covector(rightAxis, uSpan);
+    const b = covector(upAxis, vSpan);
+    const aa = a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+    const bb = b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+    const ab = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const det = aa * bb - ab * ab;
+    if (!(det > 1e-12)) return null;
+    const uVector = [(bb * a[0] - ab * b[0]) / det, (bb * a[1] - ab * b[1]) / det, (bb * a[2] - ab * b[2]) / det];
+    const vVector = [(aa * b[0] - ab * a[0]) / det, (aa * b[1] - ab * a[1]) / det, (aa * b[2] - ab * a[2]) / det];
+    // Origin: the local point whose view coordinates sit at the sheet's
+    // bottom-left corner (kept near the surface via the first vertex depth).
+    const originWorld = new THREE.Vector3()
+      .addScaledVector(rightAxis, uMin)
+      .addScaledVector(upAxis, vMin)
+      .addScaledVector(viewDirection, depth);
+    const origin = originWorld.applyMatrix4(matrix.clone().invert());
+    return {
+      origin: origin.toArray(),
+      uvOrigin: [0, 0],
+      uVector,
+      vVector,
+      surfaceAspect: uSpan / vSpan, // world metres on the camera plane: exact
+    };
+  } finally {
+    geometry.dispose();
+  }
 }
 
 /** Reprojects cover-textured faces through their captured, fixed UV planes. */

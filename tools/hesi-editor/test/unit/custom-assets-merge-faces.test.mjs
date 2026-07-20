@@ -116,12 +116,19 @@ test('mergePartFaces rejects non-meshes and too-small selections', () => {
   assert.equal(mergePartFaces(foldedSheet(), ['front', 'nope']).ok, false);
 });
 
-test('partFaceCoverProjection keeps flat faces in place and drapes folded ones', () => {
+test('partFaceCoverProjection fits mesh faces and preserves primitive planes', () => {
+  // Mesh UVs are fragments after folds/splits, so a mesh face always gets a
+  // plane fitted to the face itself — the whole image lands on the surface.
   const sheet = foldedSheet();
+  const fitted = partFaceCoverProjection(sheet, 'front');
+  assert.deepEqual(fitted.uvOrigin, [0, 0]);
+  assert.ok(Math.abs(length3(fitted.uVector) - 1) < 1e-6, 'fitted to the 1 m face width');
+  assert.ok(Math.abs(length3(fitted.vVector) - 1) < 1e-6, 'fitted to the 1 m face height');
+  const box = { kind: 'box', name: 'Crate', scale: [1, 1, 1], color: '#9aa7b5', faces: {} };
   assert.deepEqual(
-    partFaceCoverProjection(sheet, 'front'),
-    capturePartFaceProjection(sheet, 'front'),
-    'a flat face keeps its current UV plane',
+    partFaceCoverProjection(box, 'top'),
+    capturePartFaceProjection(box, 'top'),
+    'primitive faces keep their current UV plane, the picture stays put',
   );
   const single = foldedSheet();
   single.faceNames = ['surface'];
@@ -130,6 +137,19 @@ test('partFaceCoverProjection keeps flat faces in place and drapes folded ones',
   const vLength = length3(draped.vVector);
   assert.ok(vLength > 1.3 && vLength < 1.5, `a folded face gets the union-fitted plane, got v span ${vLength}`);
   assert.deepEqual(draped.uvOrigin, [0, 0]);
+});
+
+test('union cover projections measure their aspect in scaled metres', () => {
+  const single = foldedSheet();
+  single.faceNames = ['surface'];
+  for (const triangle of single.triangles) triangle.face = 0;
+  single.scale = [3, 1, 1];
+  const draped = partFaceCoverProjection(single, 'surface');
+  // 3 m wide, ~1.414 m of unfolded sheet: the aspect must use physical sizes,
+  // not the unit-space vertex coordinates.
+  const expected = 3 / Math.hypot(1, 1);
+  assert.ok(Math.abs(draped.surfaceAspect - expected) < 0.05,
+    `aspect should be ~${expected.toFixed(3)}, got ${draped.surfaceAspect}`);
 });
 
 test('the user flow: fold a box top with a vertex, split the surfaces, merge them with the front', () => {
