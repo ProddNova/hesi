@@ -4623,8 +4623,23 @@ export class HighwayMap {
     });
   }
 
+  /** True when `object` is or contains a light anywhere in its subtree. */
+  _containsLight(object) {
+    let found = false;
+    object.traverse?.((child) => { found = found || !!child.isLight; });
+    return found || !!object.isLight;
+  }
+
   _addChunkMesh(mesh, positionForChunk = null, alwaysVisible = false) {
-    if (alwaysVisible) {
+    // Lights NEVER stream, even when handed a chunk position: the scene's
+    // light census is global renderer state baked into every shader
+    // program's cache key, so a light popping in/out with chunk visibility
+    // invalidates the whole compiled program set — the first frame after
+    // the toggle re-links every visible material (a multi-hundred-ms
+    // stall). The boot prewarm (game.js prewarmGpuResources) renders one
+    // frame with everything visible and can only cover ONE lighting state;
+    // keeping lights out of streamed chunks keeps that state the only one.
+    if (alwaysVisible || this._containsLight(mesh)) {
       this.group.add(mesh);
       return mesh;
     }
@@ -7530,9 +7545,12 @@ export class HighwayMap {
     this._addChunkMesh(ring, ring.position);
     this.animatedMarkers.push(ring);
 
+    // alwaysVisible: lights never stream with their chunk (see _addChunkMesh).
+    // Distance attenuation already zeroes the beacon beyond ~46 m, so keeping
+    // it always on renders identically to streaming it.
     const beacon = new THREE.PointLight(0x55ccff, 1.4, 46, 1.8);
     beacon.position.copy(area.garageEntrance).add(vec(0, 5, 0));
-    this._addChunkMesh(beacon, beacon.position);
+    this._addChunkMesh(beacon, beacon.position, true);
   }
 
   // ------------------------------------------------------------------
@@ -8768,6 +8786,13 @@ export class HighwayMap {
    * bounded no matter how many objects the map accumulates.
    */
   attachStreamedObject(object, position = null) {
+    // Editor content carrying a light must not stream either — a streamed
+    // light forces a full shader-program re-link on every chunk visibility
+    // toggle (see _addChunkMesh). Such objects stay permanently visible.
+    if (this._containsLight(object)) {
+      this.group.add(object);
+      return object;
+    }
     const p = position || object.position;
     const chunk = this._chunkFor(this._chunkKey(p.x, p.z));
     chunk.group.add(object);
