@@ -10,11 +10,35 @@ import * as THREE from 'three';
 //
 // The same document also carries world texture overrides (for example a
 // custom repeated road/asphalt image) applied to the generated map materials.
+//
+// Texture records reference their image either as an embedded `dataUrl`
+// (legacy, and transiently for fresh uploads/edits in the editor) or as a
+// `url` relative to data/editor/ (e.g. "textures/wall-a1889f7a10.webp") —
+// the editor dev server externalizes embedded images into content-hashed
+// files on save so the document itself stays tiny and loads instantly.
 
 export const CUSTOM_ASSETS_URL = 'data/editor/custom-assets.json';
+// Relative texture urls resolve against data/editor/ regardless of the page
+// path (game at the site root, editor under /tools/hesi-editor/, node tests).
+export const CUSTOM_ASSETS_BASE_URL = new URL('../data/editor/', import.meta.url);
 export const CUSTOM_ASSETS_VERSION = 1;
 export const CUSTOM_ASSET_ID_PATTERN = /^custom:[a-z0-9][a-z0-9_-]{0,80}$/i;
 export const CUSTOM_TEXTURE_ID_PATTERN = /^tex:[a-z0-9][a-z0-9_-]{0,80}$/i;
+// Relative path under data/editor/, no leading slash, no parent traversal.
+export const CUSTOM_TEXTURE_URL_PATTERN = /^(?!\/)(?!.*\.\.)[a-z0-9 ._/-]+\.(?:png|jpe?g|webp|gif|avif)$/i;
+
+/**
+ * Resolves the loadable image source of a texture record: the embedded data
+ * URL when present, otherwise its relative `url` resolved against
+ * data/editor/. Returns null for records with neither.
+ */
+export function textureSourceUrl(record) {
+  if (typeof record?.dataUrl === 'string' && record.dataUrl.startsWith('data:image/')) return record.dataUrl;
+  if (typeof record?.url === 'string' && CUSTOM_TEXTURE_URL_PATTERN.test(record.url)) {
+    return new URL(record.url, CUSTOM_ASSETS_BASE_URL).href;
+  }
+  return null;
+}
 
 // Generated-map materials that accept a repeated texture override. Every key
 // exists in HighwayMap._createMaterials(); road surfaces carry world-anchored
@@ -93,8 +117,10 @@ export function customAssetsDocumentErrors(document) {
   if (errors.length) return errors;
   for (const [id, texture] of Object.entries(document.textures)) {
     if (FORBIDDEN_KEYS.has(id) || !CUSTOM_TEXTURE_ID_PATTERN.test(id)) errors.push(`invalid texture id: ${id}`);
-    if (!isRecord(texture) || typeof texture.dataUrl !== 'string' || !texture.dataUrl.startsWith('data:image/')) {
-      errors.push(`textures.${id}.dataUrl must be a data:image/... URL`);
+    const hasDataUrl = isRecord(texture) && typeof texture.dataUrl === 'string' && texture.dataUrl.startsWith('data:image/');
+    const hasUrl = isRecord(texture) && typeof texture.url === 'string' && CUSTOM_TEXTURE_URL_PATTERN.test(texture.url);
+    if (!hasDataUrl && !hasUrl) {
+      errors.push(`textures.${id} needs a data:image/... dataUrl or a relative image url`);
     }
   }
   for (const [slot, textureId] of Object.entries(document.worldTextures || {})) {
@@ -1544,11 +1570,17 @@ export function faceTextureTransform({
   return { repeat: scale, offset };
 }
 
-/** PSX-flavoured texture from a stored data URL, with per-face crop and flip. */
-export function textureFromDataUrl(dataUrl, {
+/**
+ * PSX-flavoured texture from an image source (a data URL or a resolved
+ * texture-file URL — see textureSourceUrl), with per-face crop and flip.
+ * Cached per (source, transform), so faces sharing one image share one
+ * texture upload. File URLs load asynchronously: the texture object returns
+ * immediately and the image streams in without blocking scene construction.
+ */
+export function textureFromSource(source, {
   repeat = null, fit = 'stretch', surfaceAspect = 1, flipX = false, flipY = false,
 } = {}) {
-  const key = JSON.stringify([dataUrl, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY)]);
+  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY)]);
   if (textureCache.has(key)) return textureCache.get(key);
   // Outside the browser (node tests) there is no image decoding: hand back a
   // bare texture object so material wiring stays testable.
@@ -1564,15 +1596,20 @@ export function textureFromDataUrl(dataUrl, {
     texture.wrapT = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.repeat.set(...transform.repeat);
     texture.offset.set(...transform.offset);
-    texture.needsUpdate = true;
+    // Only flag a GPU upload once image data exists; configure() also runs
+    // synchronously before an async file load has produced pixels.
+    if (texture.image) texture.needsUpdate = true;
   };
   const texture = typeof document === 'undefined'
     ? new THREE.Texture()
-    : new THREE.TextureLoader().load(dataUrl, configure);
+    : new THREE.TextureLoader().load(source, configure);
   configure(texture);
   textureCache.set(key, texture);
   return texture;
 }
+
+/** Back-compat alias: the source may be any URL, not only a data URL. */
+export const textureFromDataUrl = textureFromSource;
 
 function geometryMaterialAspect(geometry, materialIndex = 0, scale = [1, 1, 1]) {
   const position = geometry?.getAttribute?.('position');
@@ -1713,8 +1750,9 @@ function faceMaterial(part, faceName, texturesById, surfaceAspect = 1) {
     name: `custom:${part.kind}:${faceName}`,
   };
   const textureRecord = style.texture ? texturesById?.[style.texture] : null;
-  if (textureRecord?.dataUrl) {
-    parameters.map = textureFromDataUrl(textureRecord.dataUrl, {
+  const textureSource = textureSourceUrl(textureRecord);
+  if (textureSource) {
+    parameters.map = textureFromSource(textureSource, {
       repeat: finiteVector(style.repeat, 2) ? style.repeat : null,
       fit: style.fit === 'cover' ? 'cover' : 'stretch',
       surfaceAspect,
@@ -1848,8 +1886,9 @@ export function applyObjectFaceStyles(root, faceStyles = {}, texturesById = {}) 
       const materialIndex = Number(key.split(':')[1]);
       const textureRecord = texturesById?.[style.texture];
       const material = materials[materialIndex];
-      if (!material || !textureRecord?.dataUrl) continue;
-      material.map = textureFromDataUrl(textureRecord.dataUrl, {
+      const textureSource = textureSourceUrl(textureRecord);
+      if (!material || !textureSource) continue;
+      material.map = textureFromSource(textureSource, {
         repeat: finiteVector(style.repeat, 2) ? style.repeat : null,
         fit: style.fit === 'cover' ? 'cover' : 'stretch',
         surfaceAspect: geometryMaterialAspect(mesh.geometry, materialIndex, worldScale.toArray()),
@@ -1894,9 +1933,10 @@ export function applyWorldTextureOverrides(materials, document) {
   for (const [slot, textureId] of Object.entries(document.worldTextures)) {
     const material = materials[slot];
     const textureRecord = textureId ? document.textures?.[textureId] : null;
-    if (!material || !Object.hasOwn(WORLD_TEXTURE_SLOTS, slot) || !textureRecord?.dataUrl) { summary.skipped += 1; continue; }
+    const textureSource = textureSourceUrl(textureRecord);
+    if (!material || !Object.hasOwn(WORLD_TEXTURE_SLOTS, slot) || !textureSource) { summary.skipped += 1; continue; }
     const repeat = finiteVector(textureRecord.repeat, 2) ? textureRecord.repeat : null;
-    material.map = textureFromDataUrl(textureRecord.dataUrl, { repeat });
+    material.map = textureFromSource(textureSource, { repeat });
     // The image now carries the surface colour; a dark tint would multiply it away.
     material.color?.set?.('#ffffff');
     material.needsUpdate = true;

@@ -14,7 +14,7 @@
  */
 import { createServer } from 'node:http';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseProjectDocument, serializeProjectDocument, validateProjectDocument } from './src/overrides/override-schema.js';
@@ -42,6 +42,7 @@ const ASSETS_ENDPOINT = '/__hesi_editor_assets';
 const DIAGNOSTICS_ENDPOINT = '/__hesi_editor_diagnostics';
 const DIAGNOSTICS_DIR = 'data/editor/diagnostics';
 const CUSTOM_ASSETS_PATH = 'data/editor/custom-assets.json';
+const TEXTURES_DIR = 'data/editor/textures';
 const COMMITS_DIR = 'data/editor/commits';
 const MAX_PROJECT_BYTES = 2 * 1024 * 1024;
 // Custom assets embed face textures as data URLs, so they get a larger budget.
@@ -106,19 +107,71 @@ function validateCustomAssetsDocument(document) {
     if (forbidden.has(id) || !/^custom:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid custom asset id: ${id}`);
     if (!Array.isArray(document.assets[id]?.parts) || !document.assets[id].parts.length) throw new Error(`Asset ${id} needs a non-empty parts array`);
   }
+  const textureUrl = /^(?!\/)(?!.*\.\.)[a-z0-9 ._/-]+\.(?:png|jpe?g|webp|gif|avif)$/i;
   for (const [id, texture] of Object.entries(document.textures)) {
     if (forbidden.has(id) || !/^tex:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid texture id: ${id}`);
-    if (typeof texture?.dataUrl !== 'string' || !texture.dataUrl.startsWith('data:image/')) throw new Error(`Texture ${id} must embed a data:image/... URL`);
+    const hasDataUrl = typeof texture?.dataUrl === 'string' && texture.dataUrl.startsWith('data:image/');
+    const hasUrl = typeof texture?.url === 'string' && textureUrl.test(texture.url);
+    if (!hasDataUrl && !hasUrl) throw new Error(`Texture ${id} must embed a data:image/... URL or reference a relative image url`);
   }
   return document;
 }
 
+const TEXTURE_MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif' };
+
+function textureFileSlug(name) {
+  return String(name || 'texture')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32) || 'texture';
+}
+
+// Moves embedded texture images out of the document into content-hashed files
+// under data/editor/textures/ so the saved JSON stays tiny (the game fetches
+// it on every startup) and identical uploads share one deduplicated file.
+// Records keep their id/name and gain url:'textures/<slug>-<hash>.<ext>'.
+async function externalizeTextures(document) {
+  const summary = { extracted: 0, bytes: 0 };
+  for (const [id, record] of Object.entries(document.textures)) {
+    if (typeof record?.dataUrl !== 'string') continue;
+    const match = record.dataUrl.match(/^data:(image\/[a-z+.-]+);base64,([a-z0-9+/=\s]+)$/i);
+    if (!match) throw new Error(`Texture ${id} must embed a base64 data:image/... URL`);
+    const extension = TEXTURE_MIME_EXT[match[1].toLowerCase()];
+    if (!extension) throw new Error(`Texture ${id} has unsupported image type ${match[1]}`);
+    const raw = Buffer.from(match[2], 'base64');
+    if (!raw.length) throw new Error(`Texture ${id} decodes to an empty image`);
+    const hash = createHash('sha256').update(raw).digest('hex').slice(0, 10);
+    const fileName = `${textureFileSlug(record.name)}-${hash}.${extension}`;
+    const target = resolve(ROOT, TEXTURES_DIR, fileName);
+    try {
+      await stat(target); // content-hashed name: an existing file already holds these bytes
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, raw);
+    }
+    delete record.dataUrl;
+    record.url = `textures/${fileName}`;
+    summary.extracted += 1;
+    summary.bytes += raw.length;
+  }
+  return summary;
+}
+
 async function saveCustomAssets(document) {
   validateCustomAssetsDocument(document);
+  const textures = await externalizeTextures(document);
   const serialized = `${JSON.stringify(document, null, 2)}\n`;
   const file = resolve(ROOT, CUSTOM_ASSETS_PATH);
   const backedUp = await writeFileSafe(file, serialized);
-  return { path: CUSTOM_ASSETS_PATH, bytes: Buffer.byteLength(serialized), backup: backedUp ? `${CUSTOM_ASSETS_PATH}.bak` : null };
+  return {
+    path: CUSTOM_ASSETS_PATH,
+    bytes: Buffer.byteLength(serialized),
+    texturesExtracted: textures.extracted,
+    backup: backedUp ? `${CUSTOM_ASSETS_PATH}.bak` : null,
+  };
 }
 
 // Full write into a temporary sibling, previous content copied to .bak, then an

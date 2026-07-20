@@ -215,7 +215,13 @@ export async function applyEditorBuilds({ map = null, garageRoot = null } = {}) 
     summary.skipped += partial.skipped;
     if (partial.applied || partial.skipped) summary.scenes.push({ scene, ...partial });
   };
-  const customAssets = await fetchCustomAssetsDocument();
+  // All three documents are small (textures live in separate image files that
+  // stream in asynchronously), so fetch them in parallel and apply at once.
+  const [customAssets, highwayBuild, garageBuild] = await Promise.all([
+    fetchCustomAssetsDocument(),
+    map ? fetchBuild('highway') : null,
+    garageRoot ? fetchBuild('garage') : null,
+  ]);
   if (map) {
     // Saved world texture overrides (custom road asphalt, walls, ...) apply
     // even when no build file exists yet.
@@ -223,12 +229,10 @@ export async function applyEditorBuilds({ map = null, garageRoot = null } = {}) 
       const textures = applyWorldTextureOverrides(map.materials, customAssets);
       if (textures.applied) summary.scenes.push({ scene: 'world-textures', ...textures });
     }
-    const build = await fetchBuild('highway');
-    if (build) merge('highway', applyHighwayBuild(map, build, customAssets));
+    if (highwayBuild) merge('highway', applyHighwayBuild(map, highwayBuild, customAssets));
   }
   if (garageRoot) {
-    const build = await fetchBuild('garage');
-    if (build) merge('garage', applyGarageBuild(garageRoot, build, customAssets));
+    if (garageBuild) merge('garage', applyGarageBuild(garageRoot, garageBuild, customAssets));
   }
   return summary;
 }

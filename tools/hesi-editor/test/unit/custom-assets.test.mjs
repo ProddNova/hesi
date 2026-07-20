@@ -16,6 +16,7 @@ import {
   clearObjectFaceStyles,
   objectFaceSlots,
   partGeometry,
+  textureSourceUrl,
   weldedVertices,
 } from '../../../../js/custom-assets.js';
 import { validateBuildDocument } from '../../src/overrides/build-schema.js';
@@ -45,6 +46,25 @@ function validDocument() {
 
 test('blank custom assets document validates', () => {
   assert.deepEqual(customAssetsDocumentErrors(blankCustomAssetsDocument()), []);
+});
+
+test('texture records may reference an externalized image url instead of embedding a data URL', () => {
+  const document = validDocument();
+  document.textures['tex:0001'] = { name: 'wall.webp', url: 'textures/wall-a1889f7a10.webp' };
+  assert.deepEqual(customAssetsDocumentErrors(document), []);
+  for (const url of ['../outside.png', '/absolute.png', 'textures/evil/../../up.png', 'textures/script.js', 'https://evil.example/x.png']) {
+    document.textures['tex:0001'] = { name: 'bad', url };
+    assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('tex:0001')), `rejects ${url}`);
+  }
+});
+
+test('textureSourceUrl prefers the embedded data URL and resolves relative urls against data/editor/', () => {
+  assert.equal(textureSourceUrl({ dataUrl: PIXEL_PNG, url: 'textures/wall-a1889f7a10.webp' }), PIXEL_PNG);
+  const resolved = textureSourceUrl({ url: 'textures/wall-a1889f7a10.webp' });
+  assert.ok(resolved.endsWith('/data/editor/textures/wall-a1889f7a10.webp'), resolved);
+  assert.equal(textureSourceUrl({ url: '../escape.png' }), null);
+  assert.equal(textureSourceUrl({}), null);
+  assert.equal(textureSourceUrl(null), null);
 });
 
 test('a realistic document validates and bad references are rejected', () => {

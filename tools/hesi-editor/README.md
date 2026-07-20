@@ -150,9 +150,14 @@ full-screen modeling section that is always available inside the editor:
   directly from the right sidebar; these assignments are persisted in the
   scene project and replayed by the playable-game build
 
-Saved objects land in `data/editor/custom-assets.json` (textures embedded as
-data URLs) through the dev server's `/__hesi_editor_assets` endpoint, join the
-Assets catalog immediately, and are placeable like any world asset. Builds
+Saved objects land in `data/editor/custom-assets.json` through the dev
+server's `/__hesi_editor_assets` endpoint, join the Assets catalog
+immediately, and are placeable like any world asset. On save the server
+externalizes uploaded images into content-hashed, deduplicated files under
+`data/editor/textures/` (records carry `url: "textures/<name>-<hash>.<ext>"`;
+fresh uploads/edits travel as embedded data URLs only until the next save), so
+the JSON document stays tiny and the playable game starts instantly while the
+texture images stream in. Builds
 reference them with `place-custom` operations; the playable game rebuilds
 them — and applies world texture overrides — from the same saved document via
 `js/custom-assets.js` (shared builder) and `js/editor-map-patch.js`.

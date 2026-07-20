@@ -124,42 +124,51 @@ test('project endpoint validates, saves, backs up, and reloads deterministic JSO
 });
 
 test('build endpoint validates operations and writes the scene build file', async () => {
-  // A missing build file is a routine state and must answer 204, not 404, so
-  // the editor's startup probe never logs a browser console error.
-  await rm(new URL('../../../data/editor/garage-build.json', import.meta.url), { force: true });
-  const missing = await fetch(`${BASE}/__hesi_editor_build?scene=garage`);
-  assert.equal(missing.status, 204);
-  const unknownScene = await fetch(`${BASE}/__hesi_editor_build?scene=nope`);
-  assert.equal(unknownScene.status, 400);
-  const put = await fetch(`${BASE}/__hesi_editor_build`, {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'garage', build: sampleBuild('garage') }),
-  });
-  assert.equal(put.status, 200);
-  const result = await put.json();
-  assert.equal(result.path, 'data/editor/garage-build.json');
-  assert.equal(result.operations, 2);
-  const get = await fetch(`${BASE}/__hesi_editor_build?scene=garage`);
-  assert.equal(get.status, 200);
-  const fetched = await get.json();
-  assert.equal(fetched.ok, true);
-  assert.equal(fetched.build.scene, 'garage');
-  assert.equal(fetched.build.operations.length, 2);
-  const written = JSON.parse(await readFile(new URL('../../../data/editor/garage-build.json', import.meta.url), 'utf8'));
-  assert.equal(written.scene, 'garage');
-  assert.equal(written.operations.length, 2);
-  const badScene = await fetch(`${BASE}/__hesi_editor_build`, {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'nope', build: sampleBuild('garage') }),
-  });
-  assert.equal(badScene.status, 400);
-  const badOp = sampleBuild('highway');
-  badOp.operations.push({ op: 'evil' });
-  const invalid = await fetch(`${BASE}/__hesi_editor_build`, {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'highway', build: badOp }),
-  });
-  assert.equal(invalid.status, 400);
-  assert.match((await invalid.json()).error, /operations\[2\]/);
-  await rm(new URL('../../../data/editor/garage-build.json', import.meta.url), { force: true });
-  await rm(new URL('../../../data/editor/garage-build.json.bak', import.meta.url), { force: true });
+  // The repo may carry a real garage build; snapshot it so exercising the
+  // endpoint never destroys committed game data.
+  const BUILD_FILES = [
+    new URL('../../../data/editor/garage-build.json', import.meta.url),
+    new URL('../../../data/editor/garage-build.json.bak', import.meta.url),
+  ];
+  const snapshots = await Promise.all(BUILD_FILES.map(snapshotOptional));
+  try {
+    // A missing build file is a routine state and must answer 204, not 404, so
+    // the editor's startup probe never logs a browser console error.
+    await rm(BUILD_FILES[0], { force: true });
+    const missing = await fetch(`${BASE}/__hesi_editor_build?scene=garage`);
+    assert.equal(missing.status, 204);
+    const unknownScene = await fetch(`${BASE}/__hesi_editor_build?scene=nope`);
+    assert.equal(unknownScene.status, 400);
+    const put = await fetch(`${BASE}/__hesi_editor_build`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'garage', build: sampleBuild('garage') }),
+    });
+    assert.equal(put.status, 200);
+    const result = await put.json();
+    assert.equal(result.path, 'data/editor/garage-build.json');
+    assert.equal(result.operations, 2);
+    const get = await fetch(`${BASE}/__hesi_editor_build?scene=garage`);
+    assert.equal(get.status, 200);
+    const fetched = await get.json();
+    assert.equal(fetched.ok, true);
+    assert.equal(fetched.build.scene, 'garage');
+    assert.equal(fetched.build.operations.length, 2);
+    const written = JSON.parse(await readFile(new URL('../../../data/editor/garage-build.json', import.meta.url), 'utf8'));
+    assert.equal(written.scene, 'garage');
+    assert.equal(written.operations.length, 2);
+    const badScene = await fetch(`${BASE}/__hesi_editor_build`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'nope', build: sampleBuild('garage') }),
+    });
+    assert.equal(badScene.status, 400);
+    const badOp = sampleBuild('highway');
+    badOp.operations.push({ op: 'evil' });
+    const invalid = await fetch(`${BASE}/__hesi_editor_build`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'highway', build: badOp }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.match((await invalid.json()).error, /operations\[2\]/);
+  } finally {
+    await Promise.all(BUILD_FILES.map((file, index) => restoreOptional(file, snapshots[index])));
+  }
 });
 
 test('road route endpoint saves isolated source updates, rejects malformed data, and publishes only named routes', async () => {
@@ -230,6 +239,7 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
     new URL('../../../data/editor/custom-assets.json.bak', import.meta.url),
   ];
   const snapshots = await Promise.all(ASSET_FILES.map(snapshotOptional));
+  let extractedTextureUrl = null;
   try {
     const document = {
       version: 1,
@@ -252,11 +262,27 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
     assert.equal(put.status, 200);
     const saved = await put.json();
     assert.equal(saved.path, 'data/editor/custom-assets.json');
+    assert.equal(saved.texturesExtracted, 1, 'the embedded data URL is externalized on save');
     const get = await fetch(`${BASE}/__hesi_editor_assets`);
     assert.equal(get.status, 200);
     const loaded = await get.json();
     assert.equal(loaded.document.assets['custom:0001'].label, 'Cestino test');
     assert.equal(loaded.document.worldTextures.road, 'tex:0001');
+    const savedTexture = loaded.document.textures['tex:0001'];
+    assert.equal(savedTexture.dataUrl, undefined, 'the saved document no longer embeds image bytes');
+    assert.match(savedTexture.url, /^textures\/top-[0-9a-f]{10}\.png$/);
+    extractedTextureUrl = savedTexture.url;
+    const textureBytes = await readFile(new URL(`../../../data/editor/${extractedTextureUrl}`, import.meta.url));
+    assert.ok(textureBytes.length > 0, 'the externalized texture file holds the decoded image');
+    // A url-referencing document (the shape the server itself just saved)
+    // must round-trip too — the editor re-saves without re-embedding.
+    const rePut = await fetch(`${BASE}/__hesi_editor_assets`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ document: loaded.document }),
+    });
+    assert.equal(rePut.status, 200);
+    assert.equal((await rePut.json()).texturesExtracted, 0);
     const badId = await fetch(`${BASE}/__hesi_editor_assets`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -270,6 +296,7 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
     });
     assert.equal(badTexture.status, 400);
   } finally {
+    if (extractedTextureUrl) await rm(new URL(`../../../data/editor/${extractedTextureUrl}`, import.meta.url), { force: true });
     await Promise.all(ASSET_FILES.map((file, index) => restoreOptional(file, snapshots[index])));
   }
 });
