@@ -462,7 +462,12 @@ const server = createServer(async (req, res) => {
       return;
     }
     const body = await readFile(file);
-    res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream' });
+    // Dev server: never let the browser reuse stale editor/game code after a
+    // plain F5 (no validators are sent, so heuristic caching would kick in).
+    res.writeHead(200, {
+      'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
+      'cache-control': 'no-cache',
+    });
     res.end(req.method === 'HEAD' ? undefined : body);
   } catch (error) {
     const status = error.code === 'ENOENT' ? 404 : 400;
