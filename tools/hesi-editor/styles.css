@@ -809,6 +809,15 @@ input, select { accent-color: var(--accent); }
 .modeler-face-pick:hover { background: var(--hover); }
 .modeler-face-thumb { width: 26px; height: 26px; object-fit: cover; border: 1px solid var(--line); border-radius: 2px; image-rendering: pixelated; }
 .modeler-face-none { color: var(--text-faint); flex: 1; }
+.modeler-face-regions {
+  padding: 1px 4px;
+  background: rgba(9, 71, 113, .45);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  color: var(--text);
+  font-size: 10px;
+  white-space: nowrap;
+}
 .modeler-texture-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .modeler-texture-card { width: 74px; display: flex; flex-direction: column; gap: 2px; align-items: center; }
 .modeler-texture-card img { width: 64px; height: 64px; object-fit: cover; border: 1px solid var(--line); border-radius: 3px; image-rendering: pixelated; }
