@@ -47,6 +47,23 @@
         "0:4": {
           "texture": "tex:0024"
         }
+      },
+      "transform": {
+        "position": [
+          0,
+          5,
+          -7.06261
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
       }
     },
     "garage-part:0006": {
@@ -282,38 +299,14 @@
     "garage-part:0073": {
       "visible": false
     },
+    "garage-part:0076": {
+      "visible": false
+    },
     "garage-part:0077": {
       "visible": false
     }
   },
-  "placedObjects": [
-    {
-      "assetId": "editor:primitive:box",
-      "id": "placed:0001",
-      "layer": "Props",
-      "locked": false,
-      "name": "Box",
-      "sourceEntityId": null,
-      "transform": {
-        "position": [
-          -0.20389,
-          5.19714,
-          -7.45225
-        ],
-        "rotation": [
-          0,
-          0,
-          0
-        ],
-        "scale": [
-          22.32657,
-          0.31578,
-          13.41529
-        ]
-      },
-      "visible": true
-    }
-  ],
+  "placedObjects": [],
   "groups": [],
   "editorState": {}
 }
