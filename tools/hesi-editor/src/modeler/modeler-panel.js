@@ -4,7 +4,8 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets, buildPartObject,
   capturePartFaceProjection, clonePartFaceToOpposite, convertPartToMesh, meshInsertVertexAtPoint,
-  meshRemoveVertex, oppositePartFace, partFaceNames, partGeometry, translatePartFace, weldedVertices,
+  meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceNames, partGeometry, translatePartFace,
+  weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -451,6 +452,39 @@ export class ModelerPanel {
     this.store.dirty = true;
     this.dirtyChip.textContent = 'Unsaved changes';
     if (history) this._recordHistory();
+    this._auditTopology();
+  }
+
+  /**
+   * Watchdog: after every edit, verify each mesh part still holds its
+   * structural invariants. The first violation is reported in the status bar
+   * and the broken state (plus the previous history entry, i.e. the state the
+   * offending operation started from) is dumped to the dev server so the bug
+   * can be reproduced from real data instead of the visual aftermath.
+   */
+  _auditTopology() {
+    if (!this.definition) return;
+    const issues = [];
+    this.definition.parts.forEach((part, index) => {
+      for (const issue of meshTopologyIssues(part)) issues.push(`part ${index} (${part.name || part.kind}): ${issue}`);
+    });
+    const signature = issues.join('\n');
+    if (signature === this._lastTopologyReport) return;
+    this._lastTopologyReport = signature;
+    if (!issues.length) return;
+    console.error('[modeler] mesh topology broken:', issues);
+    this.onStatus(`⚠ MESH TOPOLOGY BROKEN (${issues.length} issue${issues.length === 1 ? '' : 's'}) — diagnostic saved, Ctrl+Z to undo`);
+    const previous = this.history[this.historyIndex - 1]?.definition ?? null;
+    fetch('/__hesi_editor_diagnostics', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        when: new Date().toISOString(),
+        issues,
+        definition: this.definition,
+        previous,
+      }),
+    }).catch(() => {});
   }
 
   // ---------------------------------------------------------- undo / redo --

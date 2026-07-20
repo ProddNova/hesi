@@ -918,6 +918,49 @@ export function meshRemoveVertex(part, vertexIndex) {
 }
 
 /**
+ * Structural invariants of a kind:'mesh' part. Editing operations must keep
+ * every vertex referenced, every triangle non-degenerate, and — on closed
+ * meshes (no doubleSide face) — every edge shared by exactly two triangles.
+ * Returns human-readable issue strings; an empty array means the topology is
+ * sound. Diagnostic only: rendering tolerates broken meshes, but they shear
+ * apart the moment a vertex moves.
+ */
+export function meshTopologyIssues(part) {
+  if (part?.kind !== 'mesh') return [];
+  const issues = [];
+  const vertices = Array.isArray(part.vertices) ? part.vertices : [];
+  const triangles = Array.isArray(part.triangles) ? part.triangles : [];
+  const referenced = new Set();
+  const edges = new Map();
+  triangles.forEach((triangle, index) => {
+    const v = triangle?.v;
+    if (!Array.isArray(v) || v.length !== 3 || v.some((entry) => !Number.isInteger(entry) || entry < 0 || entry >= vertices.length)) {
+      issues.push(`triangle ${index} has invalid vertex indices [${v}]`);
+      return;
+    }
+    if (v[0] === v[1] || v[1] === v[2] || v[0] === v[2]) {
+      issues.push(`triangle ${index} is degenerate [${v}]`);
+      return;
+    }
+    for (let corner = 0; corner < 3; corner += 1) {
+      referenced.add(v[corner]);
+      const a = v[corner], b = v[(corner + 1) % 3];
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      edges.set(key, (edges.get(key) || 0) + 1);
+    }
+  });
+  vertices.forEach((vertex, index) => {
+    if (!referenced.has(index)) issues.push(`vertex ${index} [${vertex}] is orphaned (no triangle uses it)`);
+  });
+  const open = Object.values(part.faces || {}).some((face) => face?.doubleSide);
+  for (const [key, count] of edges) {
+    if (count > 2) issues.push(`edge ${key} is shared by ${count} triangles (overlapping surface)`);
+    else if (count === 1 && !open) issues.push(`edge ${key} is a boundary crack (used by one triangle on a closed mesh)`);
+  }
+  return issues;
+}
+
+/**
  * Moves an entire named face of a part by `delta` (part-local metres before
  * the part scale): every vertex belonging to that material face translates
  * together, so a box top can be pulled upward or a roof slid sideways in one
