@@ -469,6 +469,11 @@ const TRI_POINT = new THREE.Vector3();
 const TRI_CLOSEST = new THREE.Vector3();
 const TRI_BARY = new THREE.Vector3();
 const TRIANGLE = new THREE.Triangle();
+const OPPOSITE_RAY = new THREE.Ray();
+const OPPOSITE_ORIGIN = new THREE.Vector3();
+const OPPOSITE_DIRECTION = new THREE.Vector3();
+const OPPOSITE_NORMAL = new THREE.Vector3();
+const OPPOSITE_HIT = new THREE.Vector3();
 
 const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
@@ -484,24 +489,13 @@ const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 
  * face textures stay continuous. Returns { vertexIndex, split: 'edge'|'face' }
  * or null when nothing could be added.
  */
-export function meshInsertVertexAtPoint(part, point, { edgeEpsilon = 0.12 } = {}) {
+function meshInsertSingleVertexAtPoint(part, point, { edgeEpsilon = 0.12, faceIndex = null } = {}) {
   if (part?.kind !== 'mesh' || !finiteVector(point, 3)) return null;
   if (!Array.isArray(part.vertices) || !Array.isArray(part.triangles)) return null;
   if (part.vertices.length >= MESH_MAX_VERTICES || part.triangles.length + 2 > MESH_MAX_TRIANGLES) return null;
-  TRI_POINT.fromArray(point);
-  let best = null;
-  part.triangles.forEach((triangle, triangleIndex) => {
-    const [a, b, c] = triangle.v.map((vertex) => part.vertices[vertex]);
-    if (!finiteVector(a, 3) || !finiteVector(b, 3) || !finiteVector(c, 3)) return;
-    TRIANGLE.set(TRI_A.fromArray(a), TRI_B.fromArray(b), TRI_C.fromArray(c));
-    TRIANGLE.closestPointToPoint(TRI_POINT, TRI_CLOSEST);
-    const distance = TRI_CLOSEST.distanceTo(TRI_POINT);
-    if (best && distance >= best.distance) return;
-    TRIANGLE.getBarycoord(TRI_CLOSEST, TRI_BARY);
-    best = { triangleIndex, distance, closest: TRI_CLOSEST.toArray(), bary: TRI_BARY.toArray() };
-  });
+  const best = closestMeshTriangle(part, point, faceIndex);
   if (!best) return null;
-  const triangle = part.triangles[best.triangleIndex];
+  const triangle = best.triangle;
   const weights = best.bary;
   const smallest = weights.indexOf(Math.min(...weights));
   if (weights[smallest] < edgeEpsilon) {
@@ -551,6 +545,234 @@ export function meshInsertVertexAtPoint(part, point, { edgeEpsilon = 0.12 } = {}
   });
   part.triangles.splice(best.triangleIndex, 1, ...fan);
   return { vertexIndex, split: 'face' };
+}
+
+function closestMeshTriangle(part, point, faceIndex = null) {
+  TRI_POINT.fromArray(point);
+  let best = null;
+  part.triangles.forEach((triangle, triangleIndex) => {
+    if (Number.isInteger(faceIndex) && (triangle.face || 0) !== faceIndex) return;
+    const [a, b, c] = triangle.v.map((vertex) => part.vertices[vertex]);
+    if (!finiteVector(a, 3) || !finiteVector(b, 3) || !finiteVector(c, 3)) return;
+    TRIANGLE.set(TRI_A.fromArray(a), TRI_B.fromArray(b), TRI_C.fromArray(c));
+    TRIANGLE.closestPointToPoint(TRI_POINT, TRI_CLOSEST);
+    const distance = TRI_CLOSEST.distanceTo(TRI_POINT);
+    if (best && distance >= best.distance) return;
+    TRIANGLE.getBarycoord(TRI_CLOSEST, TRI_BARY);
+    best = { triangle, triangleIndex, distance, closest: TRI_CLOSEST.toArray(), bary: TRI_BARY.toArray() };
+  });
+  return best;
+}
+
+function oppositeMeshTriangle(part, source) {
+  const [a, b, c] = source.triangle.v.map((vertex) => part.vertices[vertex]);
+  TRIANGLE.set(TRI_A.fromArray(a), TRI_B.fromArray(b), TRI_C.fromArray(c));
+  TRIANGLE.getNormal(OPPOSITE_NORMAL);
+  if (OPPOSITE_NORMAL.lengthSq() < 1e-12) return null;
+
+  const extent = part.vertices.reduce((largest, vertex) => Math.max(
+    largest, Math.abs(vertex[0]), Math.abs(vertex[1]), Math.abs(vertex[2]),
+  ), 1);
+  const minimumDistance = extent * 1e-6;
+  let best = null;
+  for (const directionSign of [1, -1]) {
+    OPPOSITE_ORIGIN.fromArray(source.closest);
+    OPPOSITE_DIRECTION.copy(OPPOSITE_NORMAL).multiplyScalar(directionSign);
+    OPPOSITE_RAY.set(OPPOSITE_ORIGIN, OPPOSITE_DIRECTION);
+    part.triangles.forEach((triangle, triangleIndex) => {
+      if (triangle === source.triangle) return;
+      const [candidateA, candidateB, candidateC] = triangle.v.map((vertex) => part.vertices[vertex]);
+      if (!finiteVector(candidateA, 3) || !finiteVector(candidateB, 3) || !finiteVector(candidateC, 3)) return;
+      const intersection = OPPOSITE_RAY.intersectTriangle(
+        TRI_A.fromArray(candidateA), TRI_B.fromArray(candidateB), TRI_C.fromArray(candidateC), false, OPPOSITE_HIT,
+      );
+      if (!intersection) return;
+      const distance = intersection.distanceTo(OPPOSITE_ORIGIN);
+      // A second triangle can share the clicked edge at distance zero; it is
+      // still part of the near surface, not the opposing face.
+      if (distance <= minimumDistance || (best && distance >= best.distance)) return;
+      TRIANGLE.set(TRI_A.fromArray(candidateA), TRI_B.fromArray(candidateB), TRI_C.fromArray(candidateC));
+      TRIANGLE.getBarycoord(intersection, TRI_BARY);
+      best = {
+        triangle, triangleIndex, distance,
+        closest: intersection.toArray(), bary: TRI_BARY.toArray(),
+      };
+    });
+  }
+  return best;
+}
+
+const meshEdgeKey = (a, b) => a < b ? `${a}:${b}` : `${b}:${a}`;
+
+/**
+ * Makes a real mesh edge between two new boundary vertices when they lie on
+ * the same planar material face. This turns opposite roof apexes into one
+ * continuous ridge instead of leaving two unrelated points.
+ */
+function connectMeshVerticesAcrossFace(part, vertexA, vertexB) {
+  const facesAtA = new Set(part.triangles
+    .filter((triangle) => triangle.v.includes(vertexA))
+    .map((triangle) => triangle.face || 0));
+  const facesAtB = new Set(part.triangles
+    .filter((triangle) => triangle.v.includes(vertexB))
+    .map((triangle) => triangle.face || 0));
+
+  for (const face of facesAtA) {
+    if (!facesAtB.has(face)) continue;
+    const faceTriangles = part.triangles.filter((triangle) => (triangle.face || 0) === face);
+    if (faceTriangles.some((triangle) => triangle.v.includes(vertexA) && triangle.v.includes(vertexB))) return true;
+
+    const edges = new Map();
+    const usedVertices = new Set();
+    const uvByVertex = new Map();
+    for (const triangle of faceTriangles) {
+      triangle.v.forEach((vertex, corner) => {
+        usedVertices.add(vertex);
+        if (triangle.uv && !uvByVertex.has(vertex)) uvByVertex.set(vertex, triangle.uv[corner].slice());
+        const next = triangle.v[(corner + 1) % 3];
+        const key = meshEdgeKey(vertex, next);
+        const edge = edges.get(key) || { count: 0, vertices: [vertex, next] };
+        edge.count += 1;
+        edges.set(key, edge);
+      });
+    }
+
+    const boundary = new Map();
+    for (const { count, vertices: [a, b] } of edges.values()) {
+      if (count !== 1) continue;
+      if (!boundary.has(a)) boundary.set(a, []);
+      if (!boundary.has(b)) boundary.set(b, []);
+      boundary.get(a).push(b);
+      boundary.get(b).push(a);
+    }
+    if (!boundary.has(vertexA) || !boundary.has(vertexB)) continue;
+
+    const loop = [vertexA];
+    let previous = -1;
+    let current = vertexA;
+    let closed = false;
+    while (loop.length <= boundary.size) {
+      const neighbours = boundary.get(current);
+      if (!neighbours || neighbours.length !== 2) break;
+      const next = neighbours[0] === previous ? neighbours[1] : neighbours[0];
+      if (next === vertexA) { closed = true; break; }
+      if (loop.includes(next)) break;
+      loop.push(next);
+      previous = current;
+      current = next;
+    }
+    // Rebuilding from the boundary is safe only for one simple loop without
+    // interior custom vertices, which must never be silently discarded.
+    if (!closed || loop.length !== usedVertices.size || !loop.includes(vertexB)) continue;
+
+    const referenceTriangle = faceTriangles.find((triangle) => {
+      const [a, b, c] = triangle.v.map((vertex) => part.vertices[vertex]);
+      TRI_A.fromArray(b).sub(TRI_B.fromArray(a));
+      TRI_C.fromArray(c).sub(TRI_B.fromArray(a));
+      return TRI_A.cross(TRI_C).lengthSq() > 1e-12;
+    });
+    if (!referenceTriangle) continue;
+    const [referenceA, referenceB, referenceC] = referenceTriangle.v.map((vertex) => part.vertices[vertex]);
+    TRIANGLE.set(TRI_A.fromArray(referenceA), TRI_B.fromArray(referenceB), TRI_C.fromArray(referenceC));
+    TRIANGLE.getNormal(OPPOSITE_NORMAL);
+    const planePoint = TRI_A.fromArray(referenceA);
+    const extent = loop.reduce((largest, vertex) => Math.max(
+      largest,
+      Math.abs(part.vertices[vertex][0]),
+      Math.abs(part.vertices[vertex][1]),
+      Math.abs(part.vertices[vertex][2]),
+    ), 1);
+    const planeTolerance = extent * 1e-5;
+    if (loop.some((vertex) => Math.abs(
+      OPPOSITE_DIRECTION.fromArray(part.vertices[vertex]).sub(planePoint).dot(OPPOSITE_NORMAL),
+    ) > planeTolerance)) continue;
+
+    // Orient the boundary like the original triangles before fanning the two
+    // polygons on either side of the requested chord.
+    OPPOSITE_DIRECTION.set(0, 0, 0);
+    for (let index = 0; index < loop.length; index += 1) {
+      const point = part.vertices[loop[index]];
+      const next = part.vertices[loop[(index + 1) % loop.length]];
+      OPPOSITE_DIRECTION.x += (point[1] - next[1]) * (point[2] + next[2]);
+      OPPOSITE_DIRECTION.y += (point[2] - next[2]) * (point[0] + next[0]);
+      OPPOSITE_DIRECTION.z += (point[0] - next[0]) * (point[1] + next[1]);
+    }
+    if (OPPOSITE_DIRECTION.dot(OPPOSITE_NORMAL) < 0) {
+      loop.splice(0, loop.length, vertexA, ...loop.slice(1).reverse());
+    }
+
+    const splitAt = loop.indexOf(vertexB);
+    const polygons = [
+      loop.slice(0, splitAt + 1),
+      [vertexB, ...loop.slice(splitAt + 1), vertexA],
+    ];
+    const replacements = [];
+    for (const polygon of polygons) {
+      if (polygon.length < 3) continue;
+      for (let index = 1; index + 1 < polygon.length; index += 1) {
+        const vertices = [polygon[0], polygon[index], polygon[index + 1]];
+        TRI_A.fromArray(part.vertices[vertices[1]]).sub(TRI_B.fromArray(part.vertices[vertices[0]]));
+        TRI_C.fromArray(part.vertices[vertices[2]]).sub(TRI_B.fromArray(part.vertices[vertices[0]]));
+        if (TRI_A.cross(TRI_C).lengthSq() <= 1e-12) continue;
+        const triangle = { v: vertices, face };
+        if (vertices.every((vertex) => uvByVertex.has(vertex))) {
+          triangle.uv = vertices.map((vertex) => uvByVertex.get(vertex).slice());
+        }
+        replacements.push(triangle);
+      }
+    }
+    const otherTriangles = part.triangles.filter((triangle) => (triangle.face || 0) !== face);
+    if (!replacements.length || otherTriangles.length + replacements.length > MESH_MAX_TRIANGLES) continue;
+    part.triangles = [...otherTriangles, ...replacements];
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Adds a custom mesh vertex and, on a closed mesh, mirrors it where the
+ * clicked face normal meets the opposite surface. If the two insertions share
+ * the boundary of a planar face, that face receives a real edge joining them.
+ * Open meshes retain the original single-point behaviour.
+ */
+export function meshInsertVertexAtPoint(part, point, {
+  edgeEpsilon = 0.12, faceIndex = null, mirrorOpposite = true,
+} = {}) {
+  if (part?.kind !== 'mesh' || !finiteVector(point, 3)) return null;
+  if (!Array.isArray(part.vertices) || !Array.isArray(part.triangles)) return null;
+  const source = closestMeshTriangle(part, point, faceIndex);
+  if (!source) return null;
+  const opposite = mirrorOpposite ? oppositeMeshTriangle(part, source) : null;
+  if (part.vertices.length + (opposite ? 2 : 1) > MESH_MAX_VERTICES) return null;
+
+  // Pair insertion is atomic: failure on the far side restores the untouched
+  // topology instead of leaving exactly the one-sided apex this prevents.
+  const originalVertices = part.vertices.map((vertex) => [...vertex]);
+  const originalTriangles = part.triangles.map((triangle) => ({
+    ...triangle,
+    v: [...triangle.v],
+    ...(triangle.uv ? { uv: triangle.uv.map((uv) => [...uv]) } : {}),
+  }));
+  const added = meshInsertSingleVertexAtPoint(part, point, { edgeEpsilon, faceIndex });
+  if (!added) return null;
+  if (!opposite) return added;
+
+  const oppositeAdded = meshInsertSingleVertexAtPoint(part, opposite.closest, {
+    edgeEpsilon,
+    faceIndex: opposite.triangle.face || 0,
+  });
+  if (!oppositeAdded) {
+    part.vertices = originalVertices;
+    part.triangles = originalTriangles;
+    return null;
+  }
+  const connected = connectMeshVerticesAcrossFace(part, added.vertexIndex, oppositeAdded.vertexIndex);
+  return {
+    ...added,
+    oppositeVertexIndex: oppositeAdded.vertexIndex,
+    oppositeSplit: oppositeAdded.split,
+    connected,
+  };
 }
 
 /**

@@ -4,6 +4,64 @@
     "name": "HESI Garage Interior"
   },
   "entityOverrides": {
+    "garage-part:0001": {
+      "faceTextures": {
+        "0:0": {
+          "texture": "tex:0025"
+        }
+      }
+    },
+    "garage-part:0003": {
+      "faceTextures": {
+        "0:0": {
+          "texture": "tex:0022"
+        }
+      }
+    },
+    "garage-part:0004": {
+      "faceTextures": {
+        "0:1": {
+          "texture": "tex:0027"
+        }
+      }
+    },
+    "garage-part:0005": {
+      "faceTextures": {
+        "0:4": {
+          "texture": "tex:0024"
+        }
+      }
+    },
+    "garage-part:0007": {
+      "faceTextures": {
+        "0:5": {
+          "texture": "tex:0026"
+        }
+      },
+      "transform": {
+        "position": [
+          0.18618,
+          5,
+          14
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          3.259,
+          1,
+          1
+        ]
+      }
+    },
+    "garage-part:0008": {
+      "visible": false
+    },
+    "garage-part:0009": {
+      "visible": false
+    },
     "garage-part:0010": {
       "visible": false
     },
@@ -52,6 +110,80 @@
     "garage-part:0025": {
       "visible": false
     },
+    "garage-part:0043": {
+      "faceTextures": {
+        "0:5": {
+          "texture": "tex:0028"
+        }
+      },
+      "transform": {
+        "position": [
+          0,
+          2.5,
+          13.9379
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "garage-part:0044": {
+      "visible": false
+    },
+    "garage-part:0045": {
+      "visible": false
+    },
+    "garage-part:0046": {
+      "visible": false
+    },
+    "garage-part:0047": {
+      "visible": false
+    },
+    "garage-part:0048": {
+      "transform": {
+        "position": [
+          0,
+          2.19,
+          13.31448
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": false
+    },
+    "garage-part:0049": {
+      "visible": false
+    },
+    "garage-part:0050": {
+      "visible": false
+    },
+    "garage-part:0051": {
+      "visible": false
+    },
+    "garage-part:0052": {
+      "visible": false
+    },
+    "garage-part:0053": {
+      "visible": false
+    },
+    "garage-part:0054": {
+      "visible": false
+    },
     "garage-part:0055": {
       "transform": {
         "position": [
@@ -69,7 +201,8 @@
           2.25695,
           1
         ]
-      }
+      },
+      "visible": false
     },
     "garage-part:0056": {
       "visible": false

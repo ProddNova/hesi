@@ -129,6 +129,38 @@ test('an interior right-click point fans the containing triangle into three', ()
   assert.deepEqual(customAssetsDocumentErrors(meshDocument(mesh)), [], 'edited mesh still validates');
 });
 
+test('an interior apex on a closed mesh is also created on the opposite face', () => {
+  const mesh = convertPartToMesh({ kind: 'box' });
+  const added = meshInsertVertexAtPoint(mesh, [0, 0.25, 0.5], { faceIndex: 4 });
+
+  assert.equal(added.split, 'face');
+  assert.equal(added.oppositeSplit, 'face');
+  assert.equal(added.vertexIndex, 8);
+  assert.equal(added.oppositeVertexIndex, 9);
+  assert.deepEqual(mesh.vertices[8], [0, 0.25, 0.5]);
+  assert.deepEqual(mesh.vertices[9], [0, 0.25, -0.5]);
+  assert.equal(mesh.triangles.length, 16, 'both opposing triangles fan into three');
+  assert.ok(mesh.triangles.some((triangle) => triangle.face === 4 && triangle.v.includes(8)));
+  assert.ok(mesh.triangles.some((triangle) => triangle.face === 5 && triangle.v.includes(9)));
+  assert.deepEqual(customAssetsDocumentErrors(meshDocument(mesh)), []);
+});
+
+test('opposite edge apexes are joined across their shared planar face', () => {
+  const mesh = convertPartToMesh({ kind: 'box' });
+  const added = meshInsertVertexAtPoint(mesh, [0.5, 0.5, 0], { faceIndex: 0 });
+
+  assert.equal(added.split, 'edge');
+  assert.equal(added.oppositeSplit, 'edge');
+  assert.equal(added.connected, true);
+  assert.deepEqual(mesh.vertices[added.vertexIndex], [0.5, 0.5, 0]);
+  assert.deepEqual(mesh.vertices[added.oppositeVertexIndex], [-0.5, 0.5, 0]);
+  assert.ok(mesh.triangles.some((triangle) => triangle.face === 2
+    && triangle.v.includes(added.vertexIndex)
+    && triangle.v.includes(added.oppositeVertexIndex)), 'the top face contains the new ridge edge');
+  assert.equal(mesh.triangles.length, 16);
+  assert.deepEqual(customAssetsDocumentErrors(meshDocument(mesh)), []);
+});
+
 test('a right-click near a shared edge splits BOTH adjacent triangles', () => {
   const mesh = squareMesh();
   // Near the middle of the 1-2 diagonal (the shared edge).

@@ -716,7 +716,7 @@ export class ModelerPanel {
       }
       if (part.kind === 'mesh') {
         this.inspector.append(element('p', 'modeler-help',
-          `Editable mesh · ${part.vertices?.length || 0} vertices · ${part.triangles?.length || 0} triangles. In Vertices mode: right-click the surface or an edge to add a vertex, right-click a vertex handle to remove it.`));
+          `Editable mesh · ${part.vertices?.length || 0} vertices · ${part.triangles?.length || 0} triangles. In Vertices mode: right-click the surface or an edge to add an opposing vertex pair, right-click a vertex handle to remove it.`));
       }
       this._renderFacePanel(part);
     } else {
@@ -886,7 +886,7 @@ export class ModelerPanel {
     this.modeHint.textContent = {
       part: 'Click a part to select · W/E/R move/rotate/scale · G snap · Del removes · Ctrl+Z/Y undo/redo',
       face: 'Click a face of the object, then attach an image from the panel on the right',
-      vertex: 'Drag a vertex via the gizmo · right-click surface/edge adds a vertex · right-click a handle removes it · G snaps',
+      vertex: 'Drag a vertex via the gizmo · right-click surface/edge adds an opposing vertex pair · right-click a handle removes it · G snaps',
     }[this.mode] || '';
   }
 
@@ -1165,7 +1165,9 @@ export class ModelerPanel {
     const node = this.partNodes[partIndex];
     if (!node) return;
     const local = node.worldToLocal(partHit.point.clone());
-    const added = meshInsertVertexAtPoint(part, [local.x, local.y, local.z]);
+    const added = meshInsertVertexAtPoint(part, [local.x, local.y, local.z], {
+      faceIndex: partHit.face?.materialIndex,
+    });
     if (!added) {
       this.onStatus('Could not add a vertex there (mesh vertex limit reached?)');
       return;
@@ -1174,9 +1176,12 @@ export class ModelerPanel {
     this._markDirty();
     this._rebuildObject();
     this._renderInspector();
-    this.onStatus(added.split === 'edge'
-      ? 'Vertex added on the edge · drag the gizmo to move it · right-click it to remove'
-      : 'Vertex added · drag the gizmo to move it · right-click it to remove');
+    const paired = Number.isInteger(added.oppositeVertexIndex);
+    this.onStatus(paired
+      ? `Opposing vertex pair added${added.connected ? ' and joined across the shared face' : ''} · drag either handle to shape it`
+      : (added.split === 'edge'
+        ? 'Vertex added on the edge · drag the gizmo to move it · right-click it to remove'
+        : 'Vertex added · drag the gizmo to move it · right-click it to remove'));
   }
 
   _removeVertexAt(weldIndex) {
