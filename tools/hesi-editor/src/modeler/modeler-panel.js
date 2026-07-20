@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
-  PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets, buildPartObject,
-  capturePartFaceProjection, captureUnionFaceProjection, clonePartFaceToOpposite, convertPartToMesh,
-  meshInsertVertexAtPoint, meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceNames,
-  partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
+  MESH_MAX_FACES, PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets,
+  buildPartObject, captureUnionFaceProjection, clonePartFaceToOpposite, convertPartToMesh,
+  mergePartFaces, meshFacePlanarRegions, meshInsertVertexAtPoint, meshRemoveVertex,
+  meshTopologyIssues, oppositePartFace, partFaceCoverProjection, partFaceNames, partGeometry,
+  splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -550,7 +551,7 @@ export class ModelerPanel {
       for (const faceName of partFaceNames(part)) {
         const style = part.faces?.[faceName];
         if (style?.fit !== 'cover' || style.projection) continue;
-        const projection = capturePartFaceProjection(part, faceName);
+        const projection = partFaceCoverProjection(part, faceName);
         if (projection) part.faces[faceName] = { ...style, projection };
       }
       const node = buildPartObject(part, this.store.texturesById(), { resolveAssetPart: resolver });
@@ -832,8 +833,13 @@ export class ModelerPanel {
       if (!faces.includes(name)) this.checkedFaces.delete(name);
     }
     this.inspector.append(element('h3', '', 'Faces & textures'));
-    this.inspector.append(element('p', 'modeler-help', 'Pick a face here (or click it in Faces mode), then attach an image: top, bottom, every side — like wrapping a photo around a bin. Tick several faces to spread one image across them.'));
+    this.inspector.append(element('p', 'modeler-help', 'Pick a face here (or click it in Faces mode), then attach an image: top, bottom, every side — like wrapping a photo around a bin. Tick several faces to spread one image across them, or merge them into one surface. Faces you folded with vertex edits show a "flat surfaces" tag: ✂ Split lists each surface here on its own.'));
+    // Vertex edits fold a face into several flat surfaces without creating
+    // new entries here; count those surfaces so they become visible (and
+    // splittable into real faces) instead of hiding inside the parent face.
+    const regionProbe = part.kind === 'mesh' ? part : convertPartToMesh(part);
     for (const faceName of faces) {
+      const regionCount = regionProbe ? (meshFacePlanarRegions(regionProbe, faceName)?.length || 0) : 0;
       const style = part.faces?.[faceName] || {};
       const row = element('div', `modeler-face-row${this.selectedFace === faceName ? ' selected' : ''}`);
       const check = document.createElement('input');
@@ -855,6 +861,11 @@ export class ModelerPanel {
         if (this.mode === 'face') this._attachGizmoToSelection();
       });
       row.append(pick);
+      if (regionCount > 1) {
+        const tag = element('small', 'modeler-face-regions', `${regionCount} flat surfaces`);
+        tag.title = 'Your vertex edits folded this face over several flat surfaces — ✂ Split turns each one into its own face in this list';
+        row.append(tag);
+      }
       const textureRecord = style.texture ? this.store.getTexture(style.texture) : null;
       if (textureRecord) {
         const thumb = element('img', 'modeler-face-thumb');
@@ -885,7 +896,7 @@ export class ModelerPanel {
           const copiedStyle = clone(style);
           delete copiedStyle.projection;
           if (copiedStyle.fit === 'cover') {
-            const projection = capturePartFaceProjection(part, name);
+            const projection = partFaceCoverProjection(part, name);
             if (projection) copiedStyle.projection = projection;
           }
           part.faces[name] = copiedStyle;
@@ -895,17 +906,9 @@ export class ModelerPanel {
         this._renderInspector();
       });
       row.append(allFaces);
-      if (part.kind === 'mesh') {
-        const split = button('✂ Split', 'tool-button small', 'Split this face into its flat regions — custom apexes carve a face into several planes; each becomes its own textureable face');
-        split.addEventListener('click', () => {
-          const result = splitPartFaceByPlanarRegions(part, faceName);
-          if (!result.ok) { this.onStatus(`Cannot split "${faceName}" · ${result.reason}`); return; }
-          this.selectedFace = faceName;
-          this._markDirty();
-          this._rebuildObject();
-          this._renderInspector();
-          this.onStatus(`Split "${faceName}" into ${result.faces.length} flat faces: ${result.faces.join(', ')} · Ctrl+Z undoes`);
-        });
+      if (regionCount > 1 && faces.length + regionCount - 1 <= MESH_MAX_FACES) {
+        const split = button('✂ Split', 'tool-button small accent', `Split this face into its ${regionCount} flat surfaces — each becomes its own face in this list, ready to tick and texture`);
+        split.addEventListener('click', () => this._splitFace(faceName));
         row.append(split);
       }
       const oppositeName = oppositePartFace(part, faceName);
@@ -938,7 +941,7 @@ export class ModelerPanel {
           const nextStyle = { ...style, fit: fit.value };
           delete nextStyle.projection;
           if (fit.value === 'cover') {
-            const projection = capturePartFaceProjection(part, faceName);
+            const projection = partFaceCoverProjection(part, faceName);
             if (projection) nextStyle.projection = projection;
           }
           part.faces[faceName] = nextStyle;
@@ -973,11 +976,49 @@ export class ModelerPanel {
       const apply = button(`Image across ${names.length} faces…`, 'tool-button accent small',
         'Attach one image spread continuously over every ticked face — the picture spans them as a single sheet');
       apply.addEventListener('click', () => this._assignTextureAcrossFaces(part, names));
+      const merge = button('⧉ Merge into one', 'tool-button small',
+        'Concatenate the ticked faces into a single face — one entry in this list, one surface, so a single image covers all of it');
+      merge.addEventListener('click', () => this._mergeCheckedFaces(names));
       const clear = button('Untick all', 'tool-button small', 'Clear the face selection');
       clear.addEventListener('click', () => { this.checkedFaces.clear(); this._renderInspector(); });
-      group.append(apply, clear);
+      group.append(apply, merge, clear);
       this.inspector.append(group);
     }
+  }
+
+  /**
+   * ✂ Split: every flat surface of a folded face becomes its own named face
+   * in the panel. Primitives convert to an editable mesh first, so surfaces
+   * carved by vertex drags on a subdivided box are reachable too.
+   */
+  _splitFace(faceName) {
+    const part = this._ensureMeshPart(this.selectedPart);
+    if (!part) { this.onStatus('Assembled asset parts have no editable faces'); return; }
+    const result = splitPartFaceByPlanarRegions(part, faceName);
+    if (!result.ok) { this.onStatus(`Cannot split "${faceName}" · ${result.reason}`); return; }
+    this.selectedFace = faceName;
+    this._markDirty();
+    this._rebuildObject();
+    this._renderInspector();
+    this.onStatus(`Split "${faceName}" into ${result.faces.length} flat faces: ${result.faces.join(', ')} · tick them to texture together · Ctrl+Z undoes`);
+  }
+
+  /**
+   * Concatenates the ticked faces into one surface. The merged face stores a
+   * union-fitted cover projection, so pressing Image… on it spreads a single
+   * picture continuously over the whole combined area.
+   */
+  _mergeCheckedFaces(faceNames) {
+    const part = this._ensureMeshPart(this.selectedPart);
+    if (!part) { this.onStatus('Assembled asset parts have no editable faces'); return; }
+    const result = mergePartFaces(part, faceNames);
+    if (!result.ok) { this.onStatus(`Cannot merge · ${result.reason}`); return; }
+    this.checkedFaces.clear();
+    this.selectedFace = result.faceName;
+    this._markDirty();
+    this._rebuildObject();
+    this._renderInspector();
+    this.onStatus(`Merged ${result.mergedCount} faces into "${result.faceName}" · press Image… on it to spread one picture over the whole surface · Ctrl+Z undoes`);
   }
 
   /**
@@ -1785,7 +1826,7 @@ export class ModelerPanel {
       part.faces = part.faces || {};
       const nextStyle = { ...(part.faces[faceName] || {}), texture: textureId };
       if (nextStyle.fit === 'cover') {
-        const projection = capturePartFaceProjection(part, faceName);
+        const projection = partFaceCoverProjection(part, faceName);
         if (projection) nextStyle.projection = projection;
       }
       part.faces[faceName] = nextStyle;

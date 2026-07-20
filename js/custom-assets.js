@@ -1330,7 +1330,8 @@ export function clonePartFaceToOpposite(part, faceName) {
 // Face splitting and shared projections
 // ---------------------------------------------------------------------------
 
-const MAX_FACE_NAMES = 16; // mirrors customAssetsDocumentErrors
+export const MESH_MAX_FACES = 16; // mirrors customAssetsDocumentErrors
+const MAX_FACE_NAMES = MESH_MAX_FACES;
 
 const triangleNormal = (a, b, c) => {
   const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -1341,25 +1342,23 @@ const triangleNormal = (a, b, c) => {
 };
 
 /**
- * Splits one material face of a kind:'mesh' part into its flat regions:
- * connected runs of (nearly) coplanar triangles become separate named faces —
- * "top", "top 2", "top 3" — each stylable on its own. Custom apexes carve a
- * box face into several visual planes; this turns them into real faces. The
- * first region keeps the original name and every new face inherits the
- * original style. Returns { ok: true, faces } with the region face names, or
- * { ok: false, reason } when the face is already a single plane or the part
- * would exceed the face-name budget.
+ * Flat regions of one material face of a kind:'mesh' part: connected runs of
+ * (nearly) coplanar triangles, each returned as an array of triangle indices.
+ * Vertex edits routinely fold a face into several visual planes (a box top
+ * pulled into bonnet + windscreen); every such plane shows up here as its own
+ * region. Returns null when the part is not a mesh or has no face with that
+ * name, and [] when the face owns no triangles.
  */
-export function splitPartFaceByPlanarRegions(part, faceName, { toleranceDegrees = 6 } = {}) {
-  if (part?.kind !== 'mesh') return { ok: false, reason: 'only editable meshes can split faces' };
+export function meshFacePlanarRegions(part, faceName, { toleranceDegrees = 6 } = {}) {
+  if (part?.kind !== 'mesh' || !Array.isArray(part.triangles)) return null;
   const names = partFaceNames(part);
   const materialIndex = names.indexOf(faceName);
-  if (materialIndex < 0) return { ok: false, reason: `no face named "${faceName}"` };
+  if (materialIndex < 0) return null;
   const owned = [];
   part.triangles.forEach((triangle, index) => {
     if ((triangle.face || 0) === materialIndex) owned.push(index);
   });
-  if (owned.length < 2) return { ok: false, reason: 'this face is a single flat surface' };
+  if (!owned.length) return [];
   const normals = new Map(owned.map((index) => {
     const [a, b, c] = part.triangles[index].v.map((vertex) => part.vertices[vertex]);
     return [index, triangleNormal(a, b, c)];
@@ -1400,7 +1399,39 @@ export function splitPartFaceByPlanarRegions(part, faceName, { toleranceDegrees 
     }
     regions.push(region);
   }
-  if (regions.length < 2) return { ok: false, reason: 'this face is a single flat surface' };
+  return regions;
+}
+
+/**
+ * How many flat surfaces a named face currently spans, for any part kind with
+ * editable geometry. Primitives are probed through a temporary mesh
+ * conversion (the part itself is not touched). 0 when the face has no
+ * triangles or the part has no editable geometry.
+ */
+export function partFacePlanarRegionCount(part, faceName, options) {
+  if (!part || part.kind === 'asset') return 0;
+  const mesh = part.kind === 'mesh' ? part : convertPartToMesh(part);
+  if (!mesh) return 0;
+  return meshFacePlanarRegions(mesh, faceName, options)?.length || 0;
+}
+
+/**
+ * Splits one material face of a kind:'mesh' part into its flat regions:
+ * connected runs of (nearly) coplanar triangles become separate named faces —
+ * "top", "top 2", "top 3" — each stylable on its own. Custom apexes carve a
+ * box face into several visual planes; this turns them into real faces. The
+ * first region keeps the original name and every new face inherits the
+ * original style. Returns { ok: true, faces } with the region face names, or
+ * { ok: false, reason } when the face is already a single plane or the part
+ * would exceed the face-name budget.
+ */
+export function splitPartFaceByPlanarRegions(part, faceName, { toleranceDegrees = 6 } = {}) {
+  if (part?.kind !== 'mesh') return { ok: false, reason: 'only editable meshes can split faces' };
+  const names = partFaceNames(part);
+  const materialIndex = names.indexOf(faceName);
+  if (materialIndex < 0) return { ok: false, reason: `no face named "${faceName}"` };
+  const regions = meshFacePlanarRegions(part, faceName, { toleranceDegrees });
+  if (!regions || regions.length < 2) return { ok: false, reason: 'this face is a single flat surface' };
   if (names.length + regions.length - 1 > MAX_FACE_NAMES) {
     return { ok: false, reason: `splitting needs ${regions.length} faces but a part can hold at most ${MAX_FACE_NAMES}` };
   }
@@ -1423,6 +1454,54 @@ export function splitPartFaceByPlanarRegions(part, faceName, { toleranceDegrees 
     for (const name of regionNames.slice(1)) part.faces[name] = structuredClone(style);
   }
   return { ok: true, faces: regionNames };
+}
+
+/**
+ * Concatenates several named faces of a kind:'mesh' part into ONE face — the
+ * first name given survives, all their triangles join its material slot, and
+ * the other names disappear from the part. The merged face is stored with a
+ * union-fitted cover projection, so a single image attached to it drapes
+ * continuously over the whole combined surface (bonnet + windscreen + roof as
+ * one sheet). Returns { ok: true, faceName, mergedCount } or
+ * { ok: false, reason }.
+ */
+export function mergePartFaces(part, faceNames) {
+  if (part?.kind !== 'mesh') return { ok: false, reason: 'only editable meshes can merge faces' };
+  const names = partFaceNames(part);
+  const wanted = [...new Set(faceNames || [])].filter((name) => names.includes(name));
+  if (wanted.length < 2) return { ok: false, reason: 'pick at least two faces of this part' };
+  const target = wanted[0];
+  const targetIndex = names.indexOf(target);
+  const mergedIndices = new Set(wanted.map((name) => names.indexOf(name)));
+  for (const triangle of part.triangles) {
+    if (mergedIndices.has(triangle.face || 0)) triangle.face = targetIndex;
+  }
+  // Drop the emptied names, then remap every triangle onto the new indices.
+  const removed = new Set(wanted.slice(1));
+  const remap = new Map();
+  const nextNames = [];
+  names.forEach((name, index) => {
+    if (removed.has(name)) return;
+    remap.set(index, nextNames.length);
+    nextNames.push(name);
+  });
+  for (const triangle of part.triangles) triangle.face = remap.get(triangle.face || 0) ?? 0;
+  part.faceNames = nextNames;
+  // The merged face keeps the target's style, or adopts the first merged
+  // style when the target had none; the removed names lose theirs.
+  const styles = part.faces || {};
+  let style = null;
+  for (const name of wanted) {
+    if (!style && styles[name]) style = structuredClone(styles[name]);
+    if (name !== target) delete styles[name];
+  }
+  const projection = captureUnionFaceProjection(part, [target]);
+  if (projection) style = { ...(style || {}), fit: 'cover', projection };
+  if (style) {
+    part.faces = styles;
+    part.faces[target] = style;
+  }
+  return { ok: true, faceName: target, mergedCount: wanted.length };
 }
 
 /**
@@ -1747,6 +1826,20 @@ export function capturePartFaceProjection(part, faceName) {
   } finally {
     geometry.dispose();
   }
+}
+
+/**
+ * The projection to store when a face switches to 'cover' fit: a flat face
+ * keeps its current UV plane (the picture stays where it is), while a folded
+ * face — several flat surfaces merged into one — gets a union-fitted plane so
+ * one image drapes continuously across every fold.
+ */
+export function partFaceCoverProjection(part, faceName) {
+  if (part?.kind === 'mesh' && (meshFacePlanarRegions(part, faceName)?.length || 0) > 1) {
+    const projection = captureUnionFaceProjection(part, [faceName]);
+    if (projection) return projection;
+  }
+  return capturePartFaceProjection(part, faceName);
 }
 
 /** Reprojects cover-textured faces through their captured, fixed UV planes. */
