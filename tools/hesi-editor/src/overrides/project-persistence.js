@@ -264,10 +264,12 @@ export class ProjectPersistence {
   /** True when the playable game's generated operations match this draft. */
   async gameBuildMatches(document = null) {
     const expected = this.buildDocument(document);
-    const response = await fetch(`/${this.scene.buildPath}`, { cache: 'no-store' });
-    if (response.status === 404) return expected.operations.length === 0;
+    // The editor endpoint answers 204 for a missing build file, so a routine
+    // "no build written yet" probe never logs a browser console 404.
+    const response = await fetch(`/__hesi_editor_build?scene=${encodeURIComponent(this.scene.id)}`, { cache: 'no-store' });
+    if (response.status === 204 || response.status === 404) return expected.operations.length === 0;
     if (!response.ok) return false;
-    const current = await response.json().catch(() => null);
+    const current = await response.json().then((payload) => payload?.build ?? null).catch(() => null);
     const sameBuild = Boolean(current)
       && current.version === expected.version
       && current.scene === expected.scene

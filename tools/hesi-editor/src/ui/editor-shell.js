@@ -40,7 +40,15 @@ const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(dig
 export function createEditorShell(root) {
   root.innerHTML = '';
   const shell = element('div', 'editor-shell');
-  const toolbar = element('header', 'toolbar');
+
+  // Header: two rows. The app bar owns identity, scene, save state, and the
+  // two save actions; the tool ribbon below owns everyday editing tools in
+  // labelled groups. This replaces the old single overflowing toolbar row.
+  const header = element('header', 'editor-header');
+  const appbar = element('div', 'appbar');
+  const toolbar = element('div', 'toolbar');
+  header.append(appbar, toolbar);
+
   const brand = element('div', 'brand');
   brand.append(element('strong', '', 'HESI World Editor'));
   const brandScene = element('small', 'brand-scene', '');
@@ -63,45 +71,50 @@ export function createEditorShell(root) {
     sceneSwitch.append(seg);
   }
 
+  const adapterChip = element('span', 'adapter-chip', 'World: loading');
+  adapterChip.dataset.testid = 'world-mode';
+  const dirtyChip = element('span', 'dirty-chip', 'Draft: Saved');
+  dirtyChip.dataset.testid = 'dirty-state';
+  const publishChip = element('span', 'publish-chip', 'Game: Current');
+  publishChip.dataset.testid = 'publish-state';
+
+  appbar.append(
+    brand,
+    sceneSwitch,
+    element('span', 'toolbar-spacer'),
+    adapterChip,
+    dirtyChip,
+    publishChip,
+    element('span', 'toolbar-divider'),
+    button('Save Draft', 'save-project', { title: 'Save locally and update the editor map with your road edits; the playable game stays unchanged (Ctrl+S)' }),
+    button('Apply to Game', 'rebuild-world', { title: 'Save the draft, publish road curves and game files to the playable game, then reload' }),
+  );
+  appbar.querySelector('[data-action="save-project"]').classList.add('accent');
+  appbar.querySelector('[data-action="rebuild-world"]').classList.add('primary');
+
+  const toolGroup = (label, ...nodes) => {
+    const group = element('div', 'tool-group');
+    if (label) {
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', label);
+      group.title = '';
+    }
+    group.append(...nodes);
+    return group;
+  };
+
   const gridSnapStepSelect = document.createElement('select');
   gridSnapStepSelect.className = 'grid-snap-step';
   gridSnapStepSelect.title = 'Grid step in meters';
   gridSnapStepSelect.setAttribute('aria-label', 'Grid snap step in meters');
   gridSnapStepSelect.dataset.testid = 'grid-snap-step';
   for (const step of GRID_SNAP_STEPS) gridSnapStepSelect.add(new Option(`${step} m`, String(step)));
-  toolbar.append(
-    brand,
-    sceneSwitch,
-    element('span', 'toolbar-divider'),
-    button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
-    button('Modeler', 'open-modeler', { title: 'Open the Object Modeler: create and texture PSX-style objects' }),
-    element('span', 'toolbar-divider'),
-    button('Move', 'transform-translate', { pressed: true, title: 'Move selected object (W)' }),
-    button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected object (E)' }),
-    button('Scale', 'transform-scale', { pressed: false, title: 'Scale selected object (R)' }),
-    button('World', 'transform-space', { pressed: true, title: 'Toggle world/local gizmo space (X)' }),
-    button('Snap', 'grid-snap', { pressed: false, title: 'Snap to grid (G): gizmo moves, placed assets, and road points land on clean steps · 15° rotations' }),
-    gridSnapStepSelect,
-    element('span', 'toolbar-divider'),
-    button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
-    button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
-    button('Save Draft', 'save-project', { title: 'Save locally and update the editor map with your road edits; the playable game stays unchanged (Ctrl+S)' }),
-    button('Apply to Game', 'rebuild-world', { title: 'Save the draft, publish road curves and game files to the playable game, then reload' }),
-    button('Commit', 'commit-project', { title: 'Snapshot the current map as a named version (Project tab)' }),
-    element('span', 'toolbar-divider'),
-    button('Focus', 'focus-selected', { title: 'Frame the selected object (F)' }),
-  );
-  toolbar.querySelector('[data-action="add-object"]').classList.add('primary');
-  toolbar.querySelector('[data-action="save-project"]').classList.add('accent');
+
   const presetSelect = document.createElement('select');
   presetSelect.className = 'preset-select';
   presetSelect.title = 'Camera location presets';
   presetSelect.setAttribute('aria-label', 'Camera preset');
-  toolbar.append(presetSelect, element('span', 'toolbar-divider'));
-  toolbar.append(
-    button('Orbit', 'nav-orbit', { pressed: true, title: 'Orbit around a target' }),
-    button('Fly', 'nav-fly', { pressed: false, title: 'No-clip free-flight camera' }),
-  );
+
   const speedGroup = element('span', 'nav-speeds');
   speedGroup.hidden = true;
   speedGroup.append(
@@ -109,14 +122,44 @@ export function createEditorShell(root) {
     button('Normal', 'speed-normal', { pressed: true, title: 'Fly speed: normal' }),
     button('Fast', 'speed-fast', { pressed: false, title: 'Fly speed: fast' }),
   );
-  toolbar.append(speedGroup, element('span', 'toolbar-divider'));
 
   const viewButton = element('button', 'tool-button', 'View ▾');
   viewButton.type = 'button';
   viewButton.dataset.action = 'view-menu';
   viewButton.title = 'Lighting, helpers, and debug tools';
   viewButton.setAttribute('aria-expanded', 'false');
-  toolbar.append(viewButton);
+
+  toolbar.append(
+    toolGroup('Create',
+      button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
+      button('Modeler', 'open-modeler', { title: 'Open the Object Modeler: create and texture PSX-style objects' }),
+    ),
+    element('span', 'toolbar-divider'),
+    toolGroup('Transform',
+      button('Move', 'transform-translate', { pressed: true, title: 'Move selected object (W)' }),
+      button('Rotate', 'transform-rotate', { pressed: false, title: 'Rotate selected object (E)' }),
+      button('Scale', 'transform-scale', { pressed: false, title: 'Scale selected object (R)' }),
+      button('World', 'transform-space', { pressed: true, title: 'Toggle world/local gizmo space (X)' }),
+      button('Snap', 'grid-snap', { pressed: false, title: 'Snap to grid (G): gizmo moves, placed assets, and road points land on clean steps · 15° rotations' }),
+      gridSnapStepSelect,
+    ),
+    element('span', 'toolbar-divider'),
+    toolGroup('History',
+      button('Undo', 'undo', { title: 'Undo the previous editor command (Ctrl+Z)' }),
+      button('Redo', 'redo', { title: 'Redo the next editor command (Ctrl+Shift+Z)' }),
+    ),
+    element('span', 'toolbar-divider'),
+    toolGroup('Camera',
+      presetSelect,
+      button('Orbit', 'nav-orbit', { pressed: true, title: 'Orbit around a target' }),
+      button('Fly', 'nav-fly', { pressed: false, title: 'No-clip free-flight camera' }),
+      speedGroup,
+      button('Focus', 'focus-selected', { title: 'Frame the selected object (F)' }),
+    ),
+    element('span', 'toolbar-spacer'),
+    viewButton,
+  );
+  toolbar.querySelector('[data-action="add-object"]').classList.add('primary');
 
   const viewState = { lightingMode: 'inspection', exposure: 1.45, fogFull: false, grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
   const viewMenu = element('div', 'view-menu');
@@ -171,7 +214,7 @@ export function createEditorShell(root) {
   debugCollision.type = 'checkbox';
   debugCollision.dataset.testid = 'debug-collision';
   viewRow('Collision walls', debugCollision);
-  toolbar.append(viewMenu);
+  header.append(viewMenu);
 
   const syncViewMenu = () => {
     lightingInspection.setAttribute('aria-checked', String(viewState.lightingMode === 'inspection'));
@@ -184,15 +227,6 @@ export function createEditorShell(root) {
     debugPivot.checked = viewState.debugPivot;
     debugCollision.checked = viewState.debugCollision;
   };
-
-  toolbar.append(element('span', 'toolbar-spacer'));
-  const adapterChip = element('span', 'adapter-chip', 'World: loading');
-  adapterChip.dataset.testid = 'world-mode';
-  const dirtyChip = element('span', 'dirty-chip', 'Draft: Saved');
-  dirtyChip.dataset.testid = 'dirty-state';
-  const publishChip = element('span', 'publish-chip', 'Game: Current');
-  publishChip.dataset.testid = 'publish-state';
-  toolbar.append(adapterChip, dirtyChip, publishChip);
 
   const workspace = element('main', 'editor-workspace');
 
@@ -332,8 +366,13 @@ export function createEditorShell(root) {
   const inspectorTitle = element('h2', '', 'Inspector');
   const inspectorCaption = element('small', '', 'Nothing selected');
   rightHeader.append(inspectorTitle, inspectorCaption);
+  // Dedicated road editing panel: visible while a road route is selected.
+  // It surfaces what used to live only in transient status-bar hints.
+  const roadPanel = element('div', 'road-panel');
+  roadPanel.hidden = true;
+  roadPanel.dataset.testid = 'road-panel';
   const inspectorContent = element('div', 'panel-content');
-  right.append(rightHeader, inspectorContent);
+  right.append(rightHeader, roadPanel, inspectorContent);
 
   const bottom = element('section', 'panel panel-bottom');
   const bottomHeader = element('div', 'panel-header');
@@ -384,7 +423,7 @@ export function createEditorShell(root) {
   const statusFps = element('span', '', 'FPS --');
   const statusGeometry = element('span', '', 'Draws -- / Tris --');
   status.append(statusMessage, statusCoordinates, statusEntities, statusFps, statusGeometry);
-  shell.append(toolbar, workspace, status);
+  shell.append(header, workspace, status);
   root.append(shell);
 
   let adapter = null;
@@ -420,12 +459,6 @@ export function createEditorShell(root) {
   };
 
   for (const [sceneId, seg] of sceneButtons) seg.addEventListener('click', () => triggerAction('scene-switch', sceneId));
-  toolbar.querySelector('[data-action="commit-project"]').addEventListener('click', () => {
-    currentTab = 'project';
-    renderBottom();
-    triggerAction('project-refresh-commits');
-    bottomContent.querySelector('[data-testid="commit-message"]')?.focus();
-  });
 
   const formatCommitDate = (iso) => {
     const date = new Date(iso);
@@ -590,20 +623,24 @@ export function createEditorShell(root) {
       fields.append(nameLabel, pathLabel, recentLabel);
       const actions = element('div', 'project-actions');
       const details = () => ({ name: nameInput.value, path: pathInput.value });
-      const projectButton = (label, action) => {
-        const node = button(label, action);
+      const projectButton = (label, action, title = '') => {
+        const node = button(label, action, { title });
         node.addEventListener('click', () => triggerAction(action, details()));
         return node;
       };
       actions.append(
-        projectButton('Save Draft', 'project-save'),
-        projectButton('Save Draft As', 'project-save-as'),
-        projectButton('Load', 'project-load'),
-        projectButton('Export Overrides', 'project-export'),
-        projectButton('Reset Unsaved Changes', 'project-reset-unsaved'),
-        projectButton('Reset Selected Override', 'reset-overrides'),
-        projectButton('Reset All Overrides', 'project-reset-all'),
+        projectButton('Save Draft', 'project-save', 'Save the draft with the name above (Ctrl+S)'),
+        projectButton('Save Draft As', 'project-save-as', 'Save the draft to the path above'),
+        projectButton('Load', 'project-load', 'Load the draft at the path above'),
+        projectButton('Export Overrides', 'project-export', 'Download the override document as JSON'),
       );
+      const dangerActions = element('div', 'project-actions project-danger');
+      const resetUnsaved = projectButton('Reset Unsaved Changes', 'project-reset-unsaved', 'Discard everything since the last save');
+      const resetAll = projectButton('Reset All Overrides', 'project-reset-all', 'Remove every override and placed object from the draft');
+      resetUnsaved.classList.add('danger');
+      resetAll.classList.add('danger');
+      dangerActions.append(resetUnsaved, resetAll);
+      actions.append(dangerActions);
       const facts = element('div', 'project-summary');
       facts.append(
         element('b', '', historyState.dirty || roadDraftDirty ? 'Unsaved draft changes' : 'Draft saved to disk'),
@@ -618,22 +655,31 @@ export function createEditorShell(root) {
     }
     if (currentTab === 'edit') {
       const panel = element('div', 'edit-panel');
+      const hasSelection = Boolean(selectedEntity);
       const group = (title) => {
         const fieldset = element('fieldset', 'edit-group');
         fieldset.append(element('legend', '', title));
         return fieldset;
+      };
+      // Selection-dependent actions are disabled without a selection instead
+      // of failing silently when clicked.
+      const selectionButton = (label, action, title = '') => {
+        const node = editButton(label, action, title);
+        node.disabled = !hasSelection;
+        return node;
       };
       const selectionGroup = group('Selection');
       const generated = selectedEntity?.generated;
       const disabled = selectedEntity?.metadata?.disabled;
       const hidden = !selectedEntity?.object3D?.visible;
       selectionGroup.append(
-        editButton(generated ? (disabled ? 'Re-enable' : 'Disable') : (hidden ? 'Show' : 'Hide'), 'toggle-visibility',
+        selectionButton(generated ? (disabled ? 'Re-enable' : 'Disable') : (hidden ? 'Show' : 'Hide'), 'toggle-visibility',
           generated ? 'Disable/restore this generated object (non-destructive)' : 'Hide/show this placed object'),
-        editButton(selectedEntity?.metadata?.locked ? 'Unlock' : 'Lock', 'toggle-lock', 'Prevent or allow selection and edits'),
-        editButton('Duplicate', 'duplicate', 'Duplicate this asset as a new placed object (Ctrl+D)'),
-        editButton('Delete', 'delete', generated ? 'Disable this generated object (Del)' : 'Remove this placed object (Del)'),
-        editButton('Assemble into object', 'assemble-selection', 'Combine the selected objects (e.g. a sign and its pole) into one single custom object in the Modeler'),
+        selectionButton(selectedEntity?.metadata?.locked ? 'Unlock' : 'Lock', 'toggle-lock', 'Prevent or allow selection and edits'),
+        selectionButton('Duplicate', 'duplicate', 'Duplicate this asset as a new placed object (Ctrl+D)'),
+        selectionButton('Delete', 'delete', generated ? 'Disable this generated object (Del)' : 'Remove this placed object (Del)'),
+        selectionButton('Assemble into object', 'assemble-selection', 'Combine the selected objects (e.g. a sign and its pole) into one single custom object in the Modeler'),
+        selectionButton('Reset overrides', 'reset-overrides', 'Restore the generated state of the selected object'),
       );
       const renameRow = element('div', 'rename-row');
       const renameInput = document.createElement('input');
@@ -641,21 +687,23 @@ export function createEditorShell(root) {
       renameInput.value = selectedEntity?.name || '';
       renameInput.placeholder = 'Selected object name';
       renameInput.setAttribute('aria-label', 'Selected object name');
+      renameInput.disabled = !hasSelection;
       const rename = button('Rename', 'rename');
+      rename.disabled = !hasSelection;
       rename.addEventListener('click', () => triggerAction('rename', renameInput.value));
       renameRow.append(renameInput, rename);
       selectionGroup.append(renameRow);
       const viewGroup = group('View');
       viewGroup.append(
-        editButton('Isolate', 'isolate', 'Hide everything except the selected object'),
-        editButton('Exit isolate', 'exit-isolate'),
+        selectionButton('Isolate', 'isolate', 'Hide everything except the selected object'),
+        editButton('Exit isolate', 'exit-isolate', 'Leave isolation and show the rest of the world again'),
         editButton('Reveal all', 'reveal-all', 'Show all layers and re-enable hidden objects'),
-        editButton('Copy ID', 'copy-id'),
+        selectionButton('Copy ID', 'copy-id', 'Copy the selected object ID to the clipboard'),
       );
       const transformGroup = group('Transform');
       transformGroup.append(
-        editButton('Copy transform', 'copy-transform'),
-        editButton('Paste transform', 'paste-transform'),
+        selectionButton('Copy transform', 'copy-transform', 'Copy position, rotation, and scale'),
+        selectionButton('Paste transform', 'paste-transform', 'Apply the copied transform to the selection'),
       );
       const settings = element('div', 'edit-settings');
       const makeNumber = (label, value, action) => {
@@ -688,39 +736,61 @@ export function createEditorShell(root) {
       });
       settings.append(axesRow);
       transformGroup.append(settings);
-      const resetGroup = group('Reset');
-      resetGroup.append(editButton('Reset overrides', 'reset-overrides', 'Restore the generated state of the selected object'));
       const summary = element('div', 'edit-summary', selectedEntity
         ? `${selectedEntity.id} · ${selectedEntity.editable ? 'editable' : 'read-only'} · ${selectedEntity.assetId || 'no reusable asset'}`
         : 'Nothing selected. Click an object in the viewport or in the Scene hierarchy.');
-      panel.append(selectionGroup, viewGroup, transformGroup, resetGroup, summary);
+      panel.append(selectionGroup, viewGroup, transformGroup, summary);
       bottomContent.append(panel);
       return;
     }
     if (currentTab === 'help') {
-      const reference = element('div', 'control-reference');
-      [
-        ['Select', 'Click an object in the viewport · click again to cycle overlapping hits · Shift+click adds/removes objects · Esc clears'],
-        ['Roads', 'Click asphalt or select a road → realistic draft asphalt appears · drag any orange point, endpoints included · right-click road adds · right-click point removes'],
-        ['Camera', 'Orbit: drag / wheel · Fly: click viewport, then WASD · E/Space up · Q/CapsLock down · wheel speed · Shift boost'],
-        ['Modeler', 'Toolbar → Modeler: build PSX-style objects from simple parts, texture each face with images, edit vertices, assemble catalog assets, and replace world textures (road asphalt included)'],
-        ['Assemble', 'Shift+click multiple map objects (sign + pole, barriers, ...) → Edit tab → Assemble into object → one placeable asset'],
-        ['Presets', 'Tatsumi PA · Initial spawn · Map center · Entire world (Home) · F focuses selection'],
-        ['Editing', 'W move · E rotate · R scale · X world/local · Del disable/delete · Ctrl+D duplicate'],
-        ['Grid snap', 'G or the toolbar Snap button · gizmo moves, placed assets, and road points land on the chosen grid step · 15° rotations'],
-        ['Add Object', '+ Add Object → pick an asset → click a surface to place · Esc cancels placement'],
-        ['History', 'Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S saves the editor draft only'],
-        ['Draft vs Game', 'Save Draft saves locally and rebuilds the editor map with your road edits · Apply to Game performs the one final production update'],
-        ['Commits', 'Project tab → Commit version snapshots the map · Restore brings any version back'],
-        ['Scenes', 'Toolbar switcher: Highway (real map) or Garage (interior) · each has its own project'],
-        ['Fly crosshair', 'Fly mode shows a first-person crosshair; it locks solid while mouse-look is active'],
-        ['View', 'L toggles inspection/game lighting · View menu: exposure, fog, grid, axes, debug tools'],
-        ['Debug tools', 'View menu → selection bounds box, pivot axes, analytic collision walls'],
-      ].forEach(([key, value]) => {
-        const card = element('div', 'asset-card');
-        card.append(element('b', '', key), element('small', '', value));
-        reference.append(card);
-      });
+      const reference = element('div', 'help-panel');
+      const helpSections = [
+        ['Roads', [
+          ['Click a road', 'Selects the route and enters road editing: draft asphalt, markings, and orange point handles appear. The Road panel on the right shows route facts and point tools.'],
+          ['Drag orange point', 'Reshapes the road; the realistic preview follows live'],
+          ['Right-click road / double-click', 'Adds a point at that position'],
+          ['Right-click point · Del', 'Removes the point'],
+          ['Road panel', 'Walk the route with Prev/Next, edit exact X/Z coordinates, frame or delete the selected point'],
+        ]],
+        ['Selection & editing', [
+          ['Click', 'Select an object · click again cycles overlapping hits · Esc clears'],
+          ['Shift+click', 'Adds/removes objects from the selection'],
+          ['W · E · R', 'Move · Rotate · Scale gizmo'],
+          ['X', 'Toggle world/local gizmo space'],
+          ['G', 'Grid snap: gizmo moves, placed assets, and road points land on the chosen step · 15° rotations'],
+          ['Del', 'Delete placed object / disable generated object'],
+          ['Ctrl+D', 'Duplicate the selection'],
+          ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · Redo'],
+        ]],
+        ['Camera & view', [
+          ['Orbit', 'Drag rotates · wheel zooms · presets in the Camera group'],
+          ['Fly', 'Click the viewport, then WASD · E/Space up · Q/CapsLock down · wheel changes speed · Shift boosts'],
+          ['F · Home', 'Frame selection · frame entire world'],
+          ['L', 'Toggle inspection/game lighting · more in the View menu (exposure, fog, grid, debug tools)'],
+        ]],
+        ['Objects & Modeler', [
+          ['+ Add Object', 'Pick an asset in the Assets tab, then click a surface to place it · Esc cancels'],
+          ['Modeler', 'Build PSX-style objects from simple parts, texture faces with images, and replace world textures (road asphalt included)'],
+          ['Assemble', 'Shift+click several map objects (sign + pole, ...) → Edit tab → Assemble into object → one placeable asset'],
+        ]],
+        ['Saving & versions', [
+          ['Save Draft (Ctrl+S)', 'Saves locally and rebuilds the editor map with your road edits · the playable game stays unchanged'],
+          ['Apply to Game', 'The one production update: publishes road curves and game files, then reloads'],
+          ['Commits', 'Project tab → snapshot the map as a named version · Restore brings any version back'],
+          ['Scenes', 'Highway (real map) or Garage (interior) · each keeps its own project file'],
+        ]],
+      ];
+      for (const [title, rows] of helpSections) {
+        const section = element('section', 'help-section');
+        section.append(element('h3', '', title));
+        for (const [keys, description] of rows) {
+          const row = element('div', 'help-row');
+          row.append(element('kbd', '', keys), element('span', '', description));
+          section.append(row);
+        }
+        reference.append(section);
+      }
       bottomContent.append(reference);
       return;
     }
@@ -822,6 +892,95 @@ export function createEditorShell(root) {
     }
     if (slots.length > 64) section.body.append(element('p', 'face-texture-help', `Showing the first 64 of ${slots.length} face slots.`));
     return section.details;
+  };
+
+  let roadState = null;
+  const formatMeters = (value) => (!Number.isFinite(value) ? 'Unavailable'
+    : (value >= 1000 ? `${(value / 1000).toFixed(2)} km` : `${value.toFixed(0)} m`));
+  const renderRoadPanel = () => {
+    roadPanel.innerHTML = '';
+    if (!roadState) { roadPanel.hidden = true; return; }
+    roadPanel.hidden = false;
+    const head = element('div', 'road-head');
+    head.append(element('b', '', 'Road editing'));
+    if (roadState.synthetic) head.append(element('span', 'road-badge', 'runtime route'));
+    if (roadState.closed) head.append(element('span', 'road-badge', 'loop'));
+    const name = element('div', 'road-name', roadState.name || roadState.routeId);
+    name.title = roadState.routeId;
+    const facts = element('div', 'road-facts');
+    const fact = (label, value) => {
+      const cell = element('div', 'road-fact');
+      cell.append(element('small', '', label), element('b', '', value));
+      facts.append(cell);
+    };
+    fact('Points', String(roadState.pointCount));
+    fact('Length', formatMeters(roadState.length));
+    fact('Width', Number.isFinite(roadState.roadWidth) ? `${roadState.roadWidth.toFixed(1)} m` : 'Unavailable');
+    fact('Lanes', Number.isFinite(roadState.lanes) ? String(roadState.lanes) : 'Unavailable');
+    roadPanel.append(head, name, facts);
+
+    const point = element('div', 'road-point');
+    const pointHead = element('div', 'road-point-head');
+    const hasPoint = Number.isInteger(roadState.activeIndex) && Array.isArray(roadState.activePoint);
+    pointHead.append(element('b', '', hasPoint ? `Point ${roadState.activeIndex + 1} of ${roadState.pointCount}` : 'No point selected'));
+    const nav = element('div', 'road-point-nav');
+    const prev = button('‹ Prev', 'road-point-step', { title: 'Select the previous road point and frame it' });
+    prev.addEventListener('click', () => triggerAction('road-point-step', -1));
+    const next = button('Next ›', 'road-point-step', { title: 'Select the next road point and frame it' });
+    next.addEventListener('click', () => triggerAction('road-point-step', 1));
+    nav.append(prev, next);
+    pointHead.append(nav);
+    point.append(pointHead);
+    if (hasPoint) {
+      const coords = element('div', 'road-point-coords');
+      const inputs = {};
+      for (const [axis, value] of [['x', roadState.activePoint[0]], ['z', roadState.activePoint[1]]]) {
+        const label = element('label', 'road-coord');
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '0.1';
+        input.value = String(Number(value.toFixed(2)));
+        input.setAttribute('aria-label', `Road point ${axis.toUpperCase()} (meters)`);
+        input.dataset.testid = `road-point-${axis}`;
+        inputs[axis] = input;
+        label.append(element('span', '', axis.toUpperCase()), input);
+        coords.append(label);
+      }
+      const applyPoint = () => triggerAction('road-point-apply', { x: Number(inputs.x.value), z: Number(inputs.z.value) });
+      const apply = button('Apply', 'road-point-apply', { title: 'Move the selected point to these exact coordinates' });
+      apply.addEventListener('click', applyPoint);
+      for (const input of Object.values(inputs)) {
+        input.addEventListener('keydown', (event) => { if (event.key === 'Enter') applyPoint(); });
+      }
+      coords.append(apply);
+      point.append(coords);
+      const pointActions = element('div', 'road-point-actions');
+      const focusPoint = button('Frame point', 'road-point-focus', { title: 'Move the camera to the selected point' });
+      focusPoint.addEventListener('click', () => triggerAction('road-point-focus'));
+      const removePoint = button('Delete point', 'road-point-delete', { title: 'Remove the selected road point (Del)' });
+      removePoint.classList.add('danger');
+      removePoint.addEventListener('click', () => triggerAction('road-point-delete'));
+      pointActions.append(focusPoint, removePoint);
+      point.append(pointActions);
+    } else {
+      point.append(element('p', 'road-hint-line', 'Click an orange handle on the road to select a point, or walk the route with Prev / Next.'));
+    }
+    roadPanel.append(point);
+
+    const hints = element('ul', 'road-hints');
+    for (const hint of [
+      'Drag an orange point to reshape the road — the asphalt preview follows live.',
+      'Right-click (or double-click) the road to add a point there.',
+      'Right-click a point, or press Del, to remove it.',
+    ]) hints.append(element('li', '', hint));
+    roadPanel.append(hints);
+
+    const dirtyLine = element('div', `road-dirty${roadState.dirtyCount ? ' pending' : ''}`);
+    dirtyLine.dataset.testid = 'road-dirty';
+    dirtyLine.textContent = roadState.dirtyCount
+      ? `${roadState.dirtyCount} road${roadState.dirtyCount === 1 ? '' : 's'} changed · Save Draft (Ctrl+S) applies to the editor only`
+      : 'No unsaved road changes';
+    roadPanel.append(dirtyLine);
   };
 
   const renderInspector = () => {
@@ -1026,19 +1185,19 @@ export function createEditorShell(root) {
     root: shell,
     viewportHost,
     onToolbar(action, handler) {
-      toolbar.querySelector(`[data-action="${action}"]`)?.addEventListener('click', handler);
+      header.querySelector(`[data-action="${action}"]`)?.addEventListener('click', handler);
     },
     onPreset(handler) { presetSelect.addEventListener('preset-selected', (event) => handler(event.detail)); },
     onEntitySelect(handler) { entitySelectHandler = handler; },
     onInspectLocked(handler) { inspectLockedHandler = handler; },
     onAction(handler) { actionHandler = handler; },
     setToggle(action, pressed) {
-      toolbar.querySelector(`[data-action="${action}"]`)?.setAttribute('aria-pressed', String(Boolean(pressed)));
+      header.querySelector(`[data-action="${action}"]`)?.setAttribute('aria-pressed', String(Boolean(pressed)));
     },
     setHistory(state) {
       historyState = { ...historyState, ...state };
-      const undo = toolbar.querySelector('[data-action="undo"]');
-      const redo = toolbar.querySelector('[data-action="redo"]');
+      const undo = header.querySelector('[data-action="undo"]');
+      const redo = header.querySelector('[data-action="redo"]');
       undo.disabled = !historyState.canUndo;
       redo.disabled = !historyState.canRedo;
       undo.textContent = 'Undo';
@@ -1052,7 +1211,7 @@ export function createEditorShell(root) {
       transformState = { ...transformState, ...state, axes: { ...transformState.axes, ...(state.axes || {}) } };
       for (const mode of ['translate', 'rotate', 'scale']) this.setToggle(`transform-${mode}`, transformState.mode === mode);
       this.setToggle('transform-space', transformState.space === 'world');
-      const space = toolbar.querySelector('[data-action="transform-space"]');
+      const space = header.querySelector('[data-action="transform-space"]');
       if (space) space.textContent = transformState.space === 'world' ? 'World' : 'Local';
       if (currentTab === 'edit') renderBottom();
     },
@@ -1140,6 +1299,10 @@ export function createEditorShell(root) {
     setTextures(entries) {
       textureEntries = Array.isArray(entries) ? entries : [];
       renderInspector();
+    },
+    setRoadEdit(state) {
+      roadState = state?.active ? state : null;
+      renderRoadPanel();
     },
     refreshInspector() { renderInspector(); },
     setNavigation({ mode, speed, speedPreset, pointerLocked }) {

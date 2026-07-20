@@ -124,6 +124,13 @@ test('project endpoint validates, saves, backs up, and reloads deterministic JSO
 });
 
 test('build endpoint validates operations and writes the scene build file', async () => {
+  // A missing build file is a routine state and must answer 204, not 404, so
+  // the editor's startup probe never logs a browser console error.
+  await rm(new URL('../../../data/editor/garage-build.json', import.meta.url), { force: true });
+  const missing = await fetch(`${BASE}/__hesi_editor_build?scene=garage`);
+  assert.equal(missing.status, 204);
+  const unknownScene = await fetch(`${BASE}/__hesi_editor_build?scene=nope`);
+  assert.equal(unknownScene.status, 400);
   const put = await fetch(`${BASE}/__hesi_editor_build`, {
     method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scene: 'garage', build: sampleBuild('garage') }),
   });
@@ -131,6 +138,12 @@ test('build endpoint validates operations and writes the scene build file', asyn
   const result = await put.json();
   assert.equal(result.path, 'data/editor/garage-build.json');
   assert.equal(result.operations, 2);
+  const get = await fetch(`${BASE}/__hesi_editor_build?scene=garage`);
+  assert.equal(get.status, 200);
+  const fetched = await get.json();
+  assert.equal(fetched.ok, true);
+  assert.equal(fetched.build.scene, 'garage');
+  assert.equal(fetched.build.operations.length, 2);
   const written = JSON.parse(await readFile(new URL('../../../data/editor/garage-build.json', import.meta.url), 'utf8'));
   assert.equal(written.scene, 'garage');
   assert.equal(written.operations.length, 2);
