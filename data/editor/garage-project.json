@@ -476,7 +476,7 @@
         "position": [
           10.25,
           0.008,
-          1.75
+          0
         ],
         "rotation": [
           3.14159,
@@ -528,7 +528,7 @@
         "position": [
           10.25,
           0.008,
-          3.32533
+          1.55052
         ],
         "rotation": [
           3.14159,
@@ -605,7 +605,7 @@
       "transform": {
         "position": [
           -1.24291,
-          0.81987,
+          0.83124,
           9.19173
         ],
         "rotation": [
@@ -615,7 +615,7 @@
         ],
         "scale": [
           1.12699,
-          1.14214,
+          1.45386,
           1.09648
         ]
       },
@@ -631,7 +631,7 @@
       "transform": {
         "position": [
           -1.4,
-          0.81987,
+          0.83001,
           9.19173
         ],
         "rotation": [
@@ -641,7 +641,7 @@
         ],
         "scale": [
           1.12699,
-          1.14214,
+          1.42026,
           1.09648
         ]
       },
@@ -656,9 +656,9 @@
       "sourceEntityId": "placed:0009",
       "transform": {
         "position": [
-          -1.31684,
+          -1.30965,
           0.81987,
-          9.08096
+          9.07377
         ],
         "rotation": [
           -1.75805,
@@ -667,8 +667,138 @@
         ],
         "scale": [
           1.12699,
-          1.14214,
+          1.42078,
           1.09648
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0010",
+      "id": "placed:0011",
+      "layer": "Props",
+      "locked": false,
+      "name": "mobile1",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          10.42357,
+          0.008,
+          8.25
+        ],
+        "rotation": [
+          0,
+          -1.5708,
+          0
+        ],
+        "scale": [
+          0.9,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0011",
+      "id": "placed:0012",
+      "layer": "Props",
+      "locked": false,
+      "name": "armadio",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -4.2,
+          0.008,
+          6.4
+        ],
+        "rotation": [
+          0,
+          1.5708,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0012",
+      "id": "placed:0013",
+      "layer": "Props",
+      "locked": false,
+      "name": "Barile1",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          10.3,
+          0.008,
+          3.2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.7,
+          0.7
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0013",
+      "id": "placed:0014",
+      "layer": "Props",
+      "locked": false,
+      "name": "attrezzi",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          5.3,
+          0.008,
+          -0.4
+        ],
+        "rotation": [
+          0,
+          -0.2618,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0014",
+      "id": "placed:0015",
+      "layer": "Props",
+      "locked": false,
+      "name": "poster1",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -4.33238,
+          1.6,
+          0.4
+        ],
+        "rotation": [
+          0,
+          1.5708,
+          0
+        ],
+        "scale": [
+          1.9,
+          1.8,
+          1
         ]
       },
       "visible": true

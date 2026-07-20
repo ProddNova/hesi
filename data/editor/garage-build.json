@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "garage",
-  "generatedAt": "2026-07-20T12:58:16.354Z",
+  "generatedAt": "2026-07-20T13:36:12.922Z",
   "project": {
-    "draftSignature": "fnv1a32:998e3bf1",
+    "draftSignature": "fnv1a32:d6307245",
     "name": "HESI Garage Interior",
     "path": "data/editor/garage-project.json"
   },
@@ -1395,7 +1395,7 @@
       "position": [
         10.25,
         0.008,
-        1.75
+        0
       ],
       "quaternion": [
         0,
@@ -1439,7 +1439,7 @@
       "position": [
         10.25,
         0.008,
-        3.32533
+        1.55052
       ],
       "quaternion": [
         0,
@@ -1504,7 +1504,7 @@
       "op": "place-custom",
       "position": [
         -1.24291,
-        0.81987,
+        0.83124,
         9.19173
       ],
       "quaternion": [
@@ -1515,7 +1515,7 @@
       ],
       "scale": [
         1.12699,
-        1.14214,
+        1.45386,
         1.09648
       ],
       "visible": true
@@ -1526,7 +1526,7 @@
       "op": "place-custom",
       "position": [
         -1.4,
-        0.81987,
+        0.83001,
         9.19173
       ],
       "quaternion": [
@@ -1537,7 +1537,7 @@
       ],
       "scale": [
         1.12699,
-        1.14214,
+        1.42026,
         1.09648
       ],
       "visible": true
@@ -1547,9 +1547,9 @@
       "name": "beer copy copy",
       "op": "place-custom",
       "position": [
-        -1.31684,
+        -1.30965,
         0.81987,
-        9.08096
+        9.07377
       ],
       "quaternion": [
         -0.68301,
@@ -1559,8 +1559,118 @@
       ],
       "scale": [
         1.12699,
-        1.14214,
+        1.42078,
         1.09648
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0010",
+      "name": "mobile1",
+      "op": "place-custom",
+      "position": [
+        10.42357,
+        0.008,
+        8.25
+      ],
+      "quaternion": [
+        0,
+        -0.70711,
+        0,
+        0.70711
+      ],
+      "scale": [
+        0.9,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0011",
+      "name": "armadio",
+      "op": "place-custom",
+      "position": [
+        -4.2,
+        0.008,
+        6.4
+      ],
+      "quaternion": [
+        0,
+        0.70711,
+        0,
+        0.70711
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0012",
+      "name": "Barile1",
+      "op": "place-custom",
+      "position": [
+        10.3,
+        0.008,
+        3.2
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        0.7,
+        0.7,
+        0.7
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0013",
+      "name": "attrezzi",
+      "op": "place-custom",
+      "position": [
+        5.3,
+        0.008,
+        -0.4
+      ],
+      "quaternion": [
+        0,
+        -0.13053,
+        0,
+        0.99144
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "assetId": "custom:0014",
+      "name": "poster1",
+      "op": "place-custom",
+      "position": [
+        -4.33238,
+        1.6,
+        0.4
+      ],
+      "quaternion": [
+        0,
+        0.70711,
+        0,
+        0.70711
+      ],
+      "scale": [
+        1.9,
+        1.8,
+        1
       ],
       "visible": true
     }

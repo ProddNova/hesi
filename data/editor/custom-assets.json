@@ -1309,6 +1309,520 @@
         }
       ],
       "updatedAt": "2026-07-20T12:55:20.946Z"
+    },
+    "custom:0010": {
+      "id": "custom:0010",
+      "label": "mobile1",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T13:06:02.350Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0063"
+            },
+            "right": {
+              "texture": "tex:0064"
+            },
+            "left": {
+              "texture": "tex:0064"
+            },
+            "back": {
+              "texture": "tex:0065"
+            },
+            "top": {
+              "texture": "tex:0065"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 4,
+              "o": [
+                -2.5162181495325053,
+                0.30623534343116177,
+                0
+              ]
+            },
+            {
+              "i": 6,
+              "o": [
+                -2.5162181495325053,
+                0,
+                0
+              ]
+            },
+            {
+              "i": 5,
+              "o": [
+                -2.5162181495325053,
+                0.30623534343116177,
+                0
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                -2.5162181495325053,
+                0,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0.413191240606972,
+                0.30623534343116177,
+                0
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                0.413191240606972,
+                0.30623534343116177,
+                0
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0.413191240606972,
+                0,
+                0
+              ]
+            },
+            {
+              "i": 3,
+              "o": [
+                0.413191240606972,
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-20T13:08:44.129Z"
+    },
+    "custom:0011": {
+      "id": "custom:0011",
+      "label": "armadio",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T13:15:40.879Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0066"
+            },
+            "left": {
+              "texture": "tex:0067"
+            },
+            "right": {
+              "texture": "tex:0067"
+            },
+            "top": {
+              "texture": "tex:0068"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 5,
+              "o": [
+                -0.6650573714091095,
+                1.4375739794395006,
+                -0.20636475709604374
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                -0.6650573714091095,
+                0,
+                -0.20636475709604374
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                0,
+                1.4375739794395006,
+                -0.20636475709604374
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0,
+                0,
+                -0.20636475709604374
+              ]
+            },
+            {
+              "i": 4,
+              "o": [
+                -0.6650573714091095,
+                1.4375739794395006,
+                0
+              ]
+            },
+            {
+              "i": 6,
+              "o": [
+                -0.6650573714091095,
+                0,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0,
+                1.4375739794395006,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-20T13:17:04.737Z"
+    },
+    "custom:0012": {
+      "id": "custom:0012",
+      "label": "Barile1",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T13:19:33.811Z",
+      "parts": [
+        {
+          "kind": "cylinder",
+          "name": "Cylinder",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1.5,
+            1,
+            1.5
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "side": {
+              "texture": "tex:0069"
+            },
+            "top": {
+              "texture": "tex:0070"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 0,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 16,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 3,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 4,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 5,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 6,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                0,
+                1.0565155909218031,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-20T13:21:04.602Z"
+    },
+    "custom:0013": {
+      "id": "custom:0013",
+      "label": "attrezzi",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T13:28:02.182Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0071"
+            },
+            "right": {
+              "texture": "tex:0072"
+            },
+            "left": {
+              "texture": "tex:0072"
+            },
+            "top": {
+              "texture": "tex:0073"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 5,
+              "o": [
+                -0.42774684309144817,
+                0.2141683198407851,
+                -0.24713695423776572
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                -0.42774684309144817,
+                0,
+                -0.24713695423776572
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                0,
+                0.2141683198407851,
+                -0.24713695423776572
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0,
+                0,
+                -0.24713695423776572
+              ]
+            },
+            {
+              "i": 4,
+              "o": [
+                -0.42774684309144817,
+                0.2141683198407851,
+                0
+              ]
+            },
+            {
+              "i": 6,
+              "o": [
+                -0.42774684309144817,
+                0,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0,
+                0.2141683198407851,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-20T13:29:26.987Z"
+    },
+    "custom:0014": {
+      "id": "custom:0014",
+      "label": "poster1",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-20T13:32:56.078Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0074"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 5,
+              "o": [
+                0,
+                0.47635373798888425,
+                -0.9747687128472737
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                0,
+                0,
+                -0.9747687128472737
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                0,
+                0.47635373798888425,
+                -0.9747687128472737
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0,
+                0,
+                -0.9747687128472737
+              ]
+            },
+            {
+              "i": 4,
+              "o": [
+                0,
+                0.47635373798888425,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0,
+                0.47635373798888425,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-20T13:34:48.863Z"
     }
   },
   "textures": {
@@ -1519,6 +2033,54 @@
     "tex:0062": {
       "name": "beer_top.png",
       "url": "textures/beer-top-4c5482025e.png"
+    },
+    "tex:0063": {
+      "name": "mobile_lato.png",
+      "url": "textures/mobile-lato-6015f78629.png"
+    },
+    "tex:0064": {
+      "name": "mobile_piccolo_lato.png",
+      "url": "textures/mobile-piccolo-lato-80727cf894.png"
+    },
+    "tex:0065": {
+      "name": "mobile_sopra.png",
+      "url": "textures/mobile-sopra-15dfbbc7a8.png"
+    },
+    "tex:0066": {
+      "name": "armadio_face.png",
+      "url": "textures/armadio-face-8d155530dc.png"
+    },
+    "tex:0067": {
+      "name": "armadio_lato.png",
+      "url": "textures/armadio-lato-5c464013e9.png"
+    },
+    "tex:0068": {
+      "name": "armadio_sopra.png",
+      "url": "textures/armadio-sopra-67689b9d58.png"
+    },
+    "tex:0069": {
+      "name": "barile1_corpo.png",
+      "url": "textures/barile1-corpo-59b9151016.png"
+    },
+    "tex:0070": {
+      "name": "barile1_tappo.png",
+      "url": "textures/barile1-tappo-612c0e98c7.png"
+    },
+    "tex:0071": {
+      "name": "Attrezzi_face.png",
+      "url": "textures/attrezzi-face-1ea06fa22f.png"
+    },
+    "tex:0072": {
+      "name": "Attrezzi_side.png",
+      "url": "textures/attrezzi-side-f47d243a5f.png"
+    },
+    "tex:0073": {
+      "name": "attrezzi_top.png",
+      "url": "textures/attrezzi-top-9aaed59a06.png"
+    },
+    "tex:0074": {
+      "name": "poster3.png",
+      "url": "textures/poster3-28308c5d74.png"
     }
   },
   "worldTextures": {
