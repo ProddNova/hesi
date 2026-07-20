@@ -1,9 +1,9 @@
-const CACHE = 'shutoko-nights-v22';
+const CACHE = 'shutoko-nights-v23';
 const CORE = [
-  './', './index.html', './styles.css', './styles/dev-map.css', './manifest.webmanifest', './icon.svg',
+  './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './manifest.webmanifest', './icon.svg',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
   './js/physics.js', './js/traffic.js', './js/data.js',
-  './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js', './js/dev-map.js', './data/routes-smoothed.js'
+  './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js', './js/dev-map.js', './js/debug-stats.js', './data/routes-smoothed.js'
 ];
 
 // Editor texture files are content-hashed (textures/<name>-<hash>.<ext>), so a

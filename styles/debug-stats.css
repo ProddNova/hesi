@@ -1,0 +1,89 @@
+/* Debug stats overlay (js/debug-stats.js) — isolated from styles.css.
+   Layering: above the debug menu (90), below the fade layer (100) and the
+   developer map (200); the manual-copy dialog sits above everything. */
+
+#debug-stats-panel {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  z-index: 95;
+  margin: 0;
+  padding: 9px 12px;
+  max-width: min(92vw, 480px);
+  overflow: hidden;
+  border: 1px solid rgba(110, 150, 210, 0.45);
+  border-left: 4px solid var(--amber, #ff9a2e);
+  background: rgba(4, 9, 17, 0.85);
+  color: #cfe3ff;
+  font: 11px/1.55 var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  white-space: pre;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+#debug-stats-rec {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  z-index: 95;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 70, 80, 0.65);
+  background: rgba(20, 4, 8, 0.85);
+  color: #ff5a63;
+  font: 10px/1.4 var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  animation: ds-rec-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ds-rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+#debug-stats-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 4, 9, 0.78);
+}
+
+#debug-stats-fallback .ds-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(720px, 92vw);
+  padding: 18px;
+  border: 1px solid #465267;
+  background: #0b111a;
+  color: #e8f0fb;
+  font: 12px var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.45);
+}
+
+#debug-stats-fallback .ds-card b { color: var(--amber, #ff9a2e); letter-spacing: 0.15em; }
+#debug-stats-fallback .ds-card p { margin: 0; color: #97a5b8; }
+
+#debug-stats-fallback textarea {
+  height: min(320px, 46dvh);
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid #39475a;
+  background: #070b12;
+  color: #cfe3ff;
+  font: 10px/1.5 var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  white-space: pre;
+}
+
+#debug-stats-fallback .ds-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+#debug-stats-fallback .ds-actions button {
+  padding: 8px 16px;
+  border: 1px solid #48576b;
+  background: #111a27;
+  color: var(--amber, #ff9a2e);
+  font: 10px var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  cursor: pointer;
+}
