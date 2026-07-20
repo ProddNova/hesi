@@ -116,7 +116,13 @@ full-screen modeling section that is always available inside the editor:
   be reused across faces and objects. Each face can use **Stretch** or
   **Fit & crop** (aspect-preserving: it freezes the image projection when
   selected, then later vertex edits clip that same stationary image through
-  the new face silhouette), plus independent horizontal and vertical flips
+  the new face silhouette), plus independent horizontal and vertical flips.
+  The **⇄ Opposite** button clones a face onto its geometric opposite
+  (front↔back, left↔right, top↔bottom) as an exact mirror image — texture,
+  colour, fit, flips, and every pulled or added vertex included
+- **Outlines** (`O` or the ▦ Outlines toggle): wireframe overlay of the
+  object being edited — every part shows its edge silhouette and the selected
+  part its full triangle wireframe, visible even through the surface
 - **Vertices mode**: drag welded vertex handles to deform primitives into
   hand-made low-poly shapes (offsets are saved with the object); **+ Vertices**
   (or the *Vertex detail* field) subdivides a part for more editable vertices
