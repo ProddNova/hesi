@@ -1,6 +1,90 @@
 {
   "version": 1,
   "assets": {
+    "custom:0001": {
+      "id": "custom:0001",
+      "label": "Macchinetta_primo_test",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-19T19:51:32.627Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0001"
+            },
+            "right": {
+              "texture": "tex:0002"
+            },
+            "left": {
+              "texture": "tex:0002"
+            },
+            "top": {
+              "texture": "tex:0002"
+            },
+            "bottom": {
+              "texture": "tex:0002"
+            },
+            "back": {
+              "texture": "tex:0002"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 5,
+              "o": [
+                0,
+                0.6537461659839807,
+                0
+              ]
+            },
+            {
+              "i": 4,
+              "o": [
+                0,
+                0.6600825633725687,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0,
+                0.6621340047953179,
+                0
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                0,
+                0.6532615927394589,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-19T19:57:15.839Z"
+    },
     "custom:0003": {
       "id": "custom:0003",
       "label": "mica_test",
