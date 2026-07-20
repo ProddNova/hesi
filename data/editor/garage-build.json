@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "garage",
-  "generatedAt": "2026-07-20T19:16:33.100Z",
+  "generatedAt": "2026-07-20T19:23:31.696Z",
   "project": {
-    "draftSignature": "fnv1a32:40f1bfd0",
+    "draftSignature": "fnv1a32:29a8224d",
     "name": "HESI Garage Interior",
     "path": "data/editor/garage-project.json"
   },
@@ -1816,10 +1816,10 @@
         6
       ],
       "quaternion": [
-        -0.02346,
-        -0.12425,
-        -0.0324,
-        0.99144
+        0,
+        -0.28119,
+        0,
+        0.95965
       ],
       "scale": [
         1.5,
