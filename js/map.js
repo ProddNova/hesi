@@ -8749,6 +8749,19 @@ export class HighwayMap {
     return this;
   }
 
+  /**
+   * Attaches an externally built object (editor placements) to the streamed
+   * chunk containing `position`, so custom content pops in/out with the rest
+   * of the world instead of rendering from any distance. Draw calls stay
+   * bounded no matter how many objects the map accumulates.
+   */
+  attachStreamedObject(object, position = null) {
+    const p = position || object.position;
+    const chunk = this._chunkFor(this._chunkKey(p.x, p.z));
+    chunk.group.add(object);
+    return object;
+  }
+
   /** Quality scaling for the effect layers: Low hides the wet-asphalt streaks. */
   setQuality(quality) {
     if (quality === this._quality) return;

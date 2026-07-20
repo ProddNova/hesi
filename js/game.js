@@ -7,6 +7,9 @@ import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260713a';
 import { applyEditorBuilds } from './editor-map-patch.js?v=20260720b';
+// Same specifier as editor-map-patch.js so both share one module instance
+// (and one texture cache/budget); a ?v= query here would fork the module.
+import { setTextureSizeBudget } from './custom-assets.js';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 
@@ -209,7 +212,18 @@ class ShutokoNights {
     },480);
   }
   exitGarage(){
-    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
+    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.garage.root.visible=false;this.releaseGarageTextures();this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
+  }
+  // The garage scene is never rendered while driving, but its textures (the
+  // editor's furniture/wall/poster images) stay uploaded after the first
+  // garage frame — the game boots into the garage, so they otherwise occupy
+  // VRAM for the whole drive. Dropping the GPU copies here (JS images stay
+  // cached) keeps long drives free of that pressure on weak GPUs; three.js
+  // re-uploads them automatically on the next garage render.
+  releaseGarageTextures(){
+    const collect=scene=>{const set=new Set();scene.traverse(o=>{for(const m of(Array.isArray(o.material)?o.material:o.material?[o.material]:[]))for(const key of ['map','emissiveMap','alphaMap','lightMap','aoMap'])if(m[key])set.add(m[key]);});return set;};
+    const keep=collect(this.roadScene);
+    for(const t of collect(this.garageScene))if(!keep.has(t))t.dispose();
   }
 
   getInput(){
@@ -565,6 +579,10 @@ class ShutokoNights {
     this.camera.aspect=innerWidth/Math.max(1,innerHeight);this.camera.updateProjectionMatrix();
     this.canvas.style.imageRendering='auto';
     this.map?.setQuality?.(q);
+    // Editor-imported textures are capped to a per-quality size so imported
+    // 1000+ px images cannot blow VRAM on weak GPUs; cached textures re-upload
+    // at the new cap when the player changes quality.
+    setTextureSizeBudget({low:128,medium:256,high:512}[q]||256);
   }
   // The old PSX pass (vertex snap, 31-level posterize, nearest-filter mush) is
   // gone. This pass only normalizes textures for the clean PS2 look: bilinear
