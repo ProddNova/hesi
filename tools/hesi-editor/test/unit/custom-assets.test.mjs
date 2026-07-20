@@ -160,6 +160,28 @@ test('face texture cover preserves aspect, crops centrally, and flips per axis',
   });
 });
 
+test('cover zoom magnifies and pan slides the sampled window', () => {
+  assert.deepEqual(faceTextureTransform({ fit: 'cover', imageAspect: 2, surfaceAspect: 1, zoom: 2 }), {
+    repeat: [0.25, 0.5], offset: [0.375, 0.25],
+  });
+  // +x pan slides the image right: the window lands at the image's left edge.
+  assert.deepEqual(faceTextureTransform({ fit: 'cover', imageAspect: 2, surfaceAspect: 1, pan: [1, 0] }), {
+    repeat: [0.5, 1], offset: [0, 0],
+  });
+  // Flips keep the perceived slide direction: +x still moves the image right.
+  assert.deepEqual(faceTextureTransform({ fit: 'cover', imageAspect: 2, surfaceAspect: 1, pan: [1, 0], flipX: true }), {
+    repeat: [-0.5, 1], offset: [1, 0],
+  });
+  // Zoom never drops below 1: the window would leave the image and smear.
+  assert.deepEqual(faceTextureTransform({ fit: 'cover', imageAspect: 2, surfaceAspect: 1, zoom: 0.25 }), {
+    repeat: [0.5, 1], offset: [0.25, 0],
+  });
+  // Stretch ignores zoom/pan entirely.
+  assert.deepEqual(faceTextureTransform({ fit: 'stretch', zoom: 4, pan: [1, 1] }), {
+    repeat: [1, 1], offset: [0, 0],
+  });
+});
+
 test('Fit & crop keeps a fixed image plane while moved vertices crop it', () => {
   const part = {
     kind: 'mesh',
@@ -234,6 +256,23 @@ test('custom asset face styles validate fit and flips', () => {
   assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.fit')));
   assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.flipX')));
   assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.projection')));
+});
+
+test('custom asset face styles validate cover zoom and pan ranges', () => {
+  const document = validDocument();
+  const part = document.assets['custom:0001'].parts[0];
+  part.faces.top = {
+    texture: 'tex:0001',
+    fit: 'cover',
+    zoom: 2,
+    pan: [0.5, -0.5],
+    projection: capturePartFaceProjection(part, 'top'),
+  };
+  assert.deepEqual(customAssetsDocumentErrors(document), []);
+  part.faces.top.zoom = 0.5;
+  part.faces.top.pan = [2, 0];
+  assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.zoom')));
+  assert.ok(customAssetsDocumentErrors(document).some((error) => error.includes('.pan')));
 });
 
 test('buildCustomAssetGroup skips unresolvable assembled parts without throwing', () => {

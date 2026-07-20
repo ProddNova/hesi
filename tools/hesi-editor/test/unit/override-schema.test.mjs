@@ -54,7 +54,7 @@ test('persisted Euler transforms round-trip through internal quaternions', () =>
 test('project schema persists per-face texture styles and checks texture references', () => {
   const document = blankProjectDocument('Textures');
   document.entityOverrides.wall = {
-    faceTextures: { '0:4': { texture: 'tex:0001', fit: 'cover', flipX: true } },
+    faceTextures: { '0:4': { texture: 'tex:0001', fit: 'cover', flipX: true, zoom: 2.5, pan: [0.25, -1] } },
   };
   assert.equal(validateProjectDocument(document, {
     entityIds: new Set(['wall']), textureIds: new Set(['tex:0001']),
@@ -65,4 +65,13 @@ test('project schema persists per-face texture styles and checks texture referen
   assert.throws(() => validateProjectDocument(document, {
     entityIds: new Set(['wall']), textureIds: new Set(['tex:9999']),
   }), /missing texture/);
+  document.entityOverrides.wall.faceTextures['0:4'].zoom = 0.5;
+  assert.throws(() => validateProjectDocument(document, {
+    entityIds: new Set(['wall']), textureIds: new Set(['tex:0001']),
+  }), /zoom/);
+  document.entityOverrides.wall.faceTextures['0:4'].zoom = 2.5;
+  document.entityOverrides.wall.faceTextures['0:4'].pan = [2, 0];
+  assert.throws(() => validateProjectDocument(document, {
+    entityIds: new Set(['wall']), textureIds: new Set(['tex:0001']),
+  }), /pan/);
 });

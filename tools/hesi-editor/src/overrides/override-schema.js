@@ -40,6 +40,13 @@ function validateFaceTextures(faceTextures, path, errors, textureIds = null) {
     } else if (textureIds && !textureIds.has(style.texture)) errors.push(`${slotPath}.texture references missing texture ${style.texture}`);
     if (style.fit !== undefined && !['stretch', 'cover'].includes(style.fit)) errors.push(`${slotPath}.fit must be stretch or cover`);
     for (const key of ['flipX', 'flipY']) if (style[key] !== undefined && typeof style[key] !== 'boolean') errors.push(`${slotPath}.${key} must be boolean`);
+    if (style.zoom !== undefined && !(Number.isFinite(style.zoom) && style.zoom >= 1 && style.zoom <= 20)) {
+      errors.push(`${slotPath}.zoom must be a number between 1 and 20`);
+    }
+    if (style.pan !== undefined && (!Array.isArray(style.pan) || style.pan.length !== 2
+      || !style.pan.every((value) => Number.isFinite(value) && value >= -1 && value <= 1))) {
+      errors.push(`${slotPath}.pan must contain 2 numbers between -1 and 1`);
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 import { sceneList } from '../scenes/scene-registry.js';
 import { GRID_SNAP_STEPS } from '../interaction/grid-snap.js';
-import { objectFaceSlots, textureSourceUrl } from '/js/custom-assets.js';
+import { objectFaceSlots, previewFaceTextureTransform, textureSourceUrl } from '/js/custom-assets.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -890,6 +890,42 @@ export function createEditorShell(root) {
         clear.addEventListener('click', () => triggerAction('face-texture-set', { slotKey: slot.key, texture: null }));
         controls.append(fit, flipX, flipY, clear);
         card.append(controls);
+        if (style.fit === 'cover') {
+          // Fit & crop only: enlarge the image and slide it across the face.
+          // Dragging previews live on the mesh; releasing a slider commits.
+          const adjust = element('div', 'face-texture-adjust');
+          const slider = (labelText, min, max, step, value, title) => {
+            const wrap = element('label');
+            wrap.title = title;
+            wrap.append(element('span', '', labelText));
+            const input = document.createElement('input');
+            input.type = 'range';
+            input.min = String(min);
+            input.max = String(max);
+            input.step = String(step);
+            input.value = String(value);
+            input.setAttribute('aria-label', `${slot.faceName} ${title}`);
+            wrap.append(input);
+            return { wrap, input };
+          };
+          const pan = Array.isArray(style.pan) ? style.pan : [0, 0];
+          const zoom = slider('Zoom', 1, 8, 0.05, Number.isFinite(style.zoom) ? style.zoom : 1,
+            'Enlarge the image on this face — zoom in, then use Move to pick the visible part');
+          const panX = slider('Move ↔', -1, 1, 0.01, pan[0] || 0, 'Slide the image left/right across the face');
+          const panY = slider('Move ↕', -1, 1, 0.01, pan[1] || 0, 'Slide the image up/down across the face');
+          const cropPatch = () => ({
+            zoom: Number(zoom.input.value),
+            pan: [Number(panX.input.value), Number(panY.input.value)],
+          });
+          for (const { input } of [zoom, panX, panY]) {
+            input.addEventListener('input', () => previewFaceTextureTransform(slot.mesh, slot.materialIndex, { ...style, ...cropPatch() }));
+            input.addEventListener('change', () => triggerAction('face-texture-style', { slotKey: slot.key, patch: cropPatch() }));
+          }
+          const reset = button('Reset', '', { title: 'Back to the centred crop at 1× zoom' });
+          reset.addEventListener('click', () => triggerAction('face-texture-style', { slotKey: slot.key, patch: { zoom: 1, pan: [0, 0] } }));
+          adjust.append(zoom.wrap, panX.wrap, panY.wrap, reset);
+          card.append(adjust);
+        }
       }
       section.body.append(card);
     }

@@ -40,10 +40,16 @@ test('build operations validate persisted face texture styles', () => {
     operations: [{
       op: 'garage-object', childIndex: 0,
       position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1], visible: true,
-      faceTextures: { '0:0': { texture: 'tex:0001', fit: 'cover', flipY: true } },
+      faceTextures: { '0:0': { texture: 'tex:0001', fit: 'cover', flipY: true, zoom: 3, pan: [-0.5, 1] } },
     }],
   };
   assert.equal(validateBuildDocument(build), true);
+  build.operations[0].faceTextures['0:0'].zoom = 40;
+  assert.throws(() => validateBuildDocument(build), BuildValidationError);
+  build.operations[0].faceTextures['0:0'].zoom = 3;
+  build.operations[0].faceTextures['0:0'].pan = [0, 1.5];
+  assert.throws(() => validateBuildDocument(build), BuildValidationError);
+  build.operations[0].faceTextures['0:0'].pan = [-0.5, 1];
   build.operations[0].faceTextures['bad-slot'] = { texture: 'nope' };
   assert.throws(() => validateBuildDocument(build), BuildValidationError);
 });

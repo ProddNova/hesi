@@ -6,7 +6,8 @@ import {
   buildPartObject, captureUnionFaceProjection, captureViewFaceProjection, clonePartFaceToOpposite,
   convertPartToMesh, mergePartFaces, meshFacePlanarRegions, meshInsertVertexAtPoint,
   meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceCoverProjection, partFaceNames,
-  partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
+  partGeometry, previewFaceTextureTransform, splitPartFaceByPlanarRegions, textureSourceUrl,
+  translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -970,6 +971,7 @@ export class ModelerPanel {
         fromView.addEventListener('click', () => this._projectFacesFromView(part, [faceName]));
         options.append(fitLabel, flipX, flipY, fromView);
         this.inspector.append(options);
+        if (style.fit === 'cover') this.inspector.append(this._buildFaceCropControls(part, faceName, style));
       }
     }
     if (this.checkedFaces.size >= 2) {
@@ -989,6 +991,73 @@ export class ModelerPanel {
       group.append(apply, applyView, merge, clear);
       this.inspector.append(group);
     }
+  }
+
+  /**
+   * Zoom + move sliders for a Fit & crop face: enlarge the image and slide it
+   * across the surface it covers. Dragging previews live on the built mesh;
+   * releasing the slider commits (with history) and rebuilds.
+   */
+  _buildFaceCropControls(part, faceName, style) {
+    const adjust = element('div', 'modeler-face-options modeler-face-crop');
+    const slider = (labelText, min, max, step, value, title) => {
+      const wrap = element('label');
+      wrap.title = title;
+      wrap.append(element('span', '', labelText));
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(value);
+      input.setAttribute('aria-label', `${faceName} ${title}`);
+      wrap.append(input);
+      return { wrap, input };
+    };
+    const pan = Array.isArray(style.pan) ? style.pan : [0, 0];
+    const zoom = slider('Zoom', 1, 8, 0.05, Number.isFinite(style.zoom) ? style.zoom : 1,
+      'Enlarge the image on this face — zoom in, then use Move to pick the visible part');
+    const panX = slider('Move ↔', -1, 1, 0.01, pan[0] || 0, 'Slide the image left/right across the face');
+    const panY = slider('Move ↕', -1, 1, 0.01, pan[1] || 0, 'Slide the image up/down across the face');
+    const cropStyle = () => ({
+      ...style,
+      zoom: Number(zoom.input.value),
+      pan: [Number(panX.input.value), Number(panY.input.value)],
+    });
+    const commitCrop = () => {
+      const next = cropStyle();
+      if (next.zoom === 1) delete next.zoom;
+      if (!next.pan[0] && !next.pan[1]) delete next.pan;
+      part.faces[faceName] = next;
+      this._markDirty();
+      this._rebuildObject();
+      this._renderInspector();
+    };
+    for (const { input } of [zoom, panX, panY]) {
+      input.addEventListener('input', () => this._previewFaceCrop(part, faceName, cropStyle()));
+      input.addEventListener('change', commitCrop);
+    }
+    const reset = button('Reset', 'tool-button small', 'Back to the centred crop at 1× zoom');
+    reset.addEventListener('click', () => {
+      const next = { ...style };
+      delete next.zoom;
+      delete next.pan;
+      part.faces[faceName] = next;
+      this._markDirty();
+      this._rebuildObject();
+      this._renderInspector();
+    });
+    adjust.append(zoom.wrap, panX.wrap, panY.wrap, reset);
+    return adjust;
+  }
+
+  /** Live zoom/pan preview during a slider drag; the slider's change commits. */
+  _previewFaceCrop(part, faceName, style) {
+    const node = this.partNodes[this.definition.parts.indexOf(part)];
+    if (!node?.isMesh) return;
+    previewFaceTextureTransform(node, partFaceNames(part).indexOf(faceName), style, {
+      surfaceAspect: style.projection?.surfaceAspect,
+    });
   }
 
   /**

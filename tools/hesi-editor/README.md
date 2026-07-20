@@ -117,6 +117,10 @@ full-screen modeling section that is always available inside the editor:
   **Fit & crop** (aspect-preserving: it freezes the image projection when
   selected, then later vertex edits clip that same stationary image through
   the new face silhouette), plus independent horizontal and vertical flips.
+  Fit & crop faces also get **Zoom** and **Move ↔ / ↕** sliders to enlarge
+  the image and slide it across the surface it covers — the preview updates
+  live while dragging, releasing the slider commits (undoable), and the same
+  controls appear on Fit & crop faces in the Map Editor inspector.
   The **⇄ Opposite** button clones a face onto its geometric opposite
   (front↔back, left↔right, top↔bottom) as an exact mirror image — texture,
   colour, fit, flips, and every pulled or added vertex included

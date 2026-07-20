@@ -2,11 +2,20 @@ import { applyObjectFaceStyles, objectFaceSlots } from '../../../../js/custom-as
 
 const clone = (value) => value == null ? value : structuredClone(value);
 
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
 function compactStyle(style) {
   if (!style?.texture) return null;
+  const cover = style.fit === 'cover';
+  const zoom = cover && Number.isFinite(style.zoom) ? clamp(style.zoom, 1, 20) : 1;
+  const pan = cover && Array.isArray(style.pan) && style.pan.length === 2 && style.pan.every(Number.isFinite)
+    ? style.pan.map((value) => clamp(value, -1, 1))
+    : [0, 0];
   return {
     texture: style.texture,
-    ...(style.fit === 'cover' ? { fit: 'cover' } : {}),
+    ...(cover ? { fit: 'cover' } : {}),
+    ...(zoom !== 1 ? { zoom } : {}),
+    ...(pan[0] || pan[1] ? { pan } : {}),
     ...(style.flipX ? { flipX: true } : {}),
     ...(style.flipY ? { flipY: true } : {}),
   };

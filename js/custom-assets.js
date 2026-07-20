@@ -201,6 +201,12 @@ export function customAssetsDocumentErrors(document) {
               if (style[key] !== undefined && typeof style[key] !== 'boolean') errors.push(`${path}.faces.${face}.${key} must be boolean`);
             }
             if (style.repeat !== undefined && !finiteVector(style.repeat, 2)) errors.push(`${path}.faces.${face}.repeat must contain 2 finite numbers`);
+            if (style.zoom !== undefined && !(Number.isFinite(style.zoom) && style.zoom >= 1 && style.zoom <= FACE_TEXTURE_MAX_ZOOM)) {
+              errors.push(`${path}.faces.${face}.zoom must be a number between 1 and ${FACE_TEXTURE_MAX_ZOOM}`);
+            }
+            if (style.pan !== undefined && !(finiteVector(style.pan, 2) && style.pan.every((value) => value >= -1 && value <= 1))) {
+              errors.push(`${path}.faces.${face}.pan must contain 2 numbers between -1 and 1`);
+            }
             if (style.projection !== undefined && !validFaceProjection(style.projection)) {
               errors.push(`${path}.faces.${face}.projection must describe a finite planar texture projection`);
             }
@@ -1673,13 +1679,25 @@ export function setTextureSizeBudget(maxSize) {
   for (const texture of textureCache.values()) applyTextureSizeBudget(texture);
 }
 
+// Zoom bounds for cover-fit textures. 1 is the classic centred crop; higher
+// magnifies. Zooming below 1 would sample outside the image and smear the
+// clamped edge pixels, so it is never allowed.
+export const FACE_TEXTURE_MAX_ZOOM = 20;
+
+const clampFaceZoom = (zoom) => (Number.isFinite(zoom) ? Math.min(Math.max(zoom, 1), FACE_TEXTURE_MAX_ZOOM) : 1);
+const clampFacePan = (value) => (Number.isFinite(value) ? Math.min(Math.max(value, -1), 1) : 0);
+
 /**
  * UV transform used by face textures. `cover` preserves the image aspect and
- * samples a centred sub-rectangle, so the mesh itself clips the excess when a
- * rectangular face is reshaped into a triangle or another silhouette.
+ * samples a sub-rectangle, so the mesh itself clips the excess when a
+ * rectangular face is reshaped into a triangle or another silhouette. `zoom`
+ * (>= 1) magnifies the image on the face and `pan` ([x, y], each -1..1,
+ * 0 = centred) slides it across the face — +x moves the image right, +y up —
+ * clamped so the sampled window never leaves the image.
  */
 export function faceTextureTransform({
   fit = 'stretch', imageAspect = 1, surfaceAspect = 1, repeat = null, flipX = false, flipY = false,
+  zoom = 1, pan = null,
 } = {}) {
   const safeImageAspect = Number.isFinite(imageAspect) && imageAspect > 0 ? imageAspect : 1;
   const safeSurfaceAspect = Number.isFinite(surfaceAspect) && surfaceAspect > 0 ? surfaceAspect : 1;
@@ -1690,8 +1708,15 @@ export function faceTextureTransform({
     scale[1] = 1;
     if (safeImageAspect > safeSurfaceAspect) scale[0] = safeSurfaceAspect / safeImageAspect;
     else if (safeImageAspect < safeSurfaceAspect) scale[1] = safeImageAspect / safeSurfaceAspect;
-    offset[0] = (1 - scale[0]) * 0.5;
-    offset[1] = (1 - scale[1]) * 0.5;
+    const safeZoom = clampFaceZoom(zoom);
+    scale[0] /= safeZoom;
+    scale[1] /= safeZoom;
+    // A flip mirrors the sampled window in place, which inverts the perceived
+    // slide direction; negating pan keeps "+x moves the image right" true.
+    const panX = clampFacePan(pan?.[0]) * (flipX ? -1 : 1);
+    const panY = clampFacePan(pan?.[1]) * (flipY ? -1 : 1);
+    offset[0] = (1 - scale[0]) * (1 - panX) * 0.5;
+    offset[1] = (1 - scale[1]) * (1 - panY) * 0.5;
   }
   if (flipX) { offset[0] += scale[0]; scale[0] *= -1; }
   if (flipY) { offset[1] += scale[1]; scale[1] *= -1; }
@@ -1706,9 +1731,10 @@ export function faceTextureTransform({
  * immediately and the image streams in without blocking scene construction.
  */
 export function textureFromSource(source, {
-  repeat = null, fit = 'stretch', surfaceAspect = 1, flipX = false, flipY = false,
+  repeat = null, fit = 'stretch', surfaceAspect = 1, flipX = false, flipY = false, zoom = 1, pan = null,
 } = {}) {
-  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY)]);
+  const cropKey = [clampFaceZoom(zoom), clampFacePan(pan?.[0]), clampFacePan(pan?.[1])].map((value) => value.toFixed(3));
+  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY), ...cropKey]);
   if (textureCache.has(key)) return textureCache.get(key);
   // Outside the browser (node tests) there is no image decoding: hand back a
   // bare texture object so material wiring stays testable.
@@ -1716,7 +1742,7 @@ export function textureFromSource(source, {
     const image = texture.image;
     const width = image?.naturalWidth || image?.videoWidth || image?.width || 1;
     const height = image?.naturalHeight || image?.videoHeight || image?.height || 1;
-    const transform = faceTextureTransform({ fit, imageAspect: width / Math.max(height, 1), surfaceAspect, repeat, flipX, flipY });
+    const transform = faceTextureTransform({ fit, imageAspect: width / Math.max(height, 1), surfaceAspect, repeat, flipX, flipY, zoom, pan });
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestMipmapLinearFilter;
@@ -1778,6 +1804,43 @@ function geometryMaterialAspect(geometry, materialIndex = 0, scale = [1, 1, 1]) 
   }
   if (!weightSum || vLength < 1e-8) return 1;
   return Math.min(1000, Math.max(0.001, uLength / vLength));
+}
+
+/**
+ * Live-previews a face style's zoom/pan (and flips) by retargeting the
+ * repeat/offset of the mesh's existing texture, without minting new entries in
+ * the texture cache — editors call this per slider tick, then commit through
+ * a full rebuild. The material's map is cloned once so the shared cached
+ * texture keeps the transform its own key describes.
+ */
+export function previewFaceTextureTransform(mesh, materialIndex, style, { surfaceAspect = null } = {}) {
+  const materials = Array.isArray(mesh?.material) ? mesh.material : [mesh?.material];
+  const material = materials[materialIndex];
+  if (!material?.map) return false;
+  const image = material.map.userData?.hesiSourceImage || material.map.image;
+  const width = image?.naturalWidth || image?.videoWidth || image?.width || 1;
+  const height = image?.naturalHeight || image?.videoHeight || image?.height || 1;
+  const aspect = Number.isFinite(surfaceAspect) && surfaceAspect > 0
+    ? surfaceAspect
+    : geometryMaterialAspect(mesh.geometry, materialIndex, mesh.getWorldScale?.(new THREE.Vector3())?.toArray?.() || [1, 1, 1]);
+  if (!material.userData.hesiPreviewMap) {
+    material.map = material.map.clone();
+    material.map.needsUpdate = true;
+    material.userData.hesiPreviewMap = true;
+  }
+  const transform = faceTextureTransform({
+    fit: style?.fit === 'cover' ? 'cover' : 'stretch',
+    imageAspect: width / Math.max(height, 1),
+    surfaceAspect: aspect,
+    repeat: finiteVector(style?.repeat, 2) ? style.repeat : null,
+    flipX: Boolean(style?.flipX),
+    flipY: Boolean(style?.flipY),
+    zoom: style?.zoom,
+    pan: finiteVector(style?.pan, 2) ? style.pan : null,
+  });
+  material.map.repeat.set(...transform.repeat);
+  material.map.offset.set(...transform.offset);
+  return true;
 }
 
 /**
@@ -2010,6 +2073,8 @@ function faceMaterial(part, faceName, texturesById, surfaceAspect = 1) {
       surfaceAspect,
       flipX: Boolean(style.flipX),
       flipY: Boolean(style.flipY),
+      zoom: style.zoom,
+      pan: finiteVector(style.pan, 2) ? style.pan : null,
     });
     parameters.color = new THREE.Color('#ffffff');
     // PSX-style cutout: pixels erased to transparency in the texture editor
@@ -2156,6 +2221,8 @@ export function applyObjectFaceStyles(root, faceStyles = {}, texturesById = {}) 
         surfaceAspect: geometryMaterialAspect(mesh.geometry, materialIndex, worldScale.toArray()),
         flipX: Boolean(style.flipX),
         flipY: Boolean(style.flipY),
+        zoom: style.zoom,
+        pan: finiteVector(style.pan, 2) ? style.pan : null,
       });
       material.color?.set?.('#ffffff');
       material.alphaTest = 0.5; // transparent texture pixels punch through
