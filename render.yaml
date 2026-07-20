@@ -17,3 +17,8 @@ services:
       - path: /*
         name: Cache-Control
         value: public, max-age=0, must-revalidate
+      # Editor textures are content-hashed (name changes when pixels change),
+      # so browsers can cache them forever without ever seeing stale images.
+      - path: /data/editor/textures/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable

@@ -111,6 +111,9 @@ export class CustomAssetStore {
     if (dataUrl !== undefined) {
       assertTextureDataUrl(record.name || id, dataUrl);
       record.dataUrl = dataUrl;
+      // The embedded edit supersedes any externalized file; the dev server
+      // writes a fresh content-hashed file (and url) on the next save.
+      delete record.url;
     }
     if (name !== undefined) record.name = String(name);
     this.dirty = true;

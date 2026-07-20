@@ -230,6 +230,7 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
     new URL('../../../data/editor/custom-assets.json.bak', import.meta.url),
   ];
   const snapshots = await Promise.all(ASSET_FILES.map(snapshotOptional));
+  let extractedTextureUrl = null;
   try {
     const document = {
       version: 1,
@@ -252,11 +253,27 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
     assert.equal(put.status, 200);
     const saved = await put.json();
     assert.equal(saved.path, 'data/editor/custom-assets.json');
+    assert.equal(saved.texturesExtracted, 1, 'the embedded data URL is externalized on save');
     const get = await fetch(`${BASE}/__hesi_editor_assets`);
     assert.equal(get.status, 200);
     const loaded = await get.json();
     assert.equal(loaded.document.assets['custom:0001'].label, 'Cestino test');
     assert.equal(loaded.document.worldTextures.road, 'tex:0001');
+    const savedTexture = loaded.document.textures['tex:0001'];
+    assert.equal(savedTexture.dataUrl, undefined, 'the saved document no longer embeds image bytes');
+    assert.match(savedTexture.url, /^textures\/top-[0-9a-f]{10}\.png$/);
+    extractedTextureUrl = savedTexture.url;
+    const textureBytes = await readFile(new URL(`../../../data/editor/${extractedTextureUrl}`, import.meta.url));
+    assert.ok(textureBytes.length > 0, 'the externalized texture file holds the decoded image');
+    // A url-referencing document (the shape the server itself just saved)
+    // must round-trip too — the editor re-saves without re-embedding.
+    const rePut = await fetch(`${BASE}/__hesi_editor_assets`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ document: loaded.document }),
+    });
+    assert.equal(rePut.status, 200);
+    assert.equal((await rePut.json()).texturesExtracted, 0);
     const badId = await fetch(`${BASE}/__hesi_editor_assets`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -270,6 +287,7 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
     });
     assert.equal(badTexture.status, 400);
   } finally {
+    if (extractedTextureUrl) await rm(new URL(`../../../data/editor/${extractedTextureUrl}`, import.meta.url), { force: true });
     await Promise.all(ASSET_FILES.map((file, index) => restoreOptional(file, snapshots[index])));
   }
 });

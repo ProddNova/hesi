@@ -1,6 +1,6 @@
 import { sceneList } from '../scenes/scene-registry.js';
 import { GRID_SNAP_STEPS } from '../interaction/grid-snap.js';
-import { objectFaceSlots } from '/js/custom-assets.js';
+import { objectFaceSlots, textureSourceUrl } from '/js/custom-assets.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -850,7 +850,7 @@ export function createEditorShell(root) {
       heading.append(element('b', '', slot.faceName), element('small', '', `${slot.meshLabel} · ${slot.materialName}`));
       if (texture) {
         const thumb = element('img', 'face-texture-thumb');
-        thumb.src = texture.dataUrl;
+        thumb.src = textureSourceUrl(texture);
         thumb.alt = texture.name || texture.id;
         heading.prepend(thumb);
       }

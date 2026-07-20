@@ -6,7 +6,7 @@ import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260713a';
-import { applyEditorBuilds } from './editor-map-patch.js?v=20260720a';
+import { applyEditorBuilds } from './editor-map-patch.js?v=20260720b';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 

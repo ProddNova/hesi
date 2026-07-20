@@ -5,7 +5,7 @@ import {
   PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets, buildPartObject,
   capturePartFaceProjection, captureUnionFaceProjection, clonePartFaceToOpposite, convertPartToMesh,
   meshInsertVertexAtPoint, meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceNames,
-  partGeometry, splitPartFaceByPlanarRegions, translatePartFace, weldedVertices,
+  partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -858,7 +858,7 @@ export class ModelerPanel {
       const textureRecord = style.texture ? this.store.getTexture(style.texture) : null;
       if (textureRecord) {
         const thumb = element('img', 'modeler-face-thumb');
-        thumb.src = textureRecord.dataUrl;
+        thumb.src = textureSourceUrl(textureRecord);
         thumb.alt = textureRecord.name || style.texture;
         thumb.title = textureRecord.name || style.texture;
         row.append(thumb);
@@ -1012,7 +1012,7 @@ export class ModelerPanel {
     for (const texture of textures) {
       const card = element('div', 'modeler-texture-card');
       const thumb = element('img');
-      thumb.src = texture.dataUrl;
+      thumb.src = textureSourceUrl(texture);
       thumb.alt = texture.name || texture.id;
       card.append(thumb, element('small', '', texture.name || texture.id));
       card.title = `${texture.name || texture.id} · ${texture.id}`;
@@ -1248,7 +1248,7 @@ export class ModelerPanel {
       dialog.remove();
       this.textureEditor = null;
     };
-    image.src = record.dataUrl;
+    image.src = textureSourceUrl(record);
 
     const closeDialog = () => {
       dialog.remove();
@@ -1310,7 +1310,7 @@ export class ModelerPanel {
       const currentRecord = current ? this.store.getTexture(current) : null;
       if (currentRecord) {
         const thumb = element('img', 'modeler-face-thumb');
-        thumb.src = currentRecord.dataUrl;
+        thumb.src = textureSourceUrl(currentRecord);
         thumb.alt = currentRecord.name || current;
         row.append(thumb);
       }
@@ -1809,7 +1809,7 @@ export class ModelerPanel {
       const pick = element('button', 'modeler-chooser-item');
       pick.type = 'button';
       const img = element('img');
-      img.src = texture.dataUrl;
+      img.src = textureSourceUrl(texture);
       img.alt = texture.name || texture.id;
       pick.append(img, element('small', '', texture.name || texture.id));
       pick.addEventListener('click', () => { chooser.remove(); useTexture(texture.id); });
