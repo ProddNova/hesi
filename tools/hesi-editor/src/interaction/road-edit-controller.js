@@ -14,7 +14,7 @@ const HANDLE_SURFACE_LIFT = 0.28;
 const LINE_SURFACE_LIFT = 0.16;
 const PREVIEW_SURFACE_LIFT = 0.08;
 const MARKING_SURFACE_LIFT = 0.12;
-const STATUS_HINT = 'Road draft · realistic asphalt preview is live · drag points · right-click road adds · right-click point removes · Save Draft keeps the game unchanged';
+const STATUS_HINT = 'Road editing active · see the Road panel on the right for tools and controls';
 
 /**
  * Road centreline curve edit mode. While a road-route entity is selected this
@@ -28,7 +28,7 @@ const STATUS_HINT = 'Road draft · realistic asphalt preview is live · drag poi
  * handle/line interaction is in progress.
  */
 export class RoadEditController {
-  constructor({ viewport, history, selection, adapter, gridSnap = null, onStatus = () => {}, onDirty = () => {} }) {
+  constructor({ viewport, history, selection, adapter, gridSnap = null, onStatus = () => {}, onDirty = () => {}, onState = () => {} }) {
     this.viewport = viewport;
     this.history = history;
     this.selection = selection;
@@ -36,6 +36,7 @@ export class RoadEditController {
     this.gridSnap = gridSnap;
     this.onStatus = onStatus;
     this.onDirty = onDirty;
+    this.onState = onState;
     this.activeEntity = null;
     this.routeData = null;
     this.route = null;
@@ -222,7 +223,7 @@ export class RoadEditController {
       redo: () => { movePoint(route, index, after); this._afterRouteMutation(route, synthetic); },
       undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
     });
-    this.onStatus('Road draft updated · Save Draft applies it to the editor map only · Apply to Game publishes it');
+    this.onStatus('Road point moved');
     return true;
   }
 
@@ -242,6 +243,98 @@ export class RoadEditController {
     this.dirty.clear();
     this.dirtyRoutes.clear();
     this.onDirty(null, false);
+    this._emitState();
+  }
+
+  /** Publishes the current editing state to the UI's Road panel. */
+  _emitState() {
+    if (!this.active || !this.route) {
+      this.onState(null);
+      return;
+    }
+    const points = this.route.points;
+    let length = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      length += Math.hypot(points[index][0] - points[index - 1][0], points[index][2] - points[index - 1][2]);
+    }
+    if (this.route.closed && points.length > 2) {
+      const first = points[0];
+      const last = points[points.length - 1];
+      length += Math.hypot(first[0] - last[0], first[2] - last[2]);
+    }
+    const index = Number.isInteger(this.activeHandle) && this.activeHandle >= 0 && this.activeHandle < points.length
+      ? this.activeHandle
+      : null;
+    this.onState({
+      active: true,
+      routeId: this.route.id,
+      name: this.route.name || this.route.id,
+      synthetic: this.synthetic,
+      closed: Boolean(this.route.closed),
+      pointCount: points.length,
+      length,
+      lanes: this.runtimeRoute?.lanes ?? null,
+      roadWidth: this.runtimeRoute?.roadWidth ?? null,
+      activeIndex: index,
+      activePoint: index != null ? [points[index][0], points[index][2]] : null,
+      dirtyCount: this.dirty.size,
+    });
+  }
+
+  /** Moves the selected point to exact coordinates (Road panel numeric edit). */
+  setActivePointPosition(x, z) {
+    const route = this.route;
+    const index = this.activeHandle;
+    if (!route || !Number.isInteger(index) || !route.points[index]) return false;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      this.onStatus('Road point coordinates must be numbers');
+      return false;
+    }
+    const point = route.points[index];
+    const before = [point[0], point[2]];
+    if (before[0] === x && before[1] === z) return false;
+    const synthetic = this.synthetic;
+    this.history.execute({
+      label: `Move road point · ${route.name}`,
+      redo: () => { movePoint(route, index, [x, z]); this._afterRouteMutation(route, synthetic); },
+      undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
+    });
+    this.onStatus('Road point moved');
+    return true;
+  }
+
+  /** Removes the selected point (Road panel button; same as Del). */
+  deleteActivePoint() {
+    return this._deletePointAt(this.activeHandle);
+  }
+
+  /**
+   * Selects the previous/next point along the route and frames it, so long
+   * routes can be walked point by point from the Road panel.
+   */
+  stepActivePoint(delta = 1) {
+    const route = this.route;
+    if (!route || !route.points.length) return false;
+    const count = route.points.length;
+    const current = Number.isInteger(this.activeHandle) ? this.activeHandle : (delta >= 0 ? -1 : count);
+    const next = ((current + delta) % count + count) % count;
+    this._setActiveHandle(next);
+    this._refreshHandles({ force: true });
+    this.focusActivePoint();
+    return true;
+  }
+
+  /** Frames the selected point in the viewport. */
+  focusActivePoint() {
+    const route = this.route;
+    const index = this.activeHandle;
+    if (!route || !Number.isInteger(index) || !route.points[index]) return false;
+    const world = this._worldPoint(route.points[index]);
+    const box = new THREE.Box3().setFromCenterAndSize(
+      new THREE.Vector3(world[0], world[1], world[2]),
+      new THREE.Vector3(70, 35, 70),
+    );
+    return this.viewport.focusOn(box);
   }
 
   /** Activates curve editing for road-route entities; deactivates otherwise. */
@@ -285,7 +378,7 @@ export class RoadEditController {
       redo: () => { insertPointAfter(route, index, point); this._afterRouteMutation(route, synthetic); },
       undo: () => { deletePoint(route, index + 1); this._afterRouteMutation(route, synthetic); },
     });
-    this.onStatus('Road draft point added · realistic preview updated · Save Draft keeps the game unchanged');
+    this.onStatus('Road point added');
     return true;
   }
 
@@ -304,7 +397,7 @@ export class RoadEditController {
       redo: () => { deletePoint(route, index); this._afterRouteMutation(route, synthetic); },
       undo: () => { route.points.splice(index, 0, [...snapshot]); this._afterRouteMutation(route, synthetic); },
     });
-    this.onStatus('Road draft point removed · realistic preview updated · Save Draft keeps the game unchanged');
+    this.onStatus('Road point removed');
     return true;
   }
 
@@ -343,6 +436,7 @@ export class RoadEditController {
       this._applyRuntimePreview();
       this._refreshHelpers();
     }
+    this._emitState();
   }
 
   async _activate(routeId) {
@@ -383,7 +477,8 @@ export class RoadEditController {
     this._applyRuntimePreview();
     this._buildHelpers();
     this._refreshTimer = setInterval(() => this._refreshHandles(), REFRESH_INTERVAL_MS);
-    this.onStatus(`${STATUS_HINT}${this.synthetic ? ' · runtime-generated route' : ''}`);
+    this._emitState();
+    this.onStatus(STATUS_HINT);
   }
 
   _deactivate() {
@@ -398,6 +493,7 @@ export class RoadEditController {
     this.yOffset = 0;
     this.activeHandle = null;
     this._clearHelpers();
+    this.onState(null);
   }
 
   _setPointer(event) {
@@ -599,6 +695,7 @@ export class RoadEditController {
     for (const mesh of this.handles) {
       mesh.material = mesh.userData.pointIndex === index ? this._activeHandleMaterial : this._handleMaterial;
     }
+    this._emitState();
   }
 
   dispose() {

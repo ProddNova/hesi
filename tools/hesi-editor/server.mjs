@@ -341,6 +341,25 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (path === BUILD_ENDPOINT) {
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const scene = requestUrl.searchParams.get('scene');
+        const targetPath = BUILD_PATHS[scene];
+        if (!targetPath) throw new Error(`Unknown build scene: ${scene}`);
+        let text;
+        try {
+          text = await readFile(resolve(ROOT, targetPath), 'utf8');
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          // "No build written yet" is a normal state (e.g. the garage scene
+          // before its first Apply to Game): answer 204 so the browser does
+          // not log a console error for a routine startup probe.
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+        sendJson(res, 200, { ok: true, path: targetPath, build: JSON.parse(text) }, req.method);
+        return;
+      }
       if (req.method === 'PUT') {
         const payload = await readJsonBody(req);
         const result = await saveBuild(payload.scene, payload.build);

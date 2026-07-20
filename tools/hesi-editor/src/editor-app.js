@@ -296,6 +296,10 @@ export async function createEditorApp(root) {
       'snap-rotate': () => transformManager.setSnaps({ rotateDegrees: detail }),
       'snap-scale': () => transformManager.setSnaps({ scale: detail }),
       'axis-toggle': () => transformManager.setAxes({ ...transformManager.axes, [detail.axis]: detail.enabled }),
+      'road-point-apply': () => roadEdit?.setActivePointPosition(Number(detail?.x), Number(detail?.z)),
+      'road-point-delete': () => roadEdit?.deleteActivePoint(),
+      'road-point-step': () => roadEdit?.stepActivePoint(Number(detail) || 1),
+      'road-point-focus': () => roadEdit?.focusActivePoint(),
       'project-save': () => runProjectTask(() => saveDraftWorkspace({ name: detail.name })),
       'project-save-as': () => runProjectTask(() => saveDraftWorkspace({ path: detail.path, name: detail.name })),
       'project-load': () => runProjectTask(async () => {
@@ -493,6 +497,7 @@ export async function createEditorApp(root) {
         roadDraftDirty = Boolean(dirty);
         syncPublishState();
       },
+      onState: (state) => shell.setRoadEdit(state),
     });
     // Initial snap-state synchronisation: the gizmo and shell were created
     // after the grid-snap state existed, so push the current state once.

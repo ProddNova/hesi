@@ -70,9 +70,13 @@ For road curves:
    the nearest road route priority over markings and props), or select a road
    route in the hierarchy. The editor draws an opaque, road-width asphalt
    preview with edge lines, dashed lane dividers, and orange draft edges at the
-   runtime collision elevation. Drag a point, right-click the draft road to
-   add a point, or right-click an interior point to remove it. Double-click to
-   add and `Delete`/`Backspace` to remove remain available as shortcuts.
+   runtime collision elevation, and opens the **Road panel** above the
+   Inspector: route facts (points, length, width, lanes), Prev/Next point
+   navigation with camera framing, exact X/Z coordinate editing, and per-point
+   Frame/Delete buttons, plus the unsaved-roads count. In the viewport, drag a
+   point, right-click the draft road to add a point, or right-click an interior
+   point to remove it. Double-click to add and `Delete`/`Backspace` to remove
+   remain available as shortcuts.
 2. Press **Save Draft** as often as needed. Changed routes are stored
    deterministically in
    `data/editor/road-route-overrides.json`; production route files are not
