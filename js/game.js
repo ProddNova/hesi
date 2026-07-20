@@ -9,6 +9,7 @@ import { GarageSystem } from './garage.js?v=20260713a';
 import { applyEditorBuilds } from './editor-map-patch.js?v=20260720a';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
+import { RetroPost } from './retro-post.js?v=20260717a';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
@@ -23,6 +24,8 @@ class ShutokoNights {
     // clean edges at near-native resolution.
     this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:true,powerPreference:'high-performance',alpha:false});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.shadowMap.enabled=false;
+    // PS2-era post: MSAA scene target + quarter-res bloom + warm grade/vignette/dither.
+    try{this.post=new RetroPost(this.renderer);}catch(e){console.warn('Post pipeline unavailable',e);this.post=null;}
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
     this.camera=new THREE.PerspectiveCamera(64,16/9,.3,1250);
@@ -78,11 +81,12 @@ class ShutokoNights {
   fallbackCar(){return{id:'koten-90',name:'Koten Maru 90',year:1988,starter:true,color:'#7d3037',price:85000,power:90,torque:128,mass:1040,drivetrain:'RWD',engineLayout:'I4',redline:6500,idleRPM:850,gearRatios:[3.35,1.95,1.29,.96,.78],finalDrive:4.1,tireGrip:1.02,brakeForce:10500,suspensionStiffness:1,fuelCapacity:45,dimensions:{length:4.25,width:1.67,height:1.32}};}
 
   setupLights(){
-    // PS2 night mood: dark blue-black sky, low ambient so emissive windows,
-    // lamps and light pools carry the scene instead of flat grey fill.
-    this.roadScene.background=new THREE.Color(0x02050c);this.roadScene.fog=new THREE.FogExp2(0x07101c,.0015);
-    this.roadScene.add(new THREE.HemisphereLight(0x35476b,0x0c101c,1.35));this.roadScene.add(new THREE.AmbientLight(0x3c4a66,.5));const moon=new THREE.DirectionalLight(0x8da4c8,.85);moon.position.set(-200,300,-100);this.roadScene.add(moon);
-    this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
+    // PS2 night mood: warm sodium-polluted sky glow over a dark ground, a
+    // faint cool moon for contrast on car roofs, low enough overall that the
+    // emissive windows, lamps and light pools carry the scene.
+    this.roadScene.background=new THREE.Color(0x050403);this.roadScene.fog=new THREE.FogExp2(0x0e0a06,.0013);
+    this.roadScene.add(new THREE.HemisphereLight(0x57492f,0x0d0a07,1.15));this.roadScene.add(new THREE.AmbientLight(0x362c1e,.55));const moon=new THREE.DirectionalLight(0x7d8ba8,.55);moon.position.set(-200,300,-100);this.roadScene.add(moon);
+    this.garageScene.add(new THREE.HemisphereLight(0x8a8570,0x17100c,1.7));
   }
   buildWorld(){
     const mapBuildStarted=performance.now();
@@ -547,7 +551,7 @@ class ShutokoNights {
     const mm=this.map?.getMinimapData?.()||this.map?.minimapData||null,services=this.map?.getServiceAreas?.()||this.map?.serviceAreas||this.map?.services||[];if(mm)this.ui.drawMinimap(mm,{x:vec(s.position||s).x,z:vec(s.position||s).z,heading:s.heading||0},services);
   }
   updateAudio(t,dt){try{this.audio?.update?.({rpm:t.rpm,redlineRpm:t.redline,speedKmh:t.speedKmh,throttle:t.throttle,slip:t.slip,turbo:this.getEffectiveCar().turbo||0,running:t.fuel>0,fuel:t.fuelFraction});}catch(e){} }
-  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;this.renderer.render(scene,this.camera);}
+  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;if(this.post)this.post.render(scene,this.camera);else this.renderer.render(scene,this.camera);}
   renderQuality(){
     const q=this.state?.settings?.quality;if(['low','medium','high'].includes(q))return q;
     const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';
@@ -562,6 +566,7 @@ class ShutokoNights {
     const maxPixels=3200000;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     this.renderer.setSize(w,h,false);
+    this.post?.setQuality(q);this.post?.setSize(w,h);
     this.camera.aspect=innerWidth/Math.max(1,innerHeight);this.camera.updateProjectionMatrix();
     this.canvas.style.imageRendering='auto';
     this.map?.setQuality?.(q);

@@ -17,6 +17,8 @@ const VEHICLE_TYPES = Object.freeze([
 const BODY_COLORS = [
   0x283449, 0x5b2027, 0x8d8a7c, 0x172a25, 0x36425a, 0x6b6557,
   0x2a252c, 0x7a2e25, 0x1f4650, 0xb0a58e, 0x473947, 0x1c1d22,
+  // white and silver dominate real Tokyo traffic and read very PS2 at night
+  0xcdc9bd, 0xcdc9bd, 0x93989c, 0x93989c,
 ];
 
 function finite(value, fallback) {
