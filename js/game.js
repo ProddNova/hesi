@@ -151,6 +151,12 @@ class ShutokoNights {
       // with distant chunks also visible, behind the boot overlay.
       // Traffic's lazily created brake-lamp material shares its program with
       // the always-present tail-lamp material, so it needs no special case.
+      // One frame covers exactly ONE lighting state — the light count is
+      // part of every program's cache key, so a light that later joined or
+      // left the render list would obsolete every program compiled here and
+      // re-link them all mid-drive. The map upholds that invariant by never
+      // chunk-streaming lights (HighwayMap._addChunkMesh), and the garage
+      // transitions swap scene and headlights in the same tick.
       this.renderer.render(this.roadScene,this.camera);
       this.performanceMetrics={...(this.performanceMetrics||{}),prewarmMs:performance.now()-t0,prewarmed:{geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures,programs:this.renderer.info.programs.length}};
     }catch(e){console.warn('GPU prewarm',e);}
