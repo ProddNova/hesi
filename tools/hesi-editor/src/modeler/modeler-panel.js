@@ -3,10 +3,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   MESH_MAX_FACES, PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets,
-  buildPartObject, captureUnionFaceProjection, clonePartFaceToOpposite, convertPartToMesh,
-  mergePartFaces, meshFacePlanarRegions, meshInsertVertexAtPoint, meshRemoveVertex,
-  meshTopologyIssues, oppositePartFace, partFaceCoverProjection, partFaceNames, partGeometry,
-  splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
+  buildPartObject, captureUnionFaceProjection, captureViewFaceProjection, clonePartFaceToOpposite,
+  convertPartToMesh, mergePartFaces, meshFacePlanarRegions, meshInsertVertexAtPoint,
+  meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceCoverProjection, partFaceNames,
+  partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -833,7 +833,7 @@ export class ModelerPanel {
       if (!faces.includes(name)) this.checkedFaces.delete(name);
     }
     this.inspector.append(element('h3', '', 'Faces & textures'));
-    this.inspector.append(element('p', 'modeler-help', 'Pick a face here (or click it in Faces mode), then attach an image: top, bottom, every side — like wrapping a photo around a bin. Tick several faces to spread one image across them, or merge them into one surface. Faces you folded with vertex edits show a "flat surfaces" tag: ✂ Split lists each surface here on its own.'));
+    this.inspector.append(element('p', 'modeler-help', 'Pick a face here (or click it in Faces mode), then attach an image: top, bottom, every side — like wrapping a photo around a bin. Tick several faces to spread one image across them, or merge them into one surface. For a photo taken from a real viewpoint (a car front, a shop sign), orbit until you look at the faces the same way and use 📷: the image lands exactly as you see it. Faces you folded with vertex edits show a "flat surfaces" tag: ✂ Split lists each surface here on its own.'));
     // Vertex edits fold a face into several flat surfaces without creating
     // new entries here; count those surfaces so they become visible (and
     // splittable into real faces) instead of hiding inside the parent face.
@@ -966,7 +966,9 @@ export class ModelerPanel {
           this._rebuildObject();
           this._renderInspector();
         });
-        options.append(fitLabel, flipX, flipY);
+        const fromView = button('📷 From view', 'tool-button small', 'Re-project this image from the current camera angle — orbit until you look at the face the way the picture was taken, then click: the image lands exactly as you see it, like a decal');
+        fromView.addEventListener('click', () => this._projectFacesFromView(part, [faceName]));
+        options.append(fitLabel, flipX, flipY, fromView);
         this.inspector.append(options);
       }
     }
@@ -976,12 +978,15 @@ export class ModelerPanel {
       const apply = button(`Image across ${names.length} faces…`, 'tool-button accent small',
         'Attach one image spread continuously over every ticked face — the picture spans them as a single sheet');
       apply.addEventListener('click', () => this._assignTextureAcrossFaces(part, names));
+      const applyView = button('📷 Image from this view…', 'tool-button accent small',
+        'Attach one image projected from the current camera angle: orbit until you see the faces the way the picture was taken, and from here the result matches the picture exactly');
+      applyView.addEventListener('click', () => this._assignTextureFromView(part, names));
       const merge = button('⧉ Merge into one', 'tool-button small',
         'Concatenate the ticked faces into a single face — one entry in this list, one surface, so a single image covers all of it');
       merge.addEventListener('click', () => this._mergeCheckedFaces(names));
       const clear = button('Untick all', 'tool-button small', 'Clear the face selection');
       clear.addEventListener('click', () => { this.checkedFaces.clear(); this._renderInspector(); });
-      group.append(apply, merge, clear);
+      group.append(apply, applyView, merge, clear);
       this.inspector.append(group);
     }
   }
@@ -1019,6 +1024,57 @@ export class ModelerPanel {
     this._rebuildObject();
     this._renderInspector();
     this.onStatus(`Merged ${result.mergedCount} faces into "${result.faceName}" · press Image… on it to spread one picture over the whole surface · Ctrl+Z undoes`);
+  }
+
+  /**
+   * View-decal projection over the given faces of the selected part, taken
+   * from the modeler camera's current orientation. Null when the faces are
+   * edge-on or the part cannot be projected.
+   */
+  _viewProjectionFor(faceNames) {
+    const part = this.definition?.parts[this.selectedPart];
+    const node = this.partNodes[this.selectedPart];
+    if (!part || !node) return null;
+    this.camera.updateMatrixWorld();
+    const camera = this.camera.matrixWorld.elements;
+    node.updateWorldMatrix(true, false);
+    return captureViewFaceProjection(part, faceNames, {
+      right: [camera[0], camera[1], camera[2]],
+      up: [camera[4], camera[5], camera[6]],
+      matrixWorld: [...node.matrixWorld.elements],
+    });
+  }
+
+  /** 📷 Re-projects the faces' current styles from the camera's viewpoint. */
+  _projectFacesFromView(part, faceNames) {
+    const projection = this._viewProjectionFor(faceNames);
+    if (!projection) { this.onStatus('Could not project from this view — orbit so the faces are in front of the camera and try again'); return; }
+    part.faces = part.faces || {};
+    for (const name of faceNames) {
+      part.faces[name] = { ...(part.faces[name] || {}), fit: 'cover', projection: clone(projection) };
+    }
+    this._markDirty();
+    this._rebuildObject();
+    this._renderInspector();
+    this.onStatus(`Projected the image from this view onto ${faceNames.join(', ')} · orbit to check the sides · Ctrl+Z undoes`);
+  }
+
+  /** 📷 One image attached to every ticked face, projected from the camera. */
+  _assignTextureFromView(part, faceNames) {
+    this._chooseTexture(`Image from this view across ${faceNames.length} face${faceNames.length === 1 ? '' : 's'}`, (textureId) => {
+      const projection = this._viewProjectionFor(faceNames);
+      if (!projection) { this.onStatus('Could not project from this view — orbit so the faces are in front of the camera and try again'); return; }
+      part.faces = part.faces || {};
+      for (const name of faceNames) {
+        part.faces[name] = { ...(part.faces[name] || {}), texture: textureId, fit: 'cover', projection: clone(projection) };
+      }
+      this._markDirty();
+      this._rebuildObject();
+      this._renderInspector();
+      this._renderTextures();
+      this.onTexturesChanged();
+      this.onStatus(`Image projected from this view across ${faceNames.join(', ')} — seen from here it matches the picture exactly`);
+    });
   }
 
   /**
@@ -1825,6 +1881,11 @@ export class ModelerPanel {
     this._chooseTexture(`Texture for face "${faceName}"`, (textureId) => {
       part.faces = part.faces || {};
       const nextStyle = { ...(part.faces[faceName] || {}), texture: textureId };
+      // Mesh UVs are inherited fragments after folds and splits — attaching
+      // an image means pasting it flat onto the face, so mesh faces default
+      // to a fitted cover projection. An explicit Stretch choice made in the
+      // fit dropdown is respected.
+      if (part.kind === 'mesh' && nextStyle.fit === undefined) nextStyle.fit = 'cover';
       if (nextStyle.fit === 'cover') {
         const projection = partFaceCoverProjection(part, faceName);
         if (projection) nextStyle.projection = projection;
