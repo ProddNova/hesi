@@ -10,6 +10,7 @@ export class GameUI {
     this.phonePage = 'home';
     this.lastMinimap = null;
     this.lastContext = null;
+    this.hudHidden = false;
     this.minimapCtx = this.$('minimap').getContext('2d');
     this.bind();
   }
@@ -50,7 +51,8 @@ export class GameUI {
     this.$('boot-screen').classList.add('active');
     this.$('continue-button').textContent = hasSave ? 'CONTINUE' : 'START NIGHT';
   }
-  showHUD(show = true) { this.$('hud').classList.toggle('hidden', !show); }
+  showHUD(show = true) { this.$('hud').classList.toggle('hidden', !show || this.hudHidden); }
+  toggleHUD() { this.hudHidden = !this.hudHidden; this.$('hud').classList.toggle('hidden', this.hudHidden); return !this.hudHidden; }
   fade(active) { this.$('fade').classList.toggle('on', active); }
 
   updateHUD(t = {}, run = {}, meta = {}) {
