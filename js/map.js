@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import ROUTE_DATA from '../data/routes-smoothed.js';
 import { buildProgressiveTransitions } from './progressive-merge.js';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js';
+import { createWorldTextures } from './textures.js';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -312,7 +313,7 @@ export class HighwayMap {
     // Quality-scalable effect layers (light pools / wet-asphalt streaks):
     // instanced meshes whose geometry name is in _effectTypes get collected so
     // setQuality can hide them on Low.
-    this._effectTypes = new Set(['lightStreak']);
+    this._effectTypes = new Set(['lightStreak', 'lightPool']);
     this._effectMeshes = [];
     this._quality = this.options.quality === 'low' ? 'low' : 'high';
     this._signMaterials = new Map();
@@ -420,6 +421,15 @@ export class HighwayMap {
     const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({
       color, fog: true, toneMapped: false, ...extra,
     });
+    // Shared low-res tile set (null in headless probes — flat colors then).
+    // Tone lives IN the texture; textured materials keep color at white.
+    this.textures = createWorldTextures(this.seed);
+    if (this.textures) {
+      for (const texture of Object.values(this.textures)) this._ownedTextures.add(texture);
+    }
+    const tiled = (textureName, fallbackColor, extra = {}) => (this.textures
+      ? lambert(0xffffff, { map: this.textures[textureName], ...extra })
+      : lambert(fallbackColor, extra));
     this._facadeSpecs = {};
     const facade = (name, spec) => {
       const texture = this._facadeTexture(spec);
@@ -429,20 +439,21 @@ export class HighwayMap {
         : lambert(0x151a24);
     };
     return {
-      facadeOffice: facade('facadeOffice', { cols: 10, rows: 13, lit: 0.44, warm: 0.45, base: '#141823', cellW: 3.4, cellH: 3.3, seed: 0x1a2b3c }),
-      facadeDark: facade('facadeDark', { cols: 10, rows: 13, lit: 0.13, warm: 0.55, base: '#0f1219', cellW: 3.4, cellH: 3.3, seed: 0x2b3c4d }),
-      facadeHotel: facade('facadeHotel', { cols: 12, rows: 14, lit: 0.32, warm: 0.85, base: '#171a21', cellW: 2.8, cellH: 3.0, seed: 0x3c4d5e }),
-      facadeIndustrial: facade('facadeIndustrial', { cols: 7, rows: 5, lit: 0.2, warm: 0.35, base: '#171a1e', cellW: 5.5, cellH: 4.2, seed: 0x4d5e6f }),
-      road: lambert(0x14171f),
-      roadAlt: lambert(0x171a23),
-      roadService: lambert(0x1d2029),
+      facadeOffice: facade('facadeOffice', { cols: 10, rows: 13, lit: 0.4, warm: 0.45, wall: '#25272c', spandrel: '#1c1e23', glass: '#0b0e14', cellW: 3.4, cellH: 3.3, seed: 0x1a2b3c }),
+      facadeDark: facade('facadeDark', { cols: 10, rows: 13, lit: 0.12, warm: 0.55, wall: '#212328', spandrel: '#191b1f', glass: '#0a0d12', cellW: 3.4, cellH: 3.3, seed: 0x2b3c4d }),
+      facadeHotel: facade('facadeHotel', { cols: 12, rows: 14, lit: 0.3, warm: 0.85, wall: '#28262a', spandrel: '#1e1c1f', glass: '#0b0d11', balconies: true, cellW: 2.8, cellH: 3.0, seed: 0x3c4d5e }),
+      facadeIndustrial: facade('facadeIndustrial', { cols: 7, rows: 5, lit: 0.18, warm: 0.35, wall: '#26282a', spandrel: '#1d1f21', glass: '#0b0d10', industrial: true, cellW: 5.5, cellH: 4.2, seed: 0x4d5e6f }),
+      road: tiled('asphalt', 0x14171f),
+      roadAlt: tiled('asphaltRamp', 0x171a23),
+      roadShoulder: tiled('shoulder', 0x20242c),
+      roadService: tiled('service', 0x1d2029),
       // Concrete/steel carry a small emissive floor so barriers stay readable
       // under the dark PS2 night lighting (they define the road edge at speed).
-      concrete: lambert(0x848a94, { side: THREE.DoubleSide, emissive: 0x1e2126 }),
-      concreteDark: lambert(0x272a31),
-      barrier: lambert(0x9096a0, { side: THREE.DoubleSide, emissive: 0x2e3138 }),
+      concrete: tiled('concrete', 0x848a94, { side: THREE.DoubleSide, emissive: 0x17191d }),
+      concreteDark: tiled('pillar', 0x272a31),
+      barrier: tiled('barrier', 0x9096a0, { side: THREE.DoubleSide, emissive: 0x1d1f24 }),
       railMetal: lambert(0xaab2bc, { side: THREE.DoubleSide, emissive: 0x23262c }),
-      tunnelWall: lambert(0x2c2f36, { side: THREE.DoubleSide }),
+      tunnelWall: tiled('tunnel', 0x2c2f36, { side: THREE.DoubleSide }),
       tunnelDark: lambert(0x191c22, { side: THREE.DoubleSide }),
       portal: lambert(0x3a3d44),
       marking: basic(0xd8d6bf),
@@ -459,22 +470,24 @@ export class HighwayMap {
       neon: basic(0xffffff),
       shed: lambert(0x1a1d24),
       crane: lambert(0x233042),
-      container: lambert(0x54331f),
+      container: tiled('container', 0x54331f),
       water: lambert(0x061019, { transparent: true, opacity: 0.9 }),
       ground: lambert(0x080a11),
-      towerWhite: lambert(0xb8bcc4),
+      towerWhite: lambert(0x9aa0aa),
       cable: basic(0x9aa3ad),
       cableLight: basic(0xcfe6ff),
-      garage: lambert(0x222632),
-      shutter: lambert(0x6e7379),
+      garage: tiled('siding', 0x222632),
+      shutter: tiled('shutter', 0x6e7379),
       vending: basic(0x8ad9ff),
       konbini: basic(0xd8ffe9),
-      canopy: basic(0xfff2c9),
+      canopy: basic(0xd8d0b4),
       fence: lambert(0x30343b),
       cushion: basic(0xe0b52f),
       parkedBody: lambert(0xffffff),
-      parkedGlass: lambert(0x0e1620),
-      marker: basic(0x57e3ff, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
+      parkedGlass: lambert(0x10161f),
+      tire: lambert(0x0a0c0e),
+      pallet: lambert(0x6a5233),
+      marker: basic(0xffb84a, { transparent: true, opacity: 0.82, side: THREE.DoubleSide }),
       billboardGlow: basic(0xffffff),
       signGreen: basic(0x0c604e, { side: THREE.DoubleSide }),
       signBack: basic(0x23262c),
@@ -482,14 +495,16 @@ export class HighwayMap {
         ? new THREE.MeshBasicMaterial({ map: this._chevronTexture(), fog: true, toneMapped: false })
         : basic(0xffc21f),
       // Additive decals: sodium pools under lamps + stretched wet-asphalt
-      // streaks — the cheap PS2 stand-in for real reflections.
+      // streaks — the cheap PS2 stand-in for real reflections. Deliberately
+      // faint: the texture carries the road, the pools only suggest sodium
+      // spill. Kept small (see _queueRouteDetails) — no giant light circles.
       lightPool: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xff9b42, transparent: true, opacity: 0.34,
+        map: this._glowTexture(), color: 0xff9b42, transparent: true, opacity: 0.15,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
       }),
       lightStreak: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xffb066, transparent: true, opacity: 0.26,
+        map: this._glowTexture(), color: 0xffb066, transparent: true, opacity: 0.11,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }),
@@ -531,6 +546,33 @@ export class HighwayMap {
     this._ownedTextures.add(texture);
     this._chevTex = texture;
     return texture;
+  }
+
+  /**
+   * Car glasshouse: a unit-cube trapezoid prism with raked windscreen and
+   * rear glass. Instanced over every parked car so the cabin reads as a
+   * real DLO silhouette instead of a floating box.
+   */
+  _cabinGeometry() {
+    const xB = 0.5;
+    const xT = 0.42;
+    const zFB = -0.5;
+    const zRB = 0.5;
+    const zFT = -0.16;
+    const zRT = 0.44;
+    const positions = [];
+    const quad = (a, b, c, d) => positions.push(...a, ...b, ...c, ...a, ...c, ...d);
+    // windscreen (front, -z), rear glass, roof, two sides
+    quad([-xB, -0.5, zFB], [-xT, 0.5, zFT], [xT, 0.5, zFT], [xB, -0.5, zFB]);
+    quad([xB, -0.5, zRB], [xT, 0.5, zRT], [-xT, 0.5, zRT], [-xB, -0.5, zRB]);
+    quad([-xT, 0.5, zFT], [-xT, 0.5, zRT], [xT, 0.5, zRT], [xT, 0.5, zFT]);
+    quad([-xB, -0.5, zFB], [-xB, -0.5, zRB], [-xT, 0.5, zRT], [-xT, 0.5, zFT]);
+    quad([xB, -0.5, zFB], [xT, 0.5, zFT], [xT, 0.5, zRT], [xB, -0.5, zRB]);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    return geometry;
   }
 
   /** Paired tunnel jet fans: two ducts + ceiling mount, one instanced geometry. */
@@ -612,27 +654,63 @@ export class HighwayMap {
   }
 
   /**
-   * Night facade texture: a grid of small emissive windows with a believable
-   * random lit pattern (warm/cool whites, dim TVs, dark floors) on a dark
-   * wall. Tiled per building with whole-window UV repeats so grids stay
-   * aligned to the silhouette — the classic PS2 Tokyo-at-night look.
+   * Night facade texture, PS2 style: a real WALL (concrete tone, per-floor
+   * spandrel bands, baked panel seams and grime) carrying a grid of inset
+   * windows — most dark glass, some lit warm/cool. Buildings must read as
+   * structures with lights in them, not as floating LED grids. Tiled per
+   * building with whole-window UV repeats so grids stay aligned to the
+   * silhouette.
    */
   _facadeTexture(spec) {
     if (typeof document === 'undefined') return null;
     const random = mulberry32(this.seed ^ spec.seed);
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
-    const context = canvas.getContext('2d');
-    context.fillStyle = spec.base;
-    context.fillRect(0, 0, 256, 256);
-    const cellW = 256 / spec.cols;
-    const cellH = 256 / spec.rows;
-    // faint floor slabs + mullions so unlit walls still read as structure
-    context.fillStyle = 'rgba(255,255,255,0.05)';
-    for (let row = 0; row <= spec.rows; row += 1) context.fillRect(0, Math.round(row * cellH), 256, 1);
-    context.fillStyle = 'rgba(0,0,0,0.35)';
-    for (let col = 0; col <= spec.cols; col += 1) context.fillRect(Math.round(col * cellW), 0, 1, 256);
+    // Painted at HALF resolution then upscaled once with smoothing — the
+    // same pixelated-then-lightly-blurred finish as the road tiles, so
+    // walls and asphalt share one texture language.
+    const small = document.createElement('canvas');
+    const S = 128;
+    small.width = S;
+    small.height = S;
+    const context = small.getContext('2d');
+    const cellW = S / spec.cols;
+    const cellH = S / spec.rows;
+    // wall base + broad quantized tone blocks (chunky, calm — no grime)
+    context.fillStyle = spec.wall || spec.base || '#24262b';
+    context.fillRect(0, 0, S, S);
+    for (let y = 0; y < S; y += 8) {
+      for (let x = 0; x < S; x += 8) {
+        const v = Math.round((random() - 0.5) * 3) * 0.022;
+        if (v === 0) continue;
+        context.fillStyle = v > 0 ? `rgba(255,255,255,${v})` : `rgba(0,0,0,${-v})`;
+        context.fillRect(x, y, 8, 8);
+      }
+    }
+    // per-floor spandrel band (the horizontal structure)
+    for (let row = 0; row < spec.rows; row += 1) {
+      const y = Math.round(row * cellH);
+      context.fillStyle = spec.spandrel || 'rgba(0,0,0,0.25)';
+      context.fillRect(0, y, S, Math.max(1, Math.round(cellH * 0.22)));
+      context.fillStyle = 'rgba(0,0,0,0.35)';
+      context.fillRect(0, y, S, 1);
+    }
+    // vertical panel seams every second window bay
+    context.fillStyle = 'rgba(0,0,0,0.26)';
+    for (let col = 0; col <= spec.cols; col += 2) context.fillRect(Math.round(col * cellW), 0, 1, S);
+    if (spec.industrial) {
+      // chunky corrugated siding ribs
+      for (let x = 0; x < S; x += 4) {
+        context.fillStyle = 'rgba(255,255,255,0.05)';
+        context.fillRect(x, 0, 1, S);
+        context.fillStyle = 'rgba(0,0,0,0.12)';
+        context.fillRect(x + 2, 0, 2, S);
+      }
+    }
+    // posterized window palette — flat game-like fills, no per-window hue jitter
+    const LIT_WARM = '#f0c789';
+    const LIT_WARM_DIM = '#7d6845';
+    const LIT_COOL = '#c3d4ee';
+    const LIT_COOL_DIM = '#5f6b80';
+    const GLOW = '#454e60';
     // some floors go fully dark / fully lit so towers band like real offices
     const floorBias = [];
     for (let row = 0; row < spec.rows; row += 1) {
@@ -641,27 +719,39 @@ export class HighwayMap {
     }
     for (let row = 0; row < spec.rows; row += 1) {
       for (let col = 0; col < spec.cols; col += 1) {
-        const x = Math.round(col * cellW + cellW * 0.2);
-        const y = Math.round(row * cellH + cellH * 0.26);
-        const w = Math.max(2, Math.round(cellW * 0.6));
-        const h = Math.max(2, Math.round(cellH * 0.5));
+        const x = Math.round(col * cellW + cellW * 0.22);
+        const y = Math.round(row * cellH + cellH * 0.32);
+        const w = Math.max(2, Math.round(cellW * 0.56));
+        const h = Math.max(2, Math.round(cellH * 0.46));
         const roll = random();
         let fill;
         if (roll < spec.lit * floorBias[row]) {
           const warm = random() < spec.warm;
-          const dim = random() < 0.25 ? 0.55 : 1;
-          fill = warm
-            ? `rgba(255,${205 + Math.floor(random() * 30)},${145 + Math.floor(random() * 45)},${dim})`
-            : `rgba(${185 + Math.floor(random() * 35)},${212 + Math.floor(random() * 25)},255,${dim})`;
+          const dim = random() < 0.3;
+          fill = warm ? (dim ? LIT_WARM_DIM : LIT_WARM) : (dim ? LIT_COOL_DIM : LIT_COOL);
         } else if (roll < spec.lit * floorBias[row] + 0.06) {
-          fill = 'rgba(110,125,160,0.4)';
+          fill = GLOW;
         } else {
-          fill = `rgba(6,8,13,${0.8 + random() * 0.2})`;
+          fill = spec.glass || '#0a0d12';
         }
+        // one-texel dark reveal then the flat glass block
+        context.fillStyle = 'rgba(0,0,0,0.45)';
+        context.fillRect(x - 1, y - 1, w + 2, h + 2);
         context.fillStyle = fill;
         context.fillRect(x, y, w, h);
+        if (spec.balconies && random() < 0.5) {
+          // simple balcony rail band under residential windows
+          context.fillStyle = 'rgba(150,156,164,0.18)';
+          context.fillRect(x - 1, y + h + 1, w + 2, 1);
+        }
       }
     }
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const big = canvas.getContext('2d');
+    big.imageSmoothingEnabled = true;
+    big.drawImage(small, 0, 0, 256, 256);
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
@@ -4622,12 +4712,71 @@ export class HighwayMap {
     return mesh;
   }
 
+  /**
+   * World-projected tiling UVs for a merged bucket: horizontal-ish faces
+   * project on XZ, steep faces project along their own horizontal tangent ×
+   * world Y. Vertices are never shared across quads, and both triangles of
+   * a quad are coplanar, so per-triangle assignment is consistent. This is
+   * what makes one 128 px asphalt/concrete tile cover every deck, fascia,
+   * parapet, mouth surface and tunnel wall in metre units with no per-site
+   * UV bookkeeping.
+   */
+  _assignWorldUVs(bucket, tile) {
+    const positions = bucket.positions;
+    const uvs = bucket.uvs;
+    const indices = bucket.indices;
+    for (let i = 0; i < indices.length; i += 3) {
+      const ia = indices[i] * 3;
+      const ib = indices[i + 1] * 3;
+      const ic = indices[i + 2] * 3;
+      const abx = positions[ib] - positions[ia];
+      const aby = positions[ib + 1] - positions[ia + 1];
+      const abz = positions[ib + 2] - positions[ia + 2];
+      const acx = positions[ic] - positions[ia];
+      const acy = positions[ic + 1] - positions[ia + 1];
+      const acz = positions[ic + 2] - positions[ia + 2];
+      const nx = aby * acz - abz * acy;
+      const ny = abz * acx - abx * acz;
+      const nz = abx * acy - aby * acx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      const horizontal = Math.abs(ny / len) >= 0.55;
+      // steep face: in-plane horizontal tangent (up × normal)
+      let tx = -nz;
+      let tz = nx;
+      const tLen = Math.hypot(tx, tz) || 1;
+      tx /= tLen;
+      tz /= tLen;
+      for (const vi of [indices[i], indices[i + 1], indices[i + 2]]) {
+        const px = positions[vi * 3];
+        const py = positions[vi * 3 + 1];
+        const pz = positions[vi * 3 + 2];
+        if (horizontal) {
+          uvs[vi * 2] = px / tile;
+          uvs[vi * 2 + 1] = pz / tile;
+        } else {
+          uvs[vi * 2] = (px * tx + pz * tz) / tile;
+          uvs[vi * 2 + 1] = py / tile;
+        }
+      }
+    }
+  }
+
+  // Tile size in metres for world-projected materials. Everything else
+  // keeps the UVs its emitter pushed.
+  static WORLD_UV_TILES = {
+    road: 7, roadAlt: 7, roadShoulder: 7, roadService: 7,
+    barrier: 3.1, concrete: 3.1, concreteDark: 4.4, tunnelWall: 6.2,
+  };
+
   _finalizeChunks() {
     // merged buffer geometry per chunk per material
     for (const [key, buckets] of this._chunkBuckets) {
       const chunk = this._chunkFor(key);
       for (const [materialName, bucket] of buckets) {
         if (!bucket.positions.length) continue;
+        if (this.textures && HighwayMap.WORLD_UV_TILES[materialName]) {
+          this._assignWorldUVs(bucket, HighwayMap.WORLD_UV_TILES[materialName]);
+        }
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
         if (bucket.uvs.length) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
@@ -4654,6 +4803,7 @@ export class HighwayMap {
     this._unitGeometries = {
       box: unitBox, plane: unitPlane, pool: unitPool,
       lamppost: this._lampGeometry(), jetfan: this._jetFanGeometry(),
+      cabin: this._cabinGeometry(), drum: new THREE.CylinderGeometry(0.5, 0.5, 1, 8),
     };
     const identityQuat = new THREE.Quaternion();
     for (const [key, types] of this._chunkInstances) {
@@ -4750,6 +4900,22 @@ export class HighwayMap {
       moon.name = 'Cool city fill light';
       moon.position.set(-2, 6, -3);
       this.group.add(hemisphere, moon);
+    }
+
+    // Horizon dome: a camera-following gradient cylinder just inside the far
+    // plane — deep navy overhead, faint city haze at the horizon. Gives the
+    // night a silhouette line instead of pure black, PS2 skydome style.
+    // One draw call, no lighting, no fog.
+    if (this.textures) {
+      const skyGeometry = new THREE.CylinderGeometry(1080, 1080, 560, 24, 1, true);
+      const sky = new THREE.Mesh(skyGeometry, new THREE.MeshBasicMaterial({
+        map: this.textures.sky, side: THREE.BackSide, fog: false, toneMapped: false, depthWrite: false,
+      }));
+      sky.name = 'Horizon dome';
+      sky.position.y = 160;
+      sky.renderOrder = -100;
+      this._skyDome = sky;
+      this.group.add(sky);
     }
   }
 
@@ -5065,7 +5231,7 @@ export class HighwayMap {
       const lat0 = baseA + (baseB - baseA) * t0;
       const lat1 = baseA + (baseB - baseA) * t1;
       if (!piece.allowed) {
-        if (this.options.markingDebug && materialName !== 'amber') {
+        if (this.options.markingDebug && materialName !== 'amber' && materialName !== 'roadShoulder') {
           const context = this._markingDebugContext(route, piece.from, piece.to);
           this._markingLog.push({
             kind: 'suppressedStrip',
@@ -5097,7 +5263,7 @@ export class HighwayMap {
       const outer1 = outerA.lerp(outerB, t1);
       const bucket = this._bucket(TMP_A.copy(inner0).lerp(outer1, 0.5), materialName);
       this._pushQuad(bucket, outer0, outer1, inner1, inner0);
-      if (this.options.markingDebug && materialName !== 'amber') {
+      if (this.options.markingDebug && materialName !== 'amber' && materialName !== 'roadShoulder') {
         const start = inner0.clone().lerp(outer0, 0.5);
         const end = inner1.clone().lerp(outer1, 0.5);
         const fromFrame = this._frameAt(route, piece.from);
@@ -5181,7 +5347,7 @@ export class HighwayMap {
       const la = sampleA.lateral;
       const lb = sampleB.lateral;
       if (la === null || lb === null) {
-        if (this.options.markingDebug && materialName !== 'amber') {
+        if (this.options.markingDebug && materialName !== 'amber' && materialName !== 'roadShoulder') {
           const context = this._markingDebugContext(route, lo, hi);
           this._markingLog.push({
             kind: 'suppressedStrip',
@@ -5212,7 +5378,7 @@ export class HighwayMap {
       const clearanceA = this._markingClearance(a, la, halfWidth);
       const clearanceB = this._markingClearance(b, lb, halfWidth);
       if (clearanceA < 0 && clearanceB < 0) {
-        if (this.options.markingDebug && materialName !== 'amber') {
+        if (this.options.markingDebug && materialName !== 'amber' && materialName !== 'roadShoulder') {
           const context = this._markingDebugContext(route, lo, hi);
           this._markingLog.push({
             kind: 'suppressedStrip',
@@ -5254,7 +5420,7 @@ export class HighwayMap {
       // record per painted piece — the piece's own world direction vs the
       // intended marking-path tangent at that station — so a probe can
       // detect diagonal/zig-zag paint instead of trusting interval maths.
-      if (this.options.markingDebug && materialName !== 'amber') {
+      if (this.options.markingDebug && materialName !== 'amber' && materialName !== 'roadShoulder') {
         const start = inner0.clone().lerp(outer0, 0.5);
         const end = inner1.clone().lerp(outer1, 0.5);
         // Mean end tangent ~ the mid tangent: on an arc, the chord of a
@@ -5332,7 +5498,7 @@ export class HighwayMap {
         rightEnd,
         rightStart,
       );
-      if (this.options.markingDebug && materialName !== 'amber') {
+      if (this.options.markingDebug && materialName !== 'amber' && materialName !== 'roadShoulder') {
         const context = this._markingDebugContext(route, lo, hi);
         const tangent = end.clone().sub(start).normalize();
         this._markingLog.push({
@@ -6218,6 +6384,13 @@ export class HighwayMap {
       for (const [from, to] of kept) {
         this._paintStrip(route, 'marking', from, to,
           mouthPaintLat((frame) => side * (frame.half - 0.75), 0.16, side), 0.16);
+        // Shoulder band outside the edge line (paler pixel asphalt strip up
+        // to the parapet base). A surface, not a marking: sits below the
+        // paint lift and is excluded from marking instrumentation. Clipped
+        // by the same zone/mouth suppression as the edge line so it never
+        // crosses a merge opening.
+        this._paintStrip(route, 'roadShoulder', from, to,
+          mouthPaintLat((frame) => side * (frame.half - 0.34), 0.66, side), 0.66, 0.028);
       }
       if (route.bidirectional) {
         this._paintStrip(route, 'amber', 0, route.length,
@@ -6454,10 +6627,10 @@ export class HighwayMap {
       const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
       lens.y = base.y + 9.26;
       this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
-      const pool = this._deckPoint(frame, side * (half - 3.6), 0.07);
-      this._instance(pool, vec(11, 1, 15.5), yawQuaternion(center.baseTangent), null, 'pool:lightPool');
+      const pool = this._deckPoint(frame, side * (half - 3.4), 0.07);
+      this._instance(pool, vec(6.2, 1, 8.8), yawQuaternion(center.baseTangent), null, 'pool:lightPool');
       const streak = this._deckPoint(frame, side * (half - 3.2), 0.1);
-      this._instance(streak, vec(1.1, 1, 30), yawQuaternion(center.baseTangent), null, 'pool:lightStreak');
+      this._instance(streak, vec(0.9, 1, 19), yawQuaternion(center.baseTangent), null, 'pool:lightStreak');
     }
 
     // Emergency phone boxes on elevated open sections (green beacon + cabinet).
@@ -7026,6 +7199,99 @@ export class HighwayMap {
   // Service area dressing
   // ------------------------------------------------------------------
 
+  // ------------------------------------------------------------------
+  // Shared PS2 prop language: every prop is a handful of instanced
+  // primitives (shared geometry + shared materials, per-instance tints),
+  // so a dressed lot costs the same draw calls as an empty one.
+  // ------------------------------------------------------------------
+
+  /** Local-frame offset applied through the prop's yaw quaternion. */
+  _propOffset(base, quaternion, x, y, z) {
+    const offset = TMP_A.set(x, y, z).applyQuaternion(quaternion);
+    return vec(base.x + offset.x, base.y + offset.y, base.z + offset.z);
+  }
+
+  /** Parked passenger car: tinted body, raked glasshouse, four wheel blocks. */
+  _emitParkedCar(ground, quaternion, color, { width = 1.72, length = 4.1 } = {}) {
+    const body = ground.clone();
+    body.y += 0.55;
+    this._instance(body, vec(width, 0.6, length), quaternion, color, 'box:parkedBody');
+    const cabin = this._propOffset(ground, quaternion, 0, 0, length * 0.045);
+    cabin.y = ground.y + 1.09;
+    this._instance(cabin, vec(width * 0.86, 0.5, length * 0.5), quaternion, null, 'cabin:parkedGlass');
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const wheel = this._propOffset(ground, quaternion, sx * width * 0.45, 0, sz * length * 0.32);
+        wheel.y = ground.y + 0.26;
+        this._instance(wheel, vec(0.22, 0.5, 0.62), quaternion, null, 'box:tire');
+      }
+    }
+  }
+
+  /** Parked box truck: cab + corrugated cargo box + wheel blocks. */
+  _emitParkedTruck(ground, quaternion, cabColor, boxTint) {
+    const cab = this._propOffset(ground, quaternion, 0, 0, -2.85);
+    cab.y = ground.y + 1.25;
+    this._instance(cab, vec(2.05, 1.7, 1.5), quaternion, cabColor, 'box:parkedBody');
+    const glass = this._propOffset(ground, quaternion, 0, 0, -3.1);
+    glass.y = ground.y + 2.05;
+    this._instance(glass, vec(1.85, 0.5, 0.9), quaternion, null, 'cabin:parkedGlass');
+    const cargo = this._propOffset(ground, quaternion, 0, 0, 0.65);
+    cargo.y = ground.y + 1.72;
+    this._instance(cargo, vec(2.25, 2.3, 5.4), quaternion, boxTint, 'box:container');
+    for (const sx of [-1, 1]) {
+      for (const z of [-2.7, 0.4, 2.6]) {
+        const wheel = this._propOffset(ground, quaternion, sx * 0.92, 0, z);
+        wheel.y = ground.y + 0.33;
+        this._instance(wheel, vec(0.28, 0.64, 0.72), quaternion, null, 'box:tire');
+      }
+    }
+  }
+
+  /** Forklift: stubby tinted body, twin mast rails, fork plate, roof guard. */
+  _emitForklift(ground, quaternion) {
+    const body = ground.clone();
+    body.y += 0.62;
+    this._instance(body, vec(1.05, 0.8, 1.55), quaternion, 0xd8942e, 'box:parkedBody');
+    const roof = this._propOffset(ground, quaternion, 0, 0, 0.15);
+    roof.y = ground.y + 1.62;
+    this._instance(roof, vec(0.95, 0.07, 0.95), quaternion, 0x3a3d42, 'box:parkedBody');
+    for (const sx of [-0.32, 0.32]) {
+      const rail = this._propOffset(ground, quaternion, sx, 0, -0.92);
+      rail.y = ground.y + 0.95;
+      this._instance(rail, vec(0.09, 1.7, 0.09), quaternion, null, 'box:railMetal');
+    }
+    const fork = this._propOffset(ground, quaternion, 0, 0, -1.25);
+    fork.y = ground.y + 0.08;
+    this._instance(fork, vec(0.85, 0.06, 0.75), quaternion, 0x555a61, 'box:parkedBody');
+  }
+
+  /** Pallet stack: a few slightly-skewed slats. */
+  _emitPalletStack(ground, quaternion, random, layers = null) {
+    const count = layers ?? (1 + Math.floor(random() * 3));
+    for (let i = 0; i < count; i += 1) {
+      const jitter = new THREE.Quaternion().setFromAxisAngle(UP, (random() - 0.5) * 0.24);
+      const pallet = ground.clone();
+      pallet.y += 0.09 + i * 0.16;
+      this._instance(pallet, vec(1.1, 0.14, 1.1), quaternion.clone().multiply(jitter), null, 'box:pallet');
+    }
+  }
+
+  /** Drum cluster: 2-4 tinted 8-sided barrels. */
+  _emitDrums(ground, random, count = null) {
+    const drums = count ?? (2 + Math.floor(random() * 3));
+    const tints = [0x365e8a, 0x8a3636, 0x7a7d82, 0x4a6a3a];
+    for (let i = 0; i < drums; i += 1) {
+      const angle = random() * Math.PI * 2;
+      const radius = i === 0 ? 0 : 0.45 + random() * 0.4;
+      const drum = ground.clone();
+      drum.x += Math.cos(angle) * radius;
+      drum.z += Math.sin(angle) * radius;
+      drum.y += 0.45;
+      this._instance(drum, vec(0.56, 0.9, 0.56), null, tints[Math.floor(random() * tints.length)], 'drum:parkedBody');
+    }
+  }
+
   _buildServiceAreaDressing() {
     const random = mulberry32(this.seed ^ 0x9e3779b9);
     const carColors = [0xb3324a, 0x3a68b6, 0xcfcfd4, 0x18191d, 0xd8a63a, 0x74306e, 0x2d7a52, 0x8a2f24];
@@ -7034,10 +7300,13 @@ export class HighwayMap {
       const packed = area.density === 'packed';
       const carCount = packed ? 34 : area.density === 'medium' ? 12 : 8;
 
-      // deck slab (roadside PAs float at deck level; Daikoku sits on the ground)
+      // deck slab (roadside PAs float at deck level; Daikoku sits on the
+      // ground). The body box only shows its dark fascia sides; the walkable
+      // top is a bucket quad so it gets metre-tiled service concrete instead
+      // of one texture stretched over the whole lot.
       const slabCenter = area.center.clone();
-      slabCenter.y -= 0.55;
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(area.width, 1.1, area.length), this.materials.roadService);
+      slabCenter.y -= 0.56;
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(area.width, 1.1, area.length), this.materials.concreteDark);
       slab.position.copy(slabCenter);
       slab.quaternion.copy(orientation); // local +Z (length) runs along the lot tangent
       slab.name = `${area.name} deck`;
@@ -7047,6 +7316,18 @@ export class HighwayMap {
       slab.updateMatrix();
       applyWorldSurfaceUVs(slab.geometry, slab.matrix);
       this._addChunkMesh(slab, slabCenter);
+      {
+        const topY = slabCenter.y + 0.56;
+        const corner = (alongSign, acrossSign) => {
+          const point = area.center.clone()
+            .addScaledVector(area.tangent, alongSign * area.length * 0.5)
+            .addScaledVector(area.normal, acrossSign * area.width * 0.5);
+          point.y = topY;
+          return point;
+        };
+        this._pushQuad(this._bucket(area.center, 'roadService'),
+          corner(1, 1), corner(-1, 1), corner(-1, -1), corner(1, -1));
+      }
 
       // support pillars when elevated; a lot straddling live carriageways
       // (the Tatsumi deck) supplies its own offsets so no column stands in
@@ -7185,25 +7466,54 @@ export class HighwayMap {
         }
       }
 
-      // parked static cars
+      // parked static cars (shared prop language: body + glasshouse + wheels)
       for (let i = 0; i < carCount && stallSlots.length; i += 1) {
         const slotIndex = Math.floor(random() * stallSlots.length);
         const slot = stallSlots.splice(slotIndex, 1)[0];
         const color = carColors[Math.floor(random() * carColors.length)];
-        const position = area.center.clone()
+        const ground = area.center.clone()
           .addScaledVector(area.tangent, slot.along)
           .addScaledVector(area.normal, slot.across);
-        position.y = area.elevation + 0.55;
+        ground.y = area.elevation;
         const yaw = orientation.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, (random() < 0.5 ? 0 : Math.PI) + (random() - 0.5) * 0.14));
-        this._instance(position, vec(1.72, 0.6, 4.1), yaw, color, 'box:parkedBody');
-        const cabin = position.clone(); cabin.y += 0.5;
-        this._instance(cabin, vec(1.5, 0.42, 2.0), yaw, null, 'box:parkedGlass');
+        this._emitParkedCar(ground, yaw, color, { length: 3.9 + random() * 0.5 });
         if (packed && random() < 0.3) {
           // open hood
-          const hood = position.clone(); hood.y += 0.62;
+          const hood = ground.clone(); hood.y += 1.17;
           const hoodQuat = yaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(vec(1, 0, 0), -0.85));
           this._instance(hood, vec(1.5, 0.06, 1.1), hoodQuat, color, 'box:parkedBody');
         }
+      }
+
+      // truck row + working clutter on the packed lot (Daikoku): box trucks
+      // nose-in along the outer edge, a forklift and pallets by the shop.
+      if (packed) {
+        const truckTints = [0x8f9298, 0xb06a3e, 0x3f8ea8, 0x9a8452];
+        for (let i = 0; i < 5; i += 1) {
+          const ground = area.center.clone()
+            .addScaledVector(area.tangent, -area.length * 0.34 + i * 9.5)
+            .addScaledVector(area.normal, -area.width * 0.395);
+          ground.y = area.elevation;
+          const yaw = orientation.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI * 0.5 + (random() - 0.5) * 0.1));
+          this._emitParkedTruck(ground, yaw, 0xcfd3d8, truckTints[Math.floor(random() * truckTints.length)]);
+        }
+        const forkGround = area.center.clone()
+          .addScaledVector(area.tangent, area.length * 0.05)
+          .addScaledVector(area.normal, area.width * 0.33);
+        forkGround.y = area.elevation;
+        this._emitForklift(forkGround, orientation.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, 2.2)));
+        for (let i = 0; i < 3; i += 1) {
+          const palletGround = area.center.clone()
+            .addScaledVector(area.tangent, area.length * 0.1 + i * 1.7)
+            .addScaledVector(area.normal, area.width * 0.36);
+          palletGround.y = area.elevation;
+          this._emitPalletStack(palletGround, orientation, random);
+        }
+        const drumGround = area.center.clone()
+          .addScaledVector(area.tangent, area.length * 0.16)
+          .addScaledVector(area.normal, area.width * 0.42);
+        drumGround.y = area.elevation;
+        this._emitDrums(drumGround, random);
       }
 
       // konbini building with glowing front
@@ -7261,7 +7571,7 @@ export class HighwayMap {
         this._instance(lens, vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
         const pool = position.clone().addScaledVector(armDirection, 3.4);
         pool.y = area.elevation + 0.07;
-        this._instance(pool, vec(11, 1, 14), orientation, null, 'pool:lightPool');
+        this._instance(pool, vec(6.2, 1, 8.5), orientation, null, 'pool:lightPool');
       }
 
       // refuel pad marker
@@ -7501,7 +7811,7 @@ export class HighwayMap {
 
       const shutterPos = lotAnchor.clone().addScaledVector(frontNormal, 0.8);
       shutterPos.y = area.elevation + 3.45;
-      this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:vending');
+      this._instance(shutterPos, vec(24, 6.8, 0.42), orientation, null, 'box:shutter');
       const sign = this._makeSignMesh('WANGAN WORKS|湾岸整備工場', '#582b72', 17, 3.25, true);
       const signPos = lotAnchor.clone().addScaledVector(frontNormal, 0.45);
       signPos.y = area.elevation + 8.5;
@@ -7518,7 +7828,7 @@ export class HighwayMap {
     this._addChunkMesh(ring, ring.position);
     this.animatedMarkers.push(ring);
 
-    const beacon = new THREE.PointLight(0x55ccff, 1.4, 46, 1.8);
+    const beacon = new THREE.PointLight(0xffab4a, 1.4, 46, 1.8);
     beacon.position.copy(area.garageEntrance).add(vec(0, 5, 0));
     this._addChunkMesh(beacon, beacon.position);
   }
@@ -7827,7 +8137,9 @@ export class HighwayMap {
     }
     }
 
-    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers.
+    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers,
+    // working yard clutter at shed fronts, and a second backdrop row of
+    // apartment blocks so the corridor gaps stay filled.
     const k1 = this._groupChains('k1')[0];
     if (!k1) return;
     for (let distance = 0; distance < k1.length; distance += 56) {
@@ -7835,7 +8147,7 @@ export class HighwayMap {
       const normal = horizontalNormal(center.baseTangent);
       const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
       for (const side of [-1, 1]) {
-        if (random() < 0.26) continue;
+        if (random() < 0.18) continue;
         const setback = 24 + random() * 92;
         const width = 26 + random() * 42;
         const depth = 20 + random() * 30;
@@ -7843,16 +8155,42 @@ export class HighwayMap {
         const position = center.position.clone().addScaledVector(normal, side * (k1.halfWidth + setback + width * 0.5));
         const radius = Math.max(width, depth) * 0.6;
         if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
+        const face = normal.clone().multiplyScalar(-side);
         this._buildStructure(random, position.x, position.z, heading + (random() < 0.3 ? Math.PI * 0.5 : 0),
-          random() < 0.72 ? 'shed' : 'warehouse', width, height, depth,
-          { face: normal.clone().multiplyScalar(-side) });
+          random() < 0.72 ? 'shed' : 'warehouse', width, height, depth, { face });
         this._recordFootprint(position.x, position.z, radius);
+        if (random() < 0.5) {
+          // loading apron in front of the shed: pallets / drums / a truck
+          const apron = position.clone().addScaledVector(face, width * 0.5 + 6);
+          apron.y = 0;
+          const apronYaw = yawQuaternion(face);
+          if (random() < 0.45) this._emitParkedTruck(apron, apronYaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI * 0.5)), 0xcfd3d8, 0x9a8452);
+          else if (random() < 0.5) this._emitForklift(apron, apronYaw);
+          const palletSpot = apron.clone().addScaledVector(center.baseTangent, 4 + random() * 3);
+          this._emitPalletStack(palletSpot, apronYaw, random);
+          if (random() < 0.5) this._emitDrums(palletSpot.clone().addScaledVector(face, 2.5), random);
+        }
         if (random() < 0.11) {
           const stackHeight = 34 + random() * 30;
           const stack = position.clone();
           stack.y = stackHeight * 0.5;
           this._instance(stack, vec(3.2, stackHeight, 3.2), null, null, 'box:concreteDark');
           this._instance(vec(position.x, stackHeight + 0.8, position.z), vec(1.1, 1.1, 1.1), null, null, 'box:redBlink');
+        }
+      }
+      // backdrop apartments behind the sheds (both sides, farther out)
+      if (random() < 0.5) {
+        const side = random() < 0.5 ? -1 : 1;
+        const setback = 150 + random() * 200;
+        const width = 24 + random() * 30;
+        const depth = 18 + random() * 22;
+        const height = 16 + Math.pow(random(), 1.5) * 42;
+        const position = center.position.clone().addScaledVector(normal, side * (k1.halfWidth + setback + width * 0.5));
+        const radius = Math.max(width, depth) * 0.6;
+        if (this._canPlaceBuilding(position.x, position.z, radius, 40)) {
+          this._buildStructure(random, position.x, position.z, heading + (random() - 0.5) * 0.2,
+            random() < 0.6 ? 'hotel' : 'slab', width, height, depth, {});
+          this._recordFootprint(position.x, position.z, radius);
         }
       }
     }
@@ -7882,11 +8220,12 @@ export class HighwayMap {
         }
       }
       if (random() < 0.35) {
-        // container stack rows
+        // container stack rows + working yard clutter beside them
         const setback = 40 + random() * 120;
         const base = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback));
         if (this._distanceToRouteXZ(base) > wangan.halfWidth + 16) {
-          const containerColors = [0x54331f, 0x1f4654, 0x5a1f24, 0x2e4a1f, 0x4a3d1f];
+          // brighter tints: the corrugated map multiplies them back down
+          const containerColors = [0xb06a3e, 0x3f8ea8, 0xb04a52, 0x5c9a4a, 0x9a8452];
           const yaw = yawQuaternion(center.baseTangent);
           for (let row = 0; row < 2 + Math.floor(random() * 3); row += 1) {
             for (let level = 0; level < 1 + Math.floor(random() * 3); level += 1) {
@@ -7894,6 +8233,21 @@ export class HighwayMap {
               box.y = 1.3 + level * 2.6;
               this._instance(box, vec(2.9, 2.55, 12.2), yaw, containerColors[Math.floor(random() * containerColors.length)], 'box:container');
             }
+          }
+          const apron = base.clone().addScaledVector(center.baseTangent, 10 + random() * 6);
+          apron.y = 0;
+          if (random() < 0.6) {
+            this._emitParkedTruck(apron, yaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, (random() - 0.5) * 0.4)), 0xcfd3d8,
+              containerColors[Math.floor(random() * containerColors.length)]);
+          }
+          if (random() < 0.55) {
+            const forkSpot = apron.clone().addScaledVector(normal, landSide * 5);
+            this._emitForklift(forkSpot, yaw.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, random() * Math.PI)));
+          }
+          if (random() < 0.7) {
+            const palletSpot = apron.clone().addScaledVector(center.baseTangent, 4);
+            this._emitPalletStack(palletSpot, yaw, random);
+            if (random() < 0.5) this._emitDrums(palletSpot.clone().addScaledVector(normal, landSide * 2.4), random);
           }
         }
       }
@@ -7935,6 +8289,23 @@ export class HighwayMap {
           this._recordFootprint(position.x, position.z, radius);
         }
       }
+      // mid-distance apartment/office silhouettes so the land side keeps a
+      // lit horizon between the port yards (cheap merged facades)
+      if (random() < 0.42) {
+        const setback = 260 + random() * 320;
+        const width = 26 + random() * 34;
+        const depth = 20 + random() * 24;
+        const height = 18 + Math.pow(random(), 1.4) * 52;
+        const position = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback + width * 0.5));
+        const radius = Math.max(width, depth) * 0.6;
+        if (this._canPlaceBuilding(position.x, position.z, radius, 40)) {
+          const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+          const roll = random();
+          this._buildStructure(random, position.x, position.z, heading + (random() - 0.5) * 0.3,
+            roll < 0.45 ? 'hotel' : roll < 0.8 ? 'slab' : 'stepped', width, height, depth, {});
+          this._recordFootprint(position.x, position.z, radius);
+        }
+      }
     }
   }
 
@@ -7949,6 +8320,8 @@ export class HighwayMap {
       { ...at(35.6300, 139.7950), spread: 1200, count: 18, tall: 90, streak: [-1, -0.2] },  // Daiba east bank
       { ...at(35.4750, 139.6600), spread: 1400, count: 16, tall: 70, streak: [1, -0.1] },   // Yokohama shore behind Daikoku
       { ...at(35.6560, 139.8300), spread: 1500, count: 16, tall: 80, streak: [-0.2, -1] },  // Tatsumi postcard
+      { ...at(35.5850, 139.7550), spread: 1400, count: 14, tall: 60, streak: [1, -0.3] },   // Oi wharf mid-Bayshore
+      { ...at(35.6150, 139.7420), spread: 1100, count: 16, tall: 95, streak: [1, 0.1] },    // Shinagawa bank
     ];
     for (const cluster of clusters) {
       for (let i = 0; i < cluster.count; i += 1) {
@@ -8007,7 +8380,7 @@ export class HighwayMap {
       const gondolaAngle = (i / 11) * Math.PI * 2;
       const gondola = new THREE.Mesh(
         new THREE.BoxGeometry(2.6, 2.6, 2.6),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(i / 11, 0.85, 0.6), fog: true, toneMapped: false }),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(i / 11, 0.45, 0.48), fog: true, toneMapped: false }),
       );
       gondola.position.set(Math.cos(gondolaAngle) * 52, Math.sin(gondolaAngle) * 52, 0);
       wheelGroup.add(gondola);
@@ -8758,6 +9131,12 @@ export class HighwayMap {
   }
 
   update(playerPosition = null, timeSeconds = 0) {
+    // Horizon dome follows the player in XZ (its gradient is direction-free,
+    // so the move is invisible) and stays glued to the far plane.
+    if (playerPosition && this._skyDome) {
+      this._skyDome.position.x = playerPosition.x;
+      this._skyDome.position.z = playerPosition.z;
+    }
     // Chunk streaming: toggle visibility around the player. Cheap enough to
     // run whenever the player crosses into a new cell or every 0.6 s.
     if (playerPosition) {
