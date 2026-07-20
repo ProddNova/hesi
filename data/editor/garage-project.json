@@ -7,8 +7,25 @@
     "garage-part:0001": {
       "faceTextures": {
         "0:0": {
-          "texture": "tex:0025"
+          "texture": "tex:0032"
         }
+      },
+      "transform": {
+        "position": [
+          0,
+          0.04395,
+          0
+        ],
+        "rotation": [
+          -1.5708,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
       }
     },
     "garage-part:0003": {
@@ -32,10 +49,17 @@
         }
       }
     },
+    "garage-part:0006": {
+      "faceTextures": {
+        "0:3": {
+          "texture": "tex:0033"
+        }
+      }
+    },
     "garage-part:0007": {
       "faceTextures": {
         "0:5": {
-          "texture": "tex:0026"
+          "texture": "tex:0030"
         }
       },
       "transform": {
@@ -113,7 +137,7 @@
     "garage-part:0043": {
       "faceTextures": {
         "0:5": {
-          "texture": "tex:0028"
+          "texture": "tex:0031"
         }
       },
       "transform": {
