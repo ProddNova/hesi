@@ -545,6 +545,9 @@ export function createEditorShell(root) {
   window.addEventListener('pointerdown', (event) => {
     if (!viewMenu.hidden && !viewMenu.contains(event.target) && event.target !== viewButton) closeViewMenu();
   });
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !viewMenu.hidden) closeViewMenu();
+  });
 
   const renderAssets = () => {
     const panel = element('div', 'assets-panel');

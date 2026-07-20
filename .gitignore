@@ -8,3 +8,5 @@ data/editor/.test-*.json.bak
 data/editor/*.autosave.json
 data/editor/*.autosave.json.bak
 data/editor/*.json.bak
+tools/hesi-editor/.devtests/shots/
+tools/hesi-editor/.claude/

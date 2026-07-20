@@ -493,7 +493,7 @@ input, select { accent-color: var(--accent); }
 .tab-button:hover { color: var(--text); background: var(--hover); }
 .tab-button.active { color: var(--text); border-bottom-color: var(--accent); }
 
-.asset-grid, .world-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 7px; }
+.asset-grid, .world-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 7px; }
 
 /* Help tab: shortcut reference grouped by topic. */
 .help-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 9px; align-content: start; }
@@ -518,7 +518,9 @@ input, select { accent-color: var(--accent); }
 .asset-card { min-height: 74px; padding: 9px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-raised); color: var(--text-muted); display: flex; flex-direction: column; }
 .asset-card b { display: block; color: var(--text); font-size: 12px; font-weight: 600; margin-bottom: 5px; }
 .asset-card small { line-height: 1.4; font-size: 11px; }
-.asset-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; padding-top: 8px; }
+/* Wrap instead of overflowing: an overflowing footer is painted over by the
+   next card in the grid, which reads as "half a button". */
+.asset-card-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 6px; margin-top: auto; padding-top: 8px; }
 .asset-kind { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); border: 1px solid var(--line); padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
 .asset-kind.primitive { color: #c3a5ea; border-color: #59477c; }
 .assets-panel { display: grid; gap: 8px; align-content: start; }
@@ -535,13 +537,17 @@ input, select { accent-color: var(--accent); }
 .axis-settings label { display: flex; align-items: center; gap: 3px; }
 .rename-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
 .edit-summary { grid-column: 1 / -1; color: var(--text-muted); font-size: 11px; font-family: var(--mono); overflow-wrap: anywhere; }
-.project-panel { display: grid; grid-template-columns: minmax(330px, 1.4fr) minmax(265px, .9fr); gap: 9px; height: 100%; }
+/* auto-fit lets the fields/actions columns stack instead of overflowing the
+   dock when the window (or the center dock column) gets narrow. */
+.project-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 9px; align-content: start; }
+.project-field input { min-width: 0; }
 .project-fields { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 6px; align-content: start; }
 .project-field { display: grid; gap: 4px; color: var(--text-muted); font-size: 11px; }
 .project-actions { display: grid; grid-template-columns: repeat(2, minmax(125px, 1fr)); gap: 5px; align-content: start; }
 .project-actions .tool-button { font-size: 11px; }
 /* Destructive project actions sit apart from the everyday save/load row. */
-.project-danger { grid-column: 1 / -1; margin-top: 6px; padding-top: 7px; border-top: 1px dashed var(--line); }
+.project-danger { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); margin-top: 6px; padding-top: 7px; border-top: 1px dashed var(--line); }
+.project-danger .tool-button { white-space: normal; }
 .project-summary { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; padding: 6px 9px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-raised); color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .project-summary b { color: var(--warning-text); font-weight: 600; }
 
@@ -680,10 +686,14 @@ input, select { accent-color: var(--accent); }
 .modeler-right { border-left: 1px solid var(--line); }
 .modeler-panel h3 { margin: 6px 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
 .modeler-help { margin: 2px 0; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
-.modeler-viewport-wrap { display: grid; grid-template-rows: 32px minmax(0, 1fr); min-width: 0; }
-.modeler-modebar { display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--surface-raised); border-bottom: 1px solid var(--line); }
+/* The single implicit column must be minmax(0, 1fr): with the default auto
+   column the modebar's min-content (buttons + hint text) widens the column
+   past the 1fr track, the canvas resizes to match, and the whole center +
+   right panel walk off the window edge. */
+.modeler-viewport-wrap { display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.modeler-modebar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 32px; padding: 3px 8px; background: var(--surface-raised); border-bottom: 1px solid var(--line); }
 .modeler-modebar .tool-button[aria-pressed="true"] { background: var(--selection); border-color: var(--accent); color: #d7ebfc; }
-.modeler-mode-hint { margin-left: 10px; color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modeler-mode-hint { margin-left: 10px; color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .modeler-modebar-sep { width: 1px; align-self: stretch; margin: 6px 2px; background: var(--line); }
 .modeler-snap-step { background: var(--surface-input); border: 1px solid var(--line); border-radius: 2px; color: var(--text); padding: 2px 3px; }
 .modeler-object-scale { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
@@ -698,6 +708,10 @@ input, select { accent-color: var(--accent); }
 }
 .modeler-viewport { position: relative; min-height: 0; }
 .modeler-viewport canvas { display: block; width: 100%; height: 100%; }
+/* Narrow windows: slim the side panels so the 3D viewport keeps real estate. */
+@media (max-width: 1200px) {
+  .modeler-body { grid-template-columns: 235px minmax(0, 1fr) 280px; }
+}
 .modeler-asset-list { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow-y: auto; }
 .modeler-asset-row {
   display: block;
