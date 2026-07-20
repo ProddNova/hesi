@@ -10,6 +10,8 @@ import {
   meshInsertVertexAtPoint,
   meshRemoveVertex,
   meshTopologyIssues,
+  captureUnionFaceProjection,
+  splitPartFaceByPlanarRegions,
   partFaceNames,
   partGeometry,
   translatePartFace,
@@ -277,15 +279,95 @@ test('meshes without stored UVs still build with planar fallback UVs', () => {
 
 test('meshTopologyIssues: primitive conversions are sound, corruption is flagged', () => {
   for (const kind of Object.keys(PART_KINDS).filter((entry) => entry !== 'asset')) {
-    const part = convertPartToMesh({ kind, name: kind, position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999', faces: {} });
+    const part = convertPartToMesh({ kind, name: kind, position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999999', faces: {} });
     if (!part) continue;
     assert.deepEqual(meshTopologyIssues(part), [], `${kind} conversion must be clean`);
   }
-  const part = convertPartToMesh({ kind: 'box', name: 'b', position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999', faces: {} });
+  const part = convertPartToMesh({ kind: 'box', name: 'b', position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999999', faces: {} });
   part.vertices.push([9, 9, 9]); // orphan handle floating in the void
   part.triangles[0] = { ...part.triangles[0], v: [0, 0, 1] }; // degenerate
   const issues = meshTopologyIssues(part);
   assert.ok(issues.some((issue) => issue.includes('orphaned')));
   assert.ok(issues.some((issue) => issue.includes('degenerate')));
   assert.ok(issues.some((issue) => issue.includes('boundary crack')));
+});
+
+test('splitPartFaceByPlanarRegions promotes the flat regions of a folded face', () => {
+  const part = convertPartToMesh({ kind: 'box', name: 'b', position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999999', faces: {} });
+  const names = partFaceNames(part);
+  // Fold the top: opposing pair near the front/top edge builds a ridge chord
+  // across the top; pulling both apexes up creates two slopes.
+  const added = meshInsertVertexAtPoint(part, [0, 0.49, 0.5], { faceIndex: names.indexOf('front') });
+  assert.ok(added?.connected);
+  part.vertices[added.vertexIndex] = [0, 0.9, 0.5];
+  part.vertices[added.oppositeVertexIndex] = [0, 0.9, -0.5];
+  part.faces.top = { color: '#123456' };
+  // A face that is still one plane refuses to split.
+  assert.equal(splitPartFaceByPlanarRegions(part, 'bottom').ok, false);
+  const result = splitPartFaceByPlanarRegions(part, 'top');
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.faces, ['top', 'top 2']);
+  assert.deepEqual(partFaceNames(part), ['right', 'left', 'top', 'bottom', 'front', 'back', 'top 2']);
+  // Both regions are non-empty, topology intact, style copied to the new face.
+  const topIndex = 2;
+  const top2Index = 6;
+  const ofFace = (face) => part.triangles.filter((t) => (t.face || 0) === face);
+  assert.ok(ofFace(topIndex).length >= 1);
+  assert.ok(ofFace(top2Index).length >= 1);
+  assert.equal(ofFace(topIndex).length + ofFace(top2Index).length, 4);
+  assert.deepEqual(meshTopologyIssues(part), []);
+  assert.deepEqual(part.faces['top 2'], { color: '#123456' });
+  // Each region is internally coplanar: all its triangles share one normal.
+  for (const face of [topIndex, top2Index]) {
+    const normals = ofFace(face).map((t) => {
+      const [a, b, c] = t.v.map((v) => part.vertices[v]);
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+      const l = Math.hypot(...n);
+      return n.map((x) => x / l);
+    });
+    for (const n of normals.slice(1)) {
+      assert.ok(n[0] * normals[0][0] + n[1] * normals[0][1] + n[2] * normals[0][2] > 0.999);
+    }
+  }
+});
+
+test('captureUnionFaceProjection maps the union of the faces onto the unit square', () => {
+  const part = convertPartToMesh({ kind: 'box', name: 'b', position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1], color: '#999999', faces: {} });
+  const projection = captureUnionFaceProjection(part, ['front', 'top']);
+  assert.ok(projection);
+  const { origin, uVector, vVector } = projection;
+  const uu = uVector[0] ** 2 + uVector[1] ** 2 + uVector[2] ** 2;
+  const vv = vVector[0] ** 2 + vVector[1] ** 2 + vVector[2] ** 2;
+  const uvDot = uVector[0] * vVector[0] + uVector[1] * vVector[1] + uVector[2] * vVector[2];
+  const det = uu * vv - uvDot * uvDot;
+  const solve = (p) => {
+    const d = [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]];
+    const du = d[0] * uVector[0] + d[1] * uVector[1] + d[2] * uVector[2];
+    const dv = d[0] * vVector[0] + d[1] * vVector[1] + d[2] * vVector[2];
+    return [(du * vv - dv * uvDot) / det, (dv * uu - du * uvDot) / det];
+  };
+  // Every corner of both faces lands inside [0,1]^2 and the extremes reach it.
+  const names = partFaceNames(part);
+  const wanted = new Set([names.indexOf('front'), names.indexOf('top')]);
+  let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+  for (const t of part.triangles) {
+    if (!wanted.has(t.face || 0)) continue;
+    for (const vi of t.v) {
+      const [u, v] = solve(part.vertices[vi]);
+      assert.ok(u > -1e-6 && u < 1 + 1e-6, `u ${u} in range`);
+      assert.ok(v > -1e-6 && v < 1 + 1e-6, `v ${v} in range`);
+      uMin = Math.min(uMin, u); uMax = Math.max(uMax, u);
+      vMin = Math.min(vMin, v); vMax = Math.max(vMax, v);
+    }
+  }
+  assert.ok(Math.abs(uMin) < 1e-6 && Math.abs(uMax - 1) < 1e-6);
+  assert.ok(Math.abs(vMin) < 1e-6 && Math.abs(vMax - 1) < 1e-6);
+  assert.equal(customAssetsDocumentErrors({
+    version: 1,
+    assets: { 'custom:0009': { id: 'custom:0009', label: 'x', parts: [part] } },
+    textures: {},
+    worldTextures: {},
+  }).length, 0);
 });

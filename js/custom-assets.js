@@ -1301,6 +1301,219 @@ export function clonePartFaceToOpposite(part, faceName) {
 }
 
 // ---------------------------------------------------------------------------
+// Face splitting and shared projections
+// ---------------------------------------------------------------------------
+
+const MAX_FACE_NAMES = 16; // mirrors customAssetsDocumentErrors
+
+const triangleNormal = (a, b, c) => {
+  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const length = Math.hypot(...n);
+  return length > 1e-12 ? n.map((value) => value / length) : null;
+};
+
+/**
+ * Splits one material face of a kind:'mesh' part into its flat regions:
+ * connected runs of (nearly) coplanar triangles become separate named faces —
+ * "top", "top 2", "top 3" — each stylable on its own. Custom apexes carve a
+ * box face into several visual planes; this turns them into real faces. The
+ * first region keeps the original name and every new face inherits the
+ * original style. Returns { ok: true, faces } with the region face names, or
+ * { ok: false, reason } when the face is already a single plane or the part
+ * would exceed the face-name budget.
+ */
+export function splitPartFaceByPlanarRegions(part, faceName, { toleranceDegrees = 6 } = {}) {
+  if (part?.kind !== 'mesh') return { ok: false, reason: 'only editable meshes can split faces' };
+  const names = partFaceNames(part);
+  const materialIndex = names.indexOf(faceName);
+  if (materialIndex < 0) return { ok: false, reason: `no face named "${faceName}"` };
+  const owned = [];
+  part.triangles.forEach((triangle, index) => {
+    if ((triangle.face || 0) === materialIndex) owned.push(index);
+  });
+  if (owned.length < 2) return { ok: false, reason: 'this face is a single flat surface' };
+  const normals = new Map(owned.map((index) => {
+    const [a, b, c] = part.triangles[index].v.map((vertex) => part.vertices[vertex]);
+    return [index, triangleNormal(a, b, c)];
+  }));
+  const byEdge = new Map();
+  for (const index of owned) {
+    const { v } = part.triangles[index];
+    for (let corner = 0; corner < 3; corner += 1) {
+      const key = meshEdgeKey(v[corner], v[(corner + 1) % 3]);
+      if (!byEdge.has(key)) byEdge.set(key, []);
+      byEdge.get(key).push(index);
+    }
+  }
+  const minDot = Math.cos(toleranceDegrees * Math.PI / 180);
+  const regionOf = new Map();
+  const regions = [];
+  for (const seed of owned) {
+    if (regionOf.has(seed)) continue;
+    const region = [];
+    const queue = [seed];
+    regionOf.set(seed, regions.length);
+    while (queue.length) {
+      const current = queue.pop();
+      region.push(current);
+      const currentNormal = normals.get(current);
+      const { v } = part.triangles[current];
+      for (let corner = 0; corner < 3; corner += 1) {
+        for (const neighbour of byEdge.get(meshEdgeKey(v[corner], v[(corner + 1) % 3])) || []) {
+          if (regionOf.has(neighbour)) continue;
+          const neighbourNormal = normals.get(neighbour);
+          if (!currentNormal || !neighbourNormal) continue;
+          const dot = currentNormal[0] * neighbourNormal[0] + currentNormal[1] * neighbourNormal[1] + currentNormal[2] * neighbourNormal[2];
+          if (dot < minDot) continue;
+          regionOf.set(neighbour, regions.length);
+          queue.push(neighbour);
+        }
+      }
+    }
+    regions.push(region);
+  }
+  if (regions.length < 2) return { ok: false, reason: 'this face is a single flat surface' };
+  if (names.length + regions.length - 1 > MAX_FACE_NAMES) {
+    return { ok: false, reason: `splitting needs ${regions.length} faces but a part can hold at most ${MAX_FACE_NAMES}` };
+  }
+  const taken = new Set(names);
+  const regionNames = [faceName];
+  for (let region = 1, suffix = 2; region < regions.length; region += 1, suffix += 1) {
+    let candidate = `${faceName} ${suffix}`;
+    while (taken.has(candidate)) { suffix += 1; candidate = `${faceName} ${suffix}`; }
+    taken.add(candidate);
+    regionNames.push(candidate);
+  }
+  part.faceNames = [...names, ...regionNames.slice(1)];
+  regions.forEach((region, order) => {
+    const face = part.faceNames.indexOf(regionNames[order]);
+    for (const index of region) part.triangles[index].face = face;
+  });
+  const style = part.faces?.[faceName];
+  if (style) {
+    part.faces = part.faces || {};
+    for (const name of regionNames.slice(1)) part.faces[name] = structuredClone(style);
+  }
+  return { ok: true, faces: regionNames };
+}
+
+/**
+ * One texture plane spanning several faces at once: captures the UV plane of
+ * the largest face of the group, then rescales it so the union of all the
+ * faces maps exactly onto the [0,1]² image square. Storing the SAME returned
+ * projection on every face of the group (fit 'cover') spreads one image
+ * continuously across them — edges line up because every face samples the
+ * same plane. Returns null when no plane can be derived.
+ */
+export function captureUnionFaceProjection(part, faceNames) {
+  if (!part || part.kind === 'asset' || !Array.isArray(faceNames) || faceNames.length < 1) return null;
+  const names = partFaceNames(part);
+  const wanted = new Set(faceNames.map((name) => names.indexOf(name)));
+  wanted.delete(-1);
+  if (!wanted.size) return null;
+  const geometry = partGeometry(part);
+  if (!geometry) return null;
+  applyVertexOffsets(geometry, part.vertexOffsets);
+  try {
+    const position = geometry.getAttribute('position');
+    if (!position) return null;
+    const index = geometry.index;
+    const cornerCount = index ? index.count : position.count;
+    const groups = geometry.groups?.length ? geometry.groups : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+    const point = (corner) => {
+      const vertex = index ? index.getX(corner) : corner;
+      return [position.getX(vertex), position.getY(vertex), position.getZ(vertex)];
+    };
+    // Largest face (by area) anchors the projection plane.
+    let largest = null;
+    let largestArea = -1;
+    for (const materialIndex of wanted) {
+      let area = 0;
+      for (const group of groups.filter((entry) => (entry.materialIndex || 0) === materialIndex)) {
+        for (let corner = group.start; corner + 2 < group.start + group.count; corner += 3) {
+          const [a, b, c] = [point(corner), point(corner + 1), point(corner + 2)];
+          const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+          const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+          area += Math.hypot(
+            u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0],
+          ) / 2;
+        }
+      }
+      if (area > largestArea) { largestArea = area; largest = materialIndex; }
+    }
+    const base = capturePartFaceProjection(part, names[largest]);
+    if (!base) return null;
+    // Project along the area-weighted average normal of the whole group — a
+    // sheet draped over the fold — so no face of the group is edge-on to the
+    // image plane, and inherit the largest face's u/v orientation.
+    const normal = [0, 0, 0];
+    for (const group of groups.filter((entry) => wanted.has(entry.materialIndex || 0))) {
+      for (let corner = group.start; corner + 2 < group.start + group.count; corner += 3) {
+        const [a, b, c] = [point(corner), point(corner + 1), point(corner + 2)];
+        const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        normal[0] += (u[1] * v[2] - u[2] * v[1]) / 2;
+        normal[1] += (u[2] * v[0] - u[0] * v[2]) / 2;
+        normal[2] += (u[0] * v[1] - u[1] * v[0]) / 2;
+      }
+    }
+    const normalLength = Math.hypot(...normal);
+    if (normalLength < 1e-9) return null;
+    const unit = normal.map((value) => value / normalLength);
+    const flatten = (vector) => {
+      const along = vector[0] * unit[0] + vector[1] * unit[1] + vector[2] * unit[2];
+      const flat = [vector[0] - along * unit[0], vector[1] - along * unit[1], vector[2] - along * unit[2]];
+      const length = Math.hypot(...flat);
+      return length > 1e-6 ? flat.map((value) => value / length) : null;
+    };
+    const uVector = flatten(base.uVector);
+    const vVector = flatten(base.vVector) || (uVector && [
+      unit[1] * uVector[2] - unit[2] * uVector[1],
+      unit[2] * uVector[0] - unit[0] * uVector[2],
+      unit[0] * uVector[1] - unit[1] * uVector[0],
+    ]);
+    if (!uVector || !vVector) return null;
+    const origin = base.origin;
+    const uu = uVector[0] ** 2 + uVector[1] ** 2 + uVector[2] ** 2;
+    const vv = vVector[0] ** 2 + vVector[1] ** 2 + vVector[2] ** 2;
+    const uvDot = uVector[0] * vVector[0] + uVector[1] * vVector[1] + uVector[2] * vVector[2];
+    const determinant = uu * vv - uvDot * uvDot;
+    if (Math.abs(determinant) < 1e-12) return null;
+    let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+    for (const group of groups.filter((entry) => wanted.has(entry.materialIndex || 0))) {
+      for (let corner = group.start; corner < group.start + group.count; corner += 1) {
+        const p = point(corner);
+        const delta = [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]];
+        const du = delta[0] * uVector[0] + delta[1] * uVector[1] + delta[2] * uVector[2];
+        const dv = delta[0] * vVector[0] + delta[1] * vVector[1] + delta[2] * vVector[2];
+        const u = (du * vv - dv * uvDot) / determinant;
+        const v = (dv * uu - du * uvDot) / determinant;
+        uMin = Math.min(uMin, u); uMax = Math.max(uMax, u);
+        vMin = Math.min(vMin, v); vMax = Math.max(vMax, v);
+      }
+    }
+    const uSpan = uMax - uMin;
+    const vSpan = vMax - vMin;
+    if (!(uSpan > 1e-6) || !(vSpan > 1e-6)) return null;
+    return {
+      origin: [
+        origin[0] + uMin * uVector[0] + vMin * vVector[0],
+        origin[1] + uMin * uVector[1] + vMin * vVector[1],
+        origin[2] + uMin * uVector[2] + vMin * vVector[2],
+      ],
+      uvOrigin: [0, 0],
+      uVector: uVector.map((value) => value * uSpan),
+      vVector: vVector.map((value) => value * vSpan),
+      surfaceAspect: (uSpan * Math.sqrt(uu)) / (vSpan * Math.sqrt(vv)),
+    };
+  } finally {
+    geometry.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Textures and materials
 // ---------------------------------------------------------------------------
 

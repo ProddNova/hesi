@@ -3,9 +3,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets, buildPartObject,
-  capturePartFaceProjection, clonePartFaceToOpposite, convertPartToMesh, meshInsertVertexAtPoint,
-  meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceNames, partGeometry, translatePartFace,
-  weldedVertices,
+  capturePartFaceProjection, captureUnionFaceProjection, clonePartFaceToOpposite, convertPartToMesh,
+  meshInsertVertexAtPoint, meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceNames,
+  partGeometry, splitPartFaceByPlanarRegions, translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -827,11 +827,26 @@ export class ModelerPanel {
   _renderFacePanel(part) {
     const faces = partFaceNames(part);
     if (!faces.length) return;
+    if (!this.checkedFaces) this.checkedFaces = new Set();
+    for (const name of [...this.checkedFaces]) {
+      if (!faces.includes(name)) this.checkedFaces.delete(name);
+    }
     this.inspector.append(element('h3', '', 'Faces & textures'));
-    this.inspector.append(element('p', 'modeler-help', 'Pick a face here (or click it in Faces mode), then attach an image: top, bottom, every side — like wrapping a photo around a bin.'));
+    this.inspector.append(element('p', 'modeler-help', 'Pick a face here (or click it in Faces mode), then attach an image: top, bottom, every side — like wrapping a photo around a bin. Tick several faces to spread one image across them.'));
     for (const faceName of faces) {
       const style = part.faces?.[faceName] || {};
       const row = element('div', `modeler-face-row${this.selectedFace === faceName ? ' selected' : ''}`);
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'modeler-face-check';
+      check.checked = this.checkedFaces.has(faceName);
+      check.title = 'Tick faces to texture together (one image spread across all of them)';
+      check.setAttribute('aria-label', `Select face ${faceName} for group texturing`);
+      check.addEventListener('change', () => {
+        if (check.checked) this.checkedFaces.add(faceName); else this.checkedFaces.delete(faceName);
+        this._renderInspector();
+      });
+      row.append(check);
       const pick = element('button', 'modeler-face-pick', faceName);
       pick.type = 'button';
       pick.addEventListener('click', () => {
@@ -880,6 +895,19 @@ export class ModelerPanel {
         this._renderInspector();
       });
       row.append(allFaces);
+      if (part.kind === 'mesh') {
+        const split = button('✂ Split', 'tool-button small', 'Split this face into its flat regions — custom apexes carve a face into several planes; each becomes its own textureable face');
+        split.addEventListener('click', () => {
+          const result = splitPartFaceByPlanarRegions(part, faceName);
+          if (!result.ok) { this.onStatus(`Cannot split "${faceName}" · ${result.reason}`); return; }
+          this.selectedFace = faceName;
+          this._markDirty();
+          this._rebuildObject();
+          this._renderInspector();
+          this.onStatus(`Split "${faceName}" into ${result.faces.length} flat faces: ${result.faces.join(', ')} · Ctrl+Z undoes`);
+        });
+        row.append(split);
+      }
       const oppositeName = oppositePartFace(part, faceName);
       if (oppositeName) {
         const cloneOpposite = button('⇄ Opposite', 'tool-button small', `Clone this face onto the "${oppositeName}" face — texture, colour, and every pulled/added vertex, mirrored across`);
@@ -939,6 +967,39 @@ export class ModelerPanel {
         this.inspector.append(options);
       }
     }
+    if (this.checkedFaces.size >= 2) {
+      const group = element('div', 'modeler-face-group');
+      const names = faces.filter((name) => this.checkedFaces.has(name));
+      const apply = button(`Image across ${names.length} faces…`, 'tool-button accent small',
+        'Attach one image spread continuously over every ticked face — the picture spans them as a single sheet');
+      apply.addEventListener('click', () => this._assignTextureAcrossFaces(part, names));
+      const clear = button('Untick all', 'tool-button small', 'Clear the face selection');
+      clear.addEventListener('click', () => { this.checkedFaces.clear(); this._renderInspector(); });
+      group.append(apply, clear);
+      this.inspector.append(group);
+    }
+  }
+
+  /**
+   * One image spread over several faces as a single sheet: every face gets the
+   * same texture with the same union-fitted projection plane, so the picture
+   * continues seamlessly across the shared edges.
+   */
+  _assignTextureAcrossFaces(part, faceNames) {
+    this._chooseTexture(`Texture across ${faceNames.length} faces`, (textureId) => {
+      const projection = captureUnionFaceProjection(part, faceNames);
+      if (!projection) { this.onStatus('Could not fit one image plane across those faces'); return; }
+      part.faces = part.faces || {};
+      for (const name of faceNames) {
+        part.faces[name] = { ...(part.faces[name] || {}), texture: textureId, fit: 'cover', projection: clone(projection) };
+      }
+      this._markDirty();
+      this._rebuildObject();
+      this._renderInspector();
+      this._renderTextures();
+      this.onTexturesChanged();
+      this.onStatus(`Image spread across ${faceNames.join(', ')} · one sheet, shared edges line up`);
+    });
   }
 
   _renderTextures() {
@@ -1720,8 +1781,7 @@ export class ModelerPanel {
   }
 
   _assignTextureToFace(part, faceName) {
-    const textures = this.store.textures();
-    const useTexture = (textureId) => {
+    this._chooseTexture(`Texture for face "${faceName}"`, (textureId) => {
       part.faces = part.faces || {};
       const nextStyle = { ...(part.faces[faceName] || {}), texture: textureId };
       if (nextStyle.fit === 'cover') {
@@ -1735,11 +1795,15 @@ export class ModelerPanel {
       this._renderInspector();
       this._renderTextures();
       this.onTexturesChanged();
-    };
+    });
+  }
+
+  /** Texture picker overlay: reuse an uploaded image or add a new one. */
+  _chooseTexture(title, useTexture) {
+    const textures = this.store.textures();
     if (!textures.length) { this._pickImage(useTexture); return; }
-    // Tiny chooser: reuse an uploaded image or add a new one.
     const chooser = element('div', 'modeler-chooser');
-    chooser.append(element('b', '', `Texture for face "${faceName}"`));
+    chooser.append(element('b', '', title));
     const grid = element('div', 'modeler-chooser-grid');
     for (const texture of textures) {
       const pick = element('button', 'modeler-chooser-item');

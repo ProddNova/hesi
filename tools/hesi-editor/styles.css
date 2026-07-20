@@ -768,8 +768,20 @@ input, select { accent-color: var(--accent); }
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.modeler-face-row { display: flex; align-items: center; gap: 5px; padding: 3px 4px; border: 1px solid transparent; border-radius: 3px; }
+.modeler-face-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 3px 4px; border: 1px solid transparent; border-radius: 3px; }
 .modeler-face-row.selected { border-color: var(--accent); background: rgba(9, 71, 113, .35); }
+.modeler-face-check { flex: 0 0 auto; margin: 0; accent-color: var(--accent); }
+.modeler-face-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin: 4px 4px 6px;
+  padding: 5px;
+  background: var(--surface-raised);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+}
 .modeler-face-options {
   display: flex;
   align-items: center;
