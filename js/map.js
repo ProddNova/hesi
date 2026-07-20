@@ -4031,12 +4031,24 @@ export class HighwayMap {
 
     if (!bestFix) {
       // Nowhere near any corridor (deep escape) — snap back to nearest route lane.
-      const nearest = this.getNearestRoute(position, { maxDistance: Infinity });
-      if (!nearest) return { hit: false, position: corrected, velocity: correctedVelocity, bounds: null };
-      const lane = this.sampleLane(nearest.routeId, nearest.distance, 0, nearest.route.bidirectional ? (nearest.signedLateral <= 0 ? 1 : -1) : 1);
-      const fixed = lane.position.clone();
-      fixed.y += 0.4;
-      bestFix = { distSq: fixed.distanceToSquared(position), point: fixed, type: 'outer-wall' };
+      // Memoized: an escape episode queries this once per sweep step per
+      // physics substep (a dozen+ calls per frame), and the unseeded
+      // nearest-route scan over the whole network cost tens of ms per call
+      // (observed 80+ ms frames — the "freeze that makes the car swerve").
+      // The snap target barely moves between probes centimetres apart, so
+      // reuse it while the query point stays within 2 m of the cached one.
+      const cache = this._escapeSnapCache;
+      if (cache && xzDistanceSq(position, cache.origin) < 4 && Math.abs(position.y - cache.origin.y) < 3) {
+        bestFix = { distSq: cache.point.distanceToSquared(position), point: cache.point.clone(), type: 'outer-wall' };
+      } else {
+        const nearest = this.getNearestRoute(position, { maxDistance: Infinity });
+        if (!nearest) return { hit: false, position: corrected, velocity: correctedVelocity, bounds: null };
+        const lane = this.sampleLane(nearest.routeId, nearest.distance, 0, nearest.route.bidirectional ? (nearest.signedLateral <= 0 ? 1 : -1) : 1);
+        const fixed = lane.position.clone();
+        fixed.y += 0.4;
+        this._escapeSnapCache = { origin: position.clone(), point: fixed.clone() };
+        bestFix = { distSq: fixed.distanceToSquared(position), point: fixed, type: 'outer-wall' };
+      }
     }
 
     corrected.copy(bestFix.point);

@@ -30,6 +30,9 @@ log in a textarea with a COPY button.
 ## Panel contents
 
 - FPS and frame time (average, p95, max over the last ~240 frames)
+- `SPIKE` line: the most recent frame above 40 ms with its subsystem
+  breakdown (physics / traffic / map streaming / render / save / other, in
+  ms) so a stutter names its cause on sight
 - JS heap used / total / limit (`performance.memory`, Chromium-only; other
   browsers show "not exposed")
 - Renderer per-frame counters: draw calls, triangles
@@ -44,18 +47,28 @@ log in a textarea with a COPY button.
 ## Log format
 
 Header lines prefixed with `#` (date, duration, user agent, GPU via
-`WEBGL_debug_renderer_info`, quality/resolution), then a tab-separated table
-at 2 rows/second — it pastes directly into any spreadsheet. Columns:
+`WEBGL_debug_renderer_info`, quality/resolution, whether the boot GPU
+prewarm ran), then a tab-separated table at 2 rows/second — it pastes
+directly into any spreadsheet. Columns:
 
 ```
-time_s mode fps frame_ms_avg frame_ms_p95 frame_ms_max draw_calls triangles
-geometries textures programs scene_objects scene_meshes visible_meshes
-instanced_count chunks_visible chunks_total traffic heap_used_mb heap_total_mb
+time_s mode fps frame_ms_avg frame_ms_p95 frame_ms_max
+max_phys_ms max_traffic_ms max_map_ms max_render_ms max_save_ms max_other_ms
+d_geometries d_textures d_programs
+draw_calls triangles geometries textures programs
+scene_objects scene_meshes visible_meshes instanced_count
+chunks_visible chunks_total traffic heap_used_mb heap_total_mb
 speed_kmh pos_x pos_z route
 ```
 
 Frame timings aggregate every frame between rows, so single-frame spikes show
-up in `frame_ms_max` even at the 500 ms row cadence.
+up in `frame_ms_max` even at the 500 ms row cadence. The `max_*` columns are
+the subsystem breakdown (from the game's per-frame profiler) of the WORST
+frame inside that row's window — a long `frame_ms_max` therefore names its
+cause on the same row. The `d_*` columns are renderer resource-count deltas
+over the window: nonzero values mean geometry/texture uploads or shader
+program compiles happened mid-window (the classic first-visibility stutter,
+which the boot prewarm is supposed to prevent while driving).
 
 ## Cost when idle
 

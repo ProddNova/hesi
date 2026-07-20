@@ -32,6 +32,9 @@ class ShutokoNights {
     this.camera=new THREE.PerspectiveCamera(64,16/9,.3,1250);
     this.roadScene=new THREE.Scene();this.garageScene=new THREE.Scene();
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
+    // Per-frame subsystem timings (ms). Filled by animate()/updateDriving()
+    // and consumed by DebugStats so long frames name their cause in the log.
+    this.frameProf={phys:0,traffic:0,map:0,render:0,persist:0,other:0,total:0};
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
     this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
@@ -73,7 +76,7 @@ class ShutokoNights {
     s.ownedCarId=s.ownedCarId||s.ownedCar?.id||d.ownedCarId;s.ownedCar=s.ownedCar||this.catalog.find(c=>c.id===s.ownedCarId)||d.ownedCar;
     s.fuel=Number.isFinite(+s.fuel)?+s.fuel:(s.ownedCar.fuelCapacity||45);return s;
   }
-  persist(){this.state.admin={...this.admin};try{localStorage.setItem(this.runtimeSaveKey,JSON.stringify(this.state));this.saver?.save?.(this.state);}catch(e){console.warn('Autosave unavailable',e);}}
+  persist(){const t0=performance.now();this.state.admin={...this.admin};try{localStorage.setItem(this.runtimeSaveKey,JSON.stringify(this.state));this.saver?.save?.(this.state);}catch(e){console.warn('Autosave unavailable',e);}if(this.frameProf)this.frameProf.persist+=performance.now()-t0;}
   generateAuctions(seed){
     const fn=Data.generateAuctions||Data.generateAuctionListings||Data.createAuctions;
     if(fn){try{return fn(seed,this.catalog);}catch(e){console.warn(e);}}
@@ -100,7 +103,10 @@ class ShutokoNights {
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
     // union for continuous collision so barriers are solid at any speed.
     this.roadAdapter={
-      getRoadInfo:(p)=>{const info=this.map?.getRoadInfo?.(p,this.currentRoadInfo?.routeId)||null;if(!info)return{onRoad:false,drivable:false,surfaceGrip:.55,snapHeight:false};this.currentRoadInfo=info;this.roadAdapter.onRoad=info.drivable!==false;return{...info,height:info.height??info.point?.y,snapHeight:true,surfaceGrip:info.drivable===false?.55:(info.surfaceGrip??1)};},
+      // getRoadInfo returns a fresh object per call, so annotating it in
+      // place is safe and skips a large object copy per physics substep
+      // (2-3 of these per frame; the copies were measurable GC churn).
+      getRoadInfo:(p)=>{const info=this.map?.getRoadInfo?.(p,this.currentRoadInfo?.routeId)||null;if(!info)return{onRoad:false,drivable:false,surfaceGrip:.55,snapHeight:false};this.currentRoadInfo=info;this.roadAdapter.onRoad=info.drivable!==false;info.height=info.height??info.point?.y;info.snapHeight=true;info.surfaceGrip=info.drivable===false?.55:(info.surfaceGrip??1);return info;},
       sweep:(from,to,radius)=>{const hit=this.map?.sweepWallCollision?.(from,to,null,Math.max(.62,radius),1.5);if(!hit?.hit)return null;return{hit:true,normal:hit.normal,correctedPosition:hit.position,penetration:0,kind:'wall',restitution:.12,friction:.4};},
       onRoad:true,
     };
@@ -115,8 +121,40 @@ class ShutokoNights {
     this.garage.root.visible=false;this.roadScene.add(this.camera);
     // World-editor builds (data/editor/*-build.json): replay saved map edits on
     // the freshly generated highway and garage. No build files -> no-op.
-    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e));
+    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>this.prewarmGpuResources());
     this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
+  }
+
+  // Uploads every road-scene geometry/texture and compiles every shader
+  // program in one hidden render during boot. Without this, three.js creates
+  // GPU resources lazily the first time an object is drawn, so first-time
+  // chunk visibility, traffic pop-in and route-specific content caused
+  // driver stalls (buffer/texture uploads + program links, worst case
+  // hundreds of ms) in the middle of driving. Runs after the editor builds
+  // land so streamed placements and imported textures are covered too.
+  prewarmGpuResources(){
+    if(!this.renderer||!this.roadScene)return;
+    const t0=performance.now();
+    const restore=[];
+    try{
+      this.roadScene.traverse(o=>{
+        if(o.visible===false){restore.push([o,'visible',false]);o.visible=true;}
+        if((o.isMesh||o.isInstancedMesh||o.isLine||o.isPoints)&&o.frustumCulled){restore.push([o,'frustumCulled',true]);o.frustumCulled=false;}
+      });
+      // Render one frame straight to the canvas: every draw call executes,
+      // uploading buffers/textures and compiling programs. It must be the
+      // canvas, not an offscreen target — three.js hardcodes linear output
+      // color space for non-XR render targets and the output color space is
+      // part of the program cache key, so an offscreen prewarm compiles
+      // throwaway variants and leaves the real sRGB compiles to happen
+      // mid-drive. The frame itself is harmless: it is the normal boot view
+      // with distant chunks also visible, behind the boot overlay.
+      // Traffic's lazily created brake-lamp material shares its program with
+      // the always-present tail-lamp material, so it needs no special case.
+      this.renderer.render(this.roadScene,this.camera);
+      this.performanceMetrics={...(this.performanceMetrics||{}),prewarmMs:performance.now()-t0,prewarmed:{geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures,programs:this.renderer.info.programs.length}};
+    }catch(e){console.warn('GPU prewarm',e);}
+    finally{for(const [object,key,value] of restore)object[key]=value;}
   }
 
   setupUI(){
@@ -246,14 +284,16 @@ class ShutokoNights {
     // physics integrates fixed 120 Hz substeps internally, so a large dt
     // stays stable); anything slower degrades to slow motion rather than
     // exploding.
+    const pf=this.frameProf;pf.phys=pf.traffic=pf.map=pf.render=pf.persist=0;const frameStart=performance.now();
     let dt=Math.min(.05,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
     // Developer map freezes gameplay (vehicle + drone stay put) while it is open.
     // Freezing is preferable to letting the car/camera drift on stuck input.
-    if(this.devMap?.isOpen()){this.render();this.debugStats?.frame();this.pressed.clear();return;}
+    if(this.devMap?.isOpen()){this.render();this.finishFrameProf(frameStart);this.pressed.clear();return;}
     if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
     this.updateDebugHitboxes(dt);
-    this.render();this.debugStats?.frame();this.pressed.clear();
+    this.render();this.finishFrameProf(frameStart);this.pressed.clear();
   }
+  finishFrameProf(frameStart){const pf=this.frameProf;pf.total=performance.now()-frameStart;pf.other=Math.max(0,pf.total-pf.phys-pf.traffic-pf.map-pf.render-pf.persist);this.debugStats?.frame(pf);}
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
@@ -270,12 +310,17 @@ class ShutokoNights {
     const state=this.getVehicleState(),pos=vec(state.position||state);
     const roadInfo=(this.roadAdapter?this.roadAdapter.getRoadInfo(pos):null)||this.map?.getRoadInfo?.(pos)||{};
     const input=this.getInput();this.lastDriveInput=input;const settings={automatic:this.state.settings.gearbox!=='manual',gearbox:this.state.settings.gearbox,infiniteFuel:this.admin.infiniteFuel};
+    const pf=this.frameProf;let t0=performance.now();
     try{this.physics.update(dt,input,this.roadAdapter||roadInfo,settings);}catch(e){console.error('Physics update',e);this.mode='error';throw e;}
+    pf.phys+=performance.now()-t0;
     // Wall contacts are now resolved inside the physics substeps (swept CCD);
     // pull the events out for scoring so scrapes/hits still cost combo/lives.
     for(const ev of this.physics.consumeEvents?.()||[]){if(ev.type==='collision'&&(ev.kind==='wall'||ev.kind==='impact'))this.registerContact('wall',{severity:ev.severity,normal:ev.normal});}
     if(this.admin.infiniteFuel)this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);
-    this.syncFuelFromPhysics();this.resolveMapCollision();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState());this.handleTrafficEvents();this.updatePlayerMesh();this.map?.update?.(pos,performance.now()/1000);
+    this.syncFuelFromPhysics();this.resolveMapCollision();
+    t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo});pf.traffic+=performance.now()-t0;
+    this.handleTrafficEvents();this.updatePlayerMesh();
+    t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
     const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
   }
@@ -332,7 +377,8 @@ class ShutokoNights {
     }catch(e){}
     return{scene,mode:this.debug.noclip?'noclip':this.mode,quality:this.renderQuality(),
       resolution:`${this.canvas.width}x${this.canvas.height}`,dpr:window.devicePixelRatio||1,
-      chunksVisible,chunksTotal,traffic:this.traffic?.active?.length??0,x,z,speedKmh,route};
+      chunksVisible,chunksTotal,traffic:this.traffic?.active?.length??0,x,z,speedKmh,route,
+      prewarm:this.performanceMetrics?.prewarmMs!=null?`${this.performanceMetrics.prewarmMs.toFixed(0)}ms (${this.performanceMetrics.prewarmed?.geometries??'?'} geo · ${this.performanceMetrics.prewarmed?.textures??'?'} tex · ${this.performanceMetrics.prewarmed?.programs??'?'} prog)`:'not run'};
   }
   getDevNetwork(){
     const mm=this.map?.getMinimapData?.();if(!mm)return null;
@@ -510,7 +556,13 @@ class ShutokoNights {
 
   getVehicleState(){return this.physics.getState?.()||this.physics.state||this.physics;}
   getTelemetry(){const t=this.physics.getTelemetry?.()||this.physics.telemetry||{};const s=this.getVehicleState();const speedMS=Math.abs(t.speedMS??t.speed??s.speed??s.velocity?.length?.()??0),gear=t.gear??s.gear??1,slip=t.slip??t.slipAngle??Math.max(Math.abs(t.frontSlipAngle||0),Math.abs(t.rearSlipAngle||0),t.frontSaturation||0,t.rearSaturation||0);return{...t,speedMS,speedKmh:t.speedKmh??speedMS*3.6,rpm:t.rpm??s.rpm??900,gear,gearLabel:t.gearLabel??(gear===0?'N':gear<0?'R':String(gear)),redline:t.redline??this.getEffectiveCar().redline??7000,fuel:t.fuel??s.fuel??this.state.fuel,fuelFraction:t.fuelFraction??((t.fuel??s.fuel??this.state.fuel)/(this.getEffectiveCar().fuelCapacity||45)),slip,throttle:t.throttle??this.lastDriveInput?.throttle??0};}
-  syncFuelFromPhysics(){const t=this.getTelemetry();if(Number.isFinite(t.fuel)){this.state.fuel=t.fuel;if(Math.random()<.004)this.persist();}}
+  syncFuelFromPhysics(){const t=this.getTelemetry();if(Number.isFinite(t.fuel)){this.state.fuel=t.fuel;
+    // Persist on a fixed 10 s cadence instead of randomly (~every 2.5 s at
+    // 100 fps): persist() does two JSON serializations + two localStorage
+    // writes on the main thread, which is a measurable frame stall. Fuel is
+    // also persisted on tab hide, garage entry and every menu transaction,
+    // so the longer interval risks nothing.
+    const now=performance.now();if(!this._lastFuelPersist||now-this._lastFuelPersist>10000){this._lastFuelPersist=now;this.persist();}}}
   setPhysicsFuel(v){if(this.physics.state)this.physics.state.fuel=v;if('fuel'in this.physics)this.physics.fuel=v;this.state.fuel=v;}
 
   updateScoring(dt,t){
@@ -586,7 +638,7 @@ class ShutokoNights {
     const mm=this.map?.getMinimapData?.()||this.map?.minimapData||null,services=this.map?.getServiceAreas?.()||this.map?.serviceAreas||this.map?.services||[];if(mm)this.ui.drawMinimap(mm,{x:vec(s.position||s).x,z:vec(s.position||s).z,heading:s.heading||0},services);
   }
   updateAudio(t,dt){try{this.audio?.update?.({rpm:t.rpm,redlineRpm:t.redline,speedKmh:t.speedKmh,throttle:t.throttle,slip:t.slip,turbo:this.getEffectiveCar().turbo||0,running:t.fuel>0,fuel:t.fuelFraction});}catch(e){} }
-  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;this.renderer.render(scene,this.camera);}
+  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;const t0=performance.now();this.renderer.render(scene,this.camera);this.frameProf.render+=performance.now()-t0;}
   renderQuality(){
     const q=this.state?.settings?.quality;if(['low','medium','high'].includes(q))return q;
     const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';

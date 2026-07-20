@@ -34,6 +34,18 @@ function asVector3(value, fallback = null) {
   return fallback ? fallback.clone() : new THREE.Vector3();
 }
 
+/** Allocation-free asVector3: same coercion rules, writes into `target`. */
+function copyVector3(target, value) {
+  if (value?.isVector3) return target.copy(value);
+  if (Array.isArray(value) && value.length >= 3) {
+    return target.set(finite(value[0], 0), finite(value[1], 0), finite(value[2], 0));
+  }
+  if (value && Number.isFinite(value.x) && Number.isFinite(value.z)) {
+    return target.set(value.x, finite(value.y, 0), value.z);
+  }
+  return target.set(0, 0, 0);
+}
+
 function seededRandom(seed) {
   let state = (Number(seed) || 0x7f4a7c15) >>> 0;
   return () => {
@@ -406,7 +418,12 @@ export class TrafficSystem {
       this._checkPlayerInteraction(vehicle, player, playerState);
     }
 
-    while (this.active.length > target) {
+    // Cull toward the target no more than a few vehicles per frame: a sudden
+    // density drop (admin slider, mode change) previously deactivated the
+    // whole surplus in one frame with an O(n) furthest-scan per removal,
+    // which is a visible hitch. Spreading it over frames is invisible.
+    let cullBudget = 3;
+    while (this.active.length > target && cullBudget > 0) {
       let furthest = null;
       let furthestDistance = -1;
       for (const vehicle of this.active) {
@@ -418,6 +435,7 @@ export class TrafficSystem {
       }
       if (!furthest) break;
       this._deactivate(furthest, 'density');
+      cullBudget -= 1;
     }
 
     this._previousPlayerPosition.copy(player.position);
@@ -429,27 +447,39 @@ export class TrafficSystem {
     if (!source) return null;
     const state = source.state ?? (typeof source.getState === 'function' ? source.getState() : source);
     if (!state?.position && !source.position) return null;
-    const position = asVector3(state.position ?? source.position);
-    const velocity = asVector3(state.velocity ?? source.velocity);
+    // Reused scratch object: this runs every frame and previously allocated
+    // ~6 vectors + an object per call (steady GC pressure while driving).
+    // Consumers never retain it — events clone any vector they keep.
+    const player = this._playerScratch ?? (this._playerScratch = {
+      source: null,
+      state: null,
+      position: new THREE.Vector3(),
+      previousPosition: new THREE.Vector3(),
+      velocity: new THREE.Vector3(),
+      speed: 0,
+      heading: 0,
+      forward: new THREE.Vector3(),
+      right: new THREE.Vector3(),
+      width: 1.78,
+      length: 4.35,
+      height: 1.45,
+    });
+    copyVector3(player.position, state.position ?? source.position);
+    copyVector3(player.velocity, state.velocity ?? source.velocity);
     const heading = finite(state.heading ?? state.yaw ?? source.heading, source.mesh?.rotation?.y ?? 0);
-    const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
-    const right = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
-    const speed = finite(state.speed, Math.hypot(velocity.x, velocity.z));
+    if (state.previousPosition) copyVector3(player.previousPosition, state.previousPosition);
+    else player.previousPosition.copy(this._previousPlayerPosition);
     const spec = state.spec ?? source.spec ?? {};
-    return {
-      source,
-      state,
-      position,
-      previousPosition: state.previousPosition ? asVector3(state.previousPosition) : this._previousPlayerPosition.clone(),
-      velocity,
-      speed,
-      heading,
-      forward,
-      right,
-      width: finite(state.width ?? spec.width, 1.78),
-      length: finite(state.length ?? spec.length, 4.35),
-      height: finite(state.height ?? spec.height, 1.45),
-    };
+    player.source = source;
+    player.state = state;
+    player.speed = finite(state.speed, Math.hypot(player.velocity.x, player.velocity.z));
+    player.heading = heading;
+    player.forward.set(Math.sin(heading), 0, Math.cos(heading));
+    player.right.set(Math.cos(heading), 0, -Math.sin(heading));
+    player.width = finite(state.width ?? spec.width, 1.78);
+    player.length = finite(state.length ?? spec.length, 4.35);
+    player.height = finite(state.height ?? spec.height, 1.45);
+    return player;
   }
 
   spawnVehicle(spawn, overrides = {}) {
@@ -1050,7 +1080,16 @@ export class TrafficSystem {
   }
 
   _brakeMaterial() {
-    if (!this._sharedMaterials.brake) this._sharedMaterials.brake = new THREE.MeshBasicMaterial({ color: 0xff2520, toneMapped: false });
+    if (!this._sharedMaterials.brake) {
+      const brake = new THREE.MeshBasicMaterial({ color: 0xff2520, toneMapped: false });
+      // Mirror the tail-lamp's post-processing flags (the game applies
+      // dithering to every scene material after construction). With equal
+      // flags this material hits the tail-lamp's cached shader program;
+      // otherwise the first braking car compiles a new program mid-drive.
+      brake.dithering = this._sharedMaterials.taillamp.dithering;
+      brake.fog = this._sharedMaterials.taillamp.fog;
+      this._sharedMaterials.brake = brake;
+    }
     return this._sharedMaterials.brake;
   }
 
