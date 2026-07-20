@@ -11,6 +11,11 @@ async function responseJson(response) {
   return payload;
 }
 
+function assertTextureDataUrl(name, dataUrl) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) throw new Error(`${name} is not an image`);
+  if (dataUrl.length > 4 * 1024 * 1024) throw new Error(`${name} is too large — keep textures under ~3 MB (small PSX-style images work best)`);
+}
+
 function nextId(prefix, existing) {
   let index = 1;
   for (const id of existing) {
@@ -87,12 +92,29 @@ export class CustomAssetStore {
       reader.onerror = () => rejectPromise(new Error(`Cannot read ${file.name}`));
       reader.readAsDataURL(file);
     });
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) throw new Error(`${file.name} is not an image`);
-    if (dataUrl.length > 4 * 1024 * 1024) throw new Error(`${file.name} is too large — keep textures under ~3 MB (small PSX-style images work best)`);
+    return this.addTextureFromDataUrl(file.name, dataUrl);
+  }
+
+  /** Registers an image data URL (e.g. an edited canvas), returning its texture id. */
+  addTextureFromDataUrl(name, dataUrl) {
+    assertTextureDataUrl(name, dataUrl);
     const id = nextId('tex', Object.keys(this.document.textures));
-    this.document.textures[id] = { name: file.name, dataUrl };
+    this.document.textures[id] = { name: String(name || id), dataUrl };
     this.dirty = true;
     return id;
+  }
+
+  /** Replaces the image and/or name of a stored texture in place. */
+  updateTexture(id, { dataUrl, name } = {}) {
+    const record = this.document.textures[id];
+    if (!record) return false;
+    if (dataUrl !== undefined) {
+      assertTextureDataUrl(record.name || id, dataUrl);
+      record.dataUrl = dataUrl;
+    }
+    if (name !== undefined) record.name = String(name);
+    this.dirty = true;
+    return true;
   }
 
   deleteTexture(id) {

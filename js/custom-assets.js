@@ -485,11 +485,13 @@ const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 
  * The nearest triangle decides how: a hit near one of its edges splits that
  * edge — including EVERY triangle sharing it, keeping the mesh watertight —
  * while an interior hit fans the triangle into three around the new vertex.
- * Stored UVs are interpolated (linearly on edges, barycentrically inside), so
- * face textures stay continuous. Returns { vertexIndex, split: 'edge'|'face' }
- * or null when nothing could be added.
+ * A hit (almost) on an existing corner snaps to it (split: 'corner', nothing
+ * inserted). Stored UVs are interpolated (linearly on edges, barycentrically
+ * inside), so face textures stay continuous. Returns
+ * { vertexIndex, split: 'edge'|'face'|'corner' } or null when nothing could
+ * be added.
  */
-function meshInsertSingleVertexAtPoint(part, point, { edgeEpsilon = 0.12, faceIndex = null } = {}) {
+function meshInsertSingleVertexAtPoint(part, point, { edgeEpsilon = 0.12, cornerEpsilon = 0.05, faceIndex = null } = {}) {
   if (part?.kind !== 'mesh' || !finiteVector(point, 3)) return null;
   if (!Array.isArray(part.vertices) || !Array.isArray(part.triangles)) return null;
   if (part.vertices.length >= MESH_MAX_VERTICES || part.triangles.length + 2 > MESH_MAX_TRIANGLES) return null;
@@ -497,6 +499,12 @@ function meshInsertSingleVertexAtPoint(part, point, { edgeEpsilon = 0.12, faceIn
   if (!best) return null;
   const triangle = best.triangle;
   const weights = best.bary;
+  const largest = weights.indexOf(Math.max(...weights));
+  if (weights[largest] >= 1 - cornerEpsilon) {
+    // (Almost) on an existing corner: reuse that vertex instead of stacking a
+    // degenerate sliver next to it.
+    return { vertexIndex: triangle.v[largest], split: 'corner' };
+  }
   const smallest = weights.indexOf(Math.min(...weights));
   if (weights[smallest] < edgeEpsilon) {
     // Near an edge: split the edge opposite the smallest-weight corner in
@@ -605,9 +613,227 @@ function oppositeMeshTriangle(part, source) {
 const meshEdgeKey = (a, b) => a < b ? `${a}:${b}` : `${b}:${a}`;
 
 /**
- * Makes a real mesh edge between two new boundary vertices when they lie on
- * the same planar material face. This turns opposite roof apexes into one
- * continuous ridge instead of leaving two unrelated points.
+ * Clips segment a→b (2D) against a triangle given as three 2D points.
+ * Returns the [t0, t1] parameter interval of the segment inside the triangle,
+ * or null when they do not overlap. Winding of the triangle does not matter.
+ */
+function clipSegmentByTriangle2(a, b, corners) {
+  let [p0, p1, p2] = corners;
+  const area = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
+  if (area === 0) return null;
+  if (area < 0) [p1, p2] = [p2, p1];
+  const ordered = [p0, p1, p2];
+  let t0 = 0;
+  let t1 = 1;
+  for (let index = 0; index < 3; index += 1) {
+    const p = ordered[index];
+    const q = ordered[(index + 1) % 3];
+    const ex = q[0] - p[0], ey = q[1] - p[1];
+    const da = ex * (a[1] - p[1]) - ey * (a[0] - p[0]);
+    const db = ex * (b[1] - p[1]) - ey * (b[0] - p[0]);
+    if (da < 0 && db < 0) return null;
+    if (da < 0) t0 = Math.max(t0, da / (da - db));
+    else if (db < 0) t1 = Math.min(t1, da / (da - db));
+  }
+  return t1 > t0 ? [t0, t1] : null;
+}
+
+/**
+ * Ear-clips one simple polygon (vertex indices in CCW order, 2D positions via
+ * `points`). Returns the triangles as index triples, or null when the polygon
+ * is degenerate.
+ */
+function earClipPolygon(indices, points) {
+  if (indices.length < 3) return [];
+  const p = (vertex) => points.get(vertex);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  let span = 0;
+  for (const vertex of indices) {
+    span = Math.max(span, Math.abs(p(vertex)[0]), Math.abs(p(vertex)[1]));
+  }
+  const areaEpsilon = Math.max(span * span, 1e-12) * 1e-9;
+  const remaining = [...indices];
+  const result = [];
+  let guard = remaining.length * remaining.length + 16;
+  while (remaining.length > 3 && guard-- > 0) {
+    let clipped = false;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const previous = remaining[(index + remaining.length - 1) % remaining.length];
+      const current = remaining[index];
+      const next = remaining[(index + 1) % remaining.length];
+      const a = p(previous), b = p(current), c = p(next);
+      if (cross(a, b, c) <= areaEpsilon) continue; // reflex or degenerate corner
+      let blocked = false;
+      for (const other of remaining) {
+        if (other === previous || other === current || other === next) continue;
+        const q = p(other);
+        if (cross(a, b, q) >= -areaEpsilon && cross(b, c, q) >= -areaEpsilon && cross(c, a, q) >= -areaEpsilon) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) continue;
+      result.push([previous, current, next]);
+      remaining.splice(index, 1);
+      clipped = true;
+      break;
+    }
+    if (!clipped) return null;
+  }
+  if (remaining.length === 3) {
+    if (cross(p(remaining[0]), p(remaining[1]), p(remaining[2])) <= areaEpsilon) return null;
+    result.push([...remaining]);
+  }
+  return result;
+}
+
+/**
+ * Inserts a real edge between vertexA and vertexB inside one planar material
+ * face by retriangulating only the corridor of triangles the connecting
+ * segment actually crosses. Triangles of the face outside the corridor — and
+ * any custom vertices they carry — stay untouched.
+ */
+function insertChordAcrossFace(part, face, vertexA, vertexB) {
+  const faceTriangles = [];
+  part.triangles.forEach((triangle, index) => {
+    if ((triangle.face || 0) === face) faceTriangles.push({ triangle, index });
+  });
+  if (faceTriangles.some(({ triangle }) => triangle.v.includes(vertexA) && triangle.v.includes(vertexB))) return true;
+
+  // Projection basis from the first non-degenerate face triangle. With
+  // v = n × u the face triangles project counter-clockwise.
+  let basis = null;
+  for (const { triangle } of faceTriangles) {
+    const [a, b, c] = triangle.v.map((vertex) => part.vertices[vertex]);
+    if (![a, b, c].every((corner) => finiteVector(corner, 3))) continue;
+    const origin = new THREE.Vector3().fromArray(a);
+    const u = new THREE.Vector3().fromArray(b).sub(origin);
+    const ac = new THREE.Vector3().fromArray(c).sub(origin);
+    const normal = u.clone().cross(ac);
+    if (normal.lengthSq() < 1e-12) continue;
+    normal.normalize();
+    u.normalize();
+    basis = { origin, normal, u, v: normal.clone().cross(u) };
+    break;
+  }
+  if (!basis) return false;
+
+  // 2D positions of every face vertex; a bent (non-planar) face cannot take a
+  // straight chord, so refuse it.
+  const points = new Map();
+  let extent = 1;
+  for (const { triangle } of faceTriangles) {
+    for (const vertex of triangle.v) {
+      if (points.has(vertex)) continue;
+      const position = part.vertices[vertex];
+      if (!finiteVector(position, 3)) return false;
+      extent = Math.max(extent, Math.abs(position[0]), Math.abs(position[1]), Math.abs(position[2]));
+      const delta = new THREE.Vector3().fromArray(position).sub(basis.origin);
+      if (Math.abs(delta.dot(basis.normal)) > extent * 1e-5) return false;
+      points.set(vertex, [delta.dot(basis.u), delta.dot(basis.v)]);
+    }
+  }
+  if (!points.has(vertexA) || !points.has(vertexB)) return false;
+  const a2 = points.get(vertexA);
+  const b2 = points.get(vertexB);
+  const segmentLength = Math.hypot(b2[0] - a2[0], b2[1] - a2[1]);
+  if (segmentLength < extent * 1e-6) return false;
+
+  // Corridor: face triangles the open segment actually passes through.
+  const corridor = faceTriangles.filter(({ triangle }) => {
+    const span = clipSegmentByTriangle2(a2, b2, triangle.v.map((vertex) => points.get(vertex)));
+    return span && (span[1] - span[0]) * segmentLength > extent * 1e-6;
+  });
+  if (!corridor.length) return false;
+
+  // Boundary loop of the corridor region (edges used by exactly one corridor
+  // triangle).
+  const edges = new Map();
+  for (const { triangle } of corridor) {
+    triangle.v.forEach((vertex, corner) => {
+      const next = triangle.v[(corner + 1) % 3];
+      const key = meshEdgeKey(vertex, next);
+      const edge = edges.get(key) || { count: 0, vertices: [vertex, next] };
+      edge.count += 1;
+      edges.set(key, edge);
+    });
+  }
+  const boundary = new Map();
+  for (const { count, vertices: [a, b] } of edges.values()) {
+    if (count !== 1) continue;
+    if (!boundary.has(a)) boundary.set(a, []);
+    if (!boundary.has(b)) boundary.set(b, []);
+    boundary.get(a).push(b);
+    boundary.get(b).push(a);
+  }
+  if (!boundary.has(vertexA) || !boundary.has(vertexB)) return false;
+  const loop = [vertexA];
+  let previous = -1;
+  let current = vertexA;
+  let closed = false;
+  while (loop.length <= boundary.size) {
+    const neighbours = boundary.get(current);
+    if (!neighbours || neighbours.length !== 2) break;
+    const next = neighbours[0] === previous ? neighbours[1] : neighbours[0];
+    if (next === vertexA) { closed = true; break; }
+    if (loop.includes(next)) break;
+    loop.push(next);
+    previous = current;
+    current = next;
+  }
+  if (!closed || !loop.includes(vertexB)) return false;
+  // A vertex strictly inside the corridor would be silently discarded by the
+  // retriangulation — never do that.
+  const onLoop = new Set(loop);
+  for (const { triangle } of corridor) {
+    if (triangle.v.some((vertex) => !onLoop.has(vertex))) return false;
+  }
+
+  // Orient the loop counter-clockwise (matching the face winding), then split
+  // it at the chord into the two polygons on either side.
+  let area = 0;
+  for (let index = 0; index < loop.length; index += 1) {
+    const p = points.get(loop[index]);
+    const q = points.get(loop[(index + 1) % loop.length]);
+    area += p[0] * q[1] - q[0] * p[1];
+  }
+  if (area < 0) loop.splice(0, loop.length, vertexA, ...loop.slice(1).reverse());
+  const splitAt = loop.indexOf(vertexB);
+  const chains = [loop.slice(0, splitAt + 1), [...loop.slice(splitAt), vertexA]];
+
+  const uvByVertex = new Map();
+  for (const { triangle } of faceTriangles) {
+    if (!triangle.uv) continue;
+    triangle.v.forEach((vertex, corner) => {
+      if (!uvByVertex.has(vertex)) uvByVertex.set(vertex, triangle.uv[corner]);
+    });
+  }
+  const replacements = [];
+  for (const chain of chains) {
+    const fan = earClipPolygon(chain, points);
+    if (!fan) return false;
+    for (const vertices of fan) {
+      const triangle = { v: vertices, face };
+      if (vertices.every((vertex) => uvByVertex.has(vertex))) {
+        triangle.uv = vertices.map((vertex) => uvByVertex.get(vertex).slice());
+      }
+      replacements.push(triangle);
+    }
+  }
+  if (!replacements.some((triangle) => triangle.v.includes(vertexA) && triangle.v.includes(vertexB))) return false;
+  const corridorIndices = new Set(corridor.map(({ index }) => index));
+  const kept = part.triangles.filter((_, index) => !corridorIndices.has(index));
+  if (kept.length + replacements.length > MESH_MAX_TRIANGLES) return false;
+  part.triangles = [...kept, ...replacements];
+  return true;
+}
+
+/**
+ * Makes a real mesh edge between two new vertices when they lie on the same
+ * planar material face. This turns opposite roof apexes into one continuous
+ * ridge instead of leaving two unrelated points, and — because only the
+ * crossed triangles are retriangulated — works even on faces that already
+ * carry custom vertices elsewhere.
  */
 function connectMeshVerticesAcrossFace(part, vertexA, vertexB) {
   const facesAtA = new Set(part.triangles
@@ -616,115 +842,9 @@ function connectMeshVerticesAcrossFace(part, vertexA, vertexB) {
   const facesAtB = new Set(part.triangles
     .filter((triangle) => triangle.v.includes(vertexB))
     .map((triangle) => triangle.face || 0));
-
   for (const face of facesAtA) {
     if (!facesAtB.has(face)) continue;
-    const faceTriangles = part.triangles.filter((triangle) => (triangle.face || 0) === face);
-    if (faceTriangles.some((triangle) => triangle.v.includes(vertexA) && triangle.v.includes(vertexB))) return true;
-
-    const edges = new Map();
-    const usedVertices = new Set();
-    const uvByVertex = new Map();
-    for (const triangle of faceTriangles) {
-      triangle.v.forEach((vertex, corner) => {
-        usedVertices.add(vertex);
-        if (triangle.uv && !uvByVertex.has(vertex)) uvByVertex.set(vertex, triangle.uv[corner].slice());
-        const next = triangle.v[(corner + 1) % 3];
-        const key = meshEdgeKey(vertex, next);
-        const edge = edges.get(key) || { count: 0, vertices: [vertex, next] };
-        edge.count += 1;
-        edges.set(key, edge);
-      });
-    }
-
-    const boundary = new Map();
-    for (const { count, vertices: [a, b] } of edges.values()) {
-      if (count !== 1) continue;
-      if (!boundary.has(a)) boundary.set(a, []);
-      if (!boundary.has(b)) boundary.set(b, []);
-      boundary.get(a).push(b);
-      boundary.get(b).push(a);
-    }
-    if (!boundary.has(vertexA) || !boundary.has(vertexB)) continue;
-
-    const loop = [vertexA];
-    let previous = -1;
-    let current = vertexA;
-    let closed = false;
-    while (loop.length <= boundary.size) {
-      const neighbours = boundary.get(current);
-      if (!neighbours || neighbours.length !== 2) break;
-      const next = neighbours[0] === previous ? neighbours[1] : neighbours[0];
-      if (next === vertexA) { closed = true; break; }
-      if (loop.includes(next)) break;
-      loop.push(next);
-      previous = current;
-      current = next;
-    }
-    // Rebuilding from the boundary is safe only for one simple loop without
-    // interior custom vertices, which must never be silently discarded.
-    if (!closed || loop.length !== usedVertices.size || !loop.includes(vertexB)) continue;
-
-    const referenceTriangle = faceTriangles.find((triangle) => {
-      const [a, b, c] = triangle.v.map((vertex) => part.vertices[vertex]);
-      TRI_A.fromArray(b).sub(TRI_B.fromArray(a));
-      TRI_C.fromArray(c).sub(TRI_B.fromArray(a));
-      return TRI_A.cross(TRI_C).lengthSq() > 1e-12;
-    });
-    if (!referenceTriangle) continue;
-    const [referenceA, referenceB, referenceC] = referenceTriangle.v.map((vertex) => part.vertices[vertex]);
-    TRIANGLE.set(TRI_A.fromArray(referenceA), TRI_B.fromArray(referenceB), TRI_C.fromArray(referenceC));
-    TRIANGLE.getNormal(OPPOSITE_NORMAL);
-    const planePoint = TRI_A.fromArray(referenceA);
-    const extent = loop.reduce((largest, vertex) => Math.max(
-      largest,
-      Math.abs(part.vertices[vertex][0]),
-      Math.abs(part.vertices[vertex][1]),
-      Math.abs(part.vertices[vertex][2]),
-    ), 1);
-    const planeTolerance = extent * 1e-5;
-    if (loop.some((vertex) => Math.abs(
-      OPPOSITE_DIRECTION.fromArray(part.vertices[vertex]).sub(planePoint).dot(OPPOSITE_NORMAL),
-    ) > planeTolerance)) continue;
-
-    // Orient the boundary like the original triangles before fanning the two
-    // polygons on either side of the requested chord.
-    OPPOSITE_DIRECTION.set(0, 0, 0);
-    for (let index = 0; index < loop.length; index += 1) {
-      const point = part.vertices[loop[index]];
-      const next = part.vertices[loop[(index + 1) % loop.length]];
-      OPPOSITE_DIRECTION.x += (point[1] - next[1]) * (point[2] + next[2]);
-      OPPOSITE_DIRECTION.y += (point[2] - next[2]) * (point[0] + next[0]);
-      OPPOSITE_DIRECTION.z += (point[0] - next[0]) * (point[1] + next[1]);
-    }
-    if (OPPOSITE_DIRECTION.dot(OPPOSITE_NORMAL) < 0) {
-      loop.splice(0, loop.length, vertexA, ...loop.slice(1).reverse());
-    }
-
-    const splitAt = loop.indexOf(vertexB);
-    const polygons = [
-      loop.slice(0, splitAt + 1),
-      [vertexB, ...loop.slice(splitAt + 1), vertexA],
-    ];
-    const replacements = [];
-    for (const polygon of polygons) {
-      if (polygon.length < 3) continue;
-      for (let index = 1; index + 1 < polygon.length; index += 1) {
-        const vertices = [polygon[0], polygon[index], polygon[index + 1]];
-        TRI_A.fromArray(part.vertices[vertices[1]]).sub(TRI_B.fromArray(part.vertices[vertices[0]]));
-        TRI_C.fromArray(part.vertices[vertices[2]]).sub(TRI_B.fromArray(part.vertices[vertices[0]]));
-        if (TRI_A.cross(TRI_C).lengthSq() <= 1e-12) continue;
-        const triangle = { v: vertices, face };
-        if (vertices.every((vertex) => uvByVertex.has(vertex))) {
-          triangle.uv = vertices.map((vertex) => uvByVertex.get(vertex).slice());
-        }
-        replacements.push(triangle);
-      }
-    }
-    const otherTriangles = part.triangles.filter((triangle) => (triangle.face || 0) !== face);
-    if (!replacements.length || otherTriangles.length + replacements.length > MESH_MAX_TRIANGLES) continue;
-    part.triangles = [...otherTriangles, ...replacements];
-    return true;
+    if (insertChordAcrossFace(part, face, vertexA, vertexB)) return true;
   }
   return false;
 }
@@ -794,6 +914,60 @@ export function meshRemoveVertex(part, vertexIndex) {
   part.triangles = kept.map((triangle) => ({ ...triangle, v: triangle.v.map((vertex) => remap.get(vertex)) }));
   // Offsets index the old welded topology; they no longer apply.
   delete part.vertexOffsets;
+  return true;
+}
+
+/**
+ * Moves an entire named face of a part by `delta` (part-local metres before
+ * the part scale): every vertex belonging to that material face translates
+ * together, so a box top can be pulled upward or a roof slid sideways in one
+ * gesture. Mesh parts move their vertices directly; primitives accumulate the
+ * move into `vertexOffsets` (staying non-destructive), keyed by the same
+ * welded indices the modeler's vertex handles use. Returns true when at least
+ * one vertex moved.
+ */
+export function translatePartFace(part, faceName, delta) {
+  if (!part || part.kind === 'asset' || !finiteVector(delta, 3)) return false;
+  const materialIndex = partFaceNames(part).indexOf(faceName);
+  if (materialIndex < 0) return false;
+  if (part.kind === 'mesh') {
+    const targets = new Set();
+    for (const triangle of part.triangles || []) {
+      if ((triangle.face || 0) !== materialIndex) continue;
+      for (const vertex of triangle.v) targets.add(vertex);
+    }
+    if (!targets.size) return false;
+    for (const vertex of targets) {
+      const position = part.vertices[vertex];
+      if (!finiteVector(position, 3)) continue;
+      part.vertices[vertex] = [position[0] + delta[0], position[1] + delta[1], position[2] + delta[2]];
+    }
+    return true;
+  }
+  const geometry = partGeometry(part);
+  if (!geometry) return false;
+  const { weldIndexOf } = weldedVertices(geometry);
+  const index = geometry.index;
+  const cornerCount = index ? index.count : geometry.getAttribute('position').count;
+  const groups = geometry.groups?.length ? geometry.groups : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+  const targets = new Set();
+  for (const group of groups) {
+    if ((group.materialIndex || 0) !== materialIndex) continue;
+    for (let corner = group.start; corner < group.start + group.count; corner += 1) {
+      targets.add(weldIndexOf[index ? index.getX(corner) : corner]);
+    }
+  }
+  geometry.dispose();
+  if (!targets.size) return false;
+  const offsets = new Map((part.vertexOffsets || []).map((entry) => [entry.i, entry.o]));
+  for (const weldIndex of targets) {
+    const offset = offsets.get(weldIndex) || [0, 0, 0];
+    offsets.set(weldIndex, [offset[0] + delta[0], offset[1] + delta[1], offset[2] + delta[2]]);
+  }
+  part.vertexOffsets = [...offsets.entries()]
+    .map(([i, o]) => ({ i, o }))
+    .filter((entry) => entry.o.some((value) => Math.abs(value) > 1e-9));
+  if (!part.vertexOffsets.length) delete part.vertexOffsets;
   return true;
 }
 
@@ -1006,6 +1180,9 @@ function faceMaterial(part, faceName, texturesById, surfaceAspect = 1) {
       flipY: Boolean(style.flipY),
     });
     parameters.color = new THREE.Color('#ffffff');
+    // PSX-style cutout: pixels erased to transparency in the texture editor
+    // punch through instead of rendering as opaque black.
+    parameters.alphaTest = 0.5;
   }
   if (part.kind === 'plane' || style.doubleSide) parameters.side = THREE.DoubleSide;
   const material = new THREE.MeshLambertMaterial(parameters);
@@ -1138,6 +1315,7 @@ export function applyObjectFaceStyles(root, faceStyles = {}, texturesById = {}) 
         flipY: Boolean(style.flipY),
       });
       material.color?.set?.('#ffffff');
+      material.alphaTest = 0.5; // transparent texture pixels punch through
       material.needsUpdate = true;
       applied += 1;
     }

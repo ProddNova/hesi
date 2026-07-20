@@ -4,7 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets, buildPartObject,
   capturePartFaceProjection, convertPartToMesh, meshInsertVertexAtPoint, meshRemoveVertex,
-  partFaceNames, partGeometry, weldedVertices,
+  partFaceNames, partGeometry, translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -72,6 +72,8 @@ export class ModelerPanel {
     this.history = [];
     this.historyIndex = -1;
     this._rightDownAt = null;
+    this._faceDrag = null;
+    this.textureEditor = null;
 
     this._buildDom(host);
     this._buildScene();
@@ -153,7 +155,7 @@ export class ModelerPanel {
     this.modeButtons = {};
     for (const [mode, label, title] of [
       ['part', 'Parts', 'Select and transform whole parts (move W · rotate E · scale R)'],
-      ['face', 'Faces', 'Click a face, then attach an image texture to it'],
+      ['face', 'Faces', 'Click a face: pull the whole face with the gizmo, or attach an image texture to it'],
       ['vertex', 'Vertices', 'Drag vertex handles for that hand-made PSX shape'],
     ]) {
       const node = button(label, 'tool-button');
@@ -734,7 +736,11 @@ export class ModelerPanel {
       const row = element('div', `modeler-face-row${this.selectedFace === faceName ? ' selected' : ''}`);
       const pick = element('button', 'modeler-face-pick', faceName);
       pick.type = 'button';
-      pick.addEventListener('click', () => { this.selectedFace = this.selectedFace === faceName ? null : faceName; this._renderInspector(); });
+      pick.addEventListener('click', () => {
+        this.selectedFace = this.selectedFace === faceName ? null : faceName;
+        this._renderInspector();
+        if (this.mode === 'face') this._attachGizmoToSelection();
+      });
       row.append(pick);
       const textureRecord = style.texture ? this.store.getTexture(style.texture) : null;
       if (textureRecord) {
@@ -835,8 +841,287 @@ export class ModelerPanel {
       thumb.alt = texture.name || texture.id;
       card.append(thumb, element('small', '', texture.name || texture.id));
       card.title = `${texture.name || texture.id} · ${texture.id}`;
+      const actions = element('div', 'modeler-texture-actions');
+      const edit = button('✎ Edit', 'tool-button small', 'Edit this image: crop it, or erase pixels to transparency');
+      edit.addEventListener('click', () => this._openTextureEditor(texture.id));
+      const remove = button('✕', 'tool-button small danger', 'Delete this image from the texture library');
+      remove.addEventListener('click', () => this._deleteTexture(texture.id));
+      actions.append(edit, remove);
+      card.append(actions);
       this.textureList.append(card);
     }
+  }
+
+  _deleteTexture(textureId) {
+    const record = this.store.getTexture(textureId);
+    if (!record) return;
+    let usage = 0;
+    for (const asset of this.store.assets()) {
+      for (const part of asset.parts || []) {
+        for (const style of Object.values(part.faces || {})) if (style.texture === textureId) usage += 1;
+      }
+    }
+    for (const slot of Object.keys(WORLD_TEXTURE_SLOTS)) if (this.store.worldTexture(slot) === textureId) usage += 1;
+    const name = record.name || textureId;
+    const message = usage
+      ? `Delete texture "${name}"? It is used on ${usage} face/world surface${usage === 1 ? '' : 's'} — they go back to their plain colour.`
+      : `Delete texture "${name}" from the library?`;
+    if (!window.confirm(message)) return;
+    this.store.deleteTexture(textureId);
+    // The open (possibly unsaved) definition is a clone — strip it too.
+    let touchedDefinition = false;
+    for (const part of this.definition?.parts || []) {
+      for (const style of Object.values(part.faces || {})) {
+        if (style.texture === textureId) { delete style.texture; touchedDefinition = true; }
+      }
+    }
+    this._markDirty({ history: touchedDefinition });
+    this._rebuildObject();
+    this._renderTextures();
+    this._renderWorldTextures();
+    this._renderInspector();
+    this.onTexturesChanged();
+    this.onWorldTexturesChanged();
+    this.onStatus(`Deleted texture "${name}" · Save Object/textures to persist`);
+  }
+
+  /**
+   * Canvas-based texture editor: crop to a dragged rectangle, or erase pixels
+   * to transparency with a round brush. Saves back into the library (faces
+   * using the texture update immediately) or as a new copy.
+   */
+  _openTextureEditor(textureId) {
+    const record = this.store.getTexture(textureId);
+    if (!record) return;
+    this.textureEditor?.remove();
+    const dialog = element('div', 'modeler-texture-editor');
+    dialog.dataset.testid = 'modeler-texture-editor';
+    this.textureEditor = dialog;
+    dialog.append(element('b', '', `Edit image · ${record.name || textureId}`));
+
+    const toolbar = element('div', 'modeler-texture-toolbar');
+    const cropButton = button('Crop', 'tool-button small', 'Drag a rectangle over the image, then Apply crop');
+    const eraseButton = button('Erase', 'tool-button small', 'Paint over the image to make those pixels transparent');
+    const brushLabel = element('label', 'modeler-texture-brush');
+    brushLabel.append(element('span', '', 'Brush'));
+    const brushInput = document.createElement('input');
+    brushInput.type = 'range';
+    brushInput.min = '2';
+    brushInput.max = '64';
+    brushInput.value = '12';
+    brushInput.setAttribute('aria-label', 'Eraser brush size in pixels');
+    brushLabel.append(brushInput);
+    const applyCropButton = button('Apply crop', 'tool-button small accent', 'Crop the image to the selected rectangle');
+    applyCropButton.disabled = true;
+    const undoButton = button('⟲ Undo', 'tool-button small', 'Undo the last image edit');
+    undoButton.disabled = true;
+    const resetButton = button('Reset', 'tool-button small', 'Back to the image as stored in the library');
+    toolbar.append(cropButton, eraseButton, brushLabel, applyCropButton, undoButton, resetButton);
+    dialog.append(toolbar);
+
+    const stage = element('div', 'modeler-texture-stage');
+    const canvas = document.createElement('canvas');
+    const selection = element('div', 'modeler-texture-selection');
+    selection.hidden = true;
+    stage.append(canvas, selection);
+    dialog.append(stage);
+    const hint = element('p', 'modeler-help', '');
+    const sizeInfo = element('small', 'modeler-texture-size', '');
+    dialog.append(hint, sizeInfo);
+
+    const actions = element('div', 'modeler-chooser-actions');
+    const saveEditButton = button('Save', 'tool-button accent', 'Replace the library image — every face using it updates');
+    const saveCopyButton = button('Save as copy', 'tool-button', 'Keep the original and add the edited image as a new texture');
+    const cancelButton = button('Cancel', 'tool-button', 'Close without changing the library');
+    actions.append(saveEditButton, saveCopyButton, cancelButton);
+    dialog.append(actions);
+
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const undoStack = [];
+    let mode = 'crop';
+    let cropRect = null; // in image pixels
+    let stroke = null;
+
+    const fitCanvas = () => {
+      // Blow small PSX textures up to a workable size; big images rely on the
+      // stage's max-width. Pointer mapping goes through getBoundingClientRect,
+      // so any display scale stays accurate.
+      const largest = Math.max(canvas.width, canvas.height, 1);
+      const scale = Math.max(1, Math.min(8, Math.floor(320 / largest) || 1));
+      canvas.style.width = `${canvas.width * scale}px`;
+      canvas.style.height = 'auto';
+    };
+    const setInfo = () => {
+      sizeInfo.textContent = `${canvas.width} × ${canvas.height} px`;
+      fitCanvas();
+    };
+    const clearCrop = () => {
+      cropRect = null;
+      selection.hidden = true;
+      applyCropButton.disabled = true;
+    };
+    const setMode = (next) => {
+      mode = next;
+      cropButton.setAttribute('aria-pressed', String(mode === 'crop'));
+      eraseButton.setAttribute('aria-pressed', String(mode === 'erase'));
+      hint.textContent = mode === 'crop'
+        ? 'Drag a rectangle over the image, then press Apply crop.'
+        : 'Paint over the image: painted pixels turn transparent (the checkerboard shows through).';
+      if (mode !== 'crop') clearCrop();
+    };
+    cropButton.addEventListener('click', () => setMode('crop'));
+    eraseButton.addEventListener('click', () => setMode('erase'));
+
+    const pushUndo = () => {
+      undoStack.push(context.getImageData(0, 0, canvas.width, canvas.height));
+      if (undoStack.length > 20) undoStack.shift();
+      undoButton.disabled = false;
+    };
+    undoButton.addEventListener('click', () => {
+      const snapshot = undoStack.pop();
+      if (snapshot) {
+        canvas.width = snapshot.width;
+        canvas.height = snapshot.height;
+        context.putImageData(snapshot, 0, 0);
+        clearCrop();
+        setInfo();
+      }
+      undoButton.disabled = !undoStack.length;
+    });
+
+    const toImagePoint = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return [
+        (event.clientX - rect.left) * (canvas.width / rect.width),
+        (event.clientY - rect.top) * (canvas.height / rect.height),
+      ];
+    };
+    const eraseAt = ([x, y]) => {
+      const radius = Math.max(1, Number(brushInput.value) / 2 || 6);
+      context.save();
+      context.globalCompositeOperation = 'destination-out';
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    };
+    const updateCrop = (start, point) => {
+      const x1 = Math.max(0, Math.min(start[0], point[0]));
+      const y1 = Math.max(0, Math.min(start[1], point[1]));
+      const x2 = Math.min(canvas.width, Math.max(start[0], point[0]));
+      const y2 = Math.min(canvas.height, Math.max(start[1], point[1]));
+      cropRect = { x: Math.round(x1), y: Math.round(y1), w: Math.round(x2 - x1), h: Math.round(y2 - y1) };
+      const scaleX = (canvas.clientWidth || canvas.width) / canvas.width;
+      const scaleY = (canvas.clientHeight || canvas.height) / canvas.height;
+      selection.hidden = false;
+      selection.style.left = `${canvas.offsetLeft + cropRect.x * scaleX}px`;
+      selection.style.top = `${canvas.offsetTop + cropRect.y * scaleY}px`;
+      selection.style.width = `${cropRect.w * scaleX}px`;
+      selection.style.height = `${cropRect.h * scaleY}px`;
+    };
+
+    canvas.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+      const point = toImagePoint(event);
+      if (mode === 'crop') {
+        clearCrop();
+        stroke = { type: 'crop', start: point };
+      } else {
+        pushUndo();
+        stroke = { type: 'erase' };
+        eraseAt(point);
+      }
+    });
+    canvas.addEventListener('pointermove', (event) => {
+      if (!stroke) return;
+      const point = toImagePoint(event);
+      if (stroke.type === 'erase') eraseAt(point);
+      else updateCrop(stroke.start, point);
+    });
+    canvas.addEventListener('pointerup', () => {
+      if (stroke?.type === 'crop') applyCropButton.disabled = !cropRect || cropRect.w < 1 || cropRect.h < 1;
+      stroke = null;
+    });
+    canvas.addEventListener('pointercancel', () => { stroke = null; });
+
+    applyCropButton.addEventListener('click', () => {
+      if (!cropRect || cropRect.w < 1 || cropRect.h < 1) return;
+      pushUndo();
+      const cut = context.getImageData(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
+      canvas.width = cropRect.w;
+      canvas.height = cropRect.h;
+      context.putImageData(cut, 0, 0);
+      clearCrop();
+      setInfo();
+    });
+
+    const image = new Image();
+    const drawOriginal = () => {
+      canvas.width = image.naturalWidth || image.width || 1;
+      canvas.height = image.naturalHeight || image.height || 1;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0);
+      clearCrop();
+      setInfo();
+    };
+    resetButton.addEventListener('click', () => { pushUndo(); drawOriginal(); });
+    image.onload = drawOriginal;
+    image.onerror = () => {
+      this.onStatus('Could not load this texture for editing');
+      dialog.remove();
+      this.textureEditor = null;
+    };
+    image.src = record.dataUrl;
+
+    const closeDialog = () => {
+      dialog.remove();
+      this.textureEditor = null;
+    };
+    const exportDataUrl = () => {
+      const dataUrl = canvas.toDataURL('image/png');
+      if (dataUrl.length > 4 * 1024 * 1024) {
+        this.onStatus('Edited image is too large — crop it smaller (keep textures under ~3 MB)');
+        return null;
+      }
+      return dataUrl;
+    };
+    const afterLibraryChange = (statusText) => {
+      closeDialog();
+      this._markDirty({ history: false });
+      this._renderTextures();
+      this._renderWorldTextures();
+      this._rebuildObject();
+      this._renderInspector();
+      this.onTexturesChanged();
+      this.onWorldTexturesChanged();
+      this.onStatus(statusText);
+    };
+    saveEditButton.addEventListener('click', () => {
+      const dataUrl = exportDataUrl();
+      if (!dataUrl) return;
+      try {
+        this.store.updateTexture(textureId, { dataUrl });
+        afterLibraryChange(`Updated texture "${record.name || textureId}" · Save Object/textures to persist`);
+      } catch (error) {
+        this.onStatus(`Save failed · ${error.message}`);
+      }
+    });
+    saveCopyButton.addEventListener('click', () => {
+      const dataUrl = exportDataUrl();
+      if (!dataUrl) return;
+      try {
+        const id = this.store.addTextureFromDataUrl(`${record.name || textureId} copy`, dataUrl);
+        afterLibraryChange(`Saved edited copy as ${id}`);
+      } catch (error) {
+        this.onStatus(`Save failed · ${error.message}`);
+      }
+    });
+    cancelButton.addEventListener('click', closeDialog);
+
+    setMode('crop');
+    this.overlay.append(dialog);
   }
 
   _renderWorldTextures() {
@@ -885,7 +1170,7 @@ export class ModelerPanel {
     this.addVerticesButton.hidden = this.mode !== 'vertex';
     this.modeHint.textContent = {
       part: 'Click a part to select · W/E/R move/rotate/scale · G snap · Del removes · Ctrl+Z/Y undo/redo',
-      face: 'Click a face of the object, then attach an image from the panel on the right',
+      face: 'Click a face, then drag the gizmo to pull the whole face — or attach an image from the panel on the right',
       vertex: 'Drag a vertex via the gizmo · right-click surface/edge adds an opposing vertex pair · right-click a handle removes it · G snaps',
     }[this.mode] || '';
   }
@@ -1014,6 +1299,7 @@ export class ModelerPanel {
   _detachGizmo() {
     this.gizmo.detach();
     if (this.gizmoProxy) { this.gizmoProxy.removeFromParent(); this.gizmoProxy = null; }
+    this._faceDrag = null;
   }
 
   _attachGizmoToSelection() {
@@ -1023,15 +1309,76 @@ export class ModelerPanel {
       if (node) { this.gizmo.setMode('translate'); this.gizmo.attach(node); }
       return;
     }
+    if (this.mode === 'face') {
+      const anchor = this._faceGizmoAnchor();
+      if (!anchor) return;
+      this.gizmoProxy = new THREE.Object3D();
+      this.gizmoProxy.position.copy(anchor);
+      this.scene.add(this.gizmoProxy);
+      this._faceDrag = { startWorld: anchor.clone(), basePart: clone(this.definition.parts[this.selectedPart]) };
+      this.gizmo.setMode('translate');
+      this.gizmo.attach(this.gizmoProxy);
+      return;
+    }
     if (this.mode === 'vertex' && this.selectedVertex >= 0) {
       const handle = this.vertexHandles.find((item) => item.userData.weldIndex === this.selectedVertex);
       if (handle) { this.gizmo.setMode('translate'); this.gizmo.attach(handle); }
     }
   }
 
+  /** World-space centroid of the selected face, the pull gizmo's anchor. */
+  _faceGizmoAnchor() {
+    const part = this.definition?.parts[this.selectedPart];
+    const node = this.partNodes[this.selectedPart];
+    if (!part || part.kind === 'asset' || !node?.isMesh || !this.selectedFace) return null;
+    const materialIndex = partFaceNames(part).indexOf(this.selectedFace);
+    if (materialIndex < 0) return null;
+    const geometry = node.geometry;
+    const position = geometry?.getAttribute?.('position');
+    if (!position) return null;
+    const index = geometry.index;
+    const cornerCount = index ? index.count : position.count;
+    const groups = geometry.groups?.length ? geometry.groups : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+    const sum = new THREE.Vector3();
+    let count = 0;
+    for (const group of groups) {
+      if ((group.materialIndex || 0) !== materialIndex) continue;
+      for (let corner = group.start; corner < group.start + group.count; corner += 1) {
+        const vertex = index ? index.getX(corner) : corner;
+        sum.x += position.getX(vertex);
+        sum.y += position.getY(vertex);
+        sum.z += position.getZ(vertex);
+        count += 1;
+      }
+    }
+    if (!count) return null;
+    sum.multiplyScalar(1 / count);
+    node.updateWorldMatrix(true, false);
+    return sum.applyMatrix4(node.matrixWorld);
+  }
+
   _onGizmoChange() {
     const part = this.definition?.parts[this.selectedPart];
     if (!part) return;
+    if (this.mode === 'face') {
+      // Pull the whole face: apply the total drag delta to a clone of the
+      // part as it was when the gizmo attached (no incremental drift).
+      const node = this.partNodes[this.selectedPart];
+      const drag = this._faceDrag;
+      if (!node?.isMesh || !drag || !this.gizmoProxy || !this.selectedFace) return;
+      node.updateWorldMatrix(true, false);
+      const inverse = node.matrixWorld.clone().invert();
+      const localNow = this.gizmoProxy.position.clone().applyMatrix4(inverse);
+      const localStart = drag.startWorld.clone().applyMatrix4(inverse);
+      const delta = [localNow.x - localStart.x, localNow.y - localStart.y, localNow.z - localStart.z];
+      const moved = clone(drag.basePart);
+      if (!translatePartFace(moved, this.selectedFace, delta)) return;
+      if (part.kind === 'mesh') part.vertices = moved.vertices;
+      else if (moved.vertexOffsets) part.vertexOffsets = moved.vertexOffsets;
+      else delete part.vertexOffsets;
+      this._rebuildPartGeometry(this.selectedPart);
+      return;
+    }
     if (this.mode === 'part') {
       const node = this.partNodes[this.selectedPart];
       if (!node) return;
@@ -1065,6 +1412,11 @@ export class ModelerPanel {
     if (!this.definition) return;
     this._markDirty();
     if (this.mode === 'part') this._renderInspector();
+    if (this.mode === 'face' && this._faceDrag) {
+      const face = this.selectedFace;
+      this._attachGizmoToSelection(); // re-anchor at the face's new centroid
+      if (face) this.onStatus(`Pulled the whole "${face}" face · Ctrl+Z undoes`);
+    }
   }
 
   _applyPartTransform(index) {
@@ -1115,6 +1467,7 @@ export class ModelerPanel {
       const materialIndex = partHit.face?.materialIndex ?? 0;
       this.selectedFace = faces[materialIndex] || faces[0] || null;
       this._renderInspector();
+      this._attachGizmoToSelection();
       return;
     }
     if (partIndex !== this.selectedPart) this._selectPart(partIndex);
@@ -1179,9 +1532,11 @@ export class ModelerPanel {
     const paired = Number.isInteger(added.oppositeVertexIndex);
     this.onStatus(paired
       ? `Opposing vertex pair added${added.connected ? ' and joined across the shared face' : ''} · drag either handle to shape it`
-      : (added.split === 'edge'
-        ? 'Vertex added on the edge · drag the gizmo to move it · right-click it to remove'
-        : 'Vertex added · drag the gizmo to move it · right-click it to remove'));
+      : (added.split === 'corner'
+        ? 'Snapped to the existing vertex · drag the gizmo to move it'
+        : (added.split === 'edge'
+          ? 'Vertex added on the edge · drag the gizmo to move it · right-click it to remove'
+          : 'Vertex added · drag the gizmo to move it · right-click it to remove')));
   }
 
   _removeVertexAt(weldIndex) {
