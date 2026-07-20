@@ -5,6 +5,7 @@ import {
   clonePartFaceToOpposite,
   convertPartToMesh,
   customAssetsDocumentErrors,
+  meshInsertVertexAtPoint,
   oppositePartFace,
   partFaceNames,
   translatePartFace,
@@ -90,6 +91,65 @@ test('a captured cover projection is mirrored, not re-centred', () => {
   assert.equal(mirrored.surfaceAspect, projection.surfaceAspect);
   // The source face keeps its own projection untouched.
   assert.deepEqual(part.faces.front.projection, projection);
+});
+
+// Every edge of a closed mesh must be shared by exactly two triangles;
+// anything else is a crack or an overlapping polygon.
+const nonManifoldEdges = (part) => {
+  const edges = new Map();
+  for (const triangle of part.triangles) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const a = triangle.v[corner];
+      const b = triangle.v[(corner + 1) % 3];
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      edges.set(key, (edges.get(key) || 0) + 1);
+    }
+  }
+  return [...edges.entries()].filter(([, count]) => count !== 2);
+};
+
+test('mesh clone with a ridge apex snaps the stale far apex instead of duplicating it', () => {
+  // Inserting near the front/top shared edge splits it and pairs a far apex,
+  // connected by a chord across the top face — the two-apex roof workflow.
+  const part = convertPartToMesh(boxPart());
+  const names = partFaceNames(part);
+  const added = meshInsertVertexAtPoint(part, [0, 0.49, 0.5], { faceIndex: names.indexOf('front') });
+  assert.ok(added);
+  assert.equal(added.connected, true);
+  // Pull only the front apex: the mesh is now asymmetric.
+  part.vertices[added.vertexIndex] = [0.1, 0.85, 0.4];
+  const vertexCount = part.vertices.length;
+  assert.equal(clonePartFaceToOpposite(part, 'front'), 'back');
+  // The far apex must MOVE to the mirrored position (the top-face ridge
+  // triangles reference it), not linger while a duplicate is added.
+  assert.equal(part.vertices.length, vertexCount);
+  const farApex = part.vertices[added.oppositeVertexIndex];
+  assert.deepEqual(farApex, [0.1, 0.85, -0.4]);
+  assert.deepEqual(nonManifoldEdges(part), []);
+  assert.deepEqual(customAssetsDocumentErrors(partDocument(part)), []);
+});
+
+test('mesh clone re-welds the frame even when the boundary carries pulled vertices', () => {
+  // A notch: the shared-edge vertex is pushed down into the face, skewing the
+  // boundary ring the mirror plane is derived from.
+  const part = convertPartToMesh(boxPart());
+  const names = partFaceNames(part);
+  const added = meshInsertVertexAtPoint(part, [0, 0.49, 0.5], { faceIndex: names.indexOf('front') });
+  assert.ok(added);
+  part.vertices[added.vertexIndex] = [0, 0.1, 0.5];
+  const vertexCount = part.vertices.length;
+  assert.equal(clonePartFaceToOpposite(part, 'front'), 'back');
+  assert.equal(part.vertices.length, vertexCount);
+  assert.deepEqual(part.vertices[added.oppositeVertexIndex], [0, 0.1, -0.5]);
+  // The box corners stay single, exactly on the frame.
+  for (const corner of [[0.5, 0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, -0.5, -0.5], [-0.5, -0.5, -0.5]]) {
+    const matches = part.vertices.filter(
+      (vertex) => vertex.every((value, axis) => Math.abs(value - corner[axis]) < 0.06),
+    );
+    assert.equal(matches.length, 1);
+    assert.deepEqual(matches[0], corner);
+  }
+  assert.deepEqual(nonManifoldEdges(part), []);
 });
 
 test('mesh clone rebuilds the opposite face as an exact mirror, points included', () => {

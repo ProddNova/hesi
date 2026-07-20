@@ -1109,28 +1109,83 @@ function mirrorMeshFaceGeometry(part, sourceName, targetName) {
   // hand-edited source face still lands exactly on the opposite side's frame.
   const sourceBoundary = [...sourceVerts].filter((vertex) => nonSourceVerts.has(vertex));
   const targetBoundary = [...targetVerts].filter((vertex) => survivors.has(vertex));
-  const mirror = mirrorPlaneBetween(
-    (sourceBoundary.length ? sourceBoundary : [...sourceVerts]).map((vertex) => vertices[vertex]),
-    (targetBoundary.length ? targetBoundary : [...targetVerts]).map((vertex) => vertices[vertex]),
-  );
+  const sourceBoundaryPoints = (sourceBoundary.length ? sourceBoundary : [...sourceVerts]).map((vertex) => vertices[vertex]);
+  const targetBoundaryPoints = (targetBoundary.length ? targetBoundary : [...targetVerts]).map((vertex) => vertices[vertex]);
+  const mirror = mirrorPlaneBetween(sourceBoundaryPoints, targetBoundaryPoints);
   if (!mirror) return null;
-  const { axis, plane } = mirror;
+  const { axis } = mirror;
+  // Boundary rings can carry hand-pulled vertices (a roof apex, a notch), so a
+  // centroid-based plane skews and nothing re-welds. Take the median of the
+  // planes implied by nearest boundary pairs instead: frame vertices outvote
+  // the odd sculpted one.
+  const across = [0, 1, 2].filter((entry) => entry !== axis);
+  const impliedPlanes = sourceBoundaryPoints.map((source) => {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const target of targetBoundaryPoints) {
+      const distance = Math.hypot(source[across[0]] - target[across[0]], source[across[1]] - target[across[1]]);
+      if (distance < bestDistance) { bestDistance = distance; best = target; }
+    }
+    return (source[axis] + best[axis]) / 2;
+  }).sort((a, b) => a - b);
+  const middle = impliedPlanes.length >> 1;
+  const plane = impliedPlanes.length % 2
+    ? impliedPlanes[middle]
+    : (impliedPlanes[middle - 1] + impliedPlanes[middle]) / 2;
+  mirror.plane = plane;
   const keptOldIndices = [...survivors].sort((a, b) => a - b);
   const remap = new Map(keptOldIndices.map((oldIndex, newIndex) => [oldIndex, newIndex]));
   const newVertices = keptOldIndices.map((oldIndex) => [...vertices[oldIndex]]);
-  const byPosition = new Map(newVertices.map((vertex, index) => [roundedPositionKey(vertex), index]));
+  const mirroredPosition = new Map([...sourceVerts].map((oldIndex) => {
+    const position = [...vertices[oldIndex]];
+    position[axis] = 2 * plane - position[axis];
+    return [oldIndex, position];
+  }));
+  // Surviving vertices of the OLD target face (its boundary ring, plus any
+  // vertex other faces keep alive — e.g. a ridge chord's far apex) are stale
+  // geometry the clone replaces. Pair each with its nearest mirrored source
+  // vertex and reuse that index, moving it into the mirrored position, so the
+  // adjacent faces follow the clone instead of keeping edges to orphan points.
+  const staleTargets = [...targetVerts].filter((oldIndex) => survivors.has(oldIndex));
+  const candidatePairs = [];
+  for (const [sourceIndex, position] of mirroredPosition) {
+    for (const targetIndex of staleTargets) {
+      const target = vertices[targetIndex];
+      const distance = Math.hypot(position[0] - target[0], position[1] - target[1], position[2] - target[2]);
+      candidatePairs.push([distance, sourceIndex, targetIndex]);
+    }
+  }
+  candidatePairs.sort((a, b) => a[0] - b[0]);
+  const matchedTarget = new Map();
+  const takenTargets = new Set();
+  for (const [, sourceIndex, targetIndex] of candidatePairs) {
+    if (matchedTarget.has(sourceIndex) || takenTargets.has(targetIndex)) continue;
+    matchedTarget.set(sourceIndex, targetIndex);
+    takenTargets.add(targetIndex);
+  }
+  for (const [sourceIndex, targetIndex] of matchedTarget) {
+    // A vertex both faces share stays put (it mirrors onto itself); everything
+    // else snaps to the mirrored source position.
+    if (sourceVerts.has(targetIndex)) continue;
+    newVertices[remap.get(targetIndex)] = mirroredPosition.get(sourceIndex);
+  }
+  const byPosition = new Map();
   const mirroredIndex = new Map();
   const mirrorVertex = (oldIndex) => {
     let index = mirroredIndex.get(oldIndex);
     if (index !== undefined) return index;
-    const position = [...vertices[oldIndex]];
-    position[axis] = 2 * plane - position[axis];
-    const key = roundedPositionKey(position);
-    index = byPosition.get(key);
-    if (index === undefined) {
-      index = newVertices.length;
-      newVertices.push(position);
-      byPosition.set(key, index);
+    const matched = matchedTarget.get(oldIndex);
+    if (matched !== undefined) {
+      index = remap.get(matched);
+    } else {
+      const position = mirroredPosition.get(oldIndex);
+      const key = roundedPositionKey(position);
+      index = byPosition.get(key);
+      if (index === undefined) {
+        index = newVertices.length;
+        newVertices.push(position);
+        byPosition.set(key, index);
+      }
     }
     mirroredIndex.set(oldIndex, index);
     return index;
