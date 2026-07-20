@@ -972,6 +972,226 @@ export function translatePartFace(part, faceName, delta) {
 }
 
 // ---------------------------------------------------------------------------
+// Opposite-face cloning
+// ---------------------------------------------------------------------------
+
+const OPPOSITE_FACE_NAMES = Object.freeze({
+  front: 'back', back: 'front', left: 'right', right: 'left', top: 'bottom', bottom: 'top',
+});
+
+/**
+ * Name of the geometric opposite of `faceName` on this part (box front↔back,
+ * left↔right, top↔bottom; cylinder top↔bottom; wedge left↔right — mesh parts
+ * inherit the pairs of the primitive they came from), or null when the part
+ * has no such pair (cones, planes, spheres, assembled assets).
+ */
+export function oppositePartFace(part, faceName) {
+  const names = partFaceNames(part);
+  const target = OPPOSITE_FACE_NAMES[faceName];
+  return target && names.includes(faceName) && names.includes(target) ? target : null;
+}
+
+const roundedPositionKey = (position) => `${Math.round(position[0] * 1e3)},${Math.round(position[1] * 1e3)},${Math.round(position[2] * 1e3)}`;
+
+/** Dominant separation axis and mirror-plane coordinate between two point sets. */
+function mirrorPlaneBetween(sourcePoints, targetPoints) {
+  if (!sourcePoints.length || !targetPoints.length) return null;
+  const centroid = (points) => points
+    .reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1], sum[2] + point[2]], [0, 0, 0])
+    .map((value) => value / points.length);
+  const sourceCentroid = centroid(sourcePoints);
+  const targetCentroid = centroid(targetPoints);
+  const diff = [0, 1, 2].map((axis) => targetCentroid[axis] - sourceCentroid[axis]);
+  const magnitudes = diff.map(Math.abs);
+  const axis = magnitudes.indexOf(Math.max(...magnitudes));
+  if (magnitudes[axis] < 1e-5) return null;
+  return { axis, plane: (sourceCentroid[axis] + targetCentroid[axis]) / 2 };
+}
+
+/**
+ * Mirrors the source face's vertex edits onto the opposite face of a
+ * primitive part. Correspondence goes through the unedited base geometry
+ * (primitives are symmetric across the axis separating an opposite pair), so
+ * the clone is exact: every pulled vertex of the source lands mirrored on the
+ * target, and target vertices whose source counterpart is unedited reset.
+ * Returns the mirror plane, or null when the clone is not possible.
+ */
+function mirrorPrimitiveFaceOffsets(part, sourceName, targetName) {
+  const names = partFaceNames(part);
+  const sourceIndex = names.indexOf(sourceName);
+  const targetIndex = names.indexOf(targetName);
+  if (sourceIndex < 0 || targetIndex < 0) return null;
+  const geometry = partGeometry(part);
+  if (!geometry) return null;
+  let welded, sourceWelds, targetWelds;
+  try {
+    const weldInfo = weldedVertices(geometry);
+    welded = weldInfo.welded;
+    const { weldIndexOf } = weldInfo;
+    const index = geometry.index;
+    const cornerCount = index ? index.count : geometry.getAttribute('position').count;
+    const groups = geometry.groups?.length ? geometry.groups : [{ start: 0, count: cornerCount, materialIndex: 0 }];
+    const weldsOfGroup = (materialIndex) => {
+      const set = new Set();
+      for (const group of groups) {
+        if ((group.materialIndex || 0) !== materialIndex) continue;
+        for (let corner = group.start; corner < group.start + group.count; corner += 1) {
+          set.add(weldIndexOf[index ? index.getX(corner) : corner]);
+        }
+      }
+      return set;
+    };
+    sourceWelds = weldsOfGroup(sourceIndex);
+    targetWelds = weldsOfGroup(targetIndex);
+  } finally {
+    geometry.dispose();
+  }
+  const mirror = mirrorPlaneBetween(
+    [...sourceWelds].map((weldIndex) => welded[weldIndex]),
+    [...targetWelds].map((weldIndex) => welded[weldIndex]),
+  );
+  if (!mirror) return null;
+  const { axis, plane } = mirror;
+  const targetByKey = new Map([...targetWelds].map((weldIndex) => [roundedPositionKey(welded[weldIndex]), weldIndex]));
+  const offsets = new Map((part.vertexOffsets || []).map((entry) => [entry.i, entry.o]));
+  const next = new Map(offsets);
+  for (const sourceWeld of sourceWelds) {
+    const mirroredBase = [...welded[sourceWeld]];
+    mirroredBase[axis] = 2 * plane - mirroredBase[axis];
+    const targetWeld = targetByKey.get(roundedPositionKey(mirroredBase));
+    if (targetWeld === undefined) return null; // base topology not symmetric — no exact clone
+    const offset = offsets.get(sourceWeld);
+    if (offset && offset.some((value) => Math.abs(value) > 1e-9)) {
+      const mirroredOffset = [...offset];
+      mirroredOffset[axis] = -mirroredOffset[axis];
+      next.set(targetWeld, mirroredOffset);
+    } else {
+      next.delete(targetWeld);
+    }
+  }
+  part.vertexOffsets = [...next.entries()]
+    .map(([i, o]) => ({ i, o }))
+    .filter((entry) => entry.o.some((value) => Math.abs(value) > 1e-9));
+  if (!part.vertexOffsets.length) delete part.vertexOffsets;
+  return mirror;
+}
+
+/**
+ * Rebuilds the opposite face of a kind:'mesh' part as an exact mirrored copy
+ * of the source face: vertices only the old target face used are dropped, the
+ * source triangles (including any added vertices) are mirrored across the
+ * plane separating the two faces, boundary vertices re-weld to the surviving
+ * mesh where positions line up, and per-corner UVs are carried over so the
+ * texture mapping clones too. Returns the mirror plane, or null on failure.
+ */
+function mirrorMeshFaceGeometry(part, sourceName, targetName) {
+  const names = partFaceNames(part);
+  const sourceIndex = names.indexOf(sourceName);
+  const targetIndex = names.indexOf(targetName);
+  if (sourceIndex < 0 || targetIndex < 0) return null;
+  const vertices = Array.isArray(part.vertices) ? part.vertices : [];
+  const triangles = Array.isArray(part.triangles) ? part.triangles : [];
+  const sourceTriangles = triangles.filter((triangle) => (triangle.face || 0) === sourceIndex);
+  const targetTriangles = triangles.filter((triangle) => (triangle.face || 0) === targetIndex);
+  const otherTriangles = triangles.filter((triangle) => (triangle.face || 0) !== targetIndex);
+  if (!sourceTriangles.length || !targetTriangles.length) return null;
+  const usedBy = (list) => {
+    const set = new Set();
+    for (const triangle of list) for (const vertex of triangle.v) set.add(vertex);
+    return set;
+  };
+  const sourceVerts = usedBy(sourceTriangles);
+  const targetVerts = usedBy(targetTriangles);
+  const survivors = usedBy(otherTriangles);
+  const nonSourceVerts = usedBy(triangles.filter((triangle) => (triangle.face || 0) !== sourceIndex));
+  // The mirror plane sits halfway between the two faces' boundary rings (the
+  // vertices each face shares with the rest of the mesh), so a bulged or
+  // hand-edited source face still lands exactly on the opposite side's frame.
+  const sourceBoundary = [...sourceVerts].filter((vertex) => nonSourceVerts.has(vertex));
+  const targetBoundary = [...targetVerts].filter((vertex) => survivors.has(vertex));
+  const mirror = mirrorPlaneBetween(
+    (sourceBoundary.length ? sourceBoundary : [...sourceVerts]).map((vertex) => vertices[vertex]),
+    (targetBoundary.length ? targetBoundary : [...targetVerts]).map((vertex) => vertices[vertex]),
+  );
+  if (!mirror) return null;
+  const { axis, plane } = mirror;
+  const keptOldIndices = [...survivors].sort((a, b) => a - b);
+  const remap = new Map(keptOldIndices.map((oldIndex, newIndex) => [oldIndex, newIndex]));
+  const newVertices = keptOldIndices.map((oldIndex) => [...vertices[oldIndex]]);
+  const byPosition = new Map(newVertices.map((vertex, index) => [roundedPositionKey(vertex), index]));
+  const mirroredIndex = new Map();
+  const mirrorVertex = (oldIndex) => {
+    let index = mirroredIndex.get(oldIndex);
+    if (index !== undefined) return index;
+    const position = [...vertices[oldIndex]];
+    position[axis] = 2 * plane - position[axis];
+    const key = roundedPositionKey(position);
+    index = byPosition.get(key);
+    if (index === undefined) {
+      index = newVertices.length;
+      newVertices.push(position);
+      byPosition.set(key, index);
+    }
+    mirroredIndex.set(oldIndex, index);
+    return index;
+  };
+  const newTriangles = otherTriangles.map((triangle) => ({ ...triangle, v: triangle.v.map((vertex) => remap.get(vertex)) }));
+  for (const triangle of sourceTriangles) {
+    // Reversed winding keeps the mirrored copy facing outward.
+    const v = [mirrorVertex(triangle.v[0]), mirrorVertex(triangle.v[2]), mirrorVertex(triangle.v[1])];
+    if (v[0] === v[1] || v[1] === v[2] || v[0] === v[2]) continue;
+    const copy = { v, face: targetIndex };
+    if (Array.isArray(triangle.uv) && triangle.uv.length === 3) {
+      copy.uv = [triangle.uv[0], triangle.uv[2], triangle.uv[1]].map((uv) => [...uv]);
+    }
+    newTriangles.push(copy);
+  }
+  if (newTriangles.length === otherTriangles.length) return null; // every mirrored triangle degenerated
+  if (newVertices.length > MESH_MAX_VERTICES || newTriangles.length > MESH_MAX_TRIANGLES) return null;
+  part.vertices = newVertices;
+  part.triangles = newTriangles;
+  delete part.vertexOffsets; // offsets indexed the old topology
+  return mirror;
+}
+
+/**
+ * Clones `faceName` onto the geometric opposite face of the part, making the
+ * opposite an exact mirror image: vertex shape (pulled faces, added mesh
+ * vertices), texture, colour, fit, flips — the whole face style. Primitives
+ * mirror their vertex offsets; mesh parts get the opposite face's topology
+ * rebuilt as a mirror of the source. Returns the target face name, or null
+ * when the part has no opposite pair or the clone failed.
+ */
+export function clonePartFaceToOpposite(part, faceName) {
+  if (!part || part.kind === 'asset') return null;
+  const targetName = oppositePartFace(part, faceName);
+  if (!targetName) return null;
+  const mirror = part.kind === 'mesh'
+    ? mirrorMeshFaceGeometry(part, faceName, targetName)
+    : mirrorPrimitiveFaceOffsets(part, faceName, targetName);
+  if (!mirror) return null;
+  const style = part.faces?.[faceName] ? structuredClone(part.faces[faceName]) : null;
+  if (style) {
+    if (validFaceProjection(style.projection)) {
+      // Mirror the captured cover projection so the image sits on the same
+      // spot of the cloned face instead of re-centering.
+      style.projection.origin[mirror.axis] = 2 * mirror.plane - style.projection.origin[mirror.axis];
+      style.projection.uVector[mirror.axis] = -style.projection.uVector[mirror.axis];
+      style.projection.vVector[mirror.axis] = -style.projection.vVector[mirror.axis];
+    } else if (style.fit === 'cover') {
+      delete style.projection;
+      const projection = capturePartFaceProjection(part, targetName);
+      if (projection) style.projection = projection;
+    }
+    part.faces = part.faces || {};
+    part.faces[targetName] = style;
+  } else if (part.faces) {
+    delete part.faces[targetName];
+  }
+  return targetName;
+}
+
+// ---------------------------------------------------------------------------
 // Textures and materials
 // ---------------------------------------------------------------------------
 

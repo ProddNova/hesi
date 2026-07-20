@@ -3,8 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets, buildPartObject,
-  capturePartFaceProjection, convertPartToMesh, meshInsertVertexAtPoint, meshRemoveVertex,
-  partFaceNames, partGeometry, translatePartFace, weldedVertices,
+  capturePartFaceProjection, clonePartFaceToOpposite, convertPartToMesh, meshInsertVertexAtPoint,
+  meshRemoveVertex, oppositePartFace, partFaceNames, partGeometry, translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 
@@ -67,6 +67,7 @@ export class ModelerPanel {
     this.disposed = false;
     this.snapEnabled = false;
     this.snapStep = 0.25;
+    this.outlinesEnabled = false;
     this.carRef = null;
     this.carRefVisible = false;
     this.history = [];
@@ -177,13 +178,15 @@ export class ModelerPanel {
     this.snapStepSelect.value = String(this.snapStep);
     this.carRefButton = button('🚗 Car', 'tool-button small', 'Show the player car next to the object for a sense of scale (4.25 × 1.7 × 1.3 m)');
     this.carRefButton.setAttribute('aria-pressed', 'false');
+    this.outlineButton = button('▦ Outlines', 'tool-button small', 'Show the wireframe outlines of the object being edited (O) — the selected part shows its full triangle wireframe, even through the surface');
+    this.outlineButton.setAttribute('aria-pressed', 'false');
     this.modeHint = element('span', 'modeler-mode-hint', '');
     modeBar.append(
       this.addVerticesButton,
       element('span', 'modeler-modebar-sep'),
       this.undoButton, this.redoButton,
       element('span', 'modeler-modebar-sep'),
-      this.snapButton, this.snapStepSelect, this.carRefButton,
+      this.snapButton, this.snapStepSelect, this.carRefButton, this.outlineButton,
       this.modeHint,
     );
     this.viewportHost = element('div', 'modeler-viewport');
@@ -295,6 +298,7 @@ export class ModelerPanel {
       if (this.snapEnabled) this._applySnap();
     });
     this.carRefButton.addEventListener('click', () => this._toggleCarReference());
+    this.outlineButton.addEventListener('click', () => this._setOutlines(!this.outlinesEnabled));
     this.scaleHalfButton.addEventListener('click', () => this._scaleObject(0.5));
     this.scaleDoubleButton.addEventListener('click', () => this._scaleObject(2));
     this.scaleApplyButton.addEventListener('click', () => this._scaleObject(Number(this.scaleFactorInput.value)));
@@ -342,6 +346,7 @@ export class ModelerPanel {
       if (event.code === 'Escape') { event.preventDefault(); this._detachGizmo(); return; }
       if (event.code === 'Delete') { event.preventDefault(); this._deleteSelectedPart(); return; }
       if (event.code === 'KeyG') { event.preventDefault(); this._setSnap(!this.snapEnabled); return; }
+      if (event.code === 'KeyO') { event.preventDefault(); this._setOutlines(!this.outlinesEnabled); return; }
       const modes = { KeyW: 'translate', KeyE: 'rotate', KeyR: 'scale' };
       if (modes[event.code] && this.mode === 'part') { event.preventDefault(); this.gizmo.setMode(modes[event.code]); }
     };
@@ -521,6 +526,7 @@ export class ModelerPanel {
     this._rebuildVertexHandles();
     this._attachGizmoToSelection();
     if (this.carRefVisible) this._positionCarReference();
+    this._refreshOutlines();
   }
 
   _rebuildPartGeometry(index) {
@@ -533,6 +539,60 @@ export class ModelerPanel {
     applyPartFaceProjections(geometry, part);
     node.geometry.dispose();
     node.geometry = geometry;
+    this._refreshOutlines(); // edge lines track the reshaped geometry live
+  }
+
+  // -------------------------------------------------------------- outlines --
+  _setOutlines(enabled) {
+    this.outlinesEnabled = enabled;
+    this.outlineButton.setAttribute('aria-pressed', String(enabled));
+    this._refreshOutlines();
+    this.onStatus(enabled
+      ? 'Outlines on · every part shows its edges, the selected part its full wireframe (O toggles)'
+      : 'Outlines off');
+  }
+
+  _clearOutlines() {
+    const stale = [];
+    this.assetGroup.traverse((child) => { if (child.userData.modelerOutline) stale.push(child); });
+    for (const outline of stale) {
+      outline.removeFromParent();
+      outline.geometry.dispose();
+      outline.material.dispose();
+    }
+  }
+
+  /**
+   * Wireframe outlines of the object being edited: every part gets its edge
+   * silhouette, and the selected part its full triangle wireframe drawn on
+   * top of everything, so face pulls and vertex edits stay readable. Lines
+   * are children of their meshes (they follow every transform) and never
+   * intercept viewport picking.
+   */
+  _refreshOutlines() {
+    this._clearOutlines();
+    if (!this.outlinesEnabled) return;
+    this.partNodes.forEach((node, index) => {
+      if (!node) return;
+      const selected = index === this.selectedPart;
+      const meshes = [];
+      node.traverse((child) => { if (child.isMesh) meshes.push(child); });
+      for (const mesh of meshes) {
+        const outline = new THREE.LineSegments(
+          selected ? new THREE.WireframeGeometry(mesh.geometry) : new THREE.EdgesGeometry(mesh.geometry, 1),
+          new THREE.LineBasicMaterial({
+            color: selected ? 0xffb020 : 0x57e3ff,
+            transparent: true,
+            opacity: selected ? 0.9 : 0.4,
+            depthTest: !selected,
+          }),
+        );
+        outline.userData.modelerOutline = true;
+        outline.raycast = () => {};
+        if (selected) outline.renderOrder = 8;
+        mesh.add(outline);
+      }
+    });
   }
 
   _rebuildVertexHandles() {
@@ -782,6 +842,22 @@ export class ModelerPanel {
         this._renderInspector();
       });
       row.append(allFaces);
+      const oppositeName = oppositePartFace(part, faceName);
+      if (oppositeName) {
+        const cloneOpposite = button('⇄ Opposite', 'tool-button small', `Clone this face onto the "${oppositeName}" face — texture, colour, and every pulled/added vertex, mirrored across`);
+        cloneOpposite.addEventListener('click', () => {
+          if (!clonePartFaceToOpposite(part, faceName)) {
+            this.onStatus(`Could not clone "${faceName}" onto "${oppositeName}" — the two faces no longer line up`);
+            return;
+          }
+          this.selectedFace = faceName;
+          this._markDirty();
+          this._rebuildObject();
+          this._renderInspector();
+          this.onStatus(`Cloned "${faceName}" onto "${oppositeName}" · shape and texture mirrored · Ctrl+Z undoes`);
+        });
+        row.append(cloneOpposite);
+      }
       this.inspector.append(row);
       if (textureRecord) {
         const options = element('div', 'modeler-face-options');
@@ -1294,6 +1370,7 @@ export class ModelerPanel {
     this._renderInspector();
     this._rebuildVertexHandles();
     this._attachGizmoToSelection();
+    this._refreshOutlines(); // the selection highlight moves with it
   }
 
   _detachGizmo() {
