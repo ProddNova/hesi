@@ -33,6 +33,23 @@
         "0:0": {
           "texture": "tex:0022"
         }
+      },
+      "transform": {
+        "position": [
+          -5,
+          5,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
       }
     },
     "garage-part:0004": {
@@ -52,7 +69,7 @@
         "position": [
           0,
           5,
-          -7.06261
+          -2.97243
         ],
         "rotation": [
           0,
@@ -159,8 +176,8 @@
       },
       "transform": {
         "position": [
-          0,
-          2.5,
+          5.7802,
+          2.07985,
           13.9379
         ],
         "rotation": [
@@ -169,8 +186,8 @@
           0
         ],
         "scale": [
-          1,
-          1,
+          0.78038,
+          0.83194,
           1
         ]
       }
@@ -299,14 +316,141 @@
     "garage-part:0073": {
       "visible": false
     },
+    "garage-part:0075": {
+      "transform": {
+        "position": [
+          -2.5,
+          0.03,
+          11.75
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          1,
+          0.7
+        ]
+      }
+    },
     "garage-part:0076": {
       "visible": false
     },
     "garage-part:0077": {
       "visible": false
+    },
+    "garage-part:0078": {
+      "visible": false
     }
   },
-  "placedObjects": [],
+  "placedObjects": [
+    {
+      "assetId": "custom:0006",
+      "id": "placed:0001",
+      "layer": "Props",
+      "locked": false,
+      "name": "letto",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          -4,
+          0.008,
+          -0.08838
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0004",
+      "id": "placed:0002",
+      "layer": "Props",
+      "locked": false,
+      "name": "Armadietti",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          10.25,
+          0.008,
+          1.5
+        ],
+        "rotation": [
+          3.14159,
+          0,
+          3.14159
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0004",
+      "id": "placed:0003",
+      "layer": "Props",
+      "locked": false,
+      "name": "Armadietti copy",
+      "sourceEntityId": "placed:0002",
+      "transform": {
+        "position": [
+          10.25,
+          0.008,
+          2.70727
+        ],
+        "rotation": [
+          3.14159,
+          0,
+          3.14159
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "custom:0005",
+      "id": "placed:0004",
+      "layer": "Props",
+      "locked": false,
+      "name": "box_elettrico",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          10.5,
+          0.008,
+          -2
+        ],
+        "rotation": [
+          3.14159,
+          0,
+          3.14159
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    }
+  ],
   "groups": [],
   "editorState": {}
 }
