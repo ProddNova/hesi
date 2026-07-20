@@ -133,6 +133,7 @@ class ShutokoNights {
       if(block.has(e.code))e.preventDefault();if(!this.keys[e.code])this.pressed.add(e.code);this.keys[e.code]=true;
       this.audio?.unlock?.();this.audio?.resume?.();
       if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
+      if(e.code==='KeyH'&&this.started&&!e.repeat){const visible=this.ui.toggleHUD();this.ui.toast(visible?'HUD ON':'HUD OFF','amber');this.pressed.delete(e.code);}
       if(e.code==='KeyC'&&this.mode==='driving'){this.cycleCamera();this.pressed.delete(e.code);}
       if(e.code==='KeyR'&&this.mode==='driving'){this.recover();this.pressed.delete(e.code);}
       if(e.code==='F1'){e.preventDefault();this.ui.showHelp();}
