@@ -228,7 +228,12 @@ function mergedBoxGeometry(parts) {
 function makeTrafficMesh(geometries, sharedMaterials) {
   const group = new THREE.Group();
   group.name = 'traffic-vehicle';
-  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true }));
+  // The body carries a self-lit floor (emissive = its own colour) so the
+  // fluorescent fleet reads at any distance instead of falling to a black
+  // silhouette once it is outside the player's headlight cone — the reveal as
+  // you close on a car should be subtle, not "it just switched on". This is a
+  // material property, not a light, so it costs nothing per frame.
+  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true, emissiveIntensity: 0.34 }));
   const lamps = new THREE.Mesh(geometries.lamps, sharedMaterials.headlamp);
   const taillamp = new THREE.Mesh(geometries.brake, sharedMaterials.taillamp);
   const blinkerL = new THREE.Mesh(geometries.blinkerL, sharedMaterials.indicator);
@@ -270,9 +275,13 @@ export class TrafficSystem {
       despawnRadius: Math.max(120, finite(options.despawnRadius, 1100)),
       minSpawnDistance: Math.max(20, finite(options.minSpawnDistance, 130)),
       // Anything spawning IN FRONT of the player must be at least this far away,
-      // so cars never blink into existence in view. Behind the player they may
-      // appear as close as minSpawnDistance (out of sight).
-      frontSpawnDistance: Math.max(0, finite(options.frontSpawnDistance, 340)),
+      // so cars never blink into existence in view. Pushed out past the fog
+      // horizon: at 340 m a new car was ~75% visible through the night haze and
+      // read as "popping in" — by ~600 m the exponential fog has faded it to a
+      // faint shape that simply resolves as the player closes the distance.
+      // Behind the player cars may still appear as close as minSpawnDistance
+      // (out of sight).
+      frontSpawnDistance: Math.max(0, finite(options.frontSpawnDistance, 600)),
       nearMissDistance: clamp(finite(options.nearMissDistance, 2.25), 0.5, 5),
       nearMissMinSpeed: speedToMps(options.nearMissMinSpeed, 100 / 3.6),
       maxSpawnPerFrame: Math.max(1, Math.floor(options.maxSpawnPerFrame ?? 6)),
@@ -492,6 +501,7 @@ export class TrafficSystem {
     const ud = vehicle.mesh.userData;
     ud.body.geometry = geoms.body;
     ud.body.material.color.set(color);
+    ud.body.material.emissive.set(color);
     ud.lamps.geometry = geoms.lamps;
     ud.taillamps[0].geometry = geoms.brake;
     ud.taillamps[0].material = this._sharedMaterials.taillamp;

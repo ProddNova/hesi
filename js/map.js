@@ -448,7 +448,7 @@ export class HighwayMap {
       marking: basic(0xd8d6bf),
       amber: basic(0xe8a844),
       reflector: basic(0xffc36a),
-      lampSodium: basic(0xff9b42),
+      lampSodium: basic(0xff8a2e),
       lampWhite: basic(0xffe9c4),
       tunnelLampOrange: basic(0xffb15e),
       tunnelLampWhite: basic(0xf3f7e8),
@@ -482,14 +482,18 @@ export class HighwayMap {
         ? new THREE.MeshBasicMaterial({ map: this._chevronTexture(), fog: true, toneMapped: false })
         : basic(0xffc21f),
       // Additive decals: sodium pools under lamps + stretched wet-asphalt
-      // streaks — the cheap PS2 stand-in for real reflections.
+      // streaks — the cheap PS2 stand-in for real reflections. The pools are
+      // large and overlap their neighbours, so opacity is kept low: additive
+      // blending stacks the overlaps back up into a continuous warm wash
+      // without blowing out. Per-lamp tint is applied through instance colour
+      // (see the lamppost loop), which is why the base colour here is white.
       lightPool: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xff9b42, transparent: true, opacity: 0.34,
+        map: this._glowTexture(), color: 0xffffff, transparent: true, opacity: 0.34,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
       }),
       lightStreak: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xffb066, transparent: true, opacity: 0.26,
+        map: this._glowTexture(), color: 0xffa858, transparent: true, opacity: 0.2,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }),
@@ -548,20 +552,30 @@ export class HighwayMap {
     return this._mergeGeometries(parts);
   }
 
-  /** Soft radial glow sprite texture (white core, transparent edge). */
+  /**
+   * Soft radial glow sprite for the sodium ground pools. The falloff is
+   * deliberately gentle with a long transparent tail so that neighbouring
+   * pools — sized to overlap — add up into one seamless warm ribbon along the
+   * road instead of a string of hard "perfect circles" with dark gaps between
+   * them. Higher resolution keeps the large stretched planes smooth.
+   */
   _glowTexture() {
     if (typeof document === 'undefined') return null;
     if (this._glowTex) return this._glowTex;
     const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
+    canvas.width = 128;
+    canvas.height = 128;
     const context = canvas.getContext('2d');
-    const gradient = context.createRadialGradient(32, 32, 2, 32, 32, 31);
-    gradient.addColorStop(0, 'rgba(255,255,255,0.95)');
-    gradient.addColorStop(0.35, 'rgba(255,255,255,0.5)');
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    const gradient = context.createRadialGradient(64, 64, 2, 64, 64, 63);
+    // Warm, soft core that fades far out — the long low-alpha tail is what
+    // lets overlapping pools blend seamlessly (no visible pool boundary).
+    gradient.addColorStop(0.0, 'rgba(255,255,255,0.9)');
+    gradient.addColorStop(0.28, 'rgba(255,255,255,0.66)');
+    gradient.addColorStop(0.5, 'rgba(255,255,255,0.37)');
+    gradient.addColorStop(0.75, 'rgba(255,255,255,0.14)');
+    gradient.addColorStop(1.0, 'rgba(255,255,255,0)');
     context.fillStyle = gradient;
-    context.fillRect(0, 0, 64, 64);
+    context.fillRect(0, 0, 128, 128);
     const texture = new THREE.CanvasTexture(canvas);
     texture.magFilter = THREE.LinearFilter;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -6460,10 +6474,28 @@ export class HighwayMap {
     }
 
     // Sodium lampposts: tapered pole + curved arm + luminaire (one merged
-    // instanced geometry), an emissive lens, an additive light pool on the
-    // asphalt and a stretched wet-reflection streak (hidden on Low quality).
+    // instanced geometry), an emissive lens, an additive ground pool and a
+    // stretched wet-reflection streak (hidden on Low quality).
+    //
+    // Night-runners lighting: the pool is large and soft, sized to OVERLAP its
+    // neighbours so the road reads as a continuous warm ribbon rather than a
+    // string of isolated circles, and it is thrown across the near lanes toward
+    // the centreline instead of only lighting the pole base. Deterministic
+    // per-lamp jitter (length/width/offset/rotation/brightness, seeded by
+    // distance) breaks up the mechanical "perfect circle" repetition. This adds
+    // no draw calls, geometries or lights — the instanced planes are simply
+    // bigger and individually tinted.
     const lampStep = isService ? 55 : (isRamp ? 70 : 42);
     const halfTurn = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI);
+    // Cheap deterministic hash -> [0,1) so every rebuild lays the same jitter.
+    const lampNoise = (seed) => {
+      let h = (Math.floor(seed) * 374761393 + 668265263) >>> 0;
+      h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    };
+    const poolSodium = new THREE.Color(0xff8a2e);
+    const tmpColor = new THREE.Color();
+    const tmpAxis = new THREE.Vector3();
     let lampSide = 1;
     for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
       const center = this._sampleCenter(route, distance, 1);
@@ -6481,10 +6513,44 @@ export class HighwayMap {
       const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
       lens.y = base.y + 9.26;
       this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
-      const pool = this._deckPoint(frame, side * (half - 3.6), 0.07);
-      this._instance(pool, vec(11, 1, 15.5), yawQuaternion(center.baseTangent), null, 'pool:lightPool');
-      const streak = this._deckPoint(frame, side * (half - 3.2), 0.1);
-      this._instance(streak, vec(1.1, 1, 30), yawQuaternion(center.baseTangent), null, 'pool:lightStreak');
+
+      const jL = lampNoise(distance);
+      const jW = lampNoise(distance * 1.7 + 41);
+      const jY = lampNoise(distance * 2.3 + 7);
+      // Pool: length comfortably exceeds the lamp spacing so consecutive pools
+      // overlap into one continuous ribbon (no dark gaps); width reaches across
+      // the near lanes; offset pushes its body over the road toward the
+      // centreline instead of only lighting the pole base.
+      const poolLen = lampStep * (1.2 + jL * 0.2);
+      const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
+      const poolOffset = side * (half - poolWidth * 0.4) + (jW - 0.5) * 1.6;
+      // The pool is a big flat quad; the deck is banked. Tilt it to lie PARALLEL
+      // to the banked road so it hugs the asphalt instead of cutting through it —
+      // a dead-flat quad on a banked deck dips below the surface on one side and
+      // is depth-occluded, which showed up as a hard diagonal light/dark edge
+      // running down the road. _deckPoint raises height toward +normal by
+      // tan(bank)*lateral, and T×UP = +normal, so the deck's up-normal is
+      // UP*cos(bank) - N*sin(bank); rotating the quad about the tangent must use
+      // -bank to match it (a +bank rotation tilts it the wrong way and doubles
+      // the mismatch).
+      const bankQuat = new THREE.Quaternion().setFromAxisAngle(tmpAxis.copy(center.baseTangent).normalize(), -frame.bank);
+      const poolQuat = yawQuaternion(center.baseTangent)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2))
+        .premultiply(bankQuat);
+      const pool = this._deckPoint(frame, poolOffset, 0.14);
+      pool.addScaledVector(frame.tangent, (jY - 0.5) * 4);
+      // Additive instance tint doubles as per-lamp brightness jitter;
+      // brighter lamps read a touch whiter, dimmer ones more amber.
+      tmpColor.copy(poolSodium).multiplyScalar(0.96 + jY * 0.26);
+      this._instance(pool, vec(poolWidth, 1, poolLen), poolQuat, tmpColor.getHex(), 'pool:lightPool');
+
+      // Wet-asphalt reflection down the near lane, long enough to bridge the
+      // lamp spacing so it reads as a continuous reflective streak on wet
+      // asphalt (Medium+; hidden on Low, where the pool carries continuity).
+      const streakLen = lampStep * (1.04 + jW * 0.2);
+      const streak = this._deckPoint(frame, side * (half - 3.0), 0.17);
+      streak.addScaledVector(frame.tangent, (jL - 0.5) * 3);
+      this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), yawQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
     }
 
     // Emergency phone boxes on elevated open sections (green beacon + cabinet).
