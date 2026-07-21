@@ -127,3 +127,33 @@ Changes:
 
 Probe added: `.devtests/traffic-visibility-probe.mjs` (populates cars ahead at a
 readable range to check distant-car colour).
+
+## Round 3 — bank-conforming pools + warmer sodium (2026-07-21)
+
+Reported: driving over the lit areas produced big elongated dark shapes on the
+road (visible in noclip too), and a request for warmer lights.
+
+Cause of the dark shapes: the ground pool is one big flat quad, but the deck is
+banked/crowned. `_deckPoint` bank-corrects the anchor's *height*, yet the quad
+was oriented by yaw only, so it lay dead flat and cut through the banked asphalt;
+the half that dips below the surface is depth-occluded, reading as a large
+elongated dark lozenge. The old 11×15.5 m pool was too small to show it; the new
+large pool made it obvious.
+
+Fix (`js/map.js`, lamppost loop):
+- Tilt the pool (and streak) to lie PARALLEL to the banked deck — rotate by the
+  bank angle about the road tangent (`premultiply(bankQuat)`) so the quad hugs
+  the asphalt across its whole width instead of intersecting it.
+- Raise the lift a touch (0.07 → 0.14 pool, 0.10 → 0.17 streak) for margin
+  against longitudinal grade. Build-time only; no runtime cost, no new
+  instances/materials/draw calls. Straight sections are unchanged (bank ≈ 0).
+- Curves add only a *horizontal* overhang of the straight quad, which does not
+  darken; the dark-shape artifact was purely the vertical bank mismatch.
+
+Warmer lights (per request):
+- Sodium pool tint `0xff9a45 → 0xff8a2e`, streak `0xffbe7a → 0xffa858`, and the
+  emissive lamp lens `lampSodium 0xff9b42 → 0xff8a2e` — a deeper amber sodium
+  glow. Player headlights stay warm-white (orange headlights read wrong).
+
+Probe added: `.devtests/pool-artifact-probe.mjs` (low/skim/curve ground-level
+shots to catch pool-vs-deck intersection artifacts).

@@ -448,7 +448,7 @@ export class HighwayMap {
       marking: basic(0xd8d6bf),
       amber: basic(0xe8a844),
       reflector: basic(0xffc36a),
-      lampSodium: basic(0xff9b42),
+      lampSodium: basic(0xff8a2e),
       lampWhite: basic(0xffe9c4),
       tunnelLampOrange: basic(0xffb15e),
       tunnelLampWhite: basic(0xf3f7e8),
@@ -493,7 +493,7 @@ export class HighwayMap {
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
       }),
       lightStreak: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xffbe7a, transparent: true, opacity: 0.2,
+        map: this._glowTexture(), color: 0xffa858, transparent: true, opacity: 0.2,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }),
@@ -6493,8 +6493,9 @@ export class HighwayMap {
       h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
       return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
     };
-    const poolSodium = new THREE.Color(0xff9a45);
+    const poolSodium = new THREE.Color(0xff8a2e);
     const tmpColor = new THREE.Color();
+    const tmpAxis = new THREE.Vector3();
     let lampSide = 1;
     for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
       const center = this._sampleCenter(route, distance, 1);
@@ -6523,9 +6524,16 @@ export class HighwayMap {
       const poolLen = lampStep * (1.2 + jL * 0.2);
       const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
       const poolOffset = side * (half - poolWidth * 0.4) + (jW - 0.5) * 1.6;
+      // The pool is a big flat quad; the deck is banked. Tilt it to lie PARALLEL
+      // to the banked road (rotate by the bank angle about the tangent) so it
+      // hugs the asphalt instead of cutting through it — a dead-flat quad on a
+      // banked deck dips below the surface on one side and is depth-occluded,
+      // which showed up as big elongated dark shapes when driving over it.
+      const bankQuat = new THREE.Quaternion().setFromAxisAngle(tmpAxis.copy(center.baseTangent).normalize(), frame.bank);
       const poolQuat = yawQuaternion(center.baseTangent)
-        .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2));
-      const pool = this._deckPoint(frame, poolOffset, 0.07);
+        .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2))
+        .premultiply(bankQuat);
+      const pool = this._deckPoint(frame, poolOffset, 0.14);
       pool.addScaledVector(frame.tangent, (jY - 0.5) * 4);
       // Additive instance tint doubles as per-lamp brightness jitter;
       // brighter lamps read a touch whiter, dimmer ones more amber.
@@ -6536,9 +6544,9 @@ export class HighwayMap {
       // lamp spacing so it reads as a continuous reflective streak on wet
       // asphalt (Medium+; hidden on Low, where the pool carries continuity).
       const streakLen = lampStep * (1.04 + jW * 0.2);
-      const streak = this._deckPoint(frame, side * (half - 3.0), 0.1);
+      const streak = this._deckPoint(frame, side * (half - 3.0), 0.17);
       streak.addScaledVector(frame.tangent, (jL - 0.5) * 3);
-      this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), yawQuaternion(center.baseTangent), null, 'pool:lightStreak');
+      this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), yawQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
     }
 
     // Emergency phone boxes on elevated open sections (green beacon + cabinet).
