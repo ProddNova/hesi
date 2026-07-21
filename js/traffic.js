@@ -270,9 +270,13 @@ export class TrafficSystem {
       despawnRadius: Math.max(120, finite(options.despawnRadius, 1100)),
       minSpawnDistance: Math.max(20, finite(options.minSpawnDistance, 130)),
       // Anything spawning IN FRONT of the player must be at least this far away,
-      // so cars never blink into existence in view. Behind the player they may
-      // appear as close as minSpawnDistance (out of sight).
-      frontSpawnDistance: Math.max(0, finite(options.frontSpawnDistance, 340)),
+      // so cars never blink into existence in view. Pushed out past the fog
+      // horizon: at 340 m a new car was ~75% visible through the night haze and
+      // read as "popping in" — by ~600 m the exponential fog has faded it to a
+      // faint shape that simply resolves as the player closes the distance.
+      // Behind the player cars may still appear as close as minSpawnDistance
+      // (out of sight).
+      frontSpawnDistance: Math.max(0, finite(options.frontSpawnDistance, 600)),
       nearMissDistance: clamp(finite(options.nearMissDistance, 2.25), 0.5, 5),
       nearMissMinSpeed: speedToMps(options.nearMissMinSpeed, 100 / 3.6),
       maxSpawnPerFrame: Math.max(1, Math.floor(options.maxSpawnPerFrame ?? 6)),

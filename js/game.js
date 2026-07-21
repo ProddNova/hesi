@@ -92,7 +92,7 @@ class ShutokoNights {
   setupLights(){
     // PS2 night mood: dark blue-black sky, low ambient so emissive windows,
     // lamps and light pools carry the scene instead of flat grey fill.
-    this.roadScene.background=new THREE.Color(0x02050c);this.roadScene.fog=new THREE.FogExp2(0x07101c,.0015);
+    this.roadScene.background=new THREE.Color(0x02050c);this.roadScene.fog=new THREE.FogExp2(0x080f1e,.0017);
     this.roadScene.add(new THREE.HemisphereLight(0x35476b,0x0c101c,1.35));this.roadScene.add(new THREE.AmbientLight(0x3c4a66,.5));const moon=new THREE.DirectionalLight(0x8da4c8,.85);moon.position.set(-200,300,-100);this.roadScene.add(moon);
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
