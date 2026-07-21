@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as MapModule from './map.js?v=20260716a';
 import * as PhysicsModule from './physics.js?v=20260713a';
-import * as TrafficModule from './traffic.js?v=20260713a';
+import * as TrafficModule from './traffic.js?v=20260721d';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
@@ -40,7 +40,7 @@ class ShutokoNights {
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
     this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
-    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1};
+    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
     this.setupDebugMenu();
     this.setupDevMap();
@@ -117,7 +117,7 @@ class ShutokoNights {
     const effective=this.getEffectiveCar();this.audio?.setVehicle?.(effective);
     this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
     this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);if(this.customCar.enabled)this.setCustomCarEnabled(true,{silent:true,persist:false});
-    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?44:56,density:1,maxVehicles:84});this.traffic.setDensity?.(this.admin.trafficDensity||1);}catch(e){console.error('Traffic init',e);this.traffic=null;}
+    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?44:56,density:1,maxVehicles:84});this.applyTrafficAdmin();}catch(e){console.error('Traffic init',e);this.traffic=null;}
     this.garage=new GarageSystem(this.garageScene,this.camera,this.canvas,{
       isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),finishInstall:d=>this.finishInstall(d),
       prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
@@ -173,7 +173,7 @@ class ShutokoNights {
 
   setupUI(){
     this.ui=new GameUI({continue:()=>this.start(),newGame:()=>this.newGame(),phoneChanged:o=>this.audioClick(),getPhoneContext:()=>this.getPhoneContext(),tow:()=>this.tow(),
-      getMinimap:()=>{const s=this.getVehicleState(),p=vec(s.position||s);return{data:this.map?.getMinimapData?.()||null,player:{x:p.x,z:p.z,heading:s.heading||0},services:this.map?.getServiceAreas?.()||[]};},setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},adminTraffic:v=>{this.admin.trafficDensity=v;this.traffic?.setDensity?.(v);this.persist();this.ui.toast(`TRAFFIC DENSITY ${v}×`,'amber');},uiClick:()=>this.audioClick(),
+      getMinimap:()=>{const s=this.getVehicleState(),p=vec(s.position||s);return{data:this.map?.getMinimapData?.()||null,player:{x:p.x,z:p.z,heading:s.heading||0},services:this.map?.getServiceAreas?.()||[]};},setting:(k,v)=>this.changeSetting(k,v),adminUnlock:ok=>this.unlockAdmin(ok),adminAction:a=>this.adminAction(a),adminToggle:(k,v)=>this.adminToggle(k,v),adminTime:v=>{this.admin.timeScale=v;this.persist();},adminTraffic:v=>{this.admin.trafficDensity=v;this.traffic?.setDensity?.(v);this.syncTrafficControls();this.persist();this.ui.toast(`TRAFFIC DENSITY ${v}×`,'amber');},uiClick:()=>this.audioClick(),
       getPCContext:()=>this.getPCContext(),buyCar:i=>this.buyCar(i),buyPart:i=>this.buyPart(i),buyFuelCan:()=>this.buyFuelCan(),pcChanged:o=>{if(o)document.exitPointerLock?.();},returnGarage:()=>this.enterGarage('crash')});
     const AudioCtor=AudioModule.AudioSystem||AudioModule.default;
     try{this.audio=typeof AudioCtor==='function'?new AudioCtor({volume:this.state.settings.volume}):AudioCtor;}catch(e){console.warn('Audio init',e);}
@@ -345,12 +345,15 @@ class ShutokoNights {
     const bind=(id,fn)=>document.getElementById(id)?.addEventListener('change',e=>fn(e.target.checked));
     bind('debug-noclip',v=>this.setNoclip(v));bind('debug-traffic',v=>this.setTrafficDisabled(v));bind('debug-custom-car',v=>this.setCustomCarEnabled(v));
     const customScale=document.getElementById('debug-custom-car-scale');customScale?.addEventListener('input',e=>this.setCustomCarScale(e.target.value,{persist:false,silent:true}));customScale?.addEventListener('change',e=>this.setCustomCarScale(e.target.value));this.syncCustomCarControls();
+    // Live traffic test sliders: drag updates instantly (no persist), release commits.
+    const trafficRange=(id,key)=>{const el=document.getElementById(id);if(!el)return;el.addEventListener('input',e=>this.setTrafficParam(key,e.target.value,false));el.addEventListener('change',e=>this.setTrafficParam(key,e.target.value,true));};
+    trafficRange('debug-traffic-intensity','density');trafficRange('debug-traffic-truck','truck');trafficRange('debug-traffic-van','van');trafficRange('debug-traffic-lanechange','lanechange');trafficRange('debug-traffic-speed','speed');this.syncTrafficControls();
     document.getElementById('debug-close')?.addEventListener('click',()=>this.toggleDebugMenu(false));
     document.querySelectorAll('[data-debug-hitbox]').forEach(input=>input.addEventListener('change',()=>this.setDebugHitbox(input.dataset.debugHitbox,input.checked)));
     document.getElementById('debug-hitboxes-all')?.addEventListener('click',()=>{const inputs=[...document.querySelectorAll('[data-debug-hitbox]')],enable=inputs.some(input=>!input.checked);for(const input of inputs){input.checked=enable;this.setDebugHitbox(input.dataset.debugHitbox,enable);}});
   }
   toggleDebugMenu(force){
-    const open=typeof force==='boolean'?force:!this.debug.menuOpen;this.debug.menuOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));
+    const open=typeof force==='boolean'?force:!this.debug.menuOpen;this.debug.menuOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.syncTrafficControls();this.syncCustomCarControls();}
     this.keys={};this.pressed.clear();this.releaseTouchInput?.();if(open)document.exitPointerLock?.();else if(this.debug.noclip&&!this.isTouchDevice)this.requestDronePointerLock();
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
@@ -521,6 +524,41 @@ class ShutokoNights {
     this.debug.trafficDisabled=!!disabled;if(disabled)this.traffic?.clear?.();
     const input=document.getElementById('debug-traffic');if(input)input.checked=!!disabled;
     this.ui?.toast?.(disabled?'DEBUG // TRAFFIC OFF':'DEBUG // TRAFFIC ON','amber');
+  }
+  // Push every stored traffic tunable into the live system (used at init and
+  // whenever a value is restored from the save).
+  applyTrafficAdmin(){
+    if(!this.traffic)return;const a=this.admin;
+    this.traffic.setDensity?.(clamp(a.trafficDensity??1,0,3));
+    this.traffic.setTypeMix?.({truck:clamp(a.trafficTruckRatio??0.09,0,0.6),van:clamp(a.trafficVanRatio??0.19,0,0.7)});
+    this.traffic.setLaneChangeRate?.(clamp(a.trafficLaneChange??1,0,3));
+    this.traffic.setSpeedFactor?.(clamp(a.trafficSpeed??1,0.4,1.8));
+  }
+  // One entry point for every dev-panel traffic slider. commit=false while
+  // dragging (live, no disk write), commit=true on release.
+  setTrafficParam(key,value,commit=true){
+    const v=+value;if(!Number.isFinite(v))return;const a=this.admin;
+    if(key==='density'){a.trafficDensity=clamp(v,0,3);this.traffic?.setDensity?.(a.trafficDensity);}
+    else if(key==='truck'){a.trafficTruckRatio=clamp(v/100,0,0.6);this.traffic?.setTypeMix?.({truck:a.trafficTruckRatio,van:a.trafficVanRatio??0.19});}
+    else if(key==='van'){a.trafficVanRatio=clamp(v/100,0,0.7);this.traffic?.setTypeMix?.({truck:a.trafficTruckRatio??0.09,van:a.trafficVanRatio});}
+    else if(key==='lanechange'){a.trafficLaneChange=clamp(v/100,0,3);this.traffic?.setLaneChangeRate?.(a.trafficLaneChange);}
+    else if(key==='speed'){a.trafficSpeed=clamp(v/100,0.4,1.8);this.traffic?.setSpeedFactor?.(a.trafficSpeed);}
+    else return;
+    this.syncTrafficControls();if(commit)this.persist();
+  }
+  // Reflect stored values back into the sliders + readouts (skips the control
+  // the user is actively dragging so it doesn't fight them).
+  syncTrafficControls(){
+    const a=this.admin;
+    const set=(id,val,label)=>{const el=document.getElementById(id);if(el&&document.activeElement!==el)el.value=String(val);const lab=document.getElementById(id+'-val');if(lab)lab.textContent=label;};
+    const truckPct=Math.round((a.trafficTruckRatio??0.09)*100),vanPct=Math.round((a.trafficVanRatio??0.19)*100),carPct=Math.max(0,100-truckPct-vanPct);
+    const lanePct=Math.round((a.trafficLaneChange??1)*100),speedPct=Math.round((a.trafficSpeed??1)*100),density=a.trafficDensity??1;
+    set('debug-traffic-intensity',density,`${density.toFixed(2)}×`);
+    set('debug-traffic-truck',truckPct,`${truckPct}%`);
+    set('debug-traffic-van',vanPct,`${vanPct}%`);
+    set('debug-traffic-lanechange',lanePct,lanePct===0?'OFF':`${lanePct}%`);
+    set('debug-traffic-speed',speedPct,`${speedPct}%`);
+    const note=document.getElementById('debug-traffic-mix-note');if(note)note.textContent=`auto ${carPct}% · furgoni ${vanPct}% · tir ${truckPct}%`;
   }
   syncCustomCarControls(){
     if(!this.customCar)return;const toggle=document.getElementById('debug-custom-car'),scale=document.getElementById('debug-custom-car-scale'),status=document.getElementById('debug-custom-car-status');if(toggle)toggle.checked=!!this.customCar.enabled;if(scale&&document.activeElement!==scale)scale.value=this.customCar.scale.toFixed(2);if(status){const text=this.customCar.status==='loading'?'caricamento GLB…':this.customCar.status==='error'?'errore nel caricamento':this.customCar.object?(this.customCar.enabled?'attiva':'pronta'):'disattivata';status.textContent=`Toyota Chaser GLB · ${text}`;}

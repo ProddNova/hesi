@@ -125,6 +125,15 @@
       <div class="debug-menu-body">
         <label class="debug-toggle"><span><b>NOCLIP / DRONE</b><small>Fly freely, then respawn the car here</small></span><input id="debug-noclip" type="checkbox"><i></i></label>
         <label class="debug-toggle"><span><b>DISABLE TRAFFIC</b><small>Despawns every AI vehicle</small></span><input id="debug-traffic" type="checkbox"><i></i></label>
+        <details class="debug-traffic-panel">
+          <summary><span><b>TRAFFIC TUNING</b><small>Live intensity &amp; spawn-mix test sliders</small></span><em>TUNE</em></summary>
+          <label class="debug-range"><span>INTENSITÀ <b id="debug-traffic-intensity-val">1.00×</b></span><input id="debug-traffic-intensity" type="range" min="0" max="3" step="0.05" value="1"></label>
+          <label class="debug-range"><span>TIR <b id="debug-traffic-truck-val">9%</b></span><input id="debug-traffic-truck" type="range" min="0" max="40" step="1" value="9"></label>
+          <label class="debug-range"><span>FURGONI <b id="debug-traffic-van-val">19%</b></span><input id="debug-traffic-van" type="range" min="0" max="55" step="1" value="19"></label>
+          <label class="debug-range"><span>CAMBI CORSIA <b id="debug-traffic-lanechange-val">100%</b></span><input id="debug-traffic-lanechange" type="range" min="0" max="250" step="5" value="100"></label>
+          <label class="debug-range"><span>VELOCITÀ FLUSSO <b id="debug-traffic-speed-val">100%</b></span><input id="debug-traffic-speed" type="range" min="60" max="140" step="5" value="100"></label>
+          <p class="debug-range-note">MIX SPAWN · <span id="debug-traffic-mix-note">auto 72% · furgoni 19% · tir 9%</span></p>
+        </details>
         <div class="debug-custom-car">
           <label class="debug-toggle"><span><b>AUTO CUSTOM</b><small id="debug-custom-car-status">Toyota Chaser GLB · disattivata</small></span><input id="debug-custom-car" type="checkbox"><i></i></label>
           <label class="debug-number"><span>SCALA MODELLO</span><input id="debug-custom-car-scale" type="number" min="0.25" max="3" step="0.05" inputmode="decimal" value="1.45"></label>
@@ -198,7 +207,7 @@
     <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260721c"></script>
+  <script type="module" src="js/game.js?v=20260721d"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));

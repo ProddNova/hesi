@@ -4,20 +4,35 @@ const clamp = THREE.MathUtils.clamp;
 const EPSILON = 1e-6;
 const UP = new THREE.Vector3(0, 1, 0);
 
+// Only three visual classes exist, by design: a passenger CAR (auto), a VAN /
+// box-truck (camioncino / furgone) and an articulated TIR (semi). They are
+// deliberately plain boxes — no wheels, no glass — so the effort goes into
+// believable real-world dimensions and a realistic spawn / lane distribution.
+//   weight     — relative spawn frequency (cars common, tir rare).
+//   laneBias   — preferred lane, 0 = fast lane by the median … 1 = slow OUTER
+//                (left-hand) lane. Tir hug the outer lane, cars roam.
+//   laneSpread — how tightly the class sticks to laneBias.
+//   topSpeed   — free-flow cruising speed in m/s (highway limit caps it).
 const VEHICLE_TYPES = Object.freeze([
-  { id: 'sedan', width: 1.72, length: 4.35, height: 1.42, minSpeed: 22, maxSpeed: 31, acceleration: 2.2, braking: 7.0, weight: 0.26 },
-  { id: 'kei', width: 1.48, length: 3.38, height: 1.55, minSpeed: 20, maxSpeed: 28, acceleration: 1.9, braking: 6.5, weight: 0.17 },
-  { id: 'coupe', width: 1.78, length: 4.18, height: 1.25, minSpeed: 25, maxSpeed: 34, acceleration: 2.8, braking: 7.5, weight: 0.13 },
-  { id: 'wagon', width: 1.78, length: 4.58, height: 1.48, minSpeed: 22, maxSpeed: 30, acceleration: 1.9, braking: 6.8, weight: 0.15 },
-  { id: 'van', width: 1.86, length: 4.78, height: 2.08, minSpeed: 19, maxSpeed: 27, acceleration: 1.45, braking: 5.8, weight: 0.13 },
-  { id: 'truck', width: 2.2, length: 6.9, height: 2.72, minSpeed: 18, maxSpeed: 25, acceleration: 1.0, braking: 5.0, weight: 0.1 },
-  { id: 'bus', width: 2.35, length: 8.7, height: 3.05, minSpeed: 18, maxSpeed: 24, acceleration: 0.85, braking: 4.5, weight: 0.06 },
+  { id: 'car',   label: 'auto',    width: 1.84, length: 4.48, height: 1.46, minSpeed: 26, maxSpeed: 37, acceleration: 2.7, braking: 8.0, weight: 0.72, laneBias: 0.36, laneSpread: 1.05 },
+  { id: 'van',   label: 'furgone', width: 2.08, length: 5.85, height: 2.44, minSpeed: 22, maxSpeed: 30, acceleration: 1.75, braking: 6.4, weight: 0.19, laneBias: 0.66, laneSpread: 0.58 },
+  { id: 'truck', label: 'tir',     width: 2.55, length: 15.6, height: 3.95, minSpeed: 19, maxSpeed: 26, acceleration: 1.05, braking: 5.2, weight: 0.09, laneBias: 1.0, laneSpread: 0.32 },
 ]);
+const TYPE_BY_ID = Object.freeze(Object.fromEntries(VEHICLE_TYPES.map((type) => [type.id, type])));
 
-const BODY_COLORS = [
-  0x283449, 0x5b2027, 0x8d8a7c, 0x172a25, 0x36425a, 0x6b6557,
-  0x2a252c, 0x7a2e25, 0x1f4650, 0xb0a58e, 0x473947, 0x1c1d22,
+// Per-class colour palettes. Cars come in every colour; vans skew commercial
+// white / silver; tir cabs are a small muted set (cab and box share a colour).
+const CAR_COLORS = [
+  0xb9c0c9, 0xf0f1f3, 0x14161b, 0x33445c, 0x6d7683, 0x8a2531,
+  0x24506b, 0x2f6146, 0xbfae87, 0x71324a, 0x2b2d33, 0x9a9ea6,
+  0x7a2f22, 0x455a74, 0xd8c9a4, 0x394a3d,
 ];
+const VAN_COLORS = [0xf1f2f0, 0xe6e8ea, 0xcfd2ce, 0xdfe3e6, 0x8fa0ad, 0x9c6b3f, 0x2f4f6b, 0xb0453a, 0xe4e5e0];
+const TRUCK_COLORS = [0xe9eaec, 0xd6dade, 0x4a6274, 0x8a2f2a, 0x2c3440, 0xb7bcc2, 0x35617a, 0x7c8894];
+const COLORS_BY_ID = { car: CAR_COLORS, van: VAN_COLORS, truck: TRUCK_COLORS };
+
+// Neutral fallback so a hand-built vehicle (tests) still behaves sanely.
+const DEFAULT_DRIVER = Object.freeze({ speedMul: 1, gapMul: 1, accelMul: 1, laneChangeBias: 1, patience: 0.6, wanderPhase: 0, wanderAmp: 0 });
 
 function finite(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
@@ -55,16 +70,6 @@ function seededRandom(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function chooseWeighted(random, items) {
-  const roll = random();
-  let running = 0;
-  for (const item of items) {
-    running += item.weight;
-    if (roll <= running) return item;
-  }
-  return items[items.length - 1];
 }
 
 function smoothstep01(value) {
@@ -125,12 +130,51 @@ function rectangleSupport(direction, right, forward, halfWidth, halfLength) {
   return Math.abs(direction.dot(right)) * halfWidth + Math.abs(direction.dot(forward)) * halfLength;
 }
 
-function geometrySet() {
-  return {
-    box: new THREE.BoxGeometry(1, 1, 1),
-    wheel: new THREE.BoxGeometry(1, 1, 1),
-    lamp: new THREE.BoxGeometry(1, 1, 0.035),
-  };
+/**
+ * Build the shared box-geometries for one vehicle class. Everything is centred
+ * on X/Z with its underside at Y=0 so the mesh group sits flat on the road.
+ * The body is a single box for a car / van, or cab + trailer + chassis for the
+ * tir — all still plain boxes, differentiated mainly by size. Lamps, brake
+ * lights and the two turn-signal clusters are tiny boxes at the right corners.
+ */
+function buildVehicleGeometry(type) {
+  const w = type.width;
+  const l = type.length;
+  const h = type.height;
+  const half = l * 0.5;
+  const bodyParts = [];
+  if (type.id === 'truck') {
+    const cabLen = 2.8;
+    const cabH = 3.05;
+    const gap = 0.18;
+    const trailerLen = l - cabLen - gap;
+    const chassisH = 0.85;                       // deck the trailer box rests on
+    bodyParts.push([[w, cabH, cabLen], [0, cabH * 0.5, half - cabLen * 0.5]]);
+    bodyParts.push([[w, h - chassisH, trailerLen], [0, (chassisH + h) * 0.5, half - cabLen - gap - trailerLen * 0.5]]);
+    bodyParts.push([[w * 0.82, chassisH, l - cabLen], [0, chassisH * 0.5, -half + (l - cabLen) * 0.5]]);
+  } else {
+    bodyParts.push([[w, h, l], [0, h * 0.5, 0]]);
+  }
+  const headY = type.id === 'truck' ? 1.2 : h * 0.5;
+  const tailY = type.id === 'truck' ? 1.05 : h * 0.52;
+  const frontZ = half - 0.04;
+  const rearZ = -half + 0.04;
+  const lampW = Math.min(0.3, w * 0.17);
+  const lamps = mergedBoxGeometry([
+    [[lampW, 0.16, 0.06], [-w * 0.33, headY, frontZ]],
+    [[lampW, 0.16, 0.06], [w * 0.33, headY, frontZ]],
+  ]);
+  const brake = mergedBoxGeometry([
+    [[lampW, 0.18, 0.06], [-w * 0.34, tailY, rearZ]],
+    [[lampW, 0.18, 0.06], [w * 0.34, tailY, rearZ]],
+  ]);
+  // One cluster per side, each a front + rear amber box at that flank so the
+  // signal reads from ahead and behind. Its bounding-box X keeps the side sign.
+  const blinker = (sign) => mergedBoxGeometry([
+    [[0.13, 0.14, 0.06], [sign * w * 0.49, headY, frontZ - 0.06]],
+    [[0.13, 0.14, 0.06], [sign * w * 0.49, tailY, rearZ + 0.06]],
+  ]);
+  return { body: mergedBoxGeometry(bodyParts), lamps, brake, blinkerL: blinker(-1), blinkerR: blinker(1) };
 }
 
 /**
@@ -188,81 +232,32 @@ function mergedBoxGeometry(parts) {
   return merged;
 }
 
-function makeTrafficMesh(type, color, geometries, sharedMaterials) {
+/**
+ * A pooled vehicle is one generic group whose part geometries are swapped to a
+ * class at spawn (see TrafficSystem._applyVehicleType). The body carries its
+ * own Lambert material so each car gets an individual colour; every other part
+ * shares a material. Draw calls stay ~3-4 per visible vehicle.
+ */
+function makeTrafficMesh(geometries, sharedMaterials) {
   const group = new THREE.Group();
-  group.name = `traffic-${type.id}`;
-  const bodyColor = new THREE.Color(color).getHex();
-  const darkerColor = new THREE.Color(color).multiplyScalar(0.58).getHex();
-  const cargoColor = 0x77715e;
-  const tireColor = 0x09090b;
-  const windowColor = 0x101d2a;
-  const headlampColor = 0xfff0be;
-  const bodyHeight = type.id === 'bus' ? type.height * 0.78 : type.id === 'truck' ? 0.75 : type.height * 0.42;
-  const bodyY = type.id === 'bus' ? type.height * 0.45 : 0.43 + bodyHeight * 0.5;
+  group.name = 'traffic-vehicle';
+  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true }));
+  const lamps = new THREE.Mesh(geometries.lamps, sharedMaterials.headlamp);
+  const taillamp = new THREE.Mesh(geometries.brake, sharedMaterials.taillamp);
+  const blinkerL = new THREE.Mesh(geometries.blinkerL, sharedMaterials.indicator);
+  const blinkerR = new THREE.Mesh(geometries.blinkerR, sharedMaterials.indicator);
+  blinkerL.visible = false;
+  blinkerR.visible = false;
+  group.add(body, lamps, taillamp, blinkerL, blinkerR);
 
-  // Two vertex-colored meshes per car: one lit (body/cabin/cargo/tires) and
-  // one emissive-style (windows/headlamps). Cuts per-car draw calls to 5.
-  const litParts = [];
-  const glowParts = [];
-  const push = (list, colorHex, scale, position) => list.push([scale, position, colorHex]);
-  push(litParts, bodyColor, [type.width, bodyHeight, type.length], [0, bodyY, 0]);
-
-  if (type.id === 'truck') {
-    push(litParts, bodyColor, [type.width * 0.96, 1.7, type.length * 0.25], [0, 1.22, type.length * 0.35]);
-    push(litParts, cargoColor, [type.width * 0.98, type.height * 0.73, type.length * 0.67], [0, type.height * 0.54, -type.length * 0.14]);
-    push(glowParts, windowColor, [type.width * 0.74, 0.48, 0.03], [0, 1.54, type.length * 0.481]);
-  } else if (type.id === 'bus') {
-    push(glowParts, windowColor, [type.width * 0.91, type.height * 0.28, type.length * 0.88], [0, type.height * 0.69, 0]);
-    push(litParts, bodyColor, [type.width * 0.95, 0.14, type.length * 0.92], [0, type.height * 0.7, 0]);
-  } else if (type.id === 'van') {
-    push(litParts, darkerColor, [type.width * 0.86, type.height * 0.52, type.length * 0.72], [0, type.height * 0.66, -type.length * 0.07]);
-    push(glowParts, windowColor, [type.width * 0.72, 0.43, type.length * 0.36], [0, type.height * 0.73, type.length * 0.2]);
-  } else {
-    const cabinLength = type.id === 'wagon' ? type.length * 0.61 : type.id === 'kei' ? type.length * 0.56 : type.length * 0.49;
-    const cabinZ = type.id === 'wagon' ? -0.08 : -type.length * 0.055;
-    push(litParts, darkerColor, [type.width * 0.82, type.height * 0.47, cabinLength], [0, bodyY + bodyHeight * 0.7, cabinZ]);
-    push(glowParts, windowColor, [type.width * 0.72, type.height * 0.31, cabinLength * 0.88], [0, bodyY + bodyHeight * 0.72, cabinZ]);
-    push(litParts, darkerColor, [type.width * 0.86, 0.075, 0.055], [0, bodyY + bodyHeight * 0.73, cabinZ]);
-  }
-
-  const wheelY = 0.31;
-  const wheelZ = type.length * (type.id === 'bus' ? 0.34 : type.id === 'truck' ? 0.35 : 0.31);
-  const wheelDepth = type.id === 'truck' || type.id === 'bus' ? 0.72 : 0.58;
-  for (const x of [-type.width * 0.51, type.width * 0.51]) {
-    for (const z of [-wheelZ, wheelZ]) {
-      push(litParts, tireColor, [0.18, 0.52, wheelDepth], [x, wheelY, z]);
-    }
-  }
-  push(glowParts, headlampColor, [type.width * 0.19, 0.18, 0.035], [-type.width * 0.32, bodyY, type.length * 0.503]);
-  push(glowParts, headlampColor, [type.width * 0.19, 0.18, 0.035], [type.width * 0.32, bodyY, type.length * 0.503]);
-
-  group.add(new THREE.Mesh(mergedBoxGeometry(litParts), sharedMaterials.litVertexColor));
-  group.add(new THREE.Mesh(mergedBoxGeometry(glowParts), sharedMaterials.glowVertexColor));
-
-  // Tail lamps stay their own mesh because braking swaps their material.
-  const taillamp = new THREE.Mesh(mergedBoxGeometry([
-    [[type.width * 0.18, 0.17, 0.035], [-type.width * 0.32, bodyY, -type.length * 0.503]],
-    [[type.width * 0.18, 0.17, 0.035], [type.width * 0.32, bodyY, -type.length * 0.503]],
-  ]), sharedMaterials.taillamp);
-  group.add(taillamp);
-
-  // Indicators stay separate per side because they blink via `visible`.
-  const indicators = [];
-  for (const side of [-1, 1]) {
-    const material = new THREE.MeshBasicMaterial({ color: 0xffa51f, toneMapped: false });
-    const mesh = new THREE.Mesh(mergedBoxGeometry([
-      [[0.12, 0.13, 0.035], [side * type.width * 0.45, bodyY, type.length * 0.505]],
-      [[0.12, 0.13, 0.035], [side * type.width * 0.45, bodyY, -type.length * 0.505]],
-    ]), material);
-    mesh.visible = false;
-    group.add(mesh);
-    indicators.push({ side, meshes: [mesh] });
-  }
-
+  group.userData.body = body;
+  group.userData.lamps = lamps;
   group.userData.headlamps = [];
   group.userData.taillamps = [taillamp];
-  group.userData.indicators = indicators;
-  group.userData.ownedMaterials = indicators.flatMap((entry) => entry.meshes.map((mesh) => mesh.material));
+  // side -1 sits on local -X, side +1 on local +X; the runtime picks the side
+  // from the actual lateral movement so the signal always matches the drift.
+  group.userData.indicators = [{ side: -1, meshes: [blinkerL] }, { side: 1, meshes: [blinkerR] }];
+  group.userData.ownedMaterials = [body.material];
   return group;
 }
 
@@ -299,6 +294,14 @@ export class TrafficSystem {
     };
     this.random = seededRandom(this.options.seed);
     this.density = this.options.density;
+    // Live-tunable behaviour knobs (dev panel). typeWeights sets how common each
+    // class is, laneChangeRate scales how often cars change lane (0 = never),
+    // speedFactor scales free-flow cruising speed across all traffic.
+    this.typeWeights = this._normalizeTypeWeights(options.typeWeights ?? {
+      car: TYPE_BY_ID.car.weight, van: TYPE_BY_ID.van.weight, truck: TYPE_BY_ID.truck.weight,
+    });
+    this.laneChangeRate = clamp(finite(options.laneChangeRate, 1), 0, 3);
+    this.speedFactor = clamp(finite(options.speedFactor, 1), 0.4, 1.8);
     this.time = 0;
     this._idCounter = 0;
     this._events = [];
@@ -310,11 +313,12 @@ export class TrafficSystem {
     this._objectRefIds = new WeakMap();
     this._nextRefId = 1;
     this._disposed = false;
-    this._geometries = geometrySet();
+    // One shared geometry-set per class, swapped onto a pooled mesh at spawn.
+    this._typeGeometries = Object.fromEntries(VEHICLE_TYPES.map((type) => [type.id, buildVehicleGeometry(type)]));
     this._sharedMaterials = {
-      litVertexColor: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-      glowVertexColor: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
-      taillamp: new THREE.MeshBasicMaterial({ color: 0xb31718, toneMapped: false }),
+      headlamp: new THREE.MeshBasicMaterial({ color: 0xfff0be, toneMapped: false }),
+      taillamp: new THREE.MeshBasicMaterial({ color: 0x8a1512, toneMapped: false }),
+      indicator: new THREE.MeshBasicMaterial({ color: 0xffa51f, toneMapped: false }),
     };
     this.pool = [];
     this.active = [];
@@ -322,9 +326,8 @@ export class TrafficSystem {
   }
 
   _createPooledVehicle(index) {
-    const type = chooseWeighted(this.random, VEHICLE_TYPES);
-    const color = BODY_COLORS[Math.floor(this.random() * BODY_COLORS.length)];
-    const mesh = makeTrafficMesh(type, color, this._geometries, this._sharedMaterials);
+    const type = TYPE_BY_ID.car;
+    const mesh = makeTrafficMesh(this._typeGeometries[type.id], this._sharedMaterials);
     mesh.visible = false;
     mesh.matrixAutoUpdate = true;
     this.scene.add(mesh);
@@ -333,6 +336,7 @@ export class TrafficSystem {
       poolIndex: index,
       active: false,
       type,
+      driver: DEFAULT_DRIVER,
       mesh,
       width: type.width,
       length: type.length,
@@ -380,6 +384,136 @@ export class TrafficSystem {
     return this.density;
   }
 
+  /** How often cars change lane. 0 disables lane changes, 1 is the default. */
+  setLaneChangeRate(rate) {
+    this.laneChangeRate = clamp(finite(rate, 1), 0, 3);
+    return this.laneChangeRate;
+  }
+
+  /** Global free-flow speed multiplier for all traffic. */
+  setSpeedFactor(factor) {
+    this.speedFactor = clamp(finite(factor, 1), 0.4, 1.8);
+    return this.speedFactor;
+  }
+
+  /**
+   * Set the class mix. `truck` and `van` are fractions of all spawns (0..1);
+   * cars take whatever is left. Existing vehicles keep their class until they
+   * despawn — only future spawns follow the new mix.
+   */
+  setTypeMix({ truck, van, car } = {}) {
+    this.typeWeights = this._normalizeTypeWeights({
+      truck: finite(truck, this.typeWeights.truck),
+      van: finite(van, this.typeWeights.van),
+      car: finite(car, undefined),
+    });
+    return this.typeWeights;
+  }
+
+  _normalizeTypeWeights(weights = {}) {
+    const truck = clamp(finite(weights.truck, TYPE_BY_ID.truck.weight), 0, 0.7);
+    const van = clamp(finite(weights.van, TYPE_BY_ID.van.weight), 0, 0.8);
+    // If a car weight is supplied honour it, otherwise cars are the remainder so
+    // the three always add up to a full population.
+    const car = Number.isFinite(weights.car) ? Math.max(0, weights.car) : Math.max(0.05, 1 - truck - van);
+    return { car, van, truck };
+  }
+
+  _chooseVehicleType() {
+    const w = this.typeWeights;
+    const total = Math.max(EPSILON, w.car + w.van + w.truck);
+    let roll = this.random() * total;
+    if ((roll -= w.truck) < 0) return TYPE_BY_ID.truck;
+    if ((roll -= w.van) < 0) return TYPE_BY_ID.van;
+    return TYPE_BY_ID.car;
+  }
+
+  _resolveType(type) {
+    if (!type) return null;
+    if (typeof type === 'string') return TYPE_BY_ID[type] ?? null;
+    if (type.id && TYPE_BY_ID[type.id]) return TYPE_BY_ID[type.id];
+    return null;
+  }
+
+  /**
+   * A per-vehicle "driver": small random offsets to cruising speed, following
+   * distance, acceleration, lane-change appetite and patience. This is what
+   * stops every car of a class behaving identically and makes the flow read as
+   * real traffic rather than a synced train.
+   */
+  _makeDriver(type) {
+    const r = this.random;
+    return {
+      speedMul: THREE.MathUtils.lerp(0.9, 1.12, r()),
+      gapMul: THREE.MathUtils.lerp(0.82, 1.4, r()),
+      accelMul: THREE.MathUtils.lerp(0.85, 1.15, r()),
+      laneChangeBias: THREE.MathUtils.lerp(0.55, 1.5, r()) * (type.id === 'truck' ? 0.55 : 1),
+      patience: THREE.MathUtils.lerp(0.35, 1, r()),
+      wanderPhase: r() * Math.PI * 2,
+      wanderAmp: THREE.MathUtils.lerp(0.02, 0.06, r()),
+    };
+  }
+
+  /**
+   * Weighted lane pick for a class: a soft Gaussian around the class's home
+   * lane (laneBias), with jitter so a run of same-class cars doesn't stack into
+   * an identical column. Lane 0 is the fast lane by the median; the highest
+   * index is the slow outer (left) lane where tir belong.
+   */
+  _pickLaneForType(type, laneCount) {
+    const count = Math.max(1, Math.floor(laneCount || 1));
+    if (count <= 1) return 0;
+    const maxIndex = count - 1;
+    const target = (type.laneBias ?? 0.5) * maxIndex;
+    const spread = Math.max(0.4, type.laneSpread ?? 0.6) * maxIndex;
+    let bestIndex = 0;
+    let bestWeight = -Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const d = (i - target) / (spread || 1);
+      // Additive jitter: negligible next to a tight class's peak (tir almost
+      // always land outermost) but decisive when a wide class's lanes tie
+      // (cars spread across the carriageway instead of stacking one column).
+      const weight = Math.exp(-0.5 * d * d) + 0.18 * this.random();
+      if (weight > bestWeight) {
+        bestWeight = weight;
+        bestIndex = i;
+      }
+    }
+    return bestIndex;
+  }
+
+  _laneCountFor(vehicle) {
+    const ref = vehicle.laneRef;
+    let count = ref?.laneCount ?? ref?.route?.lanes;
+    if (!Number.isFinite(count)) {
+      try {
+        count = this.map?.getRoute?.(ref?.routeId ?? ref?.route?.id)?.lanes;
+      } catch {
+        count = null;
+      }
+    }
+    return Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
+  }
+
+  /** Swap a pooled vehicle onto a class and colour, updating its collision box. */
+  _applyVehicleType(vehicle, type, color) {
+    const geoms = this._typeGeometries[type.id] ?? this._typeGeometries.car;
+    const ud = vehicle.mesh.userData;
+    ud.body.geometry = geoms.body;
+    ud.body.material.color.set(color);
+    ud.lamps.geometry = geoms.lamps;
+    ud.taillamps[0].geometry = geoms.brake;
+    ud.taillamps[0].material = this._sharedMaterials.taillamp;
+    ud.indicators[0].meshes[0].geometry = geoms.blinkerL;
+    ud.indicators[1].meshes[0].geometry = geoms.blinkerR;
+    ud.indicators[0].meshes[0].visible = false;
+    ud.indicators[1].meshes[0].visible = false;
+    vehicle.type = type;
+    vehicle.width = type.width;
+    vehicle.length = type.length;
+    vehicle.height = type.height;
+  }
+
   update(dt, playerState, context = {}) {
     if (this._disposed || !Number.isFinite(dt) || dt <= 0) return [];
     const frameDt = Math.min(dt, 0.12);
@@ -395,8 +529,11 @@ export class TrafficSystem {
     const target = Math.min(this.options.maxVehicles, Math.round(this.options.targetVehicles * this.density));
     let spawnBudget = this.options.maxSpawnPerFrame;
     while (this.active.length < target && spawnBudget > 0) {
-      const candidate = this._requestSpawn(player, context);
-      if (!candidate || !this.spawnVehicle(candidate)) break;
+      // Decide the class first so the spawn can bias it toward the right lane
+      // (tir to the outer lanes, cars anywhere).
+      const type = this._chooseVehicleType();
+      const candidate = this._requestSpawn(player, context, type);
+      if (!candidate || !this.spawnVehicle(candidate, { type })) break;
       spawnBudget -= 1;
     }
 
@@ -493,6 +630,13 @@ export class TrafficSystem {
       if (other.position.distanceToSquared(normalized.position) < 14 * 14) return null;
     }
 
+    // Assign the class (and an individual colour) to this pooled slot.
+    const type = this._resolveType(overrides.type ?? spawn.type) ?? this._chooseVehicleType();
+    const palette = COLORS_BY_ID[type.id] ?? CAR_COLORS;
+    const color = overrides.color ?? spawn.color ?? palette[Math.floor(this.random() * palette.length)];
+    this._applyVehicleType(vehicle, type, color);
+    vehicle.driver = this._makeDriver(type);
+
     vehicle.active = true;
     vehicle.mesh.visible = true;
     vehicle.position.copy(normalized.position);
@@ -507,18 +651,21 @@ export class TrafficSystem {
     vehicle.s = normalized.s;
     vehicle.mapState = normalized.mapState ?? spawn.mapState ?? null;
     const limit = speedToMps(normalized.speedLimit, NaN);
-    const randomSpeed = THREE.MathUtils.lerp(vehicle.type.minSpeed, vehicle.type.maxSpeed, this.random());
-    vehicle.targetSpeed = clamp(finite(overrides.speed ?? spawn.speed, randomSpeed), vehicle.type.minSpeed * 0.72, vehicle.type.maxSpeed * 1.12);
-    if (Number.isFinite(limit)) vehicle.targetSpeed = Math.min(vehicle.targetSpeed, limit * THREE.MathUtils.lerp(0.83, 1.02, this.random()));
-    vehicle.desiredSpeed = vehicle.targetSpeed;
-    vehicle.speed = clamp(finite(overrides.initialSpeed ?? spawn.initialSpeed, vehicle.targetSpeed * THREE.MathUtils.lerp(0.86, 1, this.random())), 0, vehicle.targetSpeed);
+    // Each driver has a personal cruising preference; that is the base target,
+    // then the highway limit caps it and speedFactor scales the whole flow.
+    const randomSpeed = THREE.MathUtils.lerp(vehicle.type.minSpeed, vehicle.type.maxSpeed, this.random()) * vehicle.driver.speedMul;
+    vehicle.targetSpeed = clamp(finite(overrides.speed ?? spawn.speed, randomSpeed), vehicle.type.minSpeed * 0.72, vehicle.type.maxSpeed * 1.15);
+    if (Number.isFinite(limit)) vehicle.targetSpeed = Math.min(vehicle.targetSpeed, limit * THREE.MathUtils.lerp(0.82, 1.04, this.random()));
+    vehicle.desiredSpeed = vehicle.targetSpeed * this.speedFactor;
+    vehicle.speed = clamp(finite(overrides.initialSpeed ?? spawn.initialSpeed, vehicle.desiredSpeed * THREE.MathUtils.lerp(0.86, 1, this.random())), 0, vehicle.desiredSpeed);
     vehicle.velocity.copy(vehicle.tangent).multiplyScalar(vehicle.speed);
     vehicle.acceleration = 0;
     vehicle.braking = false;
     vehicle.laneChange = null;
     vehicle.blendOffset = null;
     vehicle.indicator = 0;
-    vehicle.decisionTimer = THREE.MathUtils.lerp(5, 16, this.random());
+    // First lane-change decision is well after spawn so cars settle first.
+    vehicle.decisionTimer = THREE.MathUtils.lerp(8, 20, this.random());
     vehicle.nearMissArmed = true;
     vehicle.collisionCooldown = 0;
     vehicle.playerContact = false;
@@ -549,7 +696,7 @@ export class TrafficSystem {
     return this._normalizeLaneSample(sample, laneRef ?? sample.laneRef ?? sample.lane, s);
   }
 
-  _requestSpawn(player, context) {
+  _requestSpawn(player, context, type = null) {
     const request = {
       playerPosition: player.position,
       playerVelocity: player.velocity,
@@ -569,7 +716,8 @@ export class TrafficSystem {
         const laneCount = Math.max(1, Math.floor(route?.lanes ?? road.lanes ?? 1));
         for (let attempt = 0; attempt < 12; attempt += 1) {
           const direction = route?.bidirectional && this.random() < 0.18 ? -(road.direction ?? 1) : (road.direction ?? 1);
-          const laneIndex = Math.floor(this.random() * laneCount);
+          // Bias the lane by class: tir to the outer (slow) lanes, cars anywhere.
+          const laneIndex = type ? this._pickLaneForType(type, laneCount) : Math.floor(this.random() * laneCount);
           const offset = THREE.MathUtils.lerp(this.options.minSpawnDistance, this.options.spawnRadius * 0.88, this.random()) * (this.random() < 0.42 ? -1 : 1);
           const laneRef = {
             routeId: road.routeId,
@@ -818,24 +966,47 @@ export class TrafficSystem {
   }
 
   _updateVehicle(vehicle, dt, player, context) {
+    const driver = vehicle.driver || DEFAULT_DRIVER;
+    const type = vehicle.type;
+    // Free-flow target: personal cruise pref, scaled by the global speed factor,
+    // with a slow sinusoidal wander so nobody holds a laser-constant speed.
+    const wander = 1 + Math.sin(this.time * 0.13 + (driver.wanderPhase ?? 0)) * (driver.wanderAmp ?? 0);
+    vehicle.desiredSpeed = clamp(
+      vehicle.targetSpeed * this.speedFactor * wander,
+      type.minSpeed * 0.55,
+      type.maxSpeed * 1.15,
+    );
+
     const leader = this._findLeader(vehicle, player);
-    let acceleration = vehicle.type.acceleration * (1 - Math.pow(clamp(vehicle.speed / Math.max(1, vehicle.desiredSpeed), 0, 1.4), 4));
+    const accelCap = type.acceleration * (driver.accelMul ?? 1);
+    let acceleration = accelCap * (1 - Math.pow(clamp(vehicle.speed / Math.max(1, vehicle.desiredSpeed), 0, 1.4), 4));
     if (leader) {
+      // Intelligent-Driver-style gap term; gapMul makes tailgaters and cautious
+      // drivers keep visibly different following distances.
       const closingSpeed = vehicle.speed - leader.speed;
-      const desiredGap = 3.2 + vehicle.speed * 1.05 + vehicle.speed * closingSpeed / (2 * Math.sqrt(vehicle.type.acceleration * vehicle.type.braking));
-      acceleration -= vehicle.type.acceleration * Math.pow(Math.max(0, desiredGap) / Math.max(1, leader.gap), 2);
+      const desiredGap = 3.0 + vehicle.speed * 1.05 * (driver.gapMul ?? 1)
+        + vehicle.speed * closingSpeed / (2 * Math.sqrt(accelCap * type.braking));
+      acceleration -= accelCap * Math.pow(Math.max(0, desiredGap) / Math.max(1, leader.gap), 2);
     }
-    acceleration = clamp(acceleration, -vehicle.type.braking, vehicle.type.acceleration);
+    acceleration = clamp(acceleration, -type.braking, accelCap);
     vehicle.acceleration = THREE.MathUtils.lerp(vehicle.acceleration, acceleration, 1 - Math.exp(-dt * 4.5));
     vehicle.speed = Math.max(0, vehicle.speed + vehicle.acceleration * dt);
     vehicle.braking = vehicle.acceleration < -0.65 || (leader && leader.gap < Math.max(8, vehicle.speed * 0.55));
 
+    // Lane changes are deliberately rare: a check only every ~10-26 s, and even
+    // then only a fraction commit. Blocked cars overtake in proportion to their
+    // patience; free cars very occasionally drift toward their home lane.
     vehicle.decisionTimer -= dt;
-    if (!vehicle.laneChange && vehicle.decisionTimer <= 0) {
-      const obstructed = leader && vehicle.speed < vehicle.targetSpeed * 0.9 && leader.gap < 45;
-      const casualChange = this.random() < 0.18;
-      if (obstructed || casualChange) this._considerLaneChange(vehicle, leader, obstructed);
-      vehicle.decisionTimer = THREE.MathUtils.lerp(7, 19, this.random());
+    if (!vehicle.laneChange && vehicle.decisionTimer <= 0 && vehicle.age > 3) {
+      const rate = this.laneChangeRate;
+      if (rate > 0) {
+        const blocked = leader && vehicle.speed < vehicle.desiredSpeed * 0.82 && leader.gap < 42;
+        const overtakeChance = blocked ? 0.4 * (driver.patience ?? 0.6) : 0;
+        const driftChance = 0.045;
+        const chance = (overtakeChance + driftChance) * rate * (driver.laneChangeBias ?? 1);
+        if (this.random() < chance) this._considerLaneChange(vehicle, leader, blocked);
+      }
+      vehicle.decisionTimer = THREE.MathUtils.lerp(10, 26, this.random()) / Math.max(0.4, this.laneChangeRate);
     }
 
     const distance = vehicle.speed * dt;
@@ -855,7 +1026,12 @@ export class TrafficSystem {
     }
     if (vehicle.laneChange) {
       vehicle.laneChange.elapsed += dt;
-      const progress = clamp(vehicle.laneChange.elapsed / vehicle.laneChange.duration, 0, 1);
+      // Signal first, then drift. During the lead time the indicator blinks but
+      // the car holds its lane; the crossing itself is a long smoothstep so it
+      // eases over instead of snapping across.
+      const lead = vehicle.laneChange.signalLead ?? 0;
+      const activeElapsed = Math.max(0, vehicle.laneChange.elapsed - lead);
+      const progress = clamp(activeElapsed / vehicle.laneChange.duration, 0, 1);
       const targetSample = this._sampleLane(vehicle.laneChange.to, vehicle.s);
       if (targetSample) {
         const blend = smoothstep01(progress);
@@ -1002,19 +1178,42 @@ export class TrafficSystem {
   }
 
   _considerLaneChange(vehicle, leader, urgent) {
-    const preferred = this.random() < 0.5 ? -1 : 1;
+    // When blocked, try the faster (lower-index, toward-median) lane first to
+    // overtake. When free, prefer easing back toward this class's home lane so
+    // tir settle outward and cars don't loiter in the fast lane forever.
+    let preferred;
+    if (urgent) {
+      preferred = -1;
+    } else {
+      const idx = vehicle.laneRef?.laneIndex ?? vehicle.laneRef?.lane;
+      if (Number.isFinite(idx)) {
+        const maxIndex = Math.max(0, this._laneCountFor(vehicle) - 1);
+        const home = (vehicle.type.laneBias ?? 0.5) * maxIndex;
+        preferred = idx > home + 0.5 ? -1 : idx < home - 0.5 ? 1 : (this.random() < 0.5 ? -1 : 1);
+      } else {
+        preferred = this.random() < 0.5 ? -1 : 1;
+      }
+    }
+
     for (const direction of [preferred, -preferred]) {
       const adjacent = this._adjacentLane(vehicle, direction);
       if (!adjacent || !this._laneChangeSafe(vehicle, adjacent)) continue;
+      // Signal to the side the car will actually drift toward (robust to any
+      // lane-index convention) and cross slowly over 3.5-6 s.
+      const targetSample = this._sampleLane(adjacent, vehicle.s);
+      const lateralSign = targetSample
+        ? (new THREE.Vector3().subVectors(targetSample.position, vehicle.position).dot(vehicle.right) >= 0 ? 1 : -1)
+        : direction;
       vehicle.laneChange = {
         from: vehicle.laneRef,
         to: adjacent,
         direction,
         elapsed: 0,
-        duration: THREE.MathUtils.lerp(2.2, 3.4, this.random()),
+        signalLead: THREE.MathUtils.lerp(0.7, 1.5, this.random()),
+        duration: THREE.MathUtils.lerp(3.5, 6.0, this.random()),
+        lateralSign,
       };
-      vehicle.indicator = direction;
-      if (urgent && leader) vehicle.desiredSpeed = Math.min(vehicle.targetSpeed, leader.speed + 4);
+      vehicle.indicator = lateralSign;
       return true;
     }
     return false;
@@ -1069,7 +1268,8 @@ export class TrafficSystem {
   }
 
   _setLights(vehicle, braking) {
-    const blink = Math.floor(this.time * 3.2) % 2 === 0;
+    // ~1.5 Hz blink, like a real indicator, rather than a fast strobe.
+    const blink = Math.floor(this.time * 3) % 2 === 0;
     for (const lamp of vehicle.mesh.userData.taillamps) {
       lamp.material = braking ? this._brakeMaterial() : this._sharedMaterials.taillamp;
     }
@@ -1265,12 +1465,15 @@ export class TrafficSystem {
   dispose() {
     if (this._disposed) return;
     this.clear();
+    // Part geometries are shared per class, so dispose them once (below) rather
+    // than per mesh; only the per-vehicle body material is owned individually.
     for (const vehicle of this.pool) {
       this.scene.remove(vehicle.mesh);
-      vehicle.mesh.traverse((object) => object.geometry?.dispose?.());
       for (const material of vehicle.mesh.userData.ownedMaterials ?? []) material.dispose();
     }
-    for (const geometry of Object.values(this._geometries)) geometry.dispose();
+    for (const set of Object.values(this._typeGeometries)) {
+      for (const geometry of Object.values(set)) geometry.dispose();
+    }
     for (const material of Object.values(this._sharedMaterials)) material.dispose();
     this.pool.length = 0;
     this._disposed = true;
