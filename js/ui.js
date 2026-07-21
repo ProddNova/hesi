@@ -83,7 +83,7 @@ export class GameUI {
     const canvas = largeCanvas || this.$('minimap');
     const c = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
-    c.fillStyle = '#050910'; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#060c14'; c.fillRect(0, 0, w, h);
     const routes = data.routes || data;
     const all = routes.flatMap(r => r.points || r);
     if (!all.length) return;
@@ -98,13 +98,13 @@ export class GameUI {
       c.beginPath();
       pts.forEach((p,i) => i ? c.lineTo(tx(p.x),ty(p.z??p.y)) : c.moveTo(tx(p.x),ty(p.z??p.y)));
       if (r.closed) c.closePath();
-      c.strokeStyle = r.color || (idx === 0 ? '#ff8e2d':'#324458');
+      c.strokeStyle = r.color || (idx === 0 ? '#3fe0d0':'#2c4a66');
       c.lineWidth = largeCanvas ? 4 : 2; c.stroke();
     });
     services.forEach(s => {
-      c.fillStyle = s.garage ? '#ff4156':'#39d7f2';
+      c.fillStyle = s.garage ? '#ff3d78':'#3fe0d0';
       c.fillRect(tx(s.position?.x ?? s.x)-3,ty(s.position?.z ?? s.z)-3,6,6);
-      if (largeCanvas) { c.fillStyle='#ccd4df'; c.font='10px monospace'; c.fillText(s.name || 'PA',tx(s.position?.x ?? s.x)+6,ty(s.position?.z ?? s.z)-5); }
+      if (largeCanvas) { c.fillStyle='#a6b6c6'; c.font='10px monospace'; c.fillText(s.name || 'PA',tx(s.position?.x ?? s.x)+6,ty(s.position?.z ?? s.z)-5); }
     });
     if (player) {
       const x=tx(player.x), y=ty(player.z);
@@ -222,8 +222,8 @@ export class GameUI {
     if(!canvas||!canvas.isConnected){this._stopMapRefresh();return;}
     const src=this.cb.getMinimap?.()||this.lastMinimap;
     const c=canvas.getContext('2d');const w=canvas.width,h=canvas.height;
-    c.fillStyle='#060a10';c.fillRect(0,0,w,h);
-    if(!src?.data?.routes?.length){c.fillStyle='#7c8aa0';c.font=`${Math.round(12*(w/280))}px monospace`;c.textAlign='center';c.fillText('NO SIGNAL // DRIVE TO SYNC',w/2,h/2);return;}
+    c.fillStyle='#060c14';c.fillRect(0,0,w,h);
+    if(!src?.data?.routes?.length){c.fillStyle='#6b7f93';c.font=`${Math.round(12*(w/280))}px monospace`;c.textAlign='center';c.fillText('NO SIGNAL // DRIVE TO SYNC',w/2,h/2);return;}
     const {data,player,services=[]}=src;const b=data.bounds;const view=this.mapView;
     if(view.followPlayer&&player){view.cx=player.x;view.cz=player.z;}
     else if(!view.cx&&!view.cz){view.cx=(b.minX+b.maxX)/2;view.cz=(b.minZ+b.maxZ)/2;}
@@ -234,23 +234,23 @@ export class GameUI {
       const pts=r.points||[];if(!pts.length)continue;
       c.beginPath();pts.forEach((p,i)=>i?c.lineTo(tx(p.x),ty(p.z)):c.moveTo(tx(p.x),ty(p.z)));
       if(r.closed)c.closePath();
-      c.strokeStyle=r.color||'#42546b';c.lineWidth=Math.max(1.5,(r.width||2)*Math.min(2.4,view.zoom*.5));c.lineJoin='round';c.stroke();
+      c.strokeStyle=r.color||'#2c4a66';c.lineWidth=Math.max(1.5,(r.width||2)*Math.min(2.4,view.zoom*.5));c.lineJoin='round';c.stroke();
     }
     const fontPx=Math.max(9,Math.round(10*(w/280)));
     for(const s of services){
       const x=tx(s.position?.x??s.x),y=ty(s.position?.z??s.z);
       if(x<-30||y<-30||x>w+30||y>h+30)continue;
-      c.fillStyle=s.garage||s.hasGarage?'#ff4156':'#39d7f2';c.fillRect(x-4,y-4,8,8);
-      c.fillStyle='#ccd4df';c.font=`${fontPx}px monospace`;c.textAlign='left';c.fillText(s.name||'PA',x+8,y-6);
+      c.fillStyle=s.garage||s.hasGarage?'#ff3d78':'#3fe0d0';c.fillRect(x-4,y-4,8,8);
+      c.fillStyle='#a6b6c6';c.font=`${fontPx}px monospace`;c.textAlign='left';c.fillText(s.name||'PA',x+8,y-6);
     }
-    if(data.garage){const x=tx(data.garage.x),y=ty(data.garage.z);c.strokeStyle='#ff9a2e';c.lineWidth=2;c.strokeRect(x-6,y-6,12,12);c.fillStyle='#ff9a2e';c.font=`${fontPx}px monospace`;c.fillText('GARAGE',x+9,y+4);}
+    if(data.garage){const x=tx(data.garage.x),y=ty(data.garage.z);c.strokeStyle='#ffb23c';c.lineWidth=2;c.strokeRect(x-6,y-6,12,12);c.fillStyle='#ffb23c';c.font=`${fontPx}px monospace`;c.fillText('GARAGE',x+9,y+4);}
     if(player){
       const x=tx(player.x),y=ty(player.z);
       c.save();c.translate(x,y);c.rotate(player.heading??0);
-      c.fillStyle='#fff';c.strokeStyle='#05080e';c.lineWidth=2;
+      c.fillStyle='#fff';c.strokeStyle='#05090f';c.lineWidth=2;
       c.beginPath();c.moveTo(0,-9);c.lineTo(6,7);c.lineTo(0,3);c.lineTo(-6,7);c.closePath();c.stroke();c.fill();c.restore();
     }
-    c.fillStyle='#5d6b80';c.font=`${fontPx}px monospace`;c.textAlign='right';c.fillText(`×${view.zoom.toFixed(1)}`,w-8,h-8);
+    c.fillStyle='#6b7f93';c.font=`${fontPx}px monospace`;c.textAlign='right';c.fillText(`×${view.zoom.toFixed(1)}`,w-8,h-8);
   }
 
   openPC(context) {

@@ -12,6 +12,9 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <title>SHUTOKO NIGHTS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Saira+Condensed:wght@500;600;700;800;900&family=Share+Tech+Mono&display=swap">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="styles/dev-map.css">
   <link rel="stylesheet" href="styles/debug-stats.css">
@@ -25,13 +28,18 @@
     <div id="fade"></div>
 
     <section id="boot-screen" class="screen active">
+      <div class="boot-grid" aria-hidden="true"></div>
       <div class="boot-city"></div>
+      <div class="boot-scan" aria-hidden="true"></div>
+      <div class="boot-rec" aria-hidden="true"><i></i>REC<b>02:17:44</b><span>SP · 首都高速</span></div>
       <div class="title-lockup">
         <p class="eyebrow">首都高速 // TOKYO 02:17</p>
         <h1>SHUTOKO<br><span>NIGHTS</span></h1>
         <p class="tagline">NO FINISH LINE. JUST ONE MORE EXIT.</p>
-        <button id="continue-button" class="primary">CONTINUE</button>
-        <button id="new-game-button">NEW GAME</button>
+        <div class="boot-actions">
+          <button id="continue-button" class="primary">CONTINUE</button>
+          <button id="new-game-button">NEW GAME</button>
+        </div>
         <p class="micro">Best with headphones · Keyboard &amp; touch controls</p>
       </div>
     </section>
@@ -195,7 +203,17 @@
     <div id="rotate-hint" class="rotate-hint" aria-hidden="true">
       <span>↻</span><b>ROTATE FOR THE BEST DRIVE</b><small>Portrait still works</small>
     </div>
-    <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
+    <div id="loading" class="loading">
+      <div class="load-core">
+        <div class="load-spin" aria-hidden="true"><i></i><i></i><i></i></div>
+        <b>SHUTOKO NIGHTS</b>
+        <span>読み込み中 · LOADING EXPRESSWAY</span>
+        <div class="load-bar" aria-hidden="true"><i></i></div>
+        <em>DO NOT POWER OFF THE SYSTEM</em>
+      </div>
+    </div>
+
+    <div id="crt" class="crt" aria-hidden="true"><i class="crt-roll"></i></div>
   </div>
 
   <script type="module" src="js/game.js?v=20260721c"></script>
