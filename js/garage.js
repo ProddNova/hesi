@@ -113,21 +113,36 @@ export class GarageSystem {
     this.pcPoint=table?V(table.position.x,0,table.position.z):V(7.5,0,-9.3);
     this.refreshExitMarkers();
   }
-  // A single crystal-diamond waypoint marker. The faceted octahedron gem is
-  // lit + emissive so the top facets read lighter than the sides, like the
-  // reference screenshot.
+  // A single crystal-diamond waypoint marker, rendered as a PS2-style hologram
+  // instead of a solid painted gem: a translucent additive body that glows on
+  // its own, crisp faceted wireframe edges, and a soft outer rim halo. The three
+  // layers share one octahedron and blend additively, so the beacon reads as a
+  // projected blue/yellow hologram rather than one flat tint.
   makeBeacon(color,emissive){
     const group=new THREE.Group();
-    const core=new THREE.Mesh(new THREE.OctahedronGeometry(1,0),new THREE.MeshLambertMaterial({color,emissive,emissiveIntensity:.8,flatShading:true}));
+    const gem=new THREE.OctahedronGeometry(1,0);
+    const body=new THREE.Mesh(gem,new THREE.MeshBasicMaterial({color:emissive,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false}));
+    const edges=new THREE.Mesh(gem,new THREE.MeshBasicMaterial({color:emissive,wireframe:true,transparent:true,opacity:.9,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false}));
+    edges.scale.setScalar(1.014);
+    const halo=new THREE.Mesh(gem,new THREE.MeshBasicMaterial({color,transparent:true,opacity:.16,blending:THREE.AdditiveBlending,side:THREE.BackSide,depthWrite:false,toneMapped:false}));
+    halo.scale.setScalar(1.35);
+    const core=new THREE.Group();
+    core.add(halo,body,edges);
     core.scale.set(.24,.44,.24);          // ~0.48 m wide, ~0.88 m tall
     core.position.y=1.35;core.userData.baseY=1.35;
     group.add(core);
-    group.userData={core};
+    group.userData={core,body,edges,halo};
     return group;
   }
   animateBeacon(group,t){
-    const {core}=group.userData;if(!core)return;
+    const {core,body,edges,halo}=group.userData;if(!core)return;
     core.rotation.y=t*1.3;core.position.y=core.userData.baseY+Math.sin(t*2)*.12;
+    // Holographic shimmer: a fast flicker layered over a slow drift so the gem
+    // looks like an unstable projection instead of a steady solid.
+    const shimmer=.85+Math.sin(t*20)*.09+Math.sin(t*6.1)*.06;
+    if(body)body.material.opacity=.3*shimmer;
+    if(edges)edges.material.opacity=.9*shimmer;
+    if(halo){halo.material.opacity=.16*(.7+.3*shimmer);halo.rotation.y=-t*.9;}
   }
   refreshExitMarkers(){
     const doorX=this.shutter?.position.x??0;

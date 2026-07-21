@@ -134,7 +134,7 @@ function rectangleSupport(direction, right, forward, halfWidth, halfLength) {
  * on X/Z with its underside at Y=0 so the mesh group sits flat on the road.
  * Every class — car, van AND tir — is a SINGLE plain box, differentiated only
  * by size (no cab/trailer split, no wheels, no glass). Lamps, brake lights and
- * the two turn-signal clusters are tiny boxes at the corners.
+ * the two rear turn signals are tiny boxes at the corners.
  */
 function buildVehicleGeometry(type) {
   const w = type.width;
@@ -155,11 +155,11 @@ function buildVehicleGeometry(type) {
     [[lampW, 0.18, 0.06], [-w * 0.34, tailY, rearZ]],
     [[lampW, 0.18, 0.06], [w * 0.34, tailY, rearZ]],
   ]);
-  // One cluster per side, each a front + rear amber box at that flank so the
-  // signal reads from ahead and behind. Its bounding-box X keeps the side sign.
+  // Two rear turn signals — a single amber lamp per side sitting just outboard
+  // of the brake lights on the tail, so the blink reads from directly behind
+  // the car instead of from boxes stuck on the flanks. Bounding-box X keeps side.
   const blinker = (sign) => mergedBoxGeometry([
-    [[0.13, 0.14, 0.06], [sign * w * 0.49, headY, frontZ - 0.06]],
-    [[0.13, 0.14, 0.06], [sign * w * 0.49, tailY, rearZ + 0.06]],
+    [[0.12, 0.16, 0.06], [sign * (w * 0.34 + 0.22), tailY, rearZ]],
   ]);
   return { body, lamps, brake, blinkerL: blinker(-1), blinkerR: blinker(1) };
 }
