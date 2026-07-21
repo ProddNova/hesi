@@ -6525,11 +6525,15 @@ export class HighwayMap {
       const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
       const poolOffset = side * (half - poolWidth * 0.4) + (jW - 0.5) * 1.6;
       // The pool is a big flat quad; the deck is banked. Tilt it to lie PARALLEL
-      // to the banked road (rotate by the bank angle about the tangent) so it
-      // hugs the asphalt instead of cutting through it — a dead-flat quad on a
-      // banked deck dips below the surface on one side and is depth-occluded,
-      // which showed up as big elongated dark shapes when driving over it.
-      const bankQuat = new THREE.Quaternion().setFromAxisAngle(tmpAxis.copy(center.baseTangent).normalize(), frame.bank);
+      // to the banked road so it hugs the asphalt instead of cutting through it —
+      // a dead-flat quad on a banked deck dips below the surface on one side and
+      // is depth-occluded, which showed up as a hard diagonal light/dark edge
+      // running down the road. _deckPoint raises height toward +normal by
+      // tan(bank)*lateral, and T×UP = +normal, so the deck's up-normal is
+      // UP*cos(bank) - N*sin(bank); rotating the quad about the tangent must use
+      // -bank to match it (a +bank rotation tilts it the wrong way and doubles
+      // the mismatch).
+      const bankQuat = new THREE.Quaternion().setFromAxisAngle(tmpAxis.copy(center.baseTangent).normalize(), -frame.bank);
       const poolQuat = yawQuaternion(center.baseTangent)
         .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2))
         .premultiply(bankQuat);

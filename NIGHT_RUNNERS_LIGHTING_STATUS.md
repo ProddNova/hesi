@@ -157,3 +157,22 @@ Warmer lights (per request):
 
 Probe added: `.devtests/pool-artifact-probe.mjs` (low/skim/curve ground-level
 shots to catch pool-vs-deck intersection artifacts).
+
+### Round 3 correction — bank tilt sign
+
+The first cut of the bank tilt rotated by `+bank`, which is the wrong direction:
+it tilts the quad *against* the deck and doubles the cross-slope mismatch, so on
+banked sections the pool still cut through the asphalt and left a hard diagonal
+light/dark edge running down the road (reported in-game / noclip).
+
+Derivation of the correct sign: `_deckPoint` raises height toward `+normal` by
+`tan(bank)·lateral`, and with `horizontalNormal = (-Tz,0,Tx)` we have
+`T × UP = +normal`, so the deck's upward normal is `UP·cos(bank) − N·sin(bank)`.
+Rotating the quad about the tangent by angle φ gives normal `UP·cosφ + N·sinφ`,
+which matches only at `φ = −bank`. Fixed to `-frame.bank`.
+
+Verified with a same-spot A/B at the most-banked section (`.devtests/
+pool-topdown-probe.mjs`, which scans `_bankAt` for the steepest lamp): `+bank`
+compresses the pool to one side and darkens the other; `-bank` spreads it evenly
+across the full carriageway with no hard edge, confirmed again at a driver's-eye
+angle. Straights (bank ≈ 0) are unaffected either way.
