@@ -12,9 +12,8 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <title>SHUTOKO NIGHTS</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Saira+Condensed:wght@500;600;700;800;900&family=Share+Tech+Mono&display=swap">
+  <link rel="preload" href="fonts/sairacond-800.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/doto-800.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="styles/dev-map.css">
   <link rel="stylesheet" href="styles/debug-stats.css">
@@ -31,41 +30,47 @@
       <div class="boot-grid" aria-hidden="true"></div>
       <div class="boot-city"></div>
       <div class="boot-scan" aria-hidden="true"></div>
-      <div class="boot-rec" aria-hidden="true"><i></i>REC<b>02:17:44</b><span>SP · 首都高速</span></div>
-      <div class="title-lockup">
-        <p class="eyebrow">首都高速 // TOKYO 02:17</p>
-        <h1>SHUTOKO<br><span>NIGHTS</span></h1>
-        <p class="tagline">NO FINISH LINE. JUST ONE MORE EXIT.</p>
-        <div class="boot-actions">
-          <button id="continue-button" class="primary">CONTINUE</button>
-          <button id="new-game-button">NEW GAME</button>
+      <div class="menu-panel">
+        <div class="menu-head">
+          <p class="eyebrow">首都高速 // TOKYO EXPRESSWAY</p>
+          <h1>SHUTOKO<span>NIGHTS</span></h1>
+          <p class="tagline">NO FINISH LINE. JUST ONE MORE EXIT.</p>
         </div>
+        <nav class="menu-list">
+          <button id="continue-button" class="menu-row primary" data-sub="RESUME THE NIGHT">CONTINUE</button>
+          <button id="new-game-button" class="menu-row" data-sub="WIPE SAVE · RESTART">NEW GAME</button>
+        </nav>
         <p class="micro">Best with headphones · Keyboard &amp; touch controls</p>
       </div>
     </section>
 
     <section id="hud" class="hidden" aria-live="polite">
-      <div class="hud-top">
-        <div class="route-chip"><span id="route-name">C1 INNER</span><small id="area-name">KANDABASHI</small></div>
-        <div id="lives" class="lives"><i></i><i></i><i></i><span>RUN LIVES</span></div>
-        <div class="bank"><small>BANK</small><b id="hud-money">¥0</b></div>
-      </div>
-      <div class="hud-bottom">
-        <div id="minimap-wrap">
-          <canvas id="minimap" width="220" height="150"></canvas>
-          <span>N</span>
-        </div>
+      <div class="hud-osd">
+        <div class="route-chip"><b>CH<i>01</i></b><span id="route-name">C1 INNER</span><small id="area-name">KANDABASHI</small></div>
         <div class="score-stack">
-          <small>UNBANKED</small>
+          <small>SCORE // UNBANKED</small>
           <strong id="hud-score">000000</strong>
           <div><b id="hud-combo">×1.0</b><span id="combo-label">BUILD THE RUN</span></div>
           <div id="combo-bar"><i></i></div>
         </div>
-        <div class="cluster">
-          <div class="tach"><i id="tach-fill"></i><em id="rpm-readout">0900</em><small>RPM</small></div>
-          <div class="speed"><strong id="speed-readout">0</strong><small>KM/H</small></div>
+        <div class="hud-osd-right">
+          <div id="lives" class="lives"><i></i><i></i><i></i><span>LIVES</span></div>
+          <div class="bank"><small>BANK</small><b id="hud-money">¥0</b></div>
+        </div>
+      </div>
+      <div class="hud-dash">
+        <div id="minimap-wrap">
+          <canvas id="minimap" width="220" height="150"></canvas>
+          <span>N</span>
+        </div>
+        <div class="speedo">
+          <div class="tach"><i id="tach-fill"></i></div>
+          <div class="readout"><strong id="speed-readout">0</strong><small>KM/H</small></div>
           <div class="gear" id="gear-readout">N</div>
-          <div class="fuel"><span>FUEL</span><div><i id="fuel-fill"></i></div><b id="fuel-readout">100%</b></div>
+          <div class="speedo-meta">
+            <em class="rpm"><i id="rpm-readout">0900</i><span>RPM</span></em>
+            <div class="fuel"><span>FUEL</span><div><i id="fuel-fill"></i></div><b id="fuel-readout">100%</b></div>
+          </div>
         </div>
       </div>
       <div id="interaction-prompt" class="prompt hidden"></div>
@@ -207,12 +212,18 @@
       <div class="load-core">
         <div class="load-spin" aria-hidden="true"><i></i><i></i><i></i></div>
         <b>SHUTOKO NIGHTS</b>
-        <span>読み込み中 · LOADING EXPRESSWAY</span>
+        <span>読み込み中 · NOW LOADING</span>
         <div class="load-bar" aria-hidden="true"><i></i></div>
-        <em>DO NOT POWER OFF THE SYSTEM</em>
+        <em>MEMORY CARD (8MB) · DO NOT RESET OR REMOVE</em>
       </div>
     </div>
 
+    <div id="osd" class="osd" aria-hidden="true">
+      <div class="osd-tl"><i class="rec-dot"></i>REC<b class="osd-time">02:17:<i class="osd-frames"></i></b></div>
+      <div class="osd-tr">SP<i class="tape"></i></div>
+      <div class="osd-bl">首都高速線 CH-01</div>
+      <div class="osd-br">1999 07 21</div>
+    </div>
     <div id="crt" class="crt" aria-hidden="true"><i class="crt-roll"></i></div>
   </div>
 

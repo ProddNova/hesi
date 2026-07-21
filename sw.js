@@ -1,6 +1,8 @@
-const CACHE = 'shutoko-nights-v28';
+const CACHE = 'shutoko-nights-v29';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './manifest.webmanifest', './icon.svg',
+  './fonts/chakrapetch-400.woff2', './fonts/chakrapetch-500.woff2', './fonts/chakrapetch-700.woff2', './fonts/chakrapetch-700i.woff2',
+  './fonts/sairacond-700.woff2', './fonts/sairacond-800.woff2', './fonts/sharetechmono-400.woff2', './fonts/doto-600.woff2', './fonts/doto-800.woff2',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
   './js/physics.js', './js/traffic.js', './js/data.js',
   './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js', './js/dev-map.js', './js/debug-stats.js', './data/routes-smoothed.js'
