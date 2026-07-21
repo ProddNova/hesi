@@ -20,15 +20,14 @@ const VEHICLE_TYPES = Object.freeze([
 ]);
 const TYPE_BY_ID = Object.freeze(Object.fromEntries(VEHICLE_TYPES.map((type) => [type.id, type])));
 
-// Per-class colour palettes. Cars come in every colour; vans skew commercial
-// white / silver; tir cabs are a small muted set (cab and box share a colour).
-const CAR_COLORS = [
-  0xb9c0c9, 0xf0f1f3, 0x14161b, 0x33445c, 0x6d7683, 0x8a2531,
-  0x24506b, 0x2f6146, 0xbfae87, 0x71324a, 0x2b2d33, 0x9a9ea6,
-  0x7a2f22, 0x455a74, 0xd8c9a4, 0x394a3d,
-];
-const VAN_COLORS = [0xf1f2f0, 0xe6e8ea, 0xcfd2ce, 0xdfe3e6, 0x8fa0ad, 0x9c6b3f, 0x2f4f6b, 0xb0453a, 0xe4e5e0];
-const TRUCK_COLORS = [0xe9eaec, 0xd6dade, 0x4a6274, 0x8a2f2a, 0x2c3440, 0xb7bcc2, 0x35617a, 0x7c8894];
+// Per-class colour palettes. Every traffic vehicle — car, van and tir alike —
+// is painted the same fluorescent "neon" green (verde fluo), so the AI traffic
+// reads as a single uniform, high-visibility fleet. Each palette holds only
+// this one colour, which the random picker below then trivially selects.
+const NEON_GREEN = 0x39ff14;
+const CAR_COLORS = [NEON_GREEN];
+const VAN_COLORS = [NEON_GREEN];
+const TRUCK_COLORS = [NEON_GREEN];
 const COLORS_BY_ID = { car: CAR_COLORS, van: VAN_COLORS, truck: TRUCK_COLORS };
 
 // Neutral fallback so a hand-built vehicle (tests) still behaves sanely.
