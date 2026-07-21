@@ -81,12 +81,13 @@ export class GarageSystem {
     // carDisplay hosts the Toyota Chaser GLB the game attaches in garage mode;
     // it replaces the hidden procedural parkedGroup as the showroom car.
     this.carDisplay=new THREE.Group();this.carDisplay.position.set(0,.05,0);this.carDisplay.rotation.y=-Math.PI/2;this.root.add(this.carDisplay);
-    // PS2-style exit beacon: a single translucent blue prism spinning and
-    // bobbing over the garage door.
-    this.exitMarkers=new THREE.Group();
-    const beacon=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.85,3),new THREE.MeshBasicMaterial({color:0x2050ff,transparent:true,opacity:.85,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
-    beacon.position.set(0,1.65,0);beacon.userData.baseY=1.65;this.exitMarkers.add(beacon);
-    this.root.add(this.exitMarkers);
+    // PS2-style waypoint beacons (Enchanted Arms look): a faceted crystal
+    // diamond that spins and bobs, ringed by 4 tiny diamonds of the same shape
+    // orbiting it. Blue over the garage door, yellow over the market PC.
+    this.beacons=[];
+    this.exitMarkers=this.makeBeacon(0x2233dd,0x2f52ff);this.root.add(this.exitMarkers);
+    this.pcMarkers=this.makeBeacon(0xcf9a15,0xffc22c);this.root.add(this.pcMarkers);
+    this.beacons.push(this.exitMarkers,this.pcMarkers);
     this.carryAnchor=new THREE.Group();this.carryAnchor.position.set(.45,-.45,-1);this.camera.add(this.carryAnchor);this.scene.add(this.camera);
     this.refreshColliders();
   }
@@ -112,10 +113,38 @@ export class GarageSystem {
     this.pcPoint=table?V(table.position.x,0,table.position.z):V(7.5,0,-9.3);
     this.refreshExitMarkers();
   }
+  // A crystal-diamond waypoint marker: one central faceted gem plus 4 small
+  // satellites (~1/5 size) of the same shape. Faces are lit + emissive so the
+  // top facets read lighter than the sides, like the reference screenshot.
+  makeBeacon(color,emissive){
+    const group=new THREE.Group();
+    const geo=new THREE.OctahedronGeometry(1,0);
+    const newMat=()=>new THREE.MeshLambertMaterial({color,emissive,emissiveIntensity:.8,flatShading:true});
+    const core=new THREE.Mesh(geo,newMat());
+    core.scale.set(.3,.55,.3);           // ~0.6 m wide, ~1.1 m tall — not huge
+    core.position.y=1.35;core.userData.baseY=1.35;
+    group.add(core);
+    const sats=[];
+    for(let i=0;i<4;i++){
+      const sat=new THREE.Mesh(geo,newMat());
+      sat.scale.set(.06,.11,.06);         // ~1/5 of the central crystal
+      sat.userData={phase:i/4*Math.PI*2,rad:.62+(i%2)*.12,hOff:(i%2?.28:-.2)};
+      group.add(sat);sats.push(sat);
+    }
+    group.userData={core,sats};
+    return group;
+  }
+  animateBeacon(group,t){
+    const {core,sats}=group.userData;if(!core)return;
+    core.rotation.y=t*1.3;core.position.y=core.userData.baseY+Math.sin(t*2)*.12;
+    sats.forEach((s,i)=>{const a=t*1.1+s.userData.phase;s.position.set(Math.cos(a)*s.userData.rad,core.position.y+s.userData.hOff+Math.sin(t*2.6+i*1.7)*.09,Math.sin(a)*s.userData.rad);s.rotation.y=t*2.4+i;});
+  }
   refreshExitMarkers(){
     const doorX=this.shutter?.position.x??0;
     this.exitPoint=V(doorX,0,12.6);
-    this.exitMarkers?.position.set(doorX,0,12.55);
+    this.exitMarkers?.position.set(doorX,0,12.4);
+    const pc=this.pcPoint||V(7.5,0,-9.3);
+    this.pcMarkers?.position.set(pc.x,0,pc.z);
   }
   onBuildApplied(){this.refreshColliders();}
 
@@ -209,7 +238,7 @@ export class GarageSystem {
     if(input.interactPressed&&this.interactCooldown<=0&&target){this.interactCooldown=.35;this.interact(target,context);}
     this.pcScreen.material.color.setHex(0x2b9da9+(Math.sin(performance.now()*.004)>0?0x000909:0));
     const t=performance.now()*.001;
-    this.exitMarkers?.children.forEach(m=>{m.rotation.y=t*1.6;m.position.y=m.userData.baseY+Math.sin(t*2.3)*.14;});
+    for(const b of this.beacons)this.animateBeacon(b,t);
   }
 
   updateCamera(){

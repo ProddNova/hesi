@@ -5,7 +5,7 @@ import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
-import { GarageSystem } from './garage.js?v=20260721a';
+import { GarageSystem } from './garage.js?v=20260721b';
 import { applyEditorBuilds } from './editor-map-patch.js?v=20260720b';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.

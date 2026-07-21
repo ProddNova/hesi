@@ -72,9 +72,12 @@ const state = await page.evaluate(() => {
     carParent: car?.parent === g.carDisplay,
     carVisible: !!car?.visible,
     carInGarageScene: (() => { let n = car; while (n) { if (n === g.root) return true; n = n.parent; } return false; })(),
-    markerCount: g.exitMarkers?.children.length ?? 0,
-    markerColor: g.exitMarkers?.children[0]?.material.color.getHex() ?? null,
+    markerColor: g.exitMarkers?.userData.core?.material.color.getHex() ?? null,
+    markerSats: g.exitMarkers?.userData.sats?.length ?? 0,
     markerX: g.exitMarkers?.position.x ?? null,
+    pcMarkerColor: g.pcMarkers?.userData.core?.material.color.getHex() ?? null,
+    pcMarkerSats: g.pcMarkers?.userData.sats?.length ?? 0,
+    pcMarkerPos: g.pcMarkers ? [g.pcMarkers.position.x, g.pcMarkers.position.z] : null,
     doorX: g.shutter?.position.x ?? null,
     exitPoint: g.exitPoint ? [g.exitPoint.x, g.exitPoint.z] : null,
     pcPoint: g.pcPoint ? [g.pcPoint.x, g.pcPoint.z] : null,
@@ -84,8 +87,11 @@ const state = await page.evaluate(() => {
 check('editor build hitboxes collected', state.colliders > 10, `colliders: ${state.colliders}`);
 check('Chaser GLB parked in garage and visible', state.carParent && state.carVisible && state.carInGarageScene);
 check('procedural old car stays hidden', state.parkedGroupHidden);
-const blue = state.markerColor !== null && (state.markerColor & 0xff) > 0x80 && (state.markerColor & 0xff) >= ((state.markerColor >> 16) & 0xff);
-check('single blue exit prism follows the moved shutter', state.markerCount === 1 && blue && Math.abs(state.markerX - state.doorX) < 0.01 && Math.abs(state.doorX - 5.7) < 0.2, `count: ${state.markerCount}, color: #${(state.markerColor ?? 0).toString(16)}, doorX: ${state.doorX}, markerX: ${state.markerX}`);
+const R = (c) => (c >> 16) & 0xff, Gc = (c) => (c >> 8) & 0xff, B = (c) => c & 0xff;
+const isBlue = state.markerColor !== null && B(state.markerColor) > 0x80 && B(state.markerColor) > R(state.markerColor) && B(state.markerColor) > Gc(state.markerColor);
+check('blue crystal beacon (core + 4 satellites) at the moved shutter', isBlue && state.markerSats === 4 && Math.abs(state.markerX - state.doorX) < 0.01 && Math.abs(state.doorX - 5.7) < 0.2, `color: #${(state.markerColor ?? 0).toString(16)}, sats: ${state.markerSats}, doorX: ${state.doorX}, markerX: ${state.markerX}`);
+const isYellow = state.pcMarkerColor !== null && R(state.pcMarkerColor) > 0x80 && Gc(state.pcMarkerColor) > 0x80 && B(state.pcMarkerColor) < 0x80;
+check('yellow crystal beacon (core + 4 satellites) over the market PC', isYellow && state.pcMarkerSats === 4 && state.pcMarkerPos && Math.abs(state.pcMarkerPos[0] - state.pcPoint[0]) < 0.01 && Math.abs(state.pcMarkerPos[1] - state.pcPoint[1]) < 0.01, `color: #${(state.pcMarkerColor ?? 0).toString(16)}, sats: ${state.pcMarkerSats}, pos: ${JSON.stringify(state.pcMarkerPos)}`);
 check('exit interaction moved to the door', state.exitPoint && Math.abs(state.exitPoint[0] - state.doorX) < 0.01, `exit: ${JSON.stringify(state.exitPoint)}`);
 check('PC interaction anchored to the game table', state.pcPoint && Math.abs(state.pcPoint[0] - -1) < 0.3 && Math.abs(state.pcPoint[1] - 6) < 0.3, `pc: ${JSON.stringify(state.pcPoint)}`);
 
@@ -134,16 +140,21 @@ const delivery = await page.evaluate(() => {
 });
 check('delivery boxes spawn in the moved delivery zone', Math.abs(delivery.box[0] - delivery.zone[0]) < 2.2 && Math.abs(delivery.box[1] - delivery.zone[1]) < 2, `box: ${JSON.stringify(delivery.box)}`);
 
-// Screenshots: showroom car + exit prisms.
+// Screenshots: showroom car, blue door beacon, yellow PC beacon.
+// A few frames of update() let the crystals spin/orbit into place first.
+const settle = () => page.evaluate(() => { for (let i = 0; i < 30; i++) window.shutoko.garage.update(1 / 60, {}, {}); });
+await settle();
 await page.evaluate(() => { const g = window.shutoko.garage; g.position.set(-2.8, g.playerHeight, 5.8); g.velocity.set(0, 0, 0); g.yaw = -0.45; g.pitch = -0.16; g.updateCamera(); });
 await page.waitForTimeout(250);
 await page.screenshot({ path: join(OUT, 'garage-01-car.png') });
-await page.evaluate(() => { const g = window.shutoko.garage; g.position.set(3, g.playerHeight, 8); g.velocity.set(0, 0, 0); g.yaw = Math.PI * 1.15; g.pitch = 0; g.updateCamera(); });
-await page.waitForTimeout(250);
-await page.screenshot({ path: join(OUT, 'garage-02-exit-prisms.png') });
-await page.evaluate(() => { const g = window.shutoko.garage; g.position.set(8.5, g.playerHeight, 9); g.velocity.set(0, 0, 0); g.yaw = Math.PI * 0.65; g.pitch = -0.05; g.updateCamera(); });
-await page.waitForTimeout(250);
-await page.screenshot({ path: join(OUT, 'garage-03-room.png') });
+await page.evaluate(() => { const g = window.shutoko.garage; g.position.set(g.exitPoint.x + 1.6, g.playerHeight, 9.4); g.velocity.set(0, 0, 0); const dx = g.exitMarkers.position.x - g.position.x, dz = 12.4 - g.position.z; g.yaw = Math.atan2(-dx, -dz); g.pitch = -0.04; g.updateCamera(); });
+await settle();
+await page.waitForTimeout(150);
+await page.screenshot({ path: join(OUT, 'garage-02-exit-beacon.png') });
+await page.evaluate(() => { const g = window.shutoko.garage; g.position.set(g.pcPoint.x + 2.4, g.playerHeight, g.pcPoint.z + 3.4); g.velocity.set(0, 0, 0); const dx = g.pcPoint.x - g.position.x, dz = g.pcPoint.z - g.position.z; g.yaw = Math.atan2(-dx, -dz); g.pitch = -0.06; g.updateCamera(); });
+await settle();
+await page.waitForTimeout(150);
+await page.screenshot({ path: join(OUT, 'garage-03-pc-beacon.png') });
 
 check('no console errors after probes', errors.length === 0, errors.slice(0, 3).join(' | '));
 
