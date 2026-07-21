@@ -113,31 +113,21 @@ export class GarageSystem {
     this.pcPoint=table?V(table.position.x,0,table.position.z):V(7.5,0,-9.3);
     this.refreshExitMarkers();
   }
-  // A crystal-diamond waypoint marker: one central faceted gem plus 4 small
-  // satellites (~1/5 size) of the same shape. Faces are lit + emissive so the
-  // top facets read lighter than the sides, like the reference screenshot.
+  // A single crystal-diamond waypoint marker. The faceted octahedron gem is
+  // lit + emissive so the top facets read lighter than the sides, like the
+  // reference screenshot.
   makeBeacon(color,emissive){
     const group=new THREE.Group();
-    const geo=new THREE.OctahedronGeometry(1,0);
-    const newMat=()=>new THREE.MeshLambertMaterial({color,emissive,emissiveIntensity:.8,flatShading:true});
-    const core=new THREE.Mesh(geo,newMat());
-    core.scale.set(.3,.55,.3);           // ~0.6 m wide, ~1.1 m tall — not huge
+    const core=new THREE.Mesh(new THREE.OctahedronGeometry(1,0),new THREE.MeshLambertMaterial({color,emissive,emissiveIntensity:.8,flatShading:true}));
+    core.scale.set(.24,.44,.24);          // ~0.48 m wide, ~0.88 m tall
     core.position.y=1.35;core.userData.baseY=1.35;
     group.add(core);
-    const sats=[];
-    for(let i=0;i<4;i++){
-      const sat=new THREE.Mesh(geo,newMat());
-      sat.scale.set(.06,.11,.06);         // ~1/5 of the central crystal
-      sat.userData={phase:i/4*Math.PI*2,rad:.62+(i%2)*.12,hOff:(i%2?.28:-.2)};
-      group.add(sat);sats.push(sat);
-    }
-    group.userData={core,sats};
+    group.userData={core};
     return group;
   }
   animateBeacon(group,t){
-    const {core,sats}=group.userData;if(!core)return;
+    const {core}=group.userData;if(!core)return;
     core.rotation.y=t*1.3;core.position.y=core.userData.baseY+Math.sin(t*2)*.12;
-    sats.forEach((s,i)=>{const a=t*1.1+s.userData.phase;s.position.set(Math.cos(a)*s.userData.rad,core.position.y+s.userData.hOff+Math.sin(t*2.6+i*1.7)*.09,Math.sin(a)*s.userData.rad);s.rotation.y=t*2.4+i;});
   }
   refreshExitMarkers(){
     const doorX=this.shutter?.position.x??0;

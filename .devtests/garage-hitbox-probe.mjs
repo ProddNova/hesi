@@ -73,10 +73,10 @@ const state = await page.evaluate(() => {
     carVisible: !!car?.visible,
     carInGarageScene: (() => { let n = car; while (n) { if (n === g.root) return true; n = n.parent; } return false; })(),
     markerColor: g.exitMarkers?.userData.core?.material.color.getHex() ?? null,
-    markerSats: g.exitMarkers?.userData.sats?.length ?? 0,
+    markerChildren: g.exitMarkers?.children.length ?? 0,
     markerX: g.exitMarkers?.position.x ?? null,
     pcMarkerColor: g.pcMarkers?.userData.core?.material.color.getHex() ?? null,
-    pcMarkerSats: g.pcMarkers?.userData.sats?.length ?? 0,
+    pcMarkerChildren: g.pcMarkers?.children.length ?? 0,
     pcMarkerPos: g.pcMarkers ? [g.pcMarkers.position.x, g.pcMarkers.position.z] : null,
     doorX: g.shutter?.position.x ?? null,
     exitPoint: g.exitPoint ? [g.exitPoint.x, g.exitPoint.z] : null,
@@ -89,9 +89,9 @@ check('Chaser GLB parked in garage and visible', state.carParent && state.carVis
 check('procedural old car stays hidden', state.parkedGroupHidden);
 const R = (c) => (c >> 16) & 0xff, Gc = (c) => (c >> 8) & 0xff, B = (c) => c & 0xff;
 const isBlue = state.markerColor !== null && B(state.markerColor) > 0x80 && B(state.markerColor) > R(state.markerColor) && B(state.markerColor) > Gc(state.markerColor);
-check('blue crystal beacon (core + 4 satellites) at the moved shutter', isBlue && state.markerSats === 4 && Math.abs(state.markerX - state.doorX) < 0.01 && Math.abs(state.doorX - 5.7) < 0.2, `color: #${(state.markerColor ?? 0).toString(16)}, sats: ${state.markerSats}, doorX: ${state.doorX}, markerX: ${state.markerX}`);
+check('single blue crystal beacon at the moved shutter', isBlue && state.markerChildren === 1 && Math.abs(state.markerX - state.doorX) < 0.01 && Math.abs(state.doorX - 5.7) < 0.2, `color: #${(state.markerColor ?? 0).toString(16)}, children: ${state.markerChildren}, doorX: ${state.doorX}, markerX: ${state.markerX}`);
 const isYellow = state.pcMarkerColor !== null && R(state.pcMarkerColor) > 0x80 && Gc(state.pcMarkerColor) > 0x80 && B(state.pcMarkerColor) < 0x80;
-check('yellow crystal beacon (core + 4 satellites) over the market PC', isYellow && state.pcMarkerSats === 4 && state.pcMarkerPos && Math.abs(state.pcMarkerPos[0] - state.pcPoint[0]) < 0.01 && Math.abs(state.pcMarkerPos[1] - state.pcPoint[1]) < 0.01, `color: #${(state.pcMarkerColor ?? 0).toString(16)}, sats: ${state.pcMarkerSats}, pos: ${JSON.stringify(state.pcMarkerPos)}`);
+check('single yellow crystal beacon over the market PC', isYellow && state.pcMarkerChildren === 1 && state.pcMarkerPos && Math.abs(state.pcMarkerPos[0] - state.pcPoint[0]) < 0.01 && Math.abs(state.pcMarkerPos[1] - state.pcPoint[1]) < 0.01, `color: #${(state.pcMarkerColor ?? 0).toString(16)}, children: ${state.pcMarkerChildren}, pos: ${JSON.stringify(state.pcMarkerPos)}`);
 check('exit interaction moved to the door', state.exitPoint && Math.abs(state.exitPoint[0] - state.doorX) < 0.01, `exit: ${JSON.stringify(state.exitPoint)}`);
 check('PC interaction anchored to the game table', state.pcPoint && Math.abs(state.pcPoint[0] - -1) < 0.3 && Math.abs(state.pcPoint[1] - 6) < 0.3, `pc: ${JSON.stringify(state.pcPoint)}`);
 
