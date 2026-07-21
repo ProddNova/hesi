@@ -3062,6 +3062,231 @@
         }
       ],
       "updatedAt": "2026-07-20T19:02:39.857Z"
+    },
+    "custom:0024": {
+      "id": "custom:0024",
+      "label": "macchinetta_garage",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-21T19:16:00.059Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0090"
+            },
+            "top": {
+              "texture": "tex:0092",
+              "fit": "cover",
+              "projection": {
+                "origin": [
+                  -0.5,
+                  2.026735782623291,
+                  -0.5
+                ],
+                "uvOrigin": [
+                  0,
+                  1
+                ],
+                "uVector": [
+                  1.501306176185608,
+                  0,
+                  0
+                ],
+                "vVector": [
+                  0,
+                  0,
+                  -1
+                ],
+                "surfaceAspect": 1.501306176185608
+              }
+            },
+            "right": {
+              "texture": "tex:0091"
+            },
+            "left": {
+              "texture": "tex:0091"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 4,
+              "o": [
+                0,
+                1.5267357041629341,
+                0
+              ]
+            },
+            {
+              "i": 5,
+              "o": [
+                0,
+                1.5267357041629341,
+                0
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0.5013062254259464,
+                1.5267357041629341,
+                0
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                0.5013062254259464,
+                1.5267357041629341,
+                0
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0.5013062254259464,
+                0,
+                0
+              ]
+            },
+            {
+              "i": 3,
+              "o": [
+                0.5013062254259464,
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-21T19:17:39.011Z"
+    },
+    "custom:0025": {
+      "id": "custom:0025",
+      "label": "door_garage",
+      "description": "Custom modeled object",
+      "layer": "Props",
+      "createdAt": "2026-07-21T19:19:24.201Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Box",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "color": "#9aa7b5",
+          "faces": {
+            "front": {
+              "texture": "tex:0093"
+            },
+            "right": {
+              "texture": "tex:0093"
+            },
+            "left": {
+              "texture": "tex:0093"
+            },
+            "top": {
+              "texture": "tex:0093"
+            },
+            "bottom": {
+              "texture": "tex:0093"
+            },
+            "back": {
+              "texture": "tex:0093"
+            }
+          },
+          "vertexOffsets": [
+            {
+              "i": 4,
+              "o": [
+                -0.38093042173697034,
+                1.042171027349157,
+                0
+              ]
+            },
+            {
+              "i": 5,
+              "o": [
+                -0.38093042173697034,
+                1.042171027349157,
+                -0.9206610623570615
+              ]
+            },
+            {
+              "i": 1,
+              "o": [
+                0,
+                1.042171027349157,
+                0
+              ]
+            },
+            {
+              "i": 0,
+              "o": [
+                0,
+                1.042171027349157,
+                -0.9206610623570615
+              ]
+            },
+            {
+              "i": 6,
+              "o": [
+                -0.38093042173697034,
+                0,
+                0
+              ]
+            },
+            {
+              "i": 7,
+              "o": [
+                -0.38093042173697034,
+                0,
+                -0.9206610623570615
+              ]
+            },
+            {
+              "i": 2,
+              "o": [
+                0,
+                0,
+                -0.9206610623570615
+              ]
+            }
+          ]
+        }
+      ],
+      "updatedAt": "2026-07-21T19:19:57.816Z"
     }
   },
   "textures": {
@@ -3380,6 +3605,22 @@
     "tex:0089": {
       "name": "Front.png",
       "url": "textures/front-3dffe6ce85.png"
+    },
+    "tex:0090": {
+      "name": "macchinetta_front.png",
+      "url": "textures/macchinetta-front-ea9688197f.png"
+    },
+    "tex:0091": {
+      "name": "macchinetta_side.png",
+      "url": "textures/macchinetta-side-ffe4a4d1f0.png"
+    },
+    "tex:0092": {
+      "name": "macchinetta_top.png",
+      "url": "textures/macchinetta-top-6a8a31511c.png"
+    },
+    "tex:0093": {
+      "name": "door.png",
+      "url": "textures/door-c0c99defc1.png"
     }
   },
   "worldTextures": {
