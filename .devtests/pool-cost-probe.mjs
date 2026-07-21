@@ -50,7 +50,7 @@ const result = await page.evaluate(async () => {
 
   // Collect the additive pool/streak instanced meshes currently in the scene.
   const pools = [];
-  g.roadScene.traverse((o) => { if (o.name && /pool:light(Pool|Streak)/.test(o.name)) pools.push(o); });
+  g.roadScene.traverse((o) => { if (o.name && /light(Pool|Streak)/.test(o.name)) pools.push(o); });
 
   const frame = () => new Promise((res) => requestAnimationFrame(() => res()));
   const time = async (n, visible) => {

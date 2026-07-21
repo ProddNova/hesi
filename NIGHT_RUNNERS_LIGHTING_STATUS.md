@@ -176,3 +176,36 @@ pool-topdown-probe.mjs`, which scans `_bankAt` for the steepest lamp): `+bank`
 compresses the pool to one side and darkens the other; `-bank` spreads it evenly
 across the full carriageway with no hard edge, confirmed again at a driver's-eye
 angle. Straights (bank ≈ 0) are unaffected either way.
+
+## Round 4 — deck-conforming pools (branch `claude/tatsumi-merge-light-spikes`)
+
+Even with the correct bank tilt, a single flat quad can only match a *linearly*
+banked deck. On the 2-lane→3-lane merges near Tatsumi PA the deck height varies
+non-linearly across the width (`branchDeckOffsetAt(distance, lateral)` eases the
+branch onto the host), and the lamp-loop frame didn't pass `route`/`distance` so
+the pool ignored that offset entirely — the flat quad cut through the merge deck
+and left a hard dark wedge (confirmed: hiding the pools removes it).
+
+Fix — the pool and streak are no longer instanced flat quads. `_pushDeckStrip`
+builds each as a small grid (5 along × 4 across for pools, 5×2 for streaks) whose
+every vertex is placed with `_deckPoint(frame{route,distance,bank}, lateral)`, so
+the decal **conforms to the real road surface** — bank, crown, grade and the
+progressive-merge branch offset all included. The glow texture maps 0..1 over the
+grid. Strips are merged per chunk through the existing `_chunkBuckets` system, so
+draw calls stay flat. Materials moved to a baked warm colour with
+`side: DoubleSide` (per-lamp instance tint is gone; size/placement jitter stays).
+Narrow-ramp sizing is also fixed: pool width min dropped 13→8 m and the lateral
+offset is clamped so it no longer flips to the far side on ~9 m ramps.
+
+The strip is lifted 0.30 m (streak 0.28 m): at the merge the *rendered* deck sits
+slightly above `_deckPoint`, and the lift clears it, removing all but a faint
+residual right at the gore. Verified clean on banked straights, banked curves and
+the ramp merge; the residual at the exact overlap is a deeper progressive-merge
+centreline issue (branch centreline diverges under the host deck) left for a
+follow-up.
+
+Cost: draw calls unchanged (110/125 at 1×/3×), visible triangles ~35k→~40k (well
+under the 70k cap), textures/geometries within budget, no runtime cost.
+
+Probes added: `.devtests/ramp-scan-probe.mjs` (driver-level scan along a ramp,
+pools on/off) and `.devtests/tatsumi-merge-probe.mjs` (survey the PA merge).
