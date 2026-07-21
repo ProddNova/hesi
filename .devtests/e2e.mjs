@@ -38,10 +38,17 @@ const context = await browser.newContext({
   isMobile: true,
   hasTouch: true,
 });
-// Serve the three.js CDN request from the local node_modules copy.
+// Serve the three.js CDN requests (core build + examples/jsm addons like
+// GLTFLoader) from the local node_modules copy.
 await context.route('https://cdn.jsdelivr.net/**', async (route) => {
-  const body = await readFile(join(ROOT, 'node_modules/three/build/three.module.js'));
-  await route.fulfill({ status: 200, contentType: 'text/javascript', body });
+  const url = new URL(route.request().url());
+  const rel = url.pathname.replace(/^\/npm\/three@[^/]+\//, '');
+  try {
+    const body = await readFile(join(ROOT, 'node_modules/three', rel));
+    await route.fulfill({ status: 200, contentType: 'text/javascript', body });
+  } catch {
+    await route.fulfill({ status: 404, body: 'nope' });
+  }
 });
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());
