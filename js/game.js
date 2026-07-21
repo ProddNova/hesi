@@ -5,7 +5,7 @@ import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
-import { GarageSystem } from './garage.js?v=20260713a';
+import { GarageSystem } from './garage.js?v=20260720c';
 import { applyEditorBuilds } from './editor-map-patch.js?v=20260720b';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
@@ -125,7 +125,7 @@ class ShutokoNights {
     this.garage.root.visible=false;this.roadScene.add(this.camera);
     // World-editor builds (data/editor/*-build.json): replay saved map edits on
     // the freshly generated highway and garage. No build files -> no-op.
-    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>this.prewarmGpuResources());
+    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.prewarmGpuResources();});
     this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
   }
 
@@ -261,7 +261,7 @@ class ShutokoNights {
   enterGarage(reason='service'){
     this.ui.fade(true);setTimeout(()=>{
       if(reason==='crash'||reason==='tow'){this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};}
-      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.attachCustomCarVisual();this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Tatsumi PA workshop // Shift complete','amber');if(this.p4CaptureView)setTimeout(()=>this.exitGarage(),80);
+      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.ensureGarageCar();this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Tatsumi PA workshop // Shift complete','amber');if(this.p4CaptureView)setTimeout(()=>this.exitGarage(),80);
     },480);
   }
   exitGarage(){
@@ -522,9 +522,16 @@ class ShutokoNights {
     if(!this.customCar)return;const toggle=document.getElementById('debug-custom-car'),scale=document.getElementById('debug-custom-car-scale'),status=document.getElementById('debug-custom-car-status');if(toggle)toggle.checked=!!this.customCar.enabled;if(scale&&document.activeElement!==scale)scale.value=this.customCar.scale.toFixed(2);if(status){const text=this.customCar.status==='loading'?'caricamento GLB…':this.customCar.status==='error'?'errore nel caricamento':this.customCar.object?(this.customCar.enabled?'attiva':'pronta'):'disattivata';status.textContent=`Toyota Chaser GLB · ${text}`;}
   }
   syncPlayerVisuals(){
-    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=!!(this.customCar?.enabled&&this.customCar.object?.parent===this.playerMesh),customInGarage=!!(this.customCar?.enabled&&this.customCar.object?.parent===this.garage?.parkedGroup);for(const mesh of this.playerMesh.userData.visualMeshes||[])mesh.visible=chase&&!customOnRoad;if(this.garage?.parkedGroup)for(const object of this.garage.parkedGroup.children)if(object!==this.customCar?.object)object.visible=!customInGarage;if(this.customCar?.object)this.customCar.object.visible=(chase&&customOnRoad)||(this.mode==='garage'&&customInGarage);
+    // The garage showroom always shows the GLB (the procedural parked car was
+    // hidden by the editor build); the road copy stays behind the debug toggle.
+    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=!!(this.customCar?.enabled&&this.customCar.object?.parent===this.playerMesh),customInGarage=!!(this.customCar?.object&&(this.customCar.object.parent===this.garage?.carDisplay||this.customCar.object.parent===this.garage?.parkedGroup));for(const mesh of this.playerMesh.userData.visualMeshes||[])mesh.visible=chase&&!customOnRoad;if(this.garage?.parkedGroup)for(const object of this.garage.parkedGroup.children)if(object!==this.customCar?.object)object.visible=!customInGarage;if(this.customCar?.object)this.customCar.object.visible=(chase&&customOnRoad)||(this.mode==='garage'&&customInGarage);
   }
-  attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=this.mode==='garage'&&this.garage?.parkedGroup?this.garage.parkedGroup:this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(this.customCar.scale);this.syncPlayerVisuals();}
+  attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=(this.mode==='garage'?(this.garage?.carDisplay||this.garage?.parkedGroup):null)||this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(this.customCar.scale);this.syncPlayerVisuals();}
+  ensureGarageCar(){
+    this.attachCustomCarVisual();
+    if(this.customCar.object)this.garage?.refreshColliders?.();
+    else this.loadCustomCar().then(()=>this.garage?.refreshColliders?.()).catch(e=>console.warn('Garage car load',e));
+  }
   async loadCustomCar(){
     if(this.customCar.object)return this.customCar.object;if(this.customCar.loadPromise)return this.customCar.loadPromise;this.customCar.status='loading';this.syncCustomCarControls();
     this.customCar.loadPromise=(async()=>{const {GLTFLoader}=await import('three/addons/loaders/GLTFLoader.js'),gltf=await new GLTFLoader().loadAsync(CUSTOM_CAR_URL),source=gltf.scene||gltf.scenes?.[0];if(!source)throw new Error('The GLB contains no scene');source.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(source);if(bounds.isEmpty())throw new Error('The GLB contains no visible geometry');const center=bounds.getCenter(new THREE.Vector3());source.position.x-=center.x;source.position.y-=bounds.min.y-.03;source.position.z-=center.z;const visual=new THREE.Group();visual.name='Custom player car · Toyota Chaser';visual.rotation.y=Math.PI;visual.scale.setScalar(this.customCar.scale);visual.add(source);visual.traverse(object=>{if(object.isMesh){object.castShadow=false;object.receiveShadow=false;}});this.applyRetroMaterials(visual);this.customCar.object=visual;this.customCar.status='ready';this.attachCustomCarVisual();this.syncCustomCarControls();const textures=new Set();visual.traverse(object=>{for(const material of(Array.isArray(object.material)?object.material:[object.material]))if(material)for(const key of['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap'])if(material[key])textures.add(material[key]);});for(const texture of textures)this.renderer.initTexture?.(texture);try{await this.renderer.compileAsync?.(visual,this.camera,this.roadScene);}catch(e){console.warn('Custom car shader prewarm',e);}this.syncCustomCarControls();this.syncPlayerVisuals();return visual;})().catch(error=>{this.customCar.status='error';this.customCar.loadPromise=null;throw error;});return this.customCar.loadPromise;

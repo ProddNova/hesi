@@ -8,6 +8,7 @@ export class GarageSystem {
     this.playerHeight=1.72*1.2;
     this.enabled=false; this.position=V(0,this.playerHeight,7); this.yaw=0; this.pitch=0;
     this.velocity=V(); this.interactCooldown=0; this.carMesh=null; this.deliveryMeshes=[];
+    this.colliders=[]; this.staticColliders=[];
     this.carried=null; this.installing=null; this.mouse={x:0,y:0}; this._pointerHandler=e=>this.onMouse(e);
     this.build(); this.bind();
   }
@@ -27,15 +28,18 @@ export class GarageSystem {
     const grid=new THREE.GridHelper(22,22,0x474b4e,0x2d3235);grid.position.y=.008;this.root.add(grid);
     // Structural shell: side walls (inner face x=+/-10.825), back wall (inner
     // face z=-13.825), ceiling resting ON the wall tops (bottom face y=10.02).
-    this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(-11,5,0));
-    this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(11,5,0));
-    this.mesh(new THREE.BoxGeometry(21.65,10,.35),this.mat(0x22272a),V(0,5,-14));
+    // Structural meshes double as collision sources: refreshColliders() reads
+    // their post-editor-build world boxes, so moved/hidden walls stay in sync.
+    const solid=m=>{this.staticColliders.push(m);return m;};
+    solid(this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(-11,5,0)));
+    solid(this.mesh(new THREE.BoxGeometry(.35,10,28.7),this.mat(0x252a2f),V(11,5,0)));
+    solid(this.mesh(new THREE.BoxGeometry(21.65,10,.35),this.mat(0x22272a),V(0,5,-14)));
     this.mesh(new THREE.BoxGeometry(22.7,.35,28.7),this.mat(0x15191d),V(0,10.2,0));
     // Front wall around the shutter opening (|x|<4, y<5): two piers + lintel,
     // all clear of the shutter body.
-    this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(-7.325,5,14));
-    this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(7.325,5,14));
-    this.mesh(new THREE.BoxGeometry(8.3,5,.35),this.mat(0x22272a),V(0,7.5,14));
+    solid(this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(-7.325,5,14)));
+    solid(this.mesh(new THREE.BoxGeometry(6.65,10,.35),this.mat(0x22272a),V(7.325,5,14)));
+    solid(this.mesh(new THREE.BoxGeometry(8.3,5,.35),this.mat(0x22272a),V(0,7.5,14)));
     // Interior trim: beams pulled 0.25 m proud of the walls, stripes/panels
     // layered at distinct depths and heights.
     this.mesh(new THREE.BoxGeometry(21.4,.4,.3),this.mat(0x30343a),V(0,5.1,-13.55));
@@ -51,7 +55,7 @@ export class GarageSystem {
     }
     const warm=new THREE.PointLight(0xff762e,10,11,1.6);warm.position.set(-8,4,-10);this.root.add(warm);
     // Shutter inside the front opening; slats 25 mm proud of the shutter face.
-    this.shutter=this.mesh(new THREE.BoxGeometry(7.9,5,.25),this.mat(0x42484d),V(0,2.5,13.82));
+    this.shutter=this.mesh(new THREE.BoxGeometry(7.9,5,.25),this.mat(0x42484d),V(0,2.5,13.82));this.staticColliders.push(this.shutter);
     for(let y=.35;y<5;y+=.46)this.mesh(new THREE.BoxGeometry(7.7,.025,.06),this.mat(0x171b1f),V(0,y,13.64));
     this.exitGlow=this.mesh(new THREE.PlaneGeometry(4.5,2.2),new THREE.MeshBasicMaterial({color:0xff8d2c,transparent:true,opacity:.12,side:THREE.DoubleSide}),V(0,1.1,13.48),V(0,0,0));
     // Workbench, tools and compressor.
@@ -68,11 +72,67 @@ export class GarageSystem {
     this.mesh(new THREE.BoxGeometry(1.9,.12,.7),this.mat(0x9d998b),V(7.5,1.28,-9.55),V(.12,0,0));
     // Delivery area paint and sign.
     const zone=this.mesh(new THREE.PlaneGeometry(6,5),new THREE.MeshBasicMaterial({color:0xe7b941,transparent:true,opacity:.15,side:THREE.DoubleSide}),V(-7.2,.015,10.3),V(-Math.PI/2,0,0));
-    const edge=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(6,.03,5)),new THREE.LineBasicMaterial({color:0xe8c14a}));edge.position.set(-7.2,.03,10.3);this.root.add(edge);
+    const edge=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(6,.03,5)),new THREE.LineBasicMaterial({color:0xe8c14a}));edge.position.set(-7.2,.03,10.3);this.root.add(edge);this.deliveryEdge=edge;
     this.addSign('DELIVERY / 配達',V(-10.68,4,9.8),Math.PI/2,0xe9b947);
     this.addSign('WANGAN WORKS',V(-10.68,5,-2),Math.PI/2,0xe7e9e2);
     this.parkedGroup=new THREE.Group();this.parkedGroup.position.set(0,.05,0);this.root.add(this.parkedGroup);
+    // Children past this point are appended AFTER every editor-addressable
+    // child (0-77), so garage-build childIndex operations keep resolving.
+    // carDisplay hosts the Toyota Chaser GLB the game attaches in garage mode;
+    // it replaces the hidden procedural parkedGroup as the showroom car.
+    this.carDisplay=new THREE.Group();this.carDisplay.position.set(0,.05,0);this.carDisplay.rotation.y=-Math.PI/2;this.root.add(this.carDisplay);
+    // PS2-style exit beacon: translucent spinning prisms floating by the door.
+    this.exitMarkers=new THREE.Group();
+    const prism=(color,r,h,x,y)=>{const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,3),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.85,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));m.position.set(x,y,0);m.userData.baseY=y;this.exitMarkers.add(m);return m;};
+    prism(0x35d8ff,.32,.5,-1.25,1.32);prism(0xffb62e,.46,.68,0,1.62);prism(0xff4fd8,.32,.5,1.25,1.32);
+    this.root.add(this.exitMarkers);
     this.carryAnchor=new THREE.Group();this.carryAnchor.position.set(.45,-.45,-1);this.camera.add(this.carryAnchor);this.scene.add(this.camera);
+    this.refreshColliders();
+  }
+
+  // Rebuilds the walk colliders from whatever is actually in the room right
+  // now: the structural shell (wherever the editor build moved it), every
+  // editor-placed object and the parked car. Hidden meshes and anything
+  // outside the player's body band (floor decals, ceiling, hung signs) are
+  // skipped. Interaction anchors that follow editor-moved props (garage door,
+  // delivery zone, PC table) are refreshed together.
+  refreshColliders(){
+    this.root.updateMatrixWorld(true);
+    const boxes=[];
+    const consider=o=>{if(!o||o.visible===false)return;const box=new THREE.Box3().setFromObject(o);if(box.isEmpty()||box.min.y>1.72||box.max.y<.1)return;boxes.push(box);};
+    for(const m of this.staticColliders)consider(m);
+    const placed=this.root.children.find(c=>c.name==='Editor placed objects');
+    if(placed&&placed.visible!==false)for(const child of placed.children)consider(child);
+    if(this.carDisplay?.children.length&&this.carDisplay.visible!==false)consider(this.carDisplay);
+    this.colliders=boxes;
+    // The old desk PC was hidden and sits outside the remodelled room, so the
+    // market terminal now lives at the small table with the game boxes.
+    const table=placed?.children.find(c=>c.name==='table_small');
+    this.pcPoint=table?V(table.position.x,0,table.position.z):V(7.5,0,-9.3);
+    this.refreshExitMarkers();
+  }
+  refreshExitMarkers(){
+    const doorX=this.shutter?.position.x??0;
+    this.exitPoint=V(doorX,0,12.6);
+    this.exitMarkers?.position.set(doorX,0,12.55);
+  }
+  onBuildApplied(){this.refreshColliders();}
+
+  // Circle-vs-AABB pushout in the XZ plane; two passes settle corner contacts
+  // between neighbouring boxes so the player slides along clutter and walls.
+  resolveCollisions(next){
+    const r=.35;
+    for(let pass=0;pass<2;pass++)for(const box of this.colliders){
+      if(next.x<box.min.x-r||next.x>box.max.x+r||next.z<box.min.z-r||next.z>box.max.z+r)continue;
+      const cx=Math.max(box.min.x,Math.min(box.max.x,next.x)),cz=Math.max(box.min.z,Math.min(box.max.z,next.z));
+      const dx=next.x-cx,dz=next.z-cz,d2=dx*dx+dz*dz;
+      if(d2>=r*r)continue;
+      if(d2>1e-8){const d=Math.sqrt(d2);next.x=cx+dx/d*r;next.z=cz+dz/d*r;}
+      else{
+        const pushL=next.x-(box.min.x-r),pushR=(box.max.x+r)-next.x,pushB=next.z-(box.min.z-r),pushF=(box.max.z+r)-next.z,m=Math.min(pushL,pushR,pushB,pushF);
+        if(m===pushL)next.x=box.min.x-r;else if(m===pushR)next.x=box.max.x+r;else if(m===pushB)next.z=box.min.z-r;else next.z=box.max.z+r;
+      }
+    }
   }
 
   addSign(text,pos,ry=0,color=0xffffff){
@@ -89,7 +149,7 @@ export class GarageSystem {
 
   enter(carSpec,deliveries=[]){
     this.enabled=true;this.root.visible=true;this.position.set(0,this.playerHeight,8);this.yaw=0;this.pitch=0;this.velocity.set(0,0,0);this.carried=null;this.installing=null;this.camera.fov=66;this.camera.updateProjectionMatrix();
-    this.refreshCar(carSpec);this.syncDeliveries(deliveries);this.updateCamera();
+    this.refreshCar(carSpec);this.syncDeliveries(deliveries);this.refreshColliders();this.updateCamera();
   }
   leave(){this.enabled=false;document.exitPointerLock?.();this.clearCarry();}
 
@@ -116,7 +176,10 @@ export class GarageSystem {
       const g=new THREE.Group();const box=new THREE.Mesh(new THREE.BoxGeometry(1.15,.72,.9),this.mat(0xa77a43));box.position.y=.36;g.add(box);
       const tape=new THREE.Mesh(new THREE.BoxGeometry(.15,.735,.91),this.mat(0xd6bd7b));tape.position.y=.36;g.add(tape);
       const label=this.makeLabel(d.name||d.partName||d.partId||'PERFORMANCE PART');label.position.set(0,.48,.456);g.add(label);
-      g.position.set(-9+i%3*1.55,.02,9+Math.floor(i/3)*1.2);g.userData={delivery:d,index:i};this.root.add(g);this.deliveryMeshes.push(g);
+      // Boxes spawn inside the painted delivery zone, wherever the editor
+      // build moved its outline.
+      const zone=this.deliveryEdge?.position||V(-7.2,0,10.3);
+      g.position.set(zone.x+(i%3-1)*1.4,.02,zone.z+(Math.floor(i/3)-.5)*1.25);g.userData={delivery:d,index:i};this.root.add(g);this.deliveryMeshes.push(g);
     });
   }
   makeLabel(text){const c=document.createElement('canvas');c.width=256;c.height=96;const x=c.getContext('2d');x.fillStyle='#eee9d9';x.fillRect(0,0,256,96);x.fillStyle='#13171b';x.font='bold 18px monospace';x.fillText('WANGAN MARKET',10,25);x.font='13px monospace';x.fillText(String(text).slice(0,25),10,52);x.fillRect(10,67,190,5);for(let i=0;i<16;i++)x.fillRect(10+i*10,72,i%3?3:6,18);const t=new THREE.CanvasTexture(c);t.magFilter=THREE.NearestFilter;return new THREE.Mesh(new THREE.PlaneGeometry(.8,.3),new THREE.MeshBasicMaterial({map:t}));}
@@ -133,14 +196,19 @@ export class GarageSystem {
       const forward=V(-Math.sin(this.yaw),0,-Math.cos(this.yaw)),right=V(Math.cos(this.yaw),0,-Math.sin(this.yaw));let wish=V();
       if(input.forward)wish.add(forward);if(input.backward)wish.sub(forward);if(input.right)wish.add(right);if(input.left)wish.sub(right);
       if(wish.lengthSq())wish.normalize();const speed=input.sprint?5.3:3.2;this.velocity.lerp(wish.multiplyScalar(speed),1-Math.exp(-dt*12));
-      let next=this.position.clone().addScaledVector(this.velocity,dt);next.x=Math.max(-10.25,Math.min(10.25,next.x));next.z=Math.max(-13.1,Math.min(13.1,next.z));
-      // Keep the walker out of the parked car's footprint.
-      if(Math.abs(next.x)<2.0&&Math.abs(next.z)<2.8){const dx=2.0-Math.abs(next.x),dz=2.8-Math.abs(next.z);if(dx<dz)next.x=Math.sign(next.x||1)*2.0;else next.z=Math.sign(next.z||1)*2.8;}
+      let next=this.position.clone().addScaledVector(this.velocity,dt);
+      // Outer safety clamp only — real containment comes from the wall boxes,
+      // which follow wherever the editor build moved the room shell.
+      next.x=Math.max(-10.45,Math.min(10.45,next.x));next.z=Math.max(-13.45,Math.min(13.45,next.z));
+      if(this.colliders.length)this.resolveCollisions(next);
+      else{next.x=Math.max(-10.25,Math.min(10.25,next.x));next.z=Math.max(-13.1,Math.min(13.1,next.z));}
       this.position.copy(next);
     }
     this.updateCamera();const target=this.findInteraction(context);this.cb.prompt?.(target?.text||'',!!target);
     if(input.interactPressed&&this.interactCooldown<=0&&target){this.interactCooldown=.35;this.interact(target,context);}
     this.pcScreen.material.color.setHex(0x2b9da9+(Math.sin(performance.now()*.004)>0?0x000909:0));
+    const t=performance.now()*.001;
+    this.exitMarkers?.children.forEach((m,i)=>{m.rotation.y=t*(1.4+i*.55)*(i===1?1:-1);m.position.y=m.userData.baseY+Math.sin(t*2.3+i*2.1)*.12;});
   }
 
   updateCamera(){
@@ -154,8 +222,9 @@ export class GarageSystem {
   lookScore(p){const f=V(-Math.sin(this.yaw),0,-Math.cos(this.yaw));const to=V(p.x-this.position.x,0,p.z-this.position.z).normalize();return f.dot(to);}
   findInteraction(context){
     const candidates=[];
-    if(this.distance2D(V(7.5,0,-9.3))<2.7)candidates.push({type:'pc',pos:V(7.5,0,-9.3),text:'<kbd>E</kbd> USE WANGAN MARKET PC'});
-    if(this.distance2D(V(0,0,12.6))<2.5)candidates.push({type:'exit',pos:V(0,0,13),text:'<kbd>E</kbd> EXIT TO EXPRESSWAY'});
+    const pc=this.pcPoint||V(7.5,0,-9.3),exit=this.exitPoint||V(0,0,12.6);
+    if(this.distance2D(pc)<2.7)candidates.push({type:'pc',pos:pc,text:'<kbd>E</kbd> USE WANGAN MARKET PC'});
+    if(this.distance2D(exit)<2.5)candidates.push({type:'exit',pos:exit,text:'<kbd>E</kbd> EXIT TO EXPRESSWAY'});
     if(this.carried&&this.distance2D(V(0,0,0))<4.0)candidates.push({type:'install',pos:V(0,0,0),text:`<kbd>E</kbd> INSTALL ${this.carried.name||'DELIVERY'}`});
     if(!this.carried)for(const m of this.deliveryMeshes)if(this.distance2D(m.position)<2)candidates.push({type:'delivery',pos:m.position,mesh:m,delivery:m.userData.delivery,text:`<kbd>E</kbd> PICK UP ${m.userData.delivery.name||'DELIVERY BOX'}`});
     return candidates.filter(c=>this.lookScore(c.pos)>-.1).sort((a,b)=>this.distance2D(a.pos)-this.distance2D(b.pos))[0]||null;
