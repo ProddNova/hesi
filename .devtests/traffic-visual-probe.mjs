@@ -94,6 +94,17 @@ check('only the 3 designed classes exist', info.typeIds.every((id) => ['car', 'v
 check('dimensions are sane (tir long & tall, car small)',
   (!info.dims.truck || (info.dims.truck.l > 12 && info.dims.truck.h > 3)) && (!info.dims.car || (info.dims.car.l < 5 && info.dims.car.h < 1.8)),
   JSON.stringify(info.dims));
+
+// Tir must be ONE box now (not cab+trailer+chassis). A single merged box = 24
+// vertices; the old 3-box truck had 72.
+const truckBody = await page.evaluate(() => {
+  const t = window.shutoko.traffic.getActiveVehicles().find((v) => v.type.id === 'truck');
+  if (!t) return null;
+  const g = t.mesh.userData.body.geometry;
+  return { verts: g.attributes.position.count };
+});
+if (truckBody) check('tir body is a single box (24 verts)', truckBody.verts === 24, JSON.stringify(truckBody));
+
 await page.waitForTimeout(500);
 await page.screenshot({ path: join(OUT, 'traffic-road.png') });
 
@@ -185,6 +196,20 @@ await page.reload();
 await page.waitForFunction(() => window.shutoko && !!window.shutoko.traffic, null, { timeout: 30000 });
 const persisted = await page.evaluate(() => ({ ratio: window.shutoko.admin.trafficTruckRatio, weight: window.shutoko.traffic.typeWeights.truck }));
 check('slider settings persist across reload', Math.abs(persisted.ratio - 0.3) < 0.01 && Math.abs(persisted.weight - 0.3) < 0.01, JSON.stringify(persisted));
+
+// Immortality: repeated serious collisions must never cost a life or crash.
+const immortal = await page.evaluate(() => {
+  const g = window.shutoko;
+  g.run.lives = 3;
+  g.crash.active = false;
+  for (let i = 0; i < 6; i += 1) {
+    g.contactCooldown = 0;
+    g.registerContact('wall', { severity: 12, intensity: 2 });
+  }
+  return { lives: g.run.lives, crashed: g.crash.active, mode: g.mode };
+});
+console.log('immortality:', JSON.stringify(immortal));
+check('player is immortal — serious hits never cost a life or crash', immortal.lives === 3 && !immortal.crashed && immortal.mode !== 'crashed');
 
 check('no console errors during whole probe', errors.length === 0, errors.slice(0, 4).join(' | '));
 
