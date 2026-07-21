@@ -436,6 +436,25 @@
     },
     "garage-part:0078": {
       "visible": false
+    },
+    "garage-part:0080": {
+      "transform": {
+        "position": [
+          5.71749,
+          0,
+          12.4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
     }
   },
   "placedObjects": [

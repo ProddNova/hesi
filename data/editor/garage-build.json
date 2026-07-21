@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "garage",
-  "generatedAt": "2026-07-20T19:35:46.585Z",
+  "generatedAt": "2026-07-21T18:22:48.080Z",
   "project": {
-    "draftSignature": "fnv1a32:29a8224d",
+    "draftSignature": "fnv1a32:1bb68826",
     "name": "HESI Garage Interior",
     "path": "data/editor/garage-project.json"
   },
@@ -1365,6 +1365,27 @@
         1
       ],
       "visible": false
+    },
+    {
+      "childIndex": 79,
+      "op": "garage-object",
+      "position": [
+        5.71749,
+        0,
+        12.4
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
     },
     {
       "assetId": "custom:0006",
