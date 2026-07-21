@@ -81,10 +81,11 @@ export class GarageSystem {
     // carDisplay hosts the Toyota Chaser GLB the game attaches in garage mode;
     // it replaces the hidden procedural parkedGroup as the showroom car.
     this.carDisplay=new THREE.Group();this.carDisplay.position.set(0,.05,0);this.carDisplay.rotation.y=-Math.PI/2;this.root.add(this.carDisplay);
-    // PS2-style exit beacon: translucent spinning prisms floating by the door.
+    // PS2-style exit beacon: a single translucent blue prism spinning and
+    // bobbing over the garage door.
     this.exitMarkers=new THREE.Group();
-    const prism=(color,r,h,x,y)=>{const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,3),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.85,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));m.position.set(x,y,0);m.userData.baseY=y;this.exitMarkers.add(m);return m;};
-    prism(0x35d8ff,.32,.5,-1.25,1.32);prism(0xffb62e,.46,.68,0,1.62);prism(0xff4fd8,.32,.5,1.25,1.32);
+    const beacon=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.85,3),new THREE.MeshBasicMaterial({color:0x2050ff,transparent:true,opacity:.85,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
+    beacon.position.set(0,1.65,0);beacon.userData.baseY=1.65;this.exitMarkers.add(beacon);
     this.root.add(this.exitMarkers);
     this.carryAnchor=new THREE.Group();this.carryAnchor.position.set(.45,-.45,-1);this.camera.add(this.carryAnchor);this.scene.add(this.camera);
     this.refreshColliders();
@@ -208,7 +209,7 @@ export class GarageSystem {
     if(input.interactPressed&&this.interactCooldown<=0&&target){this.interactCooldown=.35;this.interact(target,context);}
     this.pcScreen.material.color.setHex(0x2b9da9+(Math.sin(performance.now()*.004)>0?0x000909:0));
     const t=performance.now()*.001;
-    this.exitMarkers?.children.forEach((m,i)=>{m.rotation.y=t*(1.4+i*.55)*(i===1?1:-1);m.position.y=m.userData.baseY+Math.sin(t*2.3+i*2.1)*.12;});
+    this.exitMarkers?.children.forEach(m=>{m.rotation.y=t*1.6;m.position.y=m.userData.baseY+Math.sin(t*2.3)*.14;});
   }
 
   updateCamera(){

@@ -5,7 +5,7 @@ import * as TrafficModule from './traffic.js?v=20260713a';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
-import { GarageSystem } from './garage.js?v=20260720c';
+import { GarageSystem } from './garage.js?v=20260721a';
 import { applyEditorBuilds } from './editor-map-patch.js?v=20260720b';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
@@ -127,6 +127,10 @@ class ShutokoNights {
     // the freshly generated highway and garage. No build files -> no-op.
     applyEditorBuilds({map:this.map,garageRoot:this.garage?.root}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.prewarmGpuResources();});
     this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
+    // The garage always displays the Toyota Chaser GLB as its showroom car,
+    // independent of the on-road custom-car toggle. Kick the load off now so it
+    // is parked and ready before the player finishes the boot screen.
+    this.loadCustomCar().then(()=>this.garage?.refreshColliders?.()).catch(e=>console.warn('Garage showroom car preload',e));
   }
 
   // Uploads every road-scene geometry/texture and compiles every shader

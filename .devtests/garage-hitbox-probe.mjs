@@ -73,6 +73,7 @@ const state = await page.evaluate(() => {
     carVisible: !!car?.visible,
     carInGarageScene: (() => { let n = car; while (n) { if (n === g.root) return true; n = n.parent; } return false; })(),
     markerCount: g.exitMarkers?.children.length ?? 0,
+    markerColor: g.exitMarkers?.children[0]?.material.color.getHex() ?? null,
     markerX: g.exitMarkers?.position.x ?? null,
     doorX: g.shutter?.position.x ?? null,
     exitPoint: g.exitPoint ? [g.exitPoint.x, g.exitPoint.z] : null,
@@ -83,7 +84,8 @@ const state = await page.evaluate(() => {
 check('editor build hitboxes collected', state.colliders > 10, `colliders: ${state.colliders}`);
 check('Chaser GLB parked in garage and visible', state.carParent && state.carVisible && state.carInGarageScene);
 check('procedural old car stays hidden', state.parkedGroupHidden);
-check('exit prisms follow the moved shutter', state.markerCount === 3 && Math.abs(state.markerX - state.doorX) < 0.01 && Math.abs(state.doorX - 5.7) < 0.2, `doorX: ${state.doorX}, markerX: ${state.markerX}`);
+const blue = state.markerColor !== null && (state.markerColor & 0xff) > 0x80 && (state.markerColor & 0xff) >= ((state.markerColor >> 16) & 0xff);
+check('single blue exit prism follows the moved shutter', state.markerCount === 1 && blue && Math.abs(state.markerX - state.doorX) < 0.01 && Math.abs(state.doorX - 5.7) < 0.2, `count: ${state.markerCount}, color: #${(state.markerColor ?? 0).toString(16)}, doorX: ${state.doorX}, markerX: ${state.markerX}`);
 check('exit interaction moved to the door', state.exitPoint && Math.abs(state.exitPoint[0] - state.doorX) < 0.01, `exit: ${JSON.stringify(state.exitPoint)}`);
 check('PC interaction anchored to the game table', state.pcPoint && Math.abs(state.pcPoint[0] - -1) < 0.3 && Math.abs(state.pcPoint[1] - 6) < 0.3, `pc: ${JSON.stringify(state.pcPoint)}`);
 
