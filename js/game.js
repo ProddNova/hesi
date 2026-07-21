@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as MapModule from './map.js?v=20260716a';
 import * as PhysicsModule from './physics.js?v=20260713a';
-import * as TrafficModule from './traffic.js?v=20260721d';
+import * as TrafficModule from './traffic.js?v=20260721e';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
@@ -658,12 +658,12 @@ class ShutokoNights {
   }
   nearMiss(e={}){const t=this.getTelemetry();if(t.speedKmh<100)return;const distance=e.distance??e.clearance??1.2;const base=e.points??Math.round(220+(t.speedKmh-100)*4+Math.max(0,1.5-distance)*420);this.run.combo=clamp(this.run.combo+.25+(distance<.65?.2:0),1,8);this.run.comboTimer=4.5;this.run.nearMisses++;const points=base*this.run.combo;this.run.score+=points;this.ui.nearMiss(points,distance<.65);this.audio?.nearMiss?.({side:e.side==='left'?-1:1,speedKmh:t.speedKmh,closeness:e.closeness??1-distance/2.25});}
   registerContact(kind,e={}){if(this.contactCooldown>0||this.crash.active)return;this.contactCooldown=1.1;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;const severity=Number.isFinite(e.severity)?e.severity:(e.intensity??4);const impact=clamp(severity/8,.4,2);this.audio?.crash?.(impact);
-    // A light scrape resets the combo; only a real impact costs a life.
+    // Player is immortal: collisions never cost a life or end the run. A hit
+    // still breaks the combo and physically bounces the car — it just can't
+    // kill you. (The car is only pushed by traffic, not by walls.)
     const serious=severity>2.5;
-    if(serious&&!this.admin.infiniteLives)this.run.lives--;
-    this.ui.toast(serious?`${kind.toUpperCase()} CONTACT // LIFE LOST`:`${kind.toUpperCase()} SCRAPE // COMBO LOST`,'red');
+    this.ui.toast(serious?`${kind.toUpperCase()} CONTACT`:`${kind.toUpperCase()} SCRAPE // COMBO LOST`,'red');
     if(kind!=='wall')this.physics.resolveCollision?.({...e,normal:e.normal||new THREE.Vector3(1,0,0),kind});
-    if(this.run.lives<=0)this.beginCrash();
   }
   beginCrash(){this.crash={active:true,timer:0,score:this.run.score};}
   updateCrash(dt){this.crash.timer+=dt/.28;const s=this.getVehicleState();if(s.heading!=null)s.heading+=dt*5;this.playerMesh.rotation.y+=(dt/.28)*4;const shake=Math.max(0,1-this.crash.timer/2.2)*.9;this.camera.position.x+=(Math.random()-.5)*shake;this.camera.position.y+=(Math.random()-.5)*shake;if(this.crash.timer>2.1){this.ui.showRunOver(this.crash.score);this.run.score=0;this.crash.active=false;this.mode='crashed';}}

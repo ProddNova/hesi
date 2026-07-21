@@ -8,7 +8,19 @@ import { TrafficSystem } from '../js/traffic.js';
 
 const map = new HighwayMap(null, {});
 const scene = new THREE.Group();
-const traffic = new TrafficSystem(scene, map, { count: 70, maxVehicles: 120, density: 1 });
+// Instrument spawns to prove nothing pops into view ahead of the player.
+let minFrontSpawn = Infinity;
+let frontSpawnCount = 0;
+const traffic = new TrafficSystem(scene, map, {
+  count: 70, maxVehicles: 120, density: 1,
+  onSpawn: (v) => {
+    const dx = v.position.x - player.position.x;
+    const dz = v.position.z - player.position.z;
+    const ahead = dx * Math.sin(player.heading) + dz * Math.cos(player.heading);
+    if (ahead > 0) { frontSpawnCount += 1; minFrontSpawn = Math.min(minFrontSpawn, Math.hypot(dx, dz)); }
+  },
+});
+const frontThreshold = traffic.options.frontSpawnDistance;
 
 const spawn = map.getInitialSpawn();
 const player = {
@@ -69,6 +81,8 @@ console.log('\n--- LANE CHANGES ---');
 console.log(`lane-change events over ~50s: ${laneChangeStarts}`);
 console.log(`max concurrent lane changes: ${maxConcurrentChanges}`);
 console.log(`active at end: ${traffic.activeCount}`);
+console.log('\n--- SPAWN VISIBILITY ---');
+console.log(`front-spawns: ${frontSpawnCount} · closest in front: ${minFrontSpawn === Infinity ? 'none' : minFrontSpawn.toFixed(1)}m (threshold ${frontThreshold}m)`);
 
 // Basic assertions
 let ok = true;
@@ -77,4 +91,5 @@ console.log('\n--- CHECKS ---');
 assert('cars are the most common class', typeCounts.car > typeCounts.van && typeCounts.car > typeCounts.truck);
 assert('tir are the rarest class', typeCounts.truck < typeCounts.van && typeCounts.truck <= typeCounts.car);
 assert('trucks sit further out than cars', avg(laneByType.truck) === 'n/a' || +avg(laneByType.truck) >= +avg(laneByType.car));
+assert('nothing spawns in view ahead of the player', minFrontSpawn === Infinity || minFrontSpawn >= frontThreshold - 1);
 process.exit(ok ? 0 : 1);

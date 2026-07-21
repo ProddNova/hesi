@@ -133,28 +133,16 @@ function rectangleSupport(direction, right, forward, halfWidth, halfLength) {
 /**
  * Build the shared box-geometries for one vehicle class. Everything is centred
  * on X/Z with its underside at Y=0 so the mesh group sits flat on the road.
- * The body is a single box for a car / van, or cab + trailer + chassis for the
- * tir — all still plain boxes, differentiated mainly by size. Lamps, brake
- * lights and the two turn-signal clusters are tiny boxes at the right corners.
+ * Every class — car, van AND tir — is a SINGLE plain box, differentiated only
+ * by size (no cab/trailer split, no wheels, no glass). Lamps, brake lights and
+ * the two turn-signal clusters are tiny boxes at the corners.
  */
 function buildVehicleGeometry(type) {
   const w = type.width;
   const l = type.length;
   const h = type.height;
   const half = l * 0.5;
-  const bodyParts = [];
-  if (type.id === 'truck') {
-    const cabLen = 2.8;
-    const cabH = 3.05;
-    const gap = 0.18;
-    const trailerLen = l - cabLen - gap;
-    const chassisH = 0.85;                       // deck the trailer box rests on
-    bodyParts.push([[w, cabH, cabLen], [0, cabH * 0.5, half - cabLen * 0.5]]);
-    bodyParts.push([[w, h - chassisH, trailerLen], [0, (chassisH + h) * 0.5, half - cabLen - gap - trailerLen * 0.5]]);
-    bodyParts.push([[w * 0.82, chassisH, l - cabLen], [0, chassisH * 0.5, -half + (l - cabLen) * 0.5]]);
-  } else {
-    bodyParts.push([[w, h, l], [0, h * 0.5, 0]]);
-  }
+  const body = mergedBoxGeometry([[[w, h, l], [0, h * 0.5, 0]]]);
   const headY = type.id === 'truck' ? 1.2 : h * 0.5;
   const tailY = type.id === 'truck' ? 1.05 : h * 0.52;
   const frontZ = half - 0.04;
@@ -174,7 +162,7 @@ function buildVehicleGeometry(type) {
     [[0.13, 0.14, 0.06], [sign * w * 0.49, headY, frontZ - 0.06]],
     [[0.13, 0.14, 0.06], [sign * w * 0.49, tailY, rearZ + 0.06]],
   ]);
-  return { body: mergedBoxGeometry(bodyParts), lamps, brake, blinkerL: blinker(-1), blinkerR: blinker(1) };
+  return { body, lamps, brake, blinkerL: blinker(-1), blinkerR: blinker(1) };
 }
 
 /**
@@ -281,7 +269,11 @@ export class TrafficSystem {
       density: clamp(finite(options.density, 1), 0, 3),
       spawnRadius: Math.max(80, finite(options.spawnRadius, 850)),
       despawnRadius: Math.max(120, finite(options.despawnRadius, 1100)),
-      minSpawnDistance: Math.max(20, finite(options.minSpawnDistance, 85)),
+      minSpawnDistance: Math.max(20, finite(options.minSpawnDistance, 130)),
+      // Anything spawning IN FRONT of the player must be at least this far away,
+      // so cars never blink into existence in view. Behind the player they may
+      // appear as close as minSpawnDistance (out of sight).
+      frontSpawnDistance: Math.max(0, finite(options.frontSpawnDistance, 340)),
       nearMissDistance: clamp(finite(options.nearMissDistance, 2.25), 0.5, 5),
       nearMissMinSpeed: speedToMps(options.nearMissMinSpeed, 100 / 3.6),
       maxSpawnPerFrame: Math.max(1, Math.floor(options.maxSpawnPerFrame ?? 6)),
@@ -696,6 +688,20 @@ export class TrafficSystem {
     return this._normalizeLaneSample(sample, laneRef ?? sample.laneRef ?? sample.lane, s);
   }
 
+  /**
+   * True when a candidate spawn sits in front of the player and closer than the
+   * front threshold — i.e. it would visibly pop into view. Behind the player
+   * (dot <= 0) is always fine because it is off-screen.
+   */
+  _spawnInView(position, player) {
+    if (!player?.forward || this.options.frontSpawnDistance <= 0) return false;
+    const dx = position.x - player.position.x;
+    const dz = position.z - player.position.z;
+    const ahead = dx * player.forward.x + dz * player.forward.z;
+    if (ahead <= 0) return false;
+    return Math.hypot(dx, dz) < this.options.frontSpawnDistance;
+  }
+
   _requestSpawn(player, context, type = null) {
     const request = {
       playerPosition: player.position,
@@ -730,7 +736,7 @@ export class TrafficSystem {
           const sample = this._sampleLane(laneRef, finite(road.distance, 0) + offset * direction);
           if (!sample) continue;
           const distance = Math.hypot(sample.position.x - player.position.x, sample.position.z - player.position.z);
-          if (distance >= this.options.minSpawnDistance && distance <= this.options.spawnRadius) {
+          if (distance >= this.options.minSpawnDistance && distance <= this.options.spawnRadius && !this._spawnInView(sample.position, player)) {
             return { ...sample, laneRef, playerDistance: distance };
           }
         }
@@ -757,7 +763,7 @@ export class TrafficSystem {
           const normalized = this._normalizeSpawn(result);
           if (normalized) {
             const distance = Math.hypot(normalized.position.x - player.position.x, normalized.position.z - player.position.z);
-            if (distance >= this.options.minSpawnDistance && distance <= this.options.spawnRadius) {
+            if (distance >= this.options.minSpawnDistance && distance <= this.options.spawnRadius && !this._spawnInView(normalized.position, player)) {
               return { ...result, ...normalized, playerDistance: distance };
             }
           }
@@ -785,6 +791,7 @@ export class TrafficSystem {
       if (!sample) continue;
       const distance = Math.hypot(sample.position.x - player.position.x, sample.position.z - player.position.z);
       if (distance < this.options.minSpawnDistance || distance > this.options.spawnRadius) continue;
+      if (this._spawnInView(sample.position, player)) continue;
       const candidate = { ...sample, laneRef, s, playerDistance: distance };
       if (!best || Math.abs(distance - this.options.spawnRadius * 0.5) < Math.abs(best.playerDistance - this.options.spawnRadius * 0.5)) best = candidate;
     }
