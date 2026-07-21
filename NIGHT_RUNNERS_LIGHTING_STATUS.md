@@ -91,3 +91,39 @@ fill (overdraw) of the existing instanced planes grows.
 
 Real-device iPhone validation remains a manual release check; SwiftShader timing
 is useful for regression comparison, not as a proxy for iPhone GPU behaviour.
+
+## Round 2 — warm palette + traffic visibility (2026-07-21)
+
+Follow-up from reference footage (osoi.dev): the night was too cold and blue,
+there were still black "no-light" zones, and — most reported — distant traffic
+cars were pure-black silhouettes that only "switched on" (showed their colour)
+once the player's headlights reached them.
+
+Root cause of the traffic issue: the only moving lights in the scene are the
+**player's two head SpotLights** (`game.js createCarMesh`, ~58 m range). Traffic
+bodies are plain Lambert with no emissive, so beyond that cone they were lit only
+by a cold, low ambient and fell to black. More dynamic lights are not an option —
+the renderer bakes the light count into every shader program's cache key (see
+`prewarmGpuResources`), and extra forward lights also cost per-fragment across the
+whole scene. So all of Round 2 is **recolouring existing lights + one material
+property**: no new lights, draw calls, programs or textures (verified: draw calls
+111/117, textures/geometries unchanged, no errors).
+
+Changes:
+- `js/traffic.js` — the traffic body Lambert now carries a self-lit floor
+  (`emissive = its own colour`, `emissiveIntensity 0.34`), set per vehicle in
+  `_applyVehicleType`. The fluorescent fleet now reads its colour at any
+  distance; closing on a car no longer looks like it just spawned/switched on.
+  Emissive is a standard Lambert uniform, so no new shader program.
+- `js/game.js setupLights` — shifted the night from cold blue to a warm sodium
+  haze and lifted the floor just enough to kill the pure-black zones while
+  keeping the mood dark: hemisphere `0x35476b/0x0c101c @1.35 → 0x564a40/0x1e1510
+  @1.58`, ambient `0x3c4a66 @0.5 → 0x64524a @0.66`, fog `→ 0x16110d`, background
+  `→ 0x080605`. The moon stays a slightly-cooled rim (`0x9aa6c4 @0.72`) for
+  colour contrast. Additive lamp pools and emissive windows still carry the scene.
+- `js/game.js createCarMesh` — player head SpotLight intensity `1350 → 900` so
+  the car stops being the scene's dominant light source; with the lifted warm
+  ambient the road ahead still reads clearly.
+
+Probe added: `.devtests/traffic-visibility-probe.mjs` (populates cars ahead at a
+readable range to check distant-car colour).

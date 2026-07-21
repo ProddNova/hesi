@@ -90,10 +90,13 @@ class ShutokoNights {
   fallbackCar(){return{id:'koten-90',name:'Koten Maru 90',year:1988,starter:true,color:'#7d3037',price:85000,power:90,torque:128,mass:1040,drivetrain:'RWD',engineLayout:'I4',redline:6500,idleRPM:850,gearRatios:[3.35,1.95,1.29,.96,.78],finalDrive:4.1,tireGrip:1.02,brakeForce:10500,suspensionStiffness:1,fuelCapacity:45,dimensions:{length:4.25,width:1.67,height:1.32}};}
 
   setupLights(){
-    // PS2 night mood: dark blue-black sky, low ambient so emissive windows,
-    // lamps and light pools carry the scene instead of flat grey fill.
-    this.roadScene.background=new THREE.Color(0x02050c);this.roadScene.fog=new THREE.FogExp2(0x080f1e,.0017);
-    this.roadScene.add(new THREE.HemisphereLight(0x35476b,0x0c101c,1.35));this.roadScene.add(new THREE.AmbientLight(0x3c4a66,.5));const moon=new THREE.DirectionalLight(0x8da4c8,.85);moon.position.set(-200,300,-100);this.roadScene.add(moon);
+    // Night-runners mood: a warm sodium-tinted city haze rather than a cold
+    // blue night. The fill is kept low so lamps, emissive windows and light
+    // pools still carry the scene, but warm and lifted just enough that the
+    // asphalt and distant traffic read their colour instead of falling to flat
+    // black between the pools. A cool moon rim keeps some colour contrast.
+    this.roadScene.background=new THREE.Color(0x080605);this.roadScene.fog=new THREE.FogExp2(0x16110d,.0017);
+    this.roadScene.add(new THREE.HemisphereLight(0x564a40,0x1e1510,1.58));this.roadScene.add(new THREE.AmbientLight(0x64524a,.66));const moon=new THREE.DirectionalLight(0x9aa6c4,.72);moon.position.set(-200,300,-100);this.roadScene.add(moon);
     this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
   }
   buildWorld(){
@@ -756,7 +759,7 @@ class ShutokoNights {
     add(new THREE.BoxGeometry(W,.42,L),body,0,.48,0);add(new THREE.BoxGeometry(W*.93,.18,L*.3),body,0,.74,L*-.32);const cabin=add(new THREE.BoxGeometry(W*.76,H*.45,L*.4),dark,0,1.0,L*.04);cabin.geometry.rotateX(-.03);add(new THREE.BoxGeometry(W*.7,.11,L*.32),body,0,1.3,L*.05);
     const wg=new THREE.CylinderGeometry(.3,.3,.17,8),front=[];for(const x of [-W*.52,W*.52])for(const z of [-L*.31,L*.31]){const pivot=new THREE.Group();pivot.position.set(x,.33,z);const wh=new THREE.Mesh(wg,rubber);wh.rotation.z=Math.PI/2;pivot.add(wh);g.add(pivot);visualMeshes.push(wh);if(z<0)front.push(pivot);}
     const headMat=new THREE.MeshBasicMaterial({color:0xffe4b0}),tailMat=new THREE.MeshBasicMaterial({color:0xff1833});for(const x of [-W*.31,W*.31])add(new THREE.BoxGeometry(.28,.13,.04),headMat,x,.63,-L*.505);for(const x of [-W*.32,W*.32])add(new THREE.BoxGeometry(.3,.13,.04),tailMat,x,.63,L*.505);
-    if(player){const left=new THREE.SpotLight(0xffe4bd,1350,58,.48,.72,1.35),right=left.clone();left.position.set(-W*.28,.72,-L*.49);right.position.set(W*.28,.72,-L*.49);left.target.position.set(-W*.28,.1,-28);right.target.position.set(W*.28,.1,-28);g.add(left,right,left.target,right.target);}
+    if(player){const left=new THREE.SpotLight(0xffe4bd,900,58,.48,.72,1.35),right=left.clone();left.position.set(-W*.28,.72,-L*.49);right.position.set(W*.28,.72,-L*.49);left.target.position.set(-W*.28,.1,-28);right.target.position.set(W*.28,.1,-28);g.add(left,right,left.target,right.target);}
     g.userData.frontWheels=front;g.userData.visualMeshes=visualMeshes;return g;
   }
 

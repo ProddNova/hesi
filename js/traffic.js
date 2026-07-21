@@ -228,7 +228,12 @@ function mergedBoxGeometry(parts) {
 function makeTrafficMesh(geometries, sharedMaterials) {
   const group = new THREE.Group();
   group.name = 'traffic-vehicle';
-  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true }));
+  // The body carries a self-lit floor (emissive = its own colour) so the
+  // fluorescent fleet reads at any distance instead of falling to a black
+  // silhouette once it is outside the player's headlight cone — the reveal as
+  // you close on a car should be subtle, not "it just switched on". This is a
+  // material property, not a light, so it costs nothing per frame.
+  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true, emissiveIntensity: 0.34 }));
   const lamps = new THREE.Mesh(geometries.lamps, sharedMaterials.headlamp);
   const taillamp = new THREE.Mesh(geometries.brake, sharedMaterials.taillamp);
   const blinkerL = new THREE.Mesh(geometries.blinkerL, sharedMaterials.indicator);
@@ -496,6 +501,7 @@ export class TrafficSystem {
     const ud = vehicle.mesh.userData;
     ud.body.geometry = geoms.body;
     ud.body.material.color.set(color);
+    ud.body.material.emissive.set(color);
     ud.lamps.geometry = geoms.lamps;
     ud.taillamps[0].geometry = geoms.brake;
     ud.taillamps[0].material = this._sharedMaterials.taillamp;
