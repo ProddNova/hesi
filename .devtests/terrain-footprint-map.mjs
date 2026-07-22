@@ -12,6 +12,10 @@ import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const TAG = process.argv[2] || 'after';
+// Optional close-up: --zoom <centreX> <centreZ> <halfSpan-in-metres>
+const ZOOM = process.argv.includes('--zoom')
+  ? process.argv.slice(process.argv.indexOf('--zoom') + 1, process.argv.indexOf('--zoom') + 4).map(Number)
+  : null;
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(ROOT, '.devtests', 'shots');
 await mkdir(OUT, { recursive: true });
@@ -40,7 +44,7 @@ page.on('dialog', (d) => d.accept());
 await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 60000 });
 
-const report = await page.evaluate(() => {
+const report = await page.evaluate((zoom) => {
   const map = window.shutoko.map;
   const slabNames = new Set(map._terrainSlabs.map((s) => s.name));
   const meshes = [];
@@ -51,11 +55,16 @@ const report = await page.evaluate(() => {
     bounds.minX = Math.min(bounds.minX, x); bounds.maxX = Math.max(bounds.maxX, x);
     bounds.minZ = Math.min(bounds.minZ, z); bounds.maxZ = Math.max(bounds.maxZ, z);
   };
-  for (const slab of map._terrainSlabs) {
-    grow(slab.x - slab.w / 2, slab.z - slab.d / 2);
-    grow(slab.x + slab.w / 2, slab.z + slab.d / 2);
+  if (zoom) {
+    grow(zoom[0] - zoom[2], zoom[1] - zoom[2]);
+    grow(zoom[0] + zoom[2], zoom[1] + zoom[2]);
+  } else {
+    for (const slab of map._terrainSlabs) {
+      grow(slab.x - slab.w / 2, slab.z - slab.d / 2);
+      grow(slab.x + slab.w / 2, slab.z + slab.d / 2);
+    }
   }
-  const pad = 800;
+  const pad = zoom ? 0 : 800;
   const w = bounds.maxX - bounds.minX + pad * 2;
   const h = bounds.maxZ - bounds.minZ + pad * 2;
   const W = 900;
@@ -78,9 +87,11 @@ const report = await page.evaluate(() => {
     ctx.strokeRect(px(slab.x - slab.w / 2), py(slab.z + slab.d / 2), slab.w * scale, slab.d * scale);
   }
 
-  // carved land: every +Y face, collected as world-space rects
+  // carved land: every +Y face, kept as world-space triangles
   let tris = 0;
-  const rects = [];
+  let flipped = 0;
+  let degenerate = 0;
+  const faces = [];
   ctx.fillStyle = '#25406b';
   for (const mesh of meshes) {
     const pos = mesh.geometry.attributes.position;
@@ -89,32 +100,49 @@ const report = await page.evaluate(() => {
     tris += idx.count / 3;
     for (let t = 0; t < idx.count; t += 3) {
       const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2);
+      // Winding must agree with the stored normal on EVERY face, cap or skirt.
+      const ux = pos.getX(b) - pos.getX(a), uy = pos.getY(b) - pos.getY(a), uz = pos.getZ(b) - pos.getZ(a);
+      const vx = pos.getX(c) - pos.getX(a), vy = pos.getY(c) - pos.getY(a), vz = pos.getZ(c) - pos.getZ(a);
+      const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+      const len = Math.hypot(cx, cy, cz);
+      if (len < 1e-6) degenerate += 1;
+      else if ((cx * nor.getX(a) + cy * nor.getY(a) + cz * nor.getZ(a)) / len < 0.001) flipped += 1;
       if (nor.getY(a) < 0.5) continue;
-      const xs = [], zs = [];
+      const tri = [];
       ctx.beginPath();
       for (const v of [a, b, c]) {
         const wx = pos.getX(v) + mesh.position.x;
         const wz = pos.getZ(v) + mesh.position.z;
-        xs.push(wx); zs.push(wz);
+        tri.push(wx, wz);
         ctx.lineTo(px(wx), py(wz));
       }
       ctx.closePath(); ctx.fill();
-      rects.push({ minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) });
+      faces.push(tri);
     }
   }
   const HASH = 512;
-  const rectHash = new Map();
-  for (const r of rects) {
-    for (let i = Math.floor(r.minX / HASH); i <= Math.floor(r.maxX / HASH); i += 1) {
-      for (let k = Math.floor(r.minZ / HASH); k <= Math.floor(r.maxZ / HASH); k += 1) {
+  const faceHash = new Map();
+  for (const tri of faces) {
+    const minX = Math.min(tri[0], tri[2], tri[4]);
+    const maxX = Math.max(tri[0], tri[2], tri[4]);
+    const minZ = Math.min(tri[1], tri[3], tri[5]);
+    const maxZ = Math.max(tri[1], tri[3], tri[5]);
+    for (let i = Math.floor(minX / HASH); i <= Math.floor(maxX / HASH); i += 1) {
+      for (let k = Math.floor(minZ / HASH); k <= Math.floor(maxZ / HASH); k += 1) {
         const key = `${i},${k}`;
-        if (!rectHash.has(key)) rectHash.set(key, []);
-        rectHash.get(key).push(r);
+        if (!faceHash.has(key)) faceHash.set(key, []);
+        faceHash.get(key).push(tri);
       }
     }
   }
-  const onLand = (x, z) => (rectHash.get(`${Math.floor(x / HASH)},${Math.floor(z / HASH)}`) || [])
-    .some((r) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ);
+  const side = (px1, pz1, px2, pz2, x, z) => (px2 - px1) * (z - pz1) - (pz2 - pz1) * (x - px1);
+  const onLand = (x, z) => (faceHash.get(`${Math.floor(x / HASH)},${Math.floor(z / HASH)}`) || [])
+    .some((t) => {
+      const d1 = side(t[0], t[1], t[2], t[3], x, z);
+      const d2 = side(t[2], t[3], t[4], t[5], x, z);
+      const d3 = side(t[4], t[5], t[0], t[1], x, z);
+      return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+    });
   const insideSlab = (x, z) => map._terrainSlabs.some((s) => Math.abs(x - s.x) <= s.w / 2 && Math.abs(z - s.z) <= s.d / 2);
 
   // routes
@@ -140,9 +168,9 @@ const report = await page.evaluate(() => {
     const size = supported ? 1.4 : 4;
     ctx.fillRect(px(anchor.x) - size / 2, py(anchor.z) - size / 2, size, size);
   }
-  return { W, H, tris, anchors, orphans, alwaysOverWater, bounds };
-});
+  return { W, H, tris, flipped, degenerate, anchors, orphans, alwaysOverWater, bounds };
+}, ZOOM);
 console.log(JSON.stringify(report));
-await page.locator('#terrain-map').screenshot({ path: join(OUT, `terrain-map-${TAG}.png`) });
+await page.locator('#terrain-map').screenshot({ path: join(OUT, `terrain-map-${TAG}${ZOOM ? '-zoom' : ''}.png`) });
 await browser.close();
 server.close();

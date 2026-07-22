@@ -68,6 +68,9 @@ const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 const TERRAIN_CELL = 64;
 const TERRAIN_ROAD_HALO = 130;
 const TERRAIN_BUILDING_MARGIN = 45;
+// Bucket size for the stamped-disc index the coastline is contoured against.
+const TERRAIN_DISC_HASH = 256;
+const UP_NORMAL = [0, 1, 0];
 // Local Y of the carved slab: the mesh sits where the old box centre sat, so
 // land still spans -1.12 m to -0.12 m in world space, just above the bay.
 const TERRAIN_TOP_Y = 0.5;
@@ -8175,20 +8178,25 @@ export class HighwayMap {
    */
   _buildTerrain() {
     if (!this._terrainSlabs.length) return;
+    // Rectangles grow by one cell so a shoreline prop sitting in the last few
+    // metres of one keeps its ground.
     const areas = this._terrainSlabs.map((def) => ({
       def,
-      minX: def.x - def.w * 0.5,
-      maxX: def.x + def.w * 0.5,
-      minZ: def.z - def.d * 0.5,
-      maxZ: def.z + def.d * 0.5,
+      minX: def.x - def.w * 0.5 - TERRAIN_CELL,
+      maxX: def.x + def.w * 0.5 + TERRAIN_CELL,
+      minZ: def.z - def.d * 0.5 - TERRAIN_CELL,
+      maxZ: def.z + def.d * 0.5 + TERRAIN_CELL,
       rows: new Map(),
       cells: 0,
     }));
     // Global, so two areas that meet do not skirt their shared border.
     const land = new Map();
+    // Every stamped disc, kept so the coastline can be contoured from the
+    // union itself rather than from the cells that approximate it.
+    const discs = [];
+    const discHash = new Map();
+    let discReach = 0;
 
-    // Cell-vs-rectangle overlap, not centre-in-rectangle: a shoreline prop
-    // sitting in the last few metres of a rectangle keeps its ground.
     const areaOver = (i, k) => {
       const x0 = i * TERRAIN_CELL;
       const z0 = k * TERRAIN_CELL;
@@ -8208,16 +8216,24 @@ export class HighwayMap {
       area.rows.get(k).add(i);
       area.cells += 1;
     };
+    // Marks every cell the disc TOUCHES, not just those whose centre it
+    // covers, so the contour can never leave the marked region.
     const stampDisc = (x, z, radius) => {
+      const disc = { x, z, r: radius };
+      discs.push(disc);
+      discReach = Math.max(discReach, radius);
+      const hashKey = `${Math.floor(x / TERRAIN_DISC_HASH)},${Math.floor(z / TERRAIN_DISC_HASH)}`;
+      if (!discHash.has(hashKey)) discHash.set(hashKey, []);
+      discHash.get(hashKey).push(disc);
       const limit = radius * radius;
       const i0 = Math.floor((x - radius) / TERRAIN_CELL);
       const i1 = Math.floor((x + radius) / TERRAIN_CELL);
       const k0 = Math.floor((z - radius) / TERRAIN_CELL);
       const k1 = Math.floor((z + radius) / TERRAIN_CELL);
       for (let i = i0; i <= i1; i += 1) {
-        const dx = (i + 0.5) * TERRAIN_CELL - x;
+        const dx = Math.max(i * TERRAIN_CELL - x, 0, x - (i + 1) * TERRAIN_CELL);
         for (let k = k0; k <= k1; k += 1) {
-          const dz = (k + 0.5) * TERRAIN_CELL - z;
+          const dz = Math.max(k * TERRAIN_CELL - z, 0, z - (k + 1) * TERRAIN_CELL);
           if (dx * dx + dz * dz <= limit) mark(i, k);
         }
       }
@@ -8277,9 +8293,37 @@ export class HighwayMap {
       }
     }
 
+    // Signed distance to the carved shape: positive inside, and smooth, so
+    // marching squares gives the disc union's own rounded coast instead of
+    // the staircase the cell grid would draw. Union of discs is a max of
+    // their distances; the rectangle mask clips it with a min.
+    const reach = Math.ceil(discReach / TERRAIN_DISC_HASH);
+    const field = (x, z) => {
+      let inDiscs = -Infinity;
+      const ci = Math.floor(x / TERRAIN_DISC_HASH);
+      const ck = Math.floor(z / TERRAIN_DISC_HASH);
+      for (let i = ci - reach; i <= ci + reach; i += 1) {
+        for (let k = ck - reach; k <= ck + reach; k += 1) {
+          for (const disc of discHash.get(`${i},${k}`) || []) {
+            const d = disc.r - Math.hypot(disc.x - x, disc.z - z);
+            if (d > inDiscs) inDiscs = d;
+          }
+        }
+      }
+      if (inDiscs === -Infinity) return -Infinity;
+      let inRects = -Infinity;
+      for (const area of areas) {
+        const dx = Math.max(area.minX - x, x - area.maxX);
+        const dz = Math.max(area.minZ - z, z - area.maxZ);
+        const d = -(Math.hypot(Math.max(dx, 0), Math.max(dz, 0)) + Math.min(Math.max(dx, dz), 0));
+        if (d > inRects) inRects = d;
+      }
+      return Math.min(inDiscs, inRects);
+    };
+
     for (const area of areas) {
       if (!area.cells) continue;
-      const mesh = new THREE.Mesh(this._terrainGeometry(area, land), this.materials.ground);
+      const mesh = new THREE.Mesh(this._terrainGeometry(area, field), this.materials.ground);
       mesh.position.set(area.def.x, -0.62, area.def.z);
       mesh.name = area.def.name;
       this.group.add(mesh);
@@ -8287,24 +8331,60 @@ export class HighwayMap {
   }
 
   /**
-   * One carved area as merged top faces plus a skirt down every coast edge,
-   * in coordinates local to the area centre so the mesh still transforms like
-   * the box it replaces.
+   * One carved area as a top surface plus a skirt down the coast, in
+   * coordinates local to the area centre so the mesh still transforms like the
+   * box it replaces.
+   *
+   * Cells fully inside the shape become merged quads — the cheap, flat middle
+   * of the landmass. Cells the coastline crosses are cut by marching squares
+   * against `field`, so the shore follows the rounded disc union instead of
+   * stepping around the grid, and the skirt follows the same cut.
    */
-  _terrainGeometry(area, land) {
+  _terrainGeometry(area, field) {
     const positions = [];
     const normals = [];
     const uvs = [];
     const indices = [];
+    const vertex = (x, y, z, normal) => {
+      positions.push(x - area.def.x, y, z - area.def.z);
+      normals.push(normal[0], normal[1], normal[2]);
+      uvs.push(x / TERRAIN_CELL, z / TERRAIN_CELL);
+      return positions.length / 3 - 1;
+    };
     // Corners are [worldX, localY, worldZ]; winding is CCW seen from `normal`.
     const face = (corners, normal) => {
       const base = positions.length / 3;
-      for (const [x, y, z] of corners) {
-        positions.push(x - area.def.x, y, z - area.def.z);
-        normals.push(normal[0], normal[1], normal[2]);
-        uvs.push(x / TERRAIN_CELL, z / TERRAIN_CELL);
-      }
+      for (const [x, y, z] of corners) vertex(x, y, z, normal);
       indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    };
+    /**
+     * Top surface from a CCW ring of [x, z]. Non-convex rings (the saddle
+     * hourglass) pass a `hub` they are star-shaped around; convex ones fan.
+     */
+    const cap = (ring, hub) => {
+      const ringIndices = ring.map(([x, z]) => vertex(x, TERRAIN_TOP_Y, z, UP_NORMAL));
+      if (hub) {
+        const hubIndex = vertex(hub[0], TERRAIN_TOP_Y, hub[1], UP_NORMAL);
+        for (let i = 0; i < ring.length; i += 1) {
+          indices.push(hubIndex, ringIndices[i], ringIndices[(i + 1) % ring.length]);
+        }
+        return;
+      }
+      for (let i = 1; i + 1 < ring.length; i += 1) {
+        indices.push(ringIndices[0], ringIndices[i], ringIndices[i + 1]);
+      }
+    };
+    /** Coast wall under one contour segment; land lies left of a -> b. */
+    const wall = (a, b) => {
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const length = Math.hypot(dx, dz);
+      if (length < 1e-4) return;
+      const normal = [-dz / length, 0, dx / length];
+      face([
+        [a[0], TERRAIN_BOTTOM_Y, a[1]], [b[0], TERRAIN_BOTTOM_Y, b[1]],
+        [b[0], TERRAIN_TOP_Y, b[1]], [a[0], TERRAIN_TOP_Y, a[1]],
+      ], normal);
     };
     const runs = (values) => {
       const out = [];
@@ -8315,47 +8395,82 @@ export class HighwayMap {
       }
       return out;
     };
-    const open = (i, k) => !land.has(`${i},${k}`);
 
+    // Corner samples, shared between the four cells that meet there.
+    const samples = new Map();
+    const sample = (i, k) => {
+      const key = `${i},${k}`;
+      let value = samples.get(key);
+      if (value === undefined) {
+        value = field(i * TERRAIN_CELL, k * TERRAIN_CELL);
+        samples.set(key, value);
+      }
+      return value;
+    };
+    // Corner walk order: CCW seen from above, matching the top-face winding.
+    const WALK = [[0, 0], [0, 1], [1, 1], [1, 0]];
+
+    const solid = new Map();
     for (const [k, row] of area.rows) {
+      for (const i of row) {
+        const corners = WALK.map(([di, dk]) => sample(i + di, k + dk));
+        const inside = corners.filter((value) => value >= 0).length;
+        if (inside === 0) continue;
+        if (inside === 4) {
+          if (!solid.has(k)) solid.set(k, new Set());
+          solid.get(k).add(i);
+          continue;
+        }
+        const x0 = i * TERRAIN_CELL;
+        const z0 = k * TERRAIN_CELL;
+        const points = WALK.map(([di, dk]) => [x0 + di * TERRAIN_CELL, z0 + dk * TERRAIN_CELL]);
+        const middle = field(x0 + TERRAIN_CELL * 0.5, z0 + TERRAIN_CELL * 0.5);
+        // Saddle: opposite corners inside, the two others out. With a dry
+        // middle the two corners are separate spits, not one neck.
+        const saddle = inside === 2 && (corners[0] >= 0) === (corners[2] >= 0);
+        const ring = [];
+        const coast = [];
+        for (let e = 0; e < 4; e += 1) {
+          const next = (e + 1) % 4;
+          const near = corners[e];
+          const far = corners[next];
+          if (near >= 0) ring.push(points[e]);
+          if ((near >= 0) === (far >= 0)) continue;
+          // Leaving the land: the coast runs from this crossing to the next
+          // ring entry, which is where the walk re-enters it.
+          if (near >= 0) coast.push(ring.length);
+          const t = near / (near - far);
+          ring.push([
+            points[e][0] + (points[next][0] - points[e][0]) * t,
+            points[e][1] + (points[next][1] - points[e][1]) * t,
+          ]);
+        }
+        if (saddle && middle < 0) {
+          // Two disjoint corner spits. Each runs [entry, corner, exit] from
+          // the ring entry that follows a coast segment.
+          for (const exit of coast) {
+            const start = (exit + 1) % ring.length;
+            const piece = [ring[start], ring[(start + 1) % ring.length], ring[(start + 2) % ring.length]];
+            cap(piece, null);
+            wall(piece[2], piece[0]);
+          }
+          continue;
+        }
+        // Every non-saddle ring is a square with one corner region cut off, so
+        // it is convex and fans safely. Only the saddle hourglass needs a hub,
+        // and only its own centre is guaranteed to be inside it.
+        cap(ring, saddle ? [x0 + TERRAIN_CELL * 0.5, z0 + TERRAIN_CELL * 0.5] : null);
+        for (const index of coast) wall(ring[index], ring[(index + 1) % ring.length]);
+      }
+    }
+
+    for (const [k, row] of solid) {
       const z0 = k * TERRAIN_CELL;
       const z1 = (k + 1) * TERRAIN_CELL;
       for (const [i0, i1] of runs(row)) {
         const x0 = i0 * TERRAIN_CELL;
         const x1 = (i1 + 1) * TERRAIN_CELL;
-        face([[x0, TERRAIN_TOP_Y, z0], [x0, TERRAIN_TOP_Y, z1], [x1, TERRAIN_TOP_Y, z1], [x1, TERRAIN_TOP_Y, z0]], [0, 1, 0]);
-      }
-      for (const [i0, i1] of runs([...row].filter((i) => open(i, k - 1)))) {
-        const x0 = i0 * TERRAIN_CELL;
-        const x1 = (i1 + 1) * TERRAIN_CELL;
-        face([[x1, TERRAIN_BOTTOM_Y, z0], [x0, TERRAIN_BOTTOM_Y, z0], [x0, TERRAIN_TOP_Y, z0], [x1, TERRAIN_TOP_Y, z0]], [0, 0, -1]);
-      }
-      for (const [i0, i1] of runs([...row].filter((i) => open(i, k + 1)))) {
-        const x0 = i0 * TERRAIN_CELL;
-        const x1 = (i1 + 1) * TERRAIN_CELL;
-        face([[x0, TERRAIN_BOTTOM_Y, z1], [x1, TERRAIN_BOTTOM_Y, z1], [x1, TERRAIN_TOP_Y, z1], [x0, TERRAIN_TOP_Y, z1]], [0, 0, 1]);
-      }
-    }
-
-    const columns = new Map();
-    for (const [k, row] of area.rows) {
-      for (const i of row) {
-        if (!columns.has(i)) columns.set(i, new Set());
-        columns.get(i).add(k);
-      }
-    }
-    for (const [i, column] of columns) {
-      const x0 = i * TERRAIN_CELL;
-      const x1 = (i + 1) * TERRAIN_CELL;
-      for (const [k0, k1] of runs([...column].filter((k) => open(i - 1, k)))) {
-        const z0 = k0 * TERRAIN_CELL;
-        const z1 = (k1 + 1) * TERRAIN_CELL;
-        face([[x0, TERRAIN_BOTTOM_Y, z0], [x0, TERRAIN_BOTTOM_Y, z1], [x0, TERRAIN_TOP_Y, z1], [x0, TERRAIN_TOP_Y, z0]], [-1, 0, 0]);
-      }
-      for (const [k0, k1] of runs([...column].filter((k) => open(i + 1, k)))) {
-        const z0 = k0 * TERRAIN_CELL;
-        const z1 = (k1 + 1) * TERRAIN_CELL;
-        face([[x1, TERRAIN_BOTTOM_Y, z1], [x1, TERRAIN_BOTTOM_Y, z0], [x1, TERRAIN_TOP_Y, z0], [x1, TERRAIN_TOP_Y, z1]], [1, 0, 0]);
+        face([[x0, TERRAIN_TOP_Y, z0], [x0, TERRAIN_TOP_Y, z1], [x1, TERRAIN_TOP_Y, z1], [x1, TERRAIN_TOP_Y, z0]], UP_NORMAL);
       }
     }
 
