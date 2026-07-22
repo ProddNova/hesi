@@ -133,6 +133,7 @@ export function createEditorShell(root) {
     toolGroup('Create',
       button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
       button('Modeler', 'open-modeler', { title: 'Open the Object Modeler: create and texture PSX-style objects' }),
+      button('Textures', 'open-world-textures', { title: 'Change road, parking-area, guardrail, barrier, and structure textures' }),
     ),
     element('span', 'toolbar-divider'),
     toolGroup('Transform',

@@ -315,4 +315,6 @@ test('world texture slots stay aligned with the map material names', () => {
   for (const slot of Object.keys(WORLD_TEXTURE_SLOTS)) {
     assert.match(slot, /^[a-zA-Z]+$/);
   }
+  assert.equal(WORLD_TEXTURE_SLOTS.roadService.label, 'Service area asphalt');
+  assert.equal(WORLD_TEXTURE_SLOTS.railMetal.label, 'Guardrails');
 });

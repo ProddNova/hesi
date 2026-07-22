@@ -206,6 +206,10 @@ export async function createEditorApp(root) {
     if (modeler) modeler.open();
     else shell.setStatus('The Modeler is available once the world has loaded');
   });
+  shell.onToolbar('open-world-textures', () => {
+    if (modeler) modeler.openWorldTextures();
+    else shell.setStatus('World textures are available once the world has loaded');
+  });
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));

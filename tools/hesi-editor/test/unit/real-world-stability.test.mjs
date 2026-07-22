@@ -1,9 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import { HighwayMap } from '../../../../js/map.js';
 import ROUTE_DATA from '../../../../data/routes-smoothed.js';
 import { discoverHesiEntities } from '../../src/world/entity-discovery.js';
 import { EDITOR_LAYERS } from '../../src/entity-registry.js';
+
+function crashCushionSnapshot(map) {
+  const snapshot = { total: 0, visible: 0 };
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  map.group.traverse((object) => {
+    if (!object.isInstancedMesh || !object.name.endsWith('box:cushion')) return;
+    snapshot.total += object.count;
+    for (let index = 0; index < object.count; index += 1) {
+      object.getMatrixAt(index, matrix);
+      matrix.decompose(position, quaternion, scale);
+      if (scale.lengthSq() > 1e-12) snapshot.visible += 1;
+    }
+  });
+  return snapshot;
+}
 
 function buildIdentitySnapshot() {
   const map = new HighwayMap({ quality: 'low', applyFog: false });
@@ -24,6 +43,7 @@ function buildIdentitySnapshot() {
       layers: discovery.layerCounts,
       gameplayStarted: Boolean(globalThis.shutoko),
       roadNetworkYOffset: map.roadNetworkYOffset,
+      crashCushions: crashCushionSnapshot(map),
       productionYOffset: productionMatch
         ? productionRuntime.points[0].y - productionMatch.points.at(-1)[1]
         : null,
@@ -51,6 +71,8 @@ test('two independent real-world builds produce identical stable entity IDs and 
   assert.ok(first.ids.includes('lamp:wangan-0:0042'), 'known real Wangan lamp ID is discoverable');
   assert.ok(EDITOR_LAYERS.every((layer) => first.layers[layer] > 0), 'every truthful semantic layer is populated');
   assert.equal(first.roadNetworkYOffset, 25, 'editor exposes the production road elevation offset');
+  assert.ok(first.crashCushions.total > 0, 'removed crash cushions keep ID-preserving tombstones');
+  assert.equal(first.crashCushions.visible, 0, 'yellow crash cushions stay removed from the rendered road');
   assert.ok(Math.abs(first.productionYOffset - first.roadNetworkYOffset) < 1e-6,
     'production route controls can be placed at the runtime road/collision elevation');
   assert.deepEqual(first.tatsumiExit, {

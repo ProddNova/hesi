@@ -272,7 +272,7 @@ function localToGps(origin, x, z) {
 
 async function makeFullWorld(onProgress) {
   onProgress('Importing the production HESI map generator');
-  const { HighwayMap } = await import('/js/map.js');
+  const { HighwayMap } = await import('/js/map.js?v=20260722b');
   onProgress('Generating real routes, structures, terrain, and props');
   await new Promise((resolve) => requestAnimationFrame(resolve));
   const map = new HighwayMap({ quality: 'low', applyFog: false });

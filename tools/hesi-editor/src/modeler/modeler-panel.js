@@ -197,17 +197,21 @@ export class ModelerPanel {
 
     // Right: inspector for part / face / textures / world textures
     const right = element('aside', 'modeler-panel modeler-right');
+    this.rightPanel = right;
     this.inspector = element('div', 'modeler-inspector');
     right.append(this.inspector);
+    this.worldTextureSection = element('section', 'modeler-world-section');
+    this.worldTextureSection.dataset.testid = 'world-texture-section';
+    this.worldTextureSection.append(element('h3', '', 'World textures'));
+    this.worldTextureSection.append(element('p', 'modeler-help', 'Replace road, parking-area, guardrail, barrier, and structure textures across the generated map.'));
+    this.worldTextureList = element('div', 'modeler-world-textures');
+    this.worldTextureSection.append(this.worldTextureList);
+    right.append(this.worldTextureSection);
     right.append(element('h3', '', 'Texture library'));
     this.textureList = element('div', 'modeler-texture-list');
     right.append(this.textureList);
     this.uploadTextureButton = button('Upload image…', 'tool-button', 'Add an image to the texture library');
     right.append(this.uploadTextureButton);
-    right.append(element('h3', '', 'World textures'));
-    right.append(element('p', 'modeler-help', 'Replace the repeated textures of the generated map — the road asphalt image tiles at one fixed scale across every road surface.'));
-    this.worldTextureList = element('div', 'modeler-world-textures');
-    right.append(this.worldTextureList);
 
     this.fileInput = document.createElement('input');
     this.fileInput.type = 'file';
@@ -368,6 +372,16 @@ export class ModelerPanel {
     this.frameId = requestAnimationFrame(this._renderLoop);
     this.onOpenChange(true);
     this.onStatus('Modeler open · build parts, texture faces, then Save Object to add it to the asset catalog');
+  }
+
+  /** Opens directly at the generated-map texture controls. */
+  openWorldTextures() {
+    this.open();
+    requestAnimationFrame(() => {
+      this.rightPanel.scrollTop = Math.max(0, this.worldTextureSection.offsetTop - 8);
+      this.worldTextureSection.querySelector('button')?.focus({ preventScroll: true });
+    });
+    this.onStatus('World textures · choose images for roads, parking areas, guardrails, barriers, and structures');
   }
 
   close() {

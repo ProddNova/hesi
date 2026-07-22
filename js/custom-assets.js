@@ -50,6 +50,7 @@ export const WORLD_TEXTURE_SLOTS = Object.freeze({
   roadService: { label: 'Service area asphalt', description: 'Parking-area surface at Tatsumi/Shibaura PA' },
   concrete: { label: 'Concrete', description: 'Concrete walls and structures' },
   barrier: { label: 'Barrier', description: 'Road-edge concrete barriers' },
+  railMetal: { label: 'Guardrails', description: 'Metal guardrails along roads and parking areas' },
   building: { label: 'Building', description: 'Untextured background building walls' },
   tunnelWall: { label: 'Tunnel wall', description: 'Tunnel interior walls' },
 });

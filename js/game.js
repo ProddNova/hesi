@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260716a';
+import * as MapModule from './map.js?v=20260722b';
 import * as PhysicsModule from './physics.js?v=20260713a';
 import * as TrafficModule from './traffic.js?v=20260721e';
 import * as Data from './data.js';

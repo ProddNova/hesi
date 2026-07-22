@@ -471,6 +471,8 @@ export class HighwayMap {
       konbini: basic(0xd8ffe9),
       canopy: basic(0xfff2c9),
       fence: lambert(0x30343b),
+      // Kept for zero-scale tombstones that preserve stable generated IDs
+      // after the visible yellow crash-cushion props were removed.
       cushion: basic(0xe0b52f),
       parkedBody: lambert(0xffffff),
       parkedGlass: lambert(0x0e1620),
@@ -5938,7 +5940,7 @@ export class HighwayMap {
       }
     });
 
-    // dead-end cap + crash cushions
+    // Dead-end cap and closure sign.
     if (route.deadEnd) {
       this._buildDeadEnd(route);
     }
@@ -5954,12 +5956,15 @@ export class HighwayMap {
       const rightTop = right.clone(); rightTop.y += 2.4;
       this._pushQuad(bucket, left, right, rightTop, leftTop);
       this._pushQuad(bucket, right, left, leftTop, rightTop);
+      // Preserve the old instance order/IDs for saved editor overrides while
+      // removing the cushions visually and physically from the road.
       const quaternion = yawQuaternion(endFrame.tangent);
+      const removedScale = vec(0, 0, 0);
       for (const lateral of [-1.4, 0, 1.4]) {
         const cushion = this._deckPoint(endFrame, lateral);
         cushion.addScaledVector(endFrame.tangent, -1.6);
         cushion.y += 0.6;
-        this._instance(cushion, vec(1.25, 1.2, 1.1), quaternion, null, 'box:cushion');
+        this._instance(cushion, removedScale, quaternion, null, 'box:cushion');
       }
       const sign = this._makeSignMesh('通行止|ROAD CLOSED', '#8a1a1a', 5.2, 2.2);
       const signPos = this._deckPoint(endFrame, 0);
@@ -5974,8 +5979,9 @@ export class HighwayMap {
   /**
    * Junction gore dressing. For every diverge/merge between a mainline and a
    * ramp: find the physical split point (where the two paved edges separate),
-   * paint the hatched wedge over the GENUINE gore nose only, and terminate
-   * the barrier V with a yellow/black crash cushion.
+   * paint the hatched wedge over the GENUINE gore nose only. The old
+   * yellow/black crash-cushion props were intentionally removed: on the
+   * generated network they repeated across the road and obstructed driving.
    *
    * The wedge derives from the shared junction-zone record (the same one
    * markings/rails/physics read): stations inside the zone's CROSSABLE
@@ -6068,19 +6074,23 @@ export class HighwayMap {
         }
       }
 
-      // crash cushion at the barrier split
+      // Zero-scale tombstones keep all later generated prop IDs stable for
+      // existing projects, but the yellow/black cushion is no longer visible
+      // and has no size on the road.
       if (tip) {
         const quaternion = yawQuaternion(tip.tangent);
+        const removedScale = vec(0, 0, 0);
         const base = tip.wedge.clone();
         base.y += 0.55;
-        this._instance(base, vec(1.15, 1.05, 1.7), quaternion, null, 'box:cushion');
+        this._instance(base, removedScale, quaternion, null, 'box:cushion');
         const stripe = base.clone();
         stripe.y += 0.12;
-        this._instance(stripe, vec(1.2, 0.3, 1.75), quaternion, 0x16171b, 'box:parkedBody');
+        this._instance(stripe, removedScale, quaternion, 0x16171b, 'box:parkedBody');
         const marker = base.clone();
         marker.y += 0.95;
-        this._instance(marker, vec(0.5, 0.55, 0.35), quaternion, 0xffd24a, 'box:reflector');
+        this._instance(marker, removedScale, quaternion, 0xffd24a, 'box:reflector');
       }
+
     }
   }
 
