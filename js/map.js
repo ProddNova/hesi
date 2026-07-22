@@ -61,6 +61,18 @@ const CHUNK = 600;
 const CHUNK_VISIBLE = 1500;
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 
+// Land mask resolution and reach (see _buildTerrain). The halo is measured
+// from a carriageway centreline, so ~110 m of it is open ground once the
+// widest deck is subtracted — enough for pillars, embankments and the
+// roadside clutter, without walling off the bay.
+const TERRAIN_CELL = 64;
+const TERRAIN_ROAD_HALO = 130;
+const TERRAIN_BUILDING_MARGIN = 45;
+// Local Y of the carved slab: the mesh sits where the old box centre sat, so
+// land still spans -1.12 m to -0.12 m in world space, just above the bay.
+const TERRAIN_TOP_Y = 0.5;
+const TERRAIN_BOTTOM_Y = -0.5;
+
 // Preserve the existing 15 m terrain lift and add the requested 10 m raise.
 // Apply the total once, at the authoritative data-control-point boundary, so
 // curves and every system derived from them inherit exactly the same lift
@@ -323,6 +335,10 @@ export class HighwayMap {
     // Spatial index: cell key -> [{route, sampleIndex}]
     this._grid = new Map();
     this._gridCell = 260;
+
+    // Ground-level props that are not buildings and so never enter the
+    // placement index, but still need land under them (see _buildTerrain).
+    this._terrainAnchors = [];
 
     // Chunked world: key -> { group, center, alwaysVisible }
     this._chunks = new Map();
@@ -4752,6 +4768,7 @@ export class HighwayMap {
     this._buildServiceAreaDressing();
     this._buildCity();
     this._buildBackdrop();
+    this._buildTerrain();
     this._finalizeChunks();
   }
 
@@ -4779,12 +4796,8 @@ export class HighwayMap {
     water.position.set((minX + maxX) * 0.5, -0.9, (minZ + maxZ) * 0.5);
     this.group.add(water);
 
-    for (const def of this._terrainSlabs) {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(def.w, 1.0, def.d), this.materials.ground);
-      mesh.position.set(def.x, -0.62, def.z);
-      mesh.name = def.name;
-      this.group.add(mesh);
-    }
+    // Land itself is carved in _buildTerrain, once the city has been placed
+    // and its footprints are known.
 
     if (this.options.addLighting !== false) {
       const hemisphere = new THREE.HemisphereLight(0x314167, 0x05050a, 0.72);
@@ -7671,6 +7684,15 @@ export class HighwayMap {
     const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
     if (!this._footprints.has(key)) this._footprints.set(key, []);
     this._footprints.get(key).push({ x, z, r });
+    this._recordGroundAnchor(x, z, r);
+  }
+
+  /**
+   * Ground under a prop, WITHOUT reserving it against further placement: only
+   * _buildTerrain reads these, so recording one can never move a building.
+   */
+  _recordGroundAnchor(x, z, r) {
+    this._terrainAnchors.push({ x, z, r });
   }
 
   /**
@@ -7872,6 +7894,7 @@ export class HighwayMap {
   _buildCity() {
     const random = mulberry32(this.seed ^ 0xa73b91);
     this._footprints = new Map();
+    this._terrainAnchors = [];
 
     // --- C1 canyon: two rows of towers hard against both sides of the loop
     // so the C1 reads as a lit canyon with no bare gaps. The spine is the
@@ -7994,6 +8017,7 @@ export class HighwayMap {
         if (this._distanceToRouteXZ(base) > wangan.halfWidth + 16) {
           const containerColors = [0x54331f, 0x1f4654, 0x5a1f24, 0x2e4a1f, 0x4a3d1f];
           const yaw = yawQuaternion(center.baseTangent);
+          this._recordGroundAnchor(base.x, base.z, 22);
           for (let row = 0; row < 2 + Math.floor(random() * 3); row += 1) {
             for (let level = 0; level < 1 + Math.floor(random() * 3); level += 1) {
               const box = base.clone().addScaledVector(normal, row * 3.4);
@@ -8009,6 +8033,7 @@ export class HighwayMap {
         const base = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback));
         if (this._distanceToRouteXZ(base) > wangan.halfWidth + 16) {
           const yaw = yawQuaternion(center.baseTangent);
+          this._recordGroundAnchor(base.x, base.z, 26);
           for (const legOffset of [-9, 9]) {
             const leg = base.clone().addScaledVector(center.baseTangent, legOffset);
             leg.y = 17;
@@ -8128,6 +8153,218 @@ export class HighwayMap {
     wheelGroup.position.copy(wheelCenter);
     wheelGroup.rotation.y = Math.PI * 0.32;
     this._addChunkMesh(wheelGroup, wheelCenter);
+  }
+
+  /**
+   * Land, cut to the world that actually stands on it.
+   *
+   * The extractor ships eight axis-aligned rectangles (`data.terrain`) that
+   * between them blanket ~250 km² of Tokyo Bay. Drawn whole they run past the
+   * fog limit in every direction, so the horizon is one hard straight edge and
+   * the lower half of the skybox panorama — where a bay panorama carries the
+   * city's reflection on the water — can never be seen.
+   *
+   * The rectangles are therefore demoted to a mask: they still decide WHERE
+   * land may exist, so the bay stays open under the Rainbow Bridge and along
+   * the Wangan, but a cell only becomes land if something stands on it — a
+   * carriageway within TERRAIN_ROAD_HALO, or a building footprint recorded by
+   * _buildCity / _buildBackdrop. Buildings set back past the corridor keep a
+   * spit of land joining them to the shore instead of floating on an island.
+   *
+   * Runs after the city because it consumes `this._terrainAnchors`.
+   */
+  _buildTerrain() {
+    if (!this._terrainSlabs.length) return;
+    const areas = this._terrainSlabs.map((def) => ({
+      def,
+      minX: def.x - def.w * 0.5,
+      maxX: def.x + def.w * 0.5,
+      minZ: def.z - def.d * 0.5,
+      maxZ: def.z + def.d * 0.5,
+      rows: new Map(),
+      cells: 0,
+    }));
+    // Global, so two areas that meet do not skirt their shared border.
+    const land = new Map();
+
+    // Cell-vs-rectangle overlap, not centre-in-rectangle: a shoreline prop
+    // sitting in the last few metres of a rectangle keeps its ground.
+    const areaOver = (i, k) => {
+      const x0 = i * TERRAIN_CELL;
+      const z0 = k * TERRAIN_CELL;
+      for (const area of areas) {
+        if (x0 + TERRAIN_CELL >= area.minX && x0 <= area.maxX
+          && z0 + TERRAIN_CELL >= area.minZ && z0 <= area.maxZ) return area;
+      }
+      return null;
+    };
+    const mark = (i, k) => {
+      const key = `${i},${k}`;
+      if (land.has(key)) return;
+      const area = areaOver(i, k);
+      if (!area) return;
+      land.set(key, area);
+      if (!area.rows.has(k)) area.rows.set(k, new Set());
+      area.rows.get(k).add(i);
+      area.cells += 1;
+    };
+    const stampDisc = (x, z, radius) => {
+      const limit = radius * radius;
+      const i0 = Math.floor((x - radius) / TERRAIN_CELL);
+      const i1 = Math.floor((x + radius) / TERRAIN_CELL);
+      const k0 = Math.floor((z - radius) / TERRAIN_CELL);
+      const k1 = Math.floor((z + radius) / TERRAIN_CELL);
+      for (let i = i0; i <= i1; i += 1) {
+        const dx = (i + 0.5) * TERRAIN_CELL - x;
+        for (let k = k0; k <= k1; k += 1) {
+          const dz = (k + 0.5) * TERRAIN_CELL - z;
+          if (dx * dx + dz * dz <= limit) mark(i, k);
+        }
+      }
+    };
+
+    // The corridor, plus a coarse hash of the same points so a set-back
+    // building can be walked back to the nearest carriageway.
+    const ROAD_HASH = 512;
+    const roadHash = new Map();
+    for (const route of this.routes.values()) {
+      for (const sample of route.samples) {
+        const point = sample.point;
+        stampDisc(point.x, point.z, TERRAIN_ROAD_HALO);
+        const key = `${Math.floor(point.x / ROAD_HASH)},${Math.floor(point.z / ROAD_HASH)}`;
+        if (!roadHash.has(key)) roadHash.set(key, []);
+        roadHash.get(key).push(point);
+      }
+    }
+    const nearestRoadPoint = (x, z) => {
+      const ci = Math.floor(x / ROAD_HASH);
+      const ck = Math.floor(z / ROAD_HASH);
+      let best = null;
+      let bestSq = Infinity;
+      let foundRing = Infinity;
+      // One ring past the first hit: the true nearest point can sit just over
+      // a cell border from the one that answered first.
+      for (let ring = 0; ring <= Math.min(4, foundRing + 1); ring += 1) {
+        for (let i = ci - ring; i <= ci + ring; i += 1) {
+          for (let k = ck - ring; k <= ck + ring; k += 1) {
+            if (ring > 0 && Math.abs(i - ci) !== ring && Math.abs(k - ck) !== ring) continue;
+            for (const point of roadHash.get(`${i},${k}`) || []) {
+              const dx = point.x - x;
+              const dz = point.z - z;
+              const distSq = dx * dx + dz * dz;
+              if (distSq < bestSq) { bestSq = distSq; best = point; }
+            }
+          }
+        }
+        if (best && foundRing === Infinity) foundRing = ring;
+      }
+      return best ? { point: best, distance: Math.sqrt(bestSq) } : null;
+    };
+
+    for (const anchor of this._terrainAnchors) {
+      const radius = anchor.r + TERRAIN_BUILDING_MARGIN;
+      stampDisc(anchor.x, anchor.z, radius);
+      const nearest = nearestRoadPoint(anchor.x, anchor.z);
+      if (!nearest || nearest.distance <= TERRAIN_ROAD_HALO) continue;
+      const steps = Math.ceil(nearest.distance / (TERRAIN_CELL * 0.5));
+      for (let step = 1; step < steps; step += 1) {
+        const t = step / steps;
+        stampDisc(
+          anchor.x + (nearest.point.x - anchor.x) * t,
+          anchor.z + (nearest.point.z - anchor.z) * t,
+          radius,
+        );
+      }
+    }
+
+    for (const area of areas) {
+      if (!area.cells) continue;
+      const mesh = new THREE.Mesh(this._terrainGeometry(area, land), this.materials.ground);
+      mesh.position.set(area.def.x, -0.62, area.def.z);
+      mesh.name = area.def.name;
+      this.group.add(mesh);
+    }
+  }
+
+  /**
+   * One carved area as merged top faces plus a skirt down every coast edge,
+   * in coordinates local to the area centre so the mesh still transforms like
+   * the box it replaces.
+   */
+  _terrainGeometry(area, land) {
+    const positions = [];
+    const normals = [];
+    const uvs = [];
+    const indices = [];
+    // Corners are [worldX, localY, worldZ]; winding is CCW seen from `normal`.
+    const face = (corners, normal) => {
+      const base = positions.length / 3;
+      for (const [x, y, z] of corners) {
+        positions.push(x - area.def.x, y, z - area.def.z);
+        normals.push(normal[0], normal[1], normal[2]);
+        uvs.push(x / TERRAIN_CELL, z / TERRAIN_CELL);
+      }
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    };
+    const runs = (values) => {
+      const out = [];
+      for (const value of [...values].sort((a, b) => a - b)) {
+        const last = out[out.length - 1];
+        if (last && value === last[1] + 1) last[1] = value;
+        else out.push([value, value]);
+      }
+      return out;
+    };
+    const open = (i, k) => !land.has(`${i},${k}`);
+
+    for (const [k, row] of area.rows) {
+      const z0 = k * TERRAIN_CELL;
+      const z1 = (k + 1) * TERRAIN_CELL;
+      for (const [i0, i1] of runs(row)) {
+        const x0 = i0 * TERRAIN_CELL;
+        const x1 = (i1 + 1) * TERRAIN_CELL;
+        face([[x0, TERRAIN_TOP_Y, z0], [x0, TERRAIN_TOP_Y, z1], [x1, TERRAIN_TOP_Y, z1], [x1, TERRAIN_TOP_Y, z0]], [0, 1, 0]);
+      }
+      for (const [i0, i1] of runs([...row].filter((i) => open(i, k - 1)))) {
+        const x0 = i0 * TERRAIN_CELL;
+        const x1 = (i1 + 1) * TERRAIN_CELL;
+        face([[x1, TERRAIN_BOTTOM_Y, z0], [x0, TERRAIN_BOTTOM_Y, z0], [x0, TERRAIN_TOP_Y, z0], [x1, TERRAIN_TOP_Y, z0]], [0, 0, -1]);
+      }
+      for (const [i0, i1] of runs([...row].filter((i) => open(i, k + 1)))) {
+        const x0 = i0 * TERRAIN_CELL;
+        const x1 = (i1 + 1) * TERRAIN_CELL;
+        face([[x0, TERRAIN_BOTTOM_Y, z1], [x1, TERRAIN_BOTTOM_Y, z1], [x1, TERRAIN_TOP_Y, z1], [x0, TERRAIN_TOP_Y, z1]], [0, 0, 1]);
+      }
+    }
+
+    const columns = new Map();
+    for (const [k, row] of area.rows) {
+      for (const i of row) {
+        if (!columns.has(i)) columns.set(i, new Set());
+        columns.get(i).add(k);
+      }
+    }
+    for (const [i, column] of columns) {
+      const x0 = i * TERRAIN_CELL;
+      const x1 = (i + 1) * TERRAIN_CELL;
+      for (const [k0, k1] of runs([...column].filter((k) => open(i - 1, k)))) {
+        const z0 = k0 * TERRAIN_CELL;
+        const z1 = (k1 + 1) * TERRAIN_CELL;
+        face([[x0, TERRAIN_BOTTOM_Y, z0], [x0, TERRAIN_BOTTOM_Y, z1], [x0, TERRAIN_TOP_Y, z1], [x0, TERRAIN_TOP_Y, z0]], [-1, 0, 0]);
+      }
+      for (const [k0, k1] of runs([...column].filter((k) => open(i + 1, k)))) {
+        const z0 = k0 * TERRAIN_CELL;
+        const z1 = (k1 + 1) * TERRAIN_CELL;
+        face([[x1, TERRAIN_BOTTOM_Y, z1], [x1, TERRAIN_BOTTOM_Y, z0], [x1, TERRAIN_TOP_Y, z0], [x1, TERRAIN_TOP_Y, z1]], [1, 0, 0]);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    return geometry;
   }
 
   // ------------------------------------------------------------------
