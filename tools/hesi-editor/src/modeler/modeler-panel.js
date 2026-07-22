@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   MESH_MAX_FACES, PART_KINDS, WORLD_OBJECTS, WORLD_OBJECT_GROUPS, WORLD_SURFACES,
-  isDefaultWorldSurfaceStyle, worldObjectSurfaces, worldObjectsUsingSurface,
+  isDefaultWorldSurfaceStyle, worldObjectModelKey, worldObjectSurfaces, worldObjectsUsingSurface,
   applyPartFaceProjections, applyVertexOffsets,
   buildPartObject, captureUnionFaceProjection, captureViewFaceProjection, clonePartFaceToOpposite,
   convertPartToMesh, mergePartFaces, meshFacePlanarRegions, meshInsertVertexAtPoint,
@@ -1596,9 +1596,10 @@ export class ModelerPanel {
    */
   _renderWorldObjectPanel() {
     this.worldObjectHeader.innerHTML = '';
-    const meta = WORLD_OBJECTS[this.worldObject];
+    const objectId = this.worldObject;
+    const meta = WORLD_OBJECTS[objectId];
     if (!meta) { this.worldSurfaceList.innerHTML = ''; return; }
-    const surfaces = worldObjectSurfaces(this.worldObject);
+    const surfaces = worldObjectSurfaces(objectId);
 
     const head = element('div', 'surface-head');
     head.append(element('b', '', meta.label));
@@ -1607,15 +1608,17 @@ export class ModelerPanel {
       `${meta.description}. Made of ${surfaces.length} surface${surfaces.length === 1 ? '' : 's'} — pick one below, or click it in the preview. One material, one archetype: every ${meta.label.toLowerCase()} in the world changes with it.`));
 
     // ------------------------------------------------------------- the model --
-    // The generator draws instanced archetypes from ONE shared geometry, so a
-    // saved model can stand in for it and every copy changes. Merged-quad
-    // archetypes (facades, roofs, route signs) have no per-copy record: say so
-    // instead of offering a round trip that cannot land.
+    // Instanced archetypes draw from ONE shared geometry and the buildings keep
+    // a per-copy box record, so both can be stood in for by a saved model and
+    // every copy changes. What has neither (route signs, matrix boards, tunnel
+    // strips) is merged into chunk quads with no trace of the individual
+    // copies: say so instead of offering a round trip that cannot land.
     this.worldObjectHeader.append(element('h4', 'surface-group-title', 'Model'));
-    const replacement = meta.instanceType ? this.store.worldModel(meta.instanceType) : null;
+    const modelKey = worldObjectModelKey(this.worldObject);
+    const replacement = modelKey ? this.store.worldModel(modelKey) : null;
     const replacementAsset = replacement ? this.store.getAsset(replacement) : null;
-    if (meta.instanceType) {
-      const count = this._instanceCount(meta.instanceType);
+    if (modelKey) {
+      const count = this._archetypeCount(meta);
       this.worldObjectHeader.append(element('p', 'modeler-help', replacementAsset
         ? `Every one of these draws your object "${replacementAsset.label}" instead of the generated shape${count ? ` · ${count} in the map` : ''}.`
         : `Model this object and save it, and all ${count ? `${count} ` : ''}copies in the map take the new shape — in the editor and in the game.`));
@@ -1638,17 +1641,17 @@ export class ModelerPanel {
     editable.dataset.testid = hasGeometry ? 'modeler-world-edit-as-parts' : 'modeler-world-edit-as-model';
     editable.addEventListener('click', () => this._editWorldObjectAsModel({ exact: false }));
     editRow.append(editable);
-    if (meta.instanceType) {
+    if (modelKey) {
       const pick = button('Use a saved object…', 'tool-button small',
         'Point this archetype at an object you already modelled');
       pick.dataset.testid = 'modeler-world-pick-model';
-      pick.addEventListener('click', () => this._chooseWorldModel(meta));
+      pick.addEventListener('click', () => this._chooseWorldModel(objectId));
       editRow.append(pick);
       if (replacementAsset) {
         const reset = button('Back to generated shape', 'tool-button small danger',
           'Drop the replacement model; every copy goes back to the shape the generator makes');
         reset.dataset.testid = 'modeler-world-reset-model';
-        reset.addEventListener('click', () => this._setWorldModel(meta, null));
+        reset.addEventListener('click', () => this._setWorldModel(objectId, null));
         editRow.append(reset);
       }
     }
@@ -1704,20 +1707,34 @@ export class ModelerPanel {
    * saved to the catalog and placeable — while surface paint stays the way to
    * change every copy already standing in the map.
    */
-  /** How many copies of an instanced archetype the live map holds. */
-  _instanceCount(instanceType) {
+  /**
+   * How many copies of an archetype the live map holds — instanced buckets by
+   * their instance count, buildings from the per-copy box record, which is
+   * there whether or not a replacement is currently standing in for them.
+   */
+  _archetypeCount(meta) {
+    const map = this.getMap();
+    if (meta.buildingType) {
+      return (map?.buildingBoxes || []).filter((box) => box.material === meta.buildingType).length;
+    }
+    if (!meta.instanceType) return 0;
     let total = 0;
-    for (const chunk of [...(this.getMap()?._chunks?.values?.() || [])]) {
+    for (const chunk of [...(map?._chunks?.values?.() || [])]) {
       for (const object of chunk.group?.children || []) {
-        if (object.isInstancedMesh && String(object.name).replace(/^chunk\s+\S+\s+/, '') === instanceType) total += object.count;
+        if (object.isInstancedMesh && String(object.name).replace(/^chunk\s+\S+\s+/, '') === meta.instanceType) total += object.count;
       }
     }
     return total;
   }
 
   /** Points an archetype at a saved object (or back to the generated shape). */
-  _setWorldModel(meta, assetId) {
-    this.store.setWorldModel(meta.instanceType, assetId);
+  _setWorldModel(objectId, assetId) {
+    // The object is passed in, not read off `this`: the chooser resolves long
+    // after it opened, and the selection may have moved on since.
+    const key = worldObjectModelKey(objectId);
+    const meta = WORLD_OBJECTS[objectId];
+    if (!key || !meta) return;
+    this.store.setWorldModel(key, assetId);
     this.dirtyChip.textContent = 'Unsaved changes';
     this.onWorldModelsChanged();
     this._renderWorldObjectPanel();
@@ -1728,7 +1745,8 @@ export class ModelerPanel {
       : `${meta.label} back to its generated shape`);
   }
 
-  _chooseWorldModel(meta) {
+  _chooseWorldModel(objectId) {
+    const meta = WORLD_OBJECTS[objectId];
     const assets = this.store.assets();
     if (!assets.length) { this.onStatus('No saved objects yet — model one first'); return; }
     const chooser = element('div', 'modeler-chooser');
@@ -1739,7 +1757,7 @@ export class ModelerPanel {
       const pick = element('button', 'modeler-chooser-item');
       pick.type = 'button';
       pick.append(element('small', '', asset.label || asset.id));
-      pick.addEventListener('click', () => { chooser.remove(); this._setWorldModel(meta, asset.id); });
+      pick.addEventListener('click', () => { chooser.remove(); this._setWorldModel(objectId, asset.id); });
       grid.append(pick);
     }
     chooser.append(grid);
@@ -1756,11 +1774,26 @@ export class ModelerPanel {
     if (!meta) return;
     // Remember what is being modelled: Save Object puts the result straight
     // back onto every copy of the archetype it came from.
-    this.modelTargetObject = meta.instanceType ? this.worldObject : null;
+    const modelKey = worldObjectModelKey(this.worldObject);
+    this.modelTargetObject = modelKey ? this.worldObject : null;
+    // Re-opening an archetype that already draws one of your objects reopens
+    // THAT object, so a second round of edits lands on it instead of leaving a
+    // trail of near-identical copies in the catalog.
+    const current = modelKey ? this.store.worldModel(modelKey) : null;
+    if (current && this.store.getAsset(current)) {
+      const target = this.modelTargetObject;
+      this._setLibrary('custom');
+      this.open(current);
+      this.modelTargetObject = target; // _loadDefinition clears it
+      this.onStatus(`Editing "${this.definition.label}" · Save Object and every ${meta.label.toLowerCase()} in the map follows`);
+      return;
+    }
     if (exact && meta.assetId && this.assetRegistry?.get?.(meta.assetId)) {
       this._setLibrary('custom');
+      const target = this.modelTargetObject;
       this.editCopyOfAsset(meta.assetId);
-      this.onStatus(meta.instanceType
+      this.modelTargetObject = target; // editCopyOfAsset may reload the definition
+      this.onStatus(modelKey
         ? `${meta.label} opened with its exact world geometry · Save Object and every copy in the map takes the new shape`
         : `${meta.label} opened with its exact world geometry · Save Object adds it to your catalog (its generated copies keep their shape)`);
       return;
@@ -1783,7 +1816,7 @@ export class ModelerPanel {
     this._resetHistory();
     this._renderAll();
     this._markDirty({ history: false });
-    this.onStatus(meta.instanceType
+    this.onStatus(modelKey
       ? `${meta.label} opened as ${parts.length} editable part${parts.length === 1 ? '' : 's'} · reshape it, then Save Object and every copy in the map follows`
       : `${meta.label} opened as ${parts.length} editable part${parts.length === 1 ? '' : 's'} · reshape and texture it like any object, then Save Object`);
   }
@@ -1798,7 +1831,8 @@ export class ModelerPanel {
     this.assetGroup.visible = false;
     this._detachGizmo();
     const meta = WORLD_OBJECTS[this.worldObject];
-    const replacementId = meta?.instanceType ? this.store.worldModel(meta.instanceType) : null;
+    const modelKey = worldObjectModelKey(this.worldObject);
+    const replacementId = modelKey ? this.store.worldModel(modelKey) : null;
     const replacement = replacementId ? this.store.getAsset(replacementId) : null;
     // A replaced archetype must preview as what the map now draws, not as the
     // generated shape it no longer has.
@@ -2367,12 +2401,11 @@ export class ModelerPanel {
     this.definition.label = this.nameInput.value.trim() || this.definition.label || 'Custom object';
     try {
       const saved = this.store.upsertAsset(this.definition);
-      // An object modelled FROM an instanced archetype goes straight back onto
+      // An object modelled FROM a replaceable archetype goes straight back onto
       // it: that is the round trip — reshape it, save, every copy follows.
-      const target = WORLD_OBJECTS[this.modelTargetObject || '']?.instanceType
-        ? WORLD_OBJECTS[this.modelTargetObject]
-        : null;
-      if (target) this.store.setWorldModel(target.instanceType, saved.id);
+      const targetKey = worldObjectModelKey(this.modelTargetObject || '');
+      const target = targetKey ? WORLD_OBJECTS[this.modelTargetObject] : null;
+      if (target) this.store.setWorldModel(targetKey, saved.id);
       await this.store.save();
       refreshCustomAsset(this.assetRegistry, this.store.document, saved.id);
       this.definition = clone(saved);

@@ -347,6 +347,10 @@ export class HighwayMap {
     this._chunks = new Map();
     this._chunkBuckets = new Map();   // key -> matName -> {positions, indices, colors|null}
     this._chunkInstances = new Map(); // key -> typeName -> records[]
+    // Per-copy record of every building box (see _pushBuildingBox). Buildings
+    // are merged quads, not instances, so this is the ONLY trace of where each
+    // one stands — it is what lets a saved model replace every office block.
+    this.buildingBoxes = [];
     this._visibleKey = null;
     this._lastVisibleUpdate = -Infinity;
 
@@ -7701,6 +7705,11 @@ export class HighwayMap {
   /**
    * Textured building box: 4 facade quads with whole-window UV repeats into
    * the chunk bucket for `matName`, dark roof quad. Returns the top Y.
+   *
+   * Every box also files a record in `buildingBoxes`: the box it occupies plus
+   * the exact index ranges its facade and roof triangles hold in their chunk
+   * buckets. Buildings are merged geometry — that record is what a saved model
+   * replacement hides and stands in for (applyWorldBuildingOverrides).
    */
   _pushBuildingBox(matName, random, x, z, baseY, width, height, depth, yaw) {
     const spec = this._facadeSpecs[matName] || { cols: 10, rows: 13, cellW: 3.4, cellH: 3.3 };
@@ -7718,6 +7727,7 @@ export class HighwayMap {
     ];
     const centerVec = vec(x, baseY, z);
     const bucket = this._bucket(centerVec, matName);
+    const facadeStart = bucket.indices.length;
     const floors = Math.max(2, Math.round(height / spec.cellH));
     const v1 = floors / spec.rows;
     for (let i = 0; i < 4; i += 1) {
@@ -7733,12 +7743,22 @@ export class HighwayMap {
         vec(p0[0], baseY + height, p0[1]), vec(p1[0], baseY + height, p1[1]),
         [offU, offV, offU + u1, offV + v1]);
     }
+    const facadeCount = bucket.indices.length - facadeStart;
     const roof = this._bucket(centerVec, 'building');
+    const roofStart = roof.indices.length;
     this._pushQuad(roof,
       vec(corners[3][0], baseY + height, corners[3][1]),
       vec(corners[2][0], baseY + height, corners[2][1]),
       vec(corners[1][0], baseY + height, corners[1][1]),
       vec(corners[0][0], baseY + height, corners[0][1]));
+    // Both buckets are addressed by the same chunk key (both took centerVec),
+    // and _finalizeChunks hands `bucket.indices` to the geometry unchanged, so
+    // these offsets stay valid on the finished mesh.
+    this.buildingBoxes.push({
+      key: this._chunkKey(x, z), material: matName,
+      facadeStart, facadeCount, roofStart, roofCount: roof.indices.length - roofStart,
+      x, z, baseY, width, height, depth, yaw,
+    });
     return baseY + height;
   }
 
@@ -9280,6 +9300,7 @@ export class HighwayMap {
     geometries.forEach((geometry) => geometry.dispose());
     materials.forEach((material) => material.dispose());
     this._ownedTextures.forEach((texture) => texture.dispose());
+    this.buildingBoxes.length = 0;
     this.group.clear();
   }
 }

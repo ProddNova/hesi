@@ -207,14 +207,91 @@ itself — that is the "reshape it and every copy follows" the report asked for 
 and `deleteAsset` drops any archetype pointing at a model that no longer
 exists.
 
-**Not fixed, by decision:** building facades, roofs, sheds and route signs are
-merged into chunk quads and the generator keeps no per-copy record
-(`_terrainAnchors` holds only `{x, z, r}` — no type, height or yaw), so nothing
-can place a replacement at each one. Doing it needs a `js/map.js` change to
-record building placements. The panel now states this plainly instead of
-offering a round trip that cannot land.
+**Not fixed at the time, by decision:** building facades, roofs, sheds and
+route signs are merged into chunk quads and the generator keeps no per-copy
+record (`_terrainAnchors` holds only `{x, z, r}` — no type, height or yaw), so
+nothing can place a replacement at each one. Doing it needs a `js/map.js`
+change to record building placements. The panel states this plainly instead of
+offering a round trip that cannot land. *(The buildings were done next — see
+below. Route signs, matrix boards and tunnel strips still stand.)*
+
+## Follow-up: the buildings follow too
+
+Reported again, from the other end: opening an office building as editable
+parts and saving "creates a copy instead of applying the change to every one in
+the map and in the game". That was the limitation above, working as designed —
+and the design was the thing to change. The record the previous round trip
+needed now exists.
+
+`_pushBuildingBox` (`js/map.js`) files one entry per box into
+`map.buildingBoxes`: the box it occupies (`x, z, baseY, width, height, depth,
+yaw`) and the exact index ranges its 4 facade quads and its roof quad hold in
+their chunk buckets. Cheap to keep (~2k entries on the real map) and it is the
+only trace of the individual buildings that has ever existed.
+
+`applyWorldBuildingOverrides` (`js/custom-assets.js`) then stands a saved model
+in for them: the model is merged and normalized into the *unit* building box
+(x/z centred in [-0.5, 0.5], y from 0 to 1), one InstancedMesh per chunk per
+archetype draws it, and each instance matrix is the building's own position,
+yaw and size — so every office block keeps the footprint and height the
+generator gave it while taking the new silhouette. The generated triangles are
+not deleted: their slice of the index buffer is collapsed into degenerate
+triangles, with the untouched index array kept in `userData.hesiGeneratedIndex`.
+Every pass restores from that first and re-applies the current overrides, so it
+is idempotent and "Back to generated shape" is exact. Roofs are hidden the same
+way even though the `building` bucket is shared across archetypes, because the
+record addresses each roof quad individually.
+
+`applyWorldModelOverrides` runs the pass at the end of its own, so both halves
+of the world arrive from the call the editor and `js/editor-map-patch.js`
+already make. Building overrides key on the facade material behind a prefix —
+`worldModels: { "facade:facadeOffice": "custom:0034" }` — which cannot collide
+with a `<geometry>:<material>` instance bucket; `worldObjectModelKey` /
+`worldObjectForModelKey` are the only places that know the difference, document
+validation included. The replacement meshes are always *appended* to the chunk
+group and carry `userData.hesiBuildingOverride`: the editor addresses generated
+chunk meshes by their index in that list, so saved edits keep pointing at the
+same objects whether an override is active or not, and the instanced pass skips
+them instead of re-fitting geometry it just built.
+
+Four archetypes gain the round trip: office, dark, hotel and industrial
+buildings. The industrial shed deliberately does not — the generator draws dock
+sheds from the same `facadeIndustrial` boxes as the warehouses, so the record
+cannot tell the two apart, and replacing Industrial building covers both.
+
+Same trip, one annoyance removed: re-opening an archetype that already draws
+one of your objects now reopens *that* object instead of minting a near-identical
+copy each time (the report came with three `Office building custom` assets in
+the document to show for it).
 
 ## Evidence
+
+Buildings round trip (this follow-up):
+
+- `npm test` in `tools/hesi-editor` — 119/119, including new assertions that
+  `worldObjectModelKey` maps an office building to `facade:facadeOffice` and a
+  container to its bucket, that a route sign maps to nothing, and that document
+  validation accepts a building facade target while still rejecting a bare
+  material name.
+- `node tools/hesi-editor/.devtests/building-model-probe.mjs` (new) — 9/9, no
+  console errors, `custom-assets.json` restored from a snapshot afterwards. On
+  the real map: 712 office boxes on record and 5696 facade triangles drawn;
+  opening the archetype as editable parts, adding a part and pressing **Save
+  Object** replaces 712/712 copies and takes the generated facade triangles to
+  0; the status line says every office building followed; the world-objects
+  view reports the replacement; re-opening edits `custom:0034` — the very asset
+  the map draws — instead of duplicating it; the replacement survives a full
+  reload from the document alone; and *Back to generated shape* puts all 5696
+  triangles back with 0 replacements left.
+- `node .devtests/building-model-game-probe.mjs` (new) — 2/2, no console
+  errors: the **playable game**, booting from the saved document with no
+  editor involved, draws the model on 712/712 office buildings with 0 generated
+  facade triangles left. (Its CDN route maps the whole `three@0.166.1` tree out
+  of `node_modules`; a blanket redirect to `three.module.js` hands `three/addons/`
+  imports the core file and the page dies on `mergeGeometries` —
+  `custom-content-optimization-probe.mjs` still has that blanket route.)
+
+Earlier work:
 
 - `npm run editor:test` — 127/127 (was 121/121; new assertions in
   `custom-assets.test.mjs` cover style normalize/compact/clamp, tiling + tint
@@ -265,11 +342,16 @@ offering a round trip that cannot land.
   ~7 generated building silhouettes between them (`facadeOffice` alone is used
   by the tower, crown, plain and slab shapes). The slot descriptions say so and
   the surface rows carry a `shared ×N` tag naming every archetype involved.
-- **Only instanced archetypes can have their shape replaced** (17 of the 26).
-  Merged-quad archetypes — every building facade, roofs, sheds, route signs —
-  can be repainted but not re-modelled, because the generator keeps no record
-  of where each copy stands. Modelling one still produces your own placeable
-  object.
+- **Shape replacement reaches the instanced archetypes (17 of the 26) and the
+  four building types.** What is left out — route signs, matrix boards, tunnel
+  strips, the industrial shed — is merged into chunk quads with no per-copy
+  record, or shares its record with another archetype, so it can be repainted
+  but not re-modelled. Modelling one still produces your own placeable object.
+- **A replaced building is fitted into the box the generator gave it**, so a
+  model that is not roughly as tall as it is wide gets stretched per copy — and
+  copies vary a lot (the office bucket spans everything from low blocks to
+  towers). The roof cap is part of the model's bounding box, so a model without
+  one loses ~2% of its height to the fit.
 - A replacement is **fitted into the original's bounding box**, non-uniformly.
   That is what keeps every copy where it was, but it also means a model with a
   different aspect than the archetype gets stretched to match.

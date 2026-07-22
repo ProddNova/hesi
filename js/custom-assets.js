@@ -138,27 +138,35 @@ export const WORLD_SURFACES = Object.freeze({
  * `instanceType` names the `<geometry>:<material>` bucket the generator draws
  * the object with, when it draws it as instances — one InstancedMesh whose
  * geometry every copy shares, which is what makes replacing the SHAPE possible
- * (see applyWorldModelOverrides). Archetypes without one are merged into chunk
- * quads with no per-copy record anywhere, so only their surfaces can change.
+ * (see applyWorldModelOverrides).
+ *
+ * `buildingType` is the same promise for the buildings, which the generator
+ * merges into chunk quads instead: it names the facade material of the boxes
+ * `_pushBuildingBox` files in `map.buildingBoxes`, and that per-copy record is
+ * what applyWorldBuildingOverrides stands a saved model in for. Archetypes with
+ * neither key have no per-copy trace at all, so only their surfaces can change.
  */
 export const WORLD_OBJECTS = Object.freeze({
   officeBuilding: {
-    label: 'Office building', description: 'Lit office towers — the most common city block', group: 'Buildings',
+    label: 'Office building', description: 'Lit office towers — the most common city block', group: 'Buildings', buildingType: 'facadeOffice',
     parts: [{ slot: 'facadeOffice', size: [9, 16, 9], position: [0, 8, 0] }, { slot: 'building', size: [9.4, 0.4, 9.4], position: [0, 16.2, 0] }],
   },
   darkBuilding: {
-    label: 'Dark building', description: 'Mostly unlit blocks and tower caps', group: 'Buildings',
+    label: 'Dark building', description: 'Mostly unlit blocks and tower caps', group: 'Buildings', buildingType: 'facadeDark',
     parts: [{ slot: 'facadeDark', size: [9, 14, 9], position: [0, 7, 0] }, { slot: 'building', size: [9.4, 0.4, 9.4], position: [0, 14.2, 0] }],
   },
   hotelBuilding: {
-    label: 'Hotel building', description: 'Warm-lit narrow-window hotel blocks', group: 'Buildings',
+    label: 'Hotel building', description: 'Warm-lit narrow-window hotel blocks', group: 'Buildings', buildingType: 'facadeHotel',
     parts: [{ slot: 'facadeHotel', size: [8, 18, 8], position: [0, 9, 0] }, { slot: 'building', size: [8.4, 0.4, 8.4], position: [0, 18.2, 0] }],
   },
   industrialBuilding: {
-    label: 'Industrial building', description: 'Warehouses along the bay', group: 'Buildings',
+    label: 'Industrial building', description: 'Warehouses along the bay', group: 'Buildings', buildingType: 'facadeIndustrial',
     parts: [{ slot: 'facadeIndustrial', size: [12, 7, 9], position: [0, 3.5, 0] }, { slot: 'building', size: [12.4, 0.4, 9.4], position: [0, 7.2, 0] }],
   },
   industrialShed: {
+    // No buildingType: the generator draws dock sheds from the SAME
+    // facadeIndustrial boxes as the warehouses, so the record cannot tell the
+    // two apart — replacing Industrial building covers both.
     label: 'Industrial shed', description: 'Low shed volumes in the dock districts', group: 'Buildings',
     parts: [{ slot: 'shed', size: [12, 5, 8], position: [0, 2.5, 0] }, { slot: 'building', size: [12.4, 0.4, 8.4], position: [0, 5.2, 0] }],
   },
@@ -262,6 +270,30 @@ export function worldObjectSurfaces(objectId) {
 /** The world object drawn by an instanced bucket, or null when none is. */
 export function worldObjectForInstanceType(instanceType) {
   return Object.keys(WORLD_OBJECTS).find((objectId) => WORLD_OBJECTS[objectId].instanceType === instanceType) || null;
+}
+
+/**
+ * Buildings are keyed in `worldModels` under their facade material behind this
+ * prefix, so they never collide with an instanced `<geometry>:<material>` type.
+ */
+export const WORLD_BUILDING_MODEL_PREFIX = 'facade:';
+
+/**
+ * The `worldModels` key an archetype's shape is replaced through — an instanced
+ * bucket type, a prefixed building facade, or null when the map keeps no
+ * per-copy record of it and only its surfaces can change.
+ */
+export function worldObjectModelKey(objectId) {
+  const entry = WORLD_OBJECTS[objectId];
+  if (!entry) return null;
+  if (entry.instanceType) return entry.instanceType;
+  if (entry.buildingType) return `${WORLD_BUILDING_MODEL_PREFIX}${entry.buildingType}`;
+  return null;
+}
+
+/** The world object a `worldModels` key replaces, or null when it names none. */
+export function worldObjectForModelKey(key) {
+  return Object.keys(WORLD_OBJECTS).find((objectId) => worldObjectModelKey(objectId) === key) || null;
 }
 
 /** Ids of every world object that shares a surface — the "this also changes X" warning. */
@@ -436,9 +468,9 @@ export function customAssetsDocumentErrors(document) {
     }
   }
   if (document.worldModels !== undefined && !isRecord(document.worldModels)) errors.push('worldModels must be an object');
-  for (const [instanceType, assetId] of Object.entries(document.worldModels || {})) {
-    if (!worldObjectForInstanceType(instanceType)) errors.push(`unknown world model target: ${instanceType}`);
-    else if (assetId !== null && !document.assets[assetId]) errors.push(`worldModels.${instanceType} references missing asset ${assetId}`);
+  for (const [modelKey, assetId] of Object.entries(document.worldModels || {})) {
+    if (!worldObjectForModelKey(modelKey)) errors.push(`unknown world model target: ${modelKey}`);
+    else if (assetId !== null && !document.assets[assetId]) errors.push(`worldModels.${modelKey} references missing asset ${assetId}`);
   }
   for (const [slot, entry] of Object.entries(document.worldTextures || {})) {
     if (!Object.hasOwn(WORLD_SURFACES, slot)) { errors.push(`unknown world texture slot: ${slot}`); continue; }
@@ -2523,16 +2555,8 @@ export function buildCustomAssetGroup(assetDefinition, texturesById, { resolveAs
  * captured the first time it is touched, and slots without an override are
  * restored to it. That is what lets the editor re-apply live on every edit.
  */
-/**
- * Merges a built custom-asset group into one geometry with per-material
- * groups, fitted into the box `target` occupies.
- *
- * Instanced archetypes share a single unit geometry that every copy's matrix
- * scales into place (a `box:*` bucket stretches a 1×1×1 box to each object's
- * real size). Fitting the replacement into exactly the same box is therefore
- * what keeps every copy standing where and how big it was.
- */
-function mergedAssetGeometry(group, targetGeometry) {
+/** Bakes a built custom-asset group down to one geometry + its material list. */
+function mergeAssetGroupGeometry(group) {
   group.updateMatrixWorld(true);
   const geometries = [];
   const materials = [];
@@ -2563,6 +2587,22 @@ function mergedAssetGeometry(group, targetGeometry) {
   const merged = mergeGeometries(geometries, true);
   for (const geometry of geometries) geometry.dispose();
   if (!merged) return null;
+  return { geometry: merged, materials };
+}
+
+/**
+ * Merges a built custom-asset group into one geometry with per-material
+ * groups, fitted into the box `target` occupies.
+ *
+ * Instanced archetypes share a single unit geometry that every copy's matrix
+ * scales into place (a `box:*` bucket stretches a 1×1×1 box to each object's
+ * real size). Fitting the replacement into exactly the same box is therefore
+ * what keeps every copy standing where and how big it was.
+ */
+function mergedAssetGeometry(group, targetGeometry) {
+  const built = mergeAssetGroupGeometry(group);
+  if (!built) return null;
+  const { geometry: merged, materials } = built;
   targetGeometry.computeBoundingBox();
   merged.computeBoundingBox();
   const target = targetGeometry.boundingBox;
@@ -2583,14 +2623,165 @@ function mergedAssetGeometry(group, targetGeometry) {
 }
 
 /**
+ * Normalizes a built model into the unit building box — x/z centred in
+ * [-0.5, 0.5], y from 0 at the ground to 1 at the top — so one instance matrix
+ * per building (position, yaw, its own width/height/depth as the scale) puts it
+ * exactly where the generated box stood.
+ */
+function unitBuildingGeometry(group) {
+  const built = mergeAssetGroupGeometry(group);
+  if (!built) return null;
+  const geometry = built.geometry;
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  if (!box) return null;
+  geometry.translate(-(box.min.x + box.max.x) * 0.5, -box.min.y, -(box.min.z + box.max.z) * 0.5);
+  geometry.scale(
+    1 / Math.max(1e-6, box.max.x - box.min.x),
+    1 / Math.max(1e-6, box.max.y - box.min.y),
+    1 / Math.max(1e-6, box.max.z - box.min.z),
+  );
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return { geometry, materials: built.materials };
+}
+
+/**
+ * Collapses `count` indices from `start` into degenerate (zero-area) triangles,
+ * keeping the generated index array on the mesh so the pass can be undone.
+ * Buildings live inside a merged chunk bucket shared with their neighbours, so
+ * hiding one means editing its slice of the index buffer, nothing else.
+ */
+function hideBuildingTriangles(mesh, start, count) {
+  const index = mesh?.geometry?.index;
+  if (!index || !count || start + count > index.array.length) return false;
+  if (!mesh.userData.hesiGeneratedIndex) mesh.userData.hesiGeneratedIndex = index.array.slice();
+  index.array.fill(index.array[start], start, start + count);
+  index.needsUpdate = true;
+  return true;
+}
+
+/** Buildings only ever turn about Y, the way _pushBuildingBox lays their corners out. */
+const BUILDING_UP = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Replaces the SHAPE of the BUILDING archetypes with saved custom models.
+ *
+ * Buildings are the half of the world the instanced pass cannot reach: every
+ * office block has its own random width, height and depth, so the generator
+ * merges all of them into the chunk's facade bucket instead of instancing one
+ * shared geometry. What it does leave behind is `map.buildingBoxes` — the box
+ * each one occupies plus the exact index range its facade and roof triangles
+ * hold. This pass hides those triangles and draws the saved model in their
+ * place, one InstancedMesh per chunk, each instance scaled into the box the
+ * building had. Same promise as the instanced archetypes: model it once, every
+ * copy in the map follows, in the editor and in the game.
+ *
+ * Reversible and idempotent: the generated index arrays are kept on the meshes
+ * and restored on every pass before the current overrides are re-applied.
+ */
+export function applyWorldBuildingOverrides(map, document, { resolveAssetPart = () => null } = {}) {
+  const summary = { applied: 0, skipped: 0, cleared: 0 };
+  const boxes = Array.isArray(map?.buildingBoxes) ? map.buildingBoxes : [];
+  const chunks = [...(map?._chunks?.values?.() || [])];
+  if (!boxes.length || !chunks.length) return summary;
+
+  // Start from the generated world every time: drop the meshes the previous
+  // pass added and put every bucket it edited back the way the generator made
+  // it. Re-applying then only has to consider the overrides as they stand now.
+  const retired = new Set();
+  for (const chunk of chunks) {
+    for (const child of [...(chunk.group?.children || [])]) {
+      if (child.userData?.hesiBuildingOverride) {
+        child.removeFromParent();
+        if (child.geometry) retired.add(child.geometry);
+        summary.cleared += child.count || 0;
+        continue;
+      }
+      const pristine = child.userData?.hesiGeneratedIndex;
+      if (!pristine || !child.geometry?.index) continue;
+      child.geometry.index.array.set(pristine);
+      child.geometry.index.needsUpdate = true;
+    }
+  }
+  for (const geometry of retired) geometry.dispose();
+
+  const overrides = isRecord(document?.worldModels) ? document.worldModels : {};
+  const active = new Map(); // facade material -> asset id
+  for (const meta of Object.values(WORLD_OBJECTS)) {
+    if (!meta.buildingType) continue;
+    const assetId = overrides[`${WORLD_BUILDING_MODEL_PREFIX}${meta.buildingType}`];
+    if (!assetId) continue;
+    if (!document?.assets?.[assetId]) { summary.skipped += 1; continue; }
+    active.set(meta.buildingType, assetId);
+  }
+  if (!active.size) return summary;
+
+  const byChunk = new Map(); // chunk key -> facade material -> boxes
+  for (const box of boxes) {
+    if (!active.has(box.material)) continue;
+    if (!byChunk.has(box.key)) byChunk.set(box.key, new Map());
+    const types = byChunk.get(box.key);
+    if (!types.has(box.material)) types.set(box.material, []);
+    types.get(box.material).push(box);
+  }
+
+  const built = new Map();
+  const matrix = new THREE.Matrix4();
+  const quaternion = new THREE.Quaternion();
+  const position = new THREE.Vector3();
+  const scale = new THREE.Vector3();
+  for (const [key, types] of byChunk) {
+    const chunk = map._chunks.get(key);
+    if (!chunk?.group) { summary.skipped += 1; continue; }
+    const roof = chunk.group.children.find((child) => child.name === `chunk ${key} building`);
+    for (const [type, list] of types) {
+      const assetId = active.get(type);
+      if (!built.has(assetId)) {
+        const group = buildCustomAssetGroup(document.assets[assetId], document.textures, { resolveAssetPart });
+        built.set(assetId, unitBuildingGeometry(group));
+      }
+      const model = built.get(assetId);
+      if (!model) { summary.skipped += list.length; continue; }
+      const facade = chunk.group.children.find((child) => child.name === `chunk ${key} ${type}`);
+      const mesh = new THREE.InstancedMesh(
+        model.geometry,
+        model.materials.length === 1 ? model.materials[0] : model.materials,
+        list.length,
+      );
+      mesh.name = `chunk ${key} ${WORLD_BUILDING_MODEL_PREFIX}${type}`;
+      mesh.userData.hesiBuildingOverride = true;
+      list.forEach((box, index) => {
+        quaternion.setFromAxisAngle(BUILDING_UP, box.yaw);
+        matrix.compose(position.set(box.x, box.baseY, box.z), quaternion, scale.set(box.width, box.height, box.depth));
+        mesh.setMatrixAt(index, matrix);
+        hideBuildingTriangles(facade, box.facadeStart, box.facadeCount);
+        hideBuildingTriangles(roof, box.roofStart, box.roofCount);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.frustumCulled = true;
+      mesh.computeBoundingSphere?.();
+      // Appended, never spliced in: the editor addresses generated chunk meshes
+      // by their index in this list, and saved edits must keep pointing at the
+      // same objects whether an override is active or not.
+      chunk.group.add(mesh);
+      summary.applied += list.length;
+    }
+  }
+  return summary;
+}
+
+/**
  * Replaces the SHAPE of instanced world archetypes with saved custom models.
  *
  * The generator draws each instanced archetype as one InstancedMesh per chunk,
  * every copy sharing a single geometry — so swapping that geometry changes
  * every container, lamp or barrier in the map at once, which is exactly what
- * the editor promises. Merged-quad archetypes (building facades, roofs, route
- * signs) have no per-copy record and are not replaceable; they are absent from
- * WORLD_OBJECTS[*].instanceType and never reach this function.
+ * the editor promises. The buildings are merged quads instead and take the
+ * second pass below (applyWorldBuildingOverrides), which this function runs so
+ * every caller gets both halves of the world from one call. What remains
+ * unreplaceable — route signs, matrix boards, tunnel strips — has no per-copy
+ * record anywhere, so only its surfaces can change.
  *
  * Reversible like the texture pass: the generated geometry and material are
  * kept on the mesh, and buckets with no override are restored to them.
@@ -2604,7 +2795,9 @@ export function applyWorldModelOverrides(map, document, { resolveAssetPart = () 
   const meshesByType = new Map();
   for (const chunk of chunks) {
     for (const object of chunk.group?.children || []) {
-      if (!object.isInstancedMesh) continue;
+      // The building pass owns its own meshes; they are instanced too, but
+      // their geometry is already the replacement and must not be re-fitted.
+      if (!object.isInstancedMesh || object.userData?.hesiBuildingOverride) continue;
       const instanceType = String(object.name).replace(/^chunk\s+\S+\s+/, '');
       if (!meshesByType.has(instanceType)) meshesByType.set(instanceType, []);
       meshesByType.get(instanceType).push(object);
@@ -2640,6 +2833,10 @@ export function applyWorldModelOverrides(map, document, { resolveAssetPart = () 
       summary.applied += 1;
     }
   }
+  const buildings = applyWorldBuildingOverrides(map, document, { resolveAssetPart });
+  summary.applied += buildings.applied;
+  summary.skipped += buildings.skipped;
+  summary.cleared += buildings.cleared;
   return summary;
 }
 

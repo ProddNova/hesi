@@ -9,6 +9,8 @@ import {
   WORLD_TEXTURE_SLOTS,
   compactWorldSurfaceStyle,
   worldObjectForInstanceType,
+  worldObjectForModelKey,
+  worldObjectModelKey,
   worldObjectSurfaces,
   worldObjectsUsingSurface,
   isDefaultWorldSurfaceStyle,
@@ -438,11 +440,18 @@ test('a saved model replaces the shape of every copy in an instanced bucket', ()
 
 test('world model targets and their validation', () => {
   assert.equal(worldObjectForInstanceType('box:container'), 'shippingContainer');
-  assert.equal(worldObjectForInstanceType('facadeOffice'), null, 'merged-quad archetypes are not replaceable');
+  // Buildings are replaced through their facade material, behind a prefix that
+  // cannot collide with a `<geometry>:<material>` instance bucket.
+  assert.equal(worldObjectModelKey('shippingContainer'), 'box:container');
+  assert.equal(worldObjectModelKey('officeBuilding'), 'facade:facadeOffice');
+  assert.equal(worldObjectModelKey('routeSign'), null, 'archetypes with no per-copy record are not replaceable');
+  assert.equal(worldObjectForModelKey('facade:facadeOffice'), 'officeBuilding');
   const document = validDocument();
   document.worldModels = { 'box:container': 'custom:0404' };
   assert.match(customAssetsDocumentErrors(document)[0], /missing asset custom:0404/);
-  document.worldModels = { 'facadeOffice': null };
+  document.worldModels = { 'facade:facadeOffice': null };
+  assert.deepEqual(customAssetsDocumentErrors(document), [], 'a building facade is a valid target');
+  document.worldModels = { facadeOffice: null };
   assert.match(customAssetsDocumentErrors(document)[0], /unknown world model target/);
 });
 

@@ -4460,37 +4460,6 @@
       ],
       "updatedAt": "2026-07-21T22:57:38.830Z"
     },
-    "custom:0030": {
-      "id": "custom:0030",
-      "label": "Office building custom",
-      "description": "Based on the generated office building",
-      "layer": "Props",
-      "createdAt": "2026-07-22T16:41:27.226Z",
-      "parts": [
-        {
-          "kind": "box",
-          "name": "facadeOffice",
-          "position": [
-            0,
-            8,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0
-          ],
-          "scale": [
-            9,
-            16,
-            9
-          ],
-          "color": "#ffffff",
-          "faces": {}
-        }
-      ],
-      "updatedAt": "2026-07-22T16:41:53.071Z"
-    },
     "custom:0031": {
       "id": "custom:0031",
       "label": "Office building custom",
@@ -4517,60 +4486,29 @@
             9
           ],
           "color": "#ffffff",
-          "faces": {}
-        }
-      ],
-      "updatedAt": "2026-07-22T16:42:27.571Z"
-    },
-    "custom:0032": {
-      "id": "custom:0032",
-      "label": "Office building custom",
-      "description": "Based on the generated office building",
-      "layer": "Props",
-      "createdAt": "2026-07-22T17:45:31.640Z",
-      "parts": [
-        {
-          "kind": "box",
-          "name": "Office building",
-          "position": [
-            0,
-            8,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0
-          ],
-          "scale": [
-            9,
-            16,
-            9
-          ],
-          "color": "#ffffff",
           "faces": {
             "right": {
-              "texture": "tex:0108"
+              "texture": "tex:0110"
             },
             "left": {
-              "texture": "tex:0108"
+              "texture": "tex:0110"
             },
             "top": {
-              "texture": "tex:0108"
+              "texture": "tex:0111"
             },
             "bottom": {
-              "texture": "tex:0108"
+              "texture": "tex:0110"
             },
             "front": {
-              "texture": "tex:0108"
+              "texture": "tex:0110"
             },
             "back": {
-              "texture": "tex:0108"
+              "texture": "tex:0110"
             }
           }
         }
       ],
-      "updatedAt": "2026-07-22T17:45:50.885Z"
+      "updatedAt": "2026-07-22T19:07:32.563Z"
     },
     "custom:0033": {
       "id": "custom:0033",
@@ -4623,6 +4561,56 @@
         }
       ],
       "updatedAt": "2026-07-22T18:12:19.727Z"
+    },
+    "custom:0034": {
+      "id": "custom:0034",
+      "label": "Industrial building custom",
+      "description": "Based on the generated industrial building",
+      "layer": "Props",
+      "createdAt": "2026-07-22T19:09:14.929Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Industrial building",
+          "position": [
+            0,
+            3.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            12,
+            7,
+            9
+          ],
+          "color": "#ffffff",
+          "faces": {
+            "back": {
+              "texture": "tex:0113"
+            },
+            "right": {
+              "texture": "tex:0113"
+            },
+            "left": {
+              "texture": "tex:0113"
+            },
+            "top": {
+              "texture": "tex:0111"
+            },
+            "bottom": {
+              "texture": "tex:0113"
+            },
+            "front": {
+              "texture": "tex:0113"
+            }
+          }
+        }
+      ],
+      "updatedAt": "2026-07-22T19:09:45.435Z"
     }
   },
   "textures": {
@@ -5021,6 +5009,22 @@
     "tex:0109": {
       "name": "Generated · Dark building",
       "url": "textures/generated-dark-building-576db06ead.png"
+    },
+    "tex:0110": {
+      "name": "building_big.png",
+      "url": "textures/building-big-2fd9fbfa82.png"
+    },
+    "tex:0111": {
+      "name": "roof1.png",
+      "url": "textures/roof1-ae153d820f.png"
+    },
+    "tex:0112": {
+      "name": "Generated · Industrial building",
+      "url": "textures/generated-industrial-building-04779ceed1.png"
+    },
+    "tex:0113": {
+      "name": "building_medium-small.png",
+      "url": "textures/building-medium-small-adcfc0fb12.png"
     }
   },
   "worldTextures": {
@@ -5030,5 +5034,9 @@
     "barrier": {
       "texture": "tex:0107"
     }
+  },
+  "worldModels": {
+    "facade:facadeOffice": "custom:0031",
+    "facade:facadeIndustrial": "custom:0034"
   }
 }
