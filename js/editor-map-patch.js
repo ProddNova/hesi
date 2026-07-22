@@ -201,8 +201,26 @@ export function applyGarageBuild(garageRoot, build, customAssets = null) {
     if (op.op === 'garage-object') {
       const target = children[op.childIndex];
       if (!target) { summary.skipped += 1; continue; }
-      applyTransformOp(target, op);
-      applyObjectFaceStyles(target, op.faceTextures || {}, customAssets?.textures || {});
+      const mirrorKey = target.userData?.editorBuildMirror;
+      const targets = mirrorKey
+        ? children.filter((child) => child.userData?.editorBuildMirror === mirrorKey)
+        : [target];
+      for (const operationTarget of targets) {
+        const quaternionOffset = operationTarget.userData?.editorBuildQuaternionOffset;
+        const targetOp = quaternionOffset
+          ? {
+              ...op,
+              quaternion: new THREE.Quaternion()
+                .fromArray(op.quaternion)
+                .multiply(new THREE.Quaternion().fromArray(quaternionOffset))
+                .normalize()
+                .toArray(),
+            }
+          : op;
+        applyTransformOp(operationTarget, targetOp);
+        applyObjectFaceStyles(operationTarget, op.faceTextures || {}, customAssets?.textures || {});
+      }
+      if (target.userData?.editorAnchorFollower) target.userData.editorBuildTransformApplied = true;
       summary.applied += 1;
       continue;
     }

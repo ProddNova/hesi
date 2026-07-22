@@ -81,12 +81,27 @@ export class GarageSystem {
     // carDisplay hosts the Toyota Chaser GLB the game attaches in garage mode;
     // it replaces the hidden procedural parkedGroup as the showroom car.
     this.carDisplay=new THREE.Group();this.carDisplay.position.set(0,.05,0);this.carDisplay.rotation.y=-Math.PI/2;this.root.add(this.carDisplay);
+    // The editor exposes the procedural car because it has selectable geometry,
+    // while the playable game renders the GLB under carDisplay. Treat both
+    // groups as one editor target so an Apply-to-Game transform/visibility
+    // operation also reaches the car the player actually sees.
+    this.parkedGroup.userData.editorBuildMirror='garage-showroom-car';
+    this.carDisplay.userData.editorBuildMirror='garage-showroom-car';
+    // The imported GLB is rotated PI inside carDisplay, while the procedural
+    // editor car has that orientation baked into parkedGroup. Preserve the
+    // existing visual heading when mirroring the editor's absolute rotation.
+    this.carDisplay.userData.editorBuildQuaternionOffset=[0,-1,0,0];
     // PS2-style waypoint beacons (Enchanted Arms look): a faceted crystal
     // diamond that spins and bobs, ringed by 4 tiny diamonds of the same shape
     // orbiting it. Blue over the garage door, yellow over the market PC.
     this.beacons=[];
     this.exitMarkers=this.makeBeacon(0x2233dd,0x2f52ff);this.root.add(this.exitMarkers);
     this.pcMarkers=this.makeBeacon(0xcf9a15,0xffc22c);this.root.add(this.pcMarkers);
+    // refreshExitMarkers normally follows the door/PC anchors. The runtime
+    // build marks an explicitly edited marker so later collider refreshes do
+    // not overwrite the transform that was just applied from the editor.
+    this.exitMarkers.userData.editorAnchorFollower='garage-exit';
+    this.pcMarkers.userData.editorAnchorFollower='garage-market';
     this.beacons.push(this.exitMarkers,this.pcMarkers);
     this.carryAnchor=new THREE.Group();this.carryAnchor.position.set(.45,-.45,-1);this.camera.add(this.carryAnchor);this.scene.add(this.camera);
     this.refreshColliders();
@@ -147,9 +162,9 @@ export class GarageSystem {
   refreshExitMarkers(){
     const doorX=this.shutter?.position.x??0;
     this.exitPoint=V(doorX,0,12.6);
-    this.exitMarkers?.position.set(doorX,0,12.4);
+    if(this.exitMarkers&&!this.exitMarkers.userData.editorBuildTransformApplied)this.exitMarkers.position.set(doorX,0,12.4);
     const pc=this.pcPoint||V(7.5,0,-9.3);
-    this.pcMarkers?.position.set(pc.x,0,pc.z);
+    if(this.pcMarkers&&!this.pcMarkers.userData.editorBuildTransformApplied)this.pcMarkers.position.set(pc.x,0,pc.z);
   }
   onBuildApplied(){this.refreshColliders();}
 
