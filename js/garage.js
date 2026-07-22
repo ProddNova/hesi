@@ -198,7 +198,7 @@ export class GarageSystem {
   onMouse(e){if(!this.enabled)return;this.yaw-=e.movementX*.0023;this.pitch=Math.max(-1.35,Math.min(1.25,this.pitch-e.movementY*.0021));}
 
   enter(carSpec,deliveries=[]){
-    this.enabled=true;this.root.visible=true;this.position.set(0,this.playerHeight,8);this.yaw=0;this.pitch=0;this.velocity.set(0,0,0);this.carried=null;this.installing=null;this.camera.fov=66;this.camera.updateProjectionMatrix();
+    this.enabled=true;this.root.visible=true;this.position.set(0,this.playerHeight,8);this.yaw=0;this.pitch=0;this.velocity.set(0,0,0);this.carried=null;this.installing=null;this.camera.fov=78;this.camera.updateProjectionMatrix();
     this.refreshCar(carSpec);this.syncDeliveries(deliveries);this.refreshColliders();this.updateCamera();
   }
   leave(){this.enabled=false;document.exitPointerLock?.();this.clearCarry();}
@@ -270,11 +270,17 @@ export class GarageSystem {
   }
   distance2D(p){return Math.hypot(this.position.x-p.x,this.position.z-p.z);}
   lookScore(p){const f=V(-Math.sin(this.yaw),0,-Math.cos(this.yaw));const to=V(p.x-this.position.x,0,p.z-this.position.z).normalize();return f.dot(to);}
+  markerPoint(marker,fallback){
+    if(!marker)return fallback;marker.updateWorldMatrix?.(true,false);return marker.getWorldPosition(new THREE.Vector3());
+  }
   findInteraction(context){
     const candidates=[];
-    const pc=this.pcPoint||V(7.5,0,-9.3),exit=this.exitPoint||V(0,0,12.6);
-    if(this.distance2D(pc)<2.7)candidates.push({type:'pc',pos:pc,text:'<kbd>E</kbd> USE WANGAN MARKET PC'});
-    if(this.distance2D(exit)<2.5)candidates.push({type:'exit',pos:exit,text:'<kbd>E</kbd> EXIT TO EXPRESSWAY'});
+    // The two editable prisms are the interaction anchors themselves. Moving a
+    // prism in the world editor therefore moves both its prompt and trigger.
+    const pc=this.markerPoint(this.pcMarkers,this.pcPoint||V(7.5,0,-9.3));
+    const exit=this.markerPoint(this.exitMarkers,this.exitPoint||V(0,0,12.6));
+    if(this.distance2D(pc)<2.4)candidates.push({type:'pc',pos:pc,text:'<kbd>E</kbd> USE WANGAN MARKET PC'});
+    if(this.distance2D(exit)<2.4)candidates.push({type:'exit',pos:exit,text:'<kbd>E</kbd> EXIT TO EXPRESSWAY'});
     if(this.carried&&this.distance2D(V(0,0,0))<4.0)candidates.push({type:'install',pos:V(0,0,0),text:`<kbd>E</kbd> INSTALL ${this.carried.name||'DELIVERY'}`});
     if(!this.carried)for(const m of this.deliveryMeshes)if(this.distance2D(m.position)<2)candidates.push({type:'delivery',pos:m.position,mesh:m,delivery:m.userData.delivery,text:`<kbd>E</kbd> PICK UP ${m.userData.delivery.name||'DELIVERY BOX'}`});
     return candidates.filter(c=>this.lookScore(c.pos)>-.1).sort((a,b)=>this.distance2D(a.pos)-this.distance2D(b.pos))[0]||null;

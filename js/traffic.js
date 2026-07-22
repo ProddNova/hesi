@@ -553,7 +553,7 @@ export class TrafficSystem {
         this._deactivate(vehicle, 'distance');
         continue;
       }
-      this._checkPlayerInteraction(vehicle, player, playerState);
+      this._checkPlayerInteraction(vehicle, player, playerState, context);
     }
 
     // Cull toward the target no more than a few vehicles per frame: a sudden
@@ -1309,8 +1309,13 @@ export class TrafficSystem {
     return this._sharedMaterials.brake;
   }
 
-  _checkPlayerInteraction(vehicle, player, originalPlayerSource) {
+  _checkPlayerInteraction(vehicle, player, originalPlayerSource, context = {}) {
     if (vehicle.spawnGrace > 0) return;
+    if (context.playerGhost) {
+      vehicle.playerContact = false;
+      vehicle.nearMissArmed = true;
+      return;
+    }
     if (Math.abs(vehicle.position.y - player.position.y) > Math.max(2.4, (vehicle.height + player.height) * 0.65)) {
       vehicle.nearMissArmed = true;
       vehicle.playerContact = false;

@@ -52,7 +52,15 @@ export class GameUI {
     this.$('continue-button').textContent = hasSave ? 'CONTINUE' : 'START NIGHT';
   }
   showHUD(show = true) { this.$('hud').classList.toggle('hidden', !show || this.hudHidden); }
-  toggleHUD() { this.hudHidden = !this.hudHidden; this.$('hud').classList.toggle('hidden', this.hudHidden); return !this.hudHidden; }
+  toggleHUD() {
+    this.hudHidden = !this.hudHidden;
+    this.$('hud').classList.toggle('hidden', this.hudHidden);
+    document.body.classList.toggle('hud-hidden', this.hudHidden);
+    const button=document.querySelector('.touch-hud-toggle');
+    if(button){button.textContent=this.hudHidden?'SHOW HUD':'HIDE HUD';button.setAttribute('aria-label',this.hudHidden?'Show HUD':'Hide HUD');}
+    return !this.hudHidden;
+  }
+  updateFPS(fps) { const el=this.$('mobile-fps');if(el)el.textContent=`${Math.max(0,Math.round(fps))} FPS`; }
   fade(active) { this.$('fade').classList.toggle('on', active); }
 
   updateHUD(t = {}, run = {}, meta = {}) {

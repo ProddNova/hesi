@@ -42,6 +42,7 @@
         <div id="lives" class="lives"><i></i><i></i><i></i><span>RUN LIVES</span></div>
         <div class="bank"><small>BANK</small><b id="hud-money">¥0</b></div>
       </div>
+      <div id="mobile-fps" class="mobile-fps">-- FPS</div>
       <div class="hud-bottom">
         <div id="minimap-wrap">
           <canvas id="minimap" width="220" height="150"></canvas>
@@ -194,6 +195,7 @@
         <button data-action="drone-faster" aria-label="Increase drone speed">+</button>
       </div>
       <div class="touch-utility">
+        <button data-action="hud" class="touch-hud-toggle" aria-label="Hide HUD">HIDE HUD</button>
         <button data-action="debug" class="touch-debug" aria-label="Open debug menu">DBG</button>
         <button data-action="phone" aria-label="Open phone">PHONE</button>
         <button data-action="dev-map" class="touch-dev-map" aria-label="Open developer map">DEV MAP</button>
@@ -207,7 +209,7 @@
     <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260722c"></script>
+  <script type="module" src="js/game.js?v=20260722d"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));

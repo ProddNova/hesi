@@ -38,7 +38,8 @@ class ShutokoNights {
     // and consumed by DebugStats so long frames name their cause in the log.
     this.frameProf={phys:0,traffic:0,map:0,render:0,persist:0,other:0,total:0};
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
-    this.lastService=null;this.contactCooldown=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
+    this.lastService=null;this.contactCooldown=0;this.ghostTimer=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
+    this.mobileFPS={startedAt:performance.now(),frames:0};
     this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
     this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
@@ -195,7 +196,7 @@ class ShutokoNights {
       if(block.has(e.code))e.preventDefault();if(!this.keys[e.code])this.pressed.add(e.code);this.keys[e.code]=true;
       this.audio?.unlock?.();this.audio?.resume?.();
       if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
-      if(e.code==='KeyH'&&this.started&&!e.repeat){const visible=this.ui.toggleHUD();this.ui.toast(visible?'HUD ON':'HUD OFF','amber');this.pressed.delete(e.code);}
+      if(e.code==='KeyH'&&this.started&&!e.repeat){this.toggleHUD();this.pressed.delete(e.code);}
       if(e.code==='KeyC'&&this.mode==='driving'){this.cycleCamera();this.pressed.delete(e.code);}
       if(e.code==='KeyR'&&this.mode==='driving'){this.recover();this.pressed.delete(e.code);}
       if(e.code==='F1'){e.preventDefault();this.ui.showHelp();}
@@ -230,6 +231,7 @@ class ShutokoNights {
       if(action==='phone'&&this.started&&!this.ui.pcOpen)this.ui.togglePhone(this.getPhoneContext());
       else if(action==='camera'&&this.mode==='driving')this.cycleCamera();
       else if(action==='recover'&&this.mode==='driving')this.recover();
+      else if(action==='hud'&&this.started)this.toggleHUD();
       else if(action==='debug')this.toggleDebugMenu();
       else if(action==='dev-map'&&this.started&&!this.ui.phoneOpen&&!this.ui.pcOpen&&!this.debug.menuOpen)this.toggleDevMap();
       else if(action==='drone-faster'&&this.debug.noclip){this.debug.moveSpeed=clamp(this.debug.moveSpeed*1.25,5,400);this.updateDroneSpeedHUD();}
@@ -247,6 +249,8 @@ class ShutokoNights {
     document.addEventListener('visibilitychange',()=>{if(document.hidden){this.releaseTouchInput();this.persist();}});
     window.addEventListener('pagehide',()=>this.persist());
   }
+
+  toggleHUD(){const visible=this.ui.toggleHUD();if(visible)this.ui.toast('HUD ON','amber');}
 
   syncTouchUI(){
     const root=document.getElementById('touch-controls');if(!root)return;const blocked=this.ui?.phoneOpen||this.ui?.pcOpen||this.debug.menuOpen||!document.getElementById('run-over')?.classList.contains('hidden')||!document.getElementById('pause-help')?.classList.contains('hidden');
@@ -268,11 +272,11 @@ class ShutokoNights {
   enterGarage(reason='service'){
     this.ui.fade(true);setTimeout(()=>{
       if(reason==='crash'||reason==='tow'){this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};}
-      this.mode='garage';this.crash.active=false;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.ensureGarageCar();this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Tatsumi PA workshop // Shift complete','amber');if(this.p4CaptureView)setTimeout(()=>this.exitGarage(),80);
+      this.mode='garage';this.crash.active=false;this.ghostTimer=0;this.playerMesh.visible=false;this.garage.root.visible=true;this.garageScene.add(this.camera);this.garage.enter(this.getEffectiveCar(),this.availableDeliveries());this.ensureGarageCar();this.applyRetroMaterials(this.garage.parkedGroup);this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);this.ui.toast(reason==='crash'?'Car recovered. Unbanked score lost.':'Tatsumi PA workshop // Shift complete','amber');if(this.p4CaptureView)setTimeout(()=>this.exitGarage(),80);
     },480);
   }
   exitGarage(){
-    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.garage.leave();this.attachCustomCarVisual();this.garage.root.visible=false;this.releaseGarageTextures();this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
+    this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.ghostTimer=0;this.garage.leave();this.attachCustomCarVisual();this.garage.root.visible=false;this.releaseGarageTextures();this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
   }
   // The garage scene is never rendered while driving, but its textures (the
   // editor's furniture/wall/poster images) stay uploaded after the first
@@ -301,7 +305,7 @@ class ShutokoNights {
     // physics integrates fixed 120 Hz substeps internally, so a large dt
     // stays stable); anything slower degrades to slow motion rather than
     // exploding.
-    const pf=this.frameProf;pf.phys=pf.traffic=pf.map=pf.render=pf.persist=0;const frameStart=performance.now();
+    const pf=this.frameProf;pf.phys=pf.traffic=pf.map=pf.render=pf.persist=0;const frameStart=performance.now();this.updateMobileFPS(frameStart);
     let dt=Math.min(.05,this.clock.getDelta()||.016);dt*=this.admin.timeScale||1;if(this.crash.active)dt*=.28;this.syncTouchUI();
     // Developer map freezes gameplay (vehicle + drone stay put) while it is open.
     // Freezing is preferable to letting the car/camera drift on stuck input.
@@ -311,6 +315,7 @@ class ShutokoNights {
     this.render();this.finishFrameProf(frameStart);this.pressed.clear();
   }
   finishFrameProf(frameStart){const pf=this.frameProf;pf.total=performance.now()-frameStart;pf.other=Math.max(0,pf.total-pf.phys-pf.traffic-pf.map-pf.render-pf.persist);this.debugStats?.frame(pf);}
+  updateMobileFPS(now){if(!this.isTouchDevice)return;const meter=this.mobileFPS;meter.frames++;const elapsed=now-meter.startedAt;if(elapsed<500)return;this.ui.updateFPS(meter.frames*1000/elapsed);meter.frames=0;meter.startedAt=now;}
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
@@ -323,7 +328,7 @@ class ShutokoNights {
     // time, so the world freezes while an overlay is up. Desktop keeps
     // driving as before.
     if(this.isTouchDevice&&(this.ui.phoneOpen||this.ui.pcOpen)&&!this.crash.active){const tel=this.getTelemetry();this.updateAudio({...tel,throttle:0,slip:0},dt);return;}
-    this.contactCooldown=Math.max(0,this.contactCooldown-dt);if(this.crash.active){this.updateCrash(dt);return;}
+    this.contactCooldown=Math.max(0,this.contactCooldown-dt);this.updateGhost(dt);if(this.crash.active){this.updateCrash(dt);return;}
     const state=this.getVehicleState(),pos=vec(state.position||state);
     const roadInfo=(this.roadAdapter?this.roadAdapter.getRoadInfo(pos):null)||this.map?.getRoadInfo?.(pos)||{};
     const input=this.getInput();this.lastDriveInput=input;const settings={automatic:this.state.settings.gearbox!=='manual',gearbox:this.state.settings.gearbox,infiniteFuel:this.admin.infiniteFuel};
@@ -335,7 +340,7 @@ class ShutokoNights {
     for(const ev of this.physics.consumeEvents?.()||[]){if(ev.type==='collision'&&(ev.kind==='wall'||ev.kind==='impact'))this.registerContact('wall',{severity:ev.severity,normal:ev.normal});}
     if(this.admin.infiniteFuel)this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);
     this.syncFuelFromPhysics();this.resolveMapCollision();
-    t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo});pf.traffic+=performance.now()-t0;
+    t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo,playerGhost:this.ghostTimer>0});pf.traffic+=performance.now()-t0;
     this.handleTrafficEvents();this.updatePlayerMesh();
     t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
     const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
@@ -659,23 +664,28 @@ class ShutokoNights {
       if(type.includes('near'))this.nearMiss(e);else if(type.includes('collision')||type.includes('contact'))this.registerContact('traffic',e);
     }
   }
+  updateGhost(dt){
+    const wasGhost=this.ghostTimer>0;this.ghostTimer=Math.max(0,this.ghostTimer-dt);
+    if(this.playerMesh&&this.mode==='driving'&&!this.debug.noclip)this.playerMesh.visible=!this.ghostTimer||Math.floor(this.ghostTimer*8)%2===0;
+    if(wasGhost&&!this.ghostTimer&&this.playerMesh&&!this.debug.noclip)this.playerMesh.visible=true;
+  }
   nearMiss(e={}){const t=this.getTelemetry();if(t.speedKmh<100)return;const distance=e.distance??e.clearance??1.2;const base=e.points??Math.round(220+(t.speedKmh-100)*4+Math.max(0,1.5-distance)*420);this.run.combo=clamp(this.run.combo+.25+(distance<.65?.2:0),1,8);this.run.comboTimer=4.5;this.run.nearMisses++;const points=base*this.run.combo;this.run.score+=points;this.ui.nearMiss(points,distance<.65);this.audio?.nearMiss?.({side:e.side==='left'?-1:1,speedKmh:t.speedKmh,closeness:e.closeness??1-distance/2.25});}
-  registerContact(kind,e={}){if(this.contactCooldown>0||this.crash.active)return;this.contactCooldown=1.1;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;const severity=Number.isFinite(e.severity)?e.severity:(e.intensity??4);const impact=clamp(severity/8,.4,2);this.audio?.crash?.(impact);
+  registerContact(kind,e={}){if(this.contactCooldown>0||this.ghostTimer>0||this.crash.active)return;this.contactCooldown=1.1;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;const severity=Number.isFinite(e.severity)?e.severity:(e.intensity??4);const impact=clamp(severity/8,.4,2);this.audio?.crash?.(impact);
     // A light scrape only breaks the combo; a real impact costs one of the three
-    // lives. Admin infinite-lives keeps the player unkillable for testing. When
-    // the last life is gone the run is wasted (see wasteRun) — no garage tow.
-    const serious=severity>2.5;
-    if(serious&&!this.admin.infiniteLives)this.run.lives--;
-    this.ui.toast(serious?`${kind.toUpperCase()} CONTACT // LIFE LOST`:`${kind.toUpperCase()} SCRAPE // COMBO LOST`,'red');
+    // lives. Every registered contact then starts five seconds of blinking
+    // invulnerability; traffic collision checks are disabled for that window.
+    const serious=severity>2.5,lostLife=serious&&!this.admin.infiniteLives;
+    if(lostLife)this.run.lives--;
+    this.ghostTimer=5;
     if(kind!=='wall')this.physics.resolveCollision?.({...e,normal:e.normal||new THREE.Vector3(1,0,0),kind});
     if(this.run.lives<=0)this.beginCrash();
+    else this.ui.toast(lostLife?`${kind.toUpperCase()} CONTACT // LIFE LOST // GHOST 5S`:serious?`${kind.toUpperCase()} CONTACT // GHOST 5S`:`${kind.toUpperCase()} SCRAPE // GHOST 5S`,'red');
   }
-  beginCrash(){this.crash={active:true,timer:0,score:this.run.score};}
-  updateCrash(dt){this.crash.timer+=dt/.28;const s=this.getVehicleState();if(s.heading!=null)s.heading+=dt*5;this.playerMesh.rotation.y+=(dt/.28)*4;const shake=Math.max(0,1-this.crash.timer/2.2)*.9;this.camera.position.x+=(Math.random()-.5)*shake;this.camera.position.y+=(Math.random()-.5)*shake;if(this.crash.timer>2.1)this.wasteRun();}
-  // Out of lives: no tow back to the garage. Wipe the run's score, hand back a
-  // fresh set of three lives and drop the car onto the road so the night simply
-  // restarts from 0 with the player still driving.
-  wasteRun(){this.crash.active=false;const s=this.getVehicleState(),p=vec(s.position||s),info=this.map?.getRoadInfo?.(p)||{};const target=vec(info.center||info.position||p);target.y=(info.height??target.y)+.6;const h=info.heading??s.heading??0;if(this.physics.setPosition)this.physics.setPosition(target.x,target.y,target.z,h);else this.physics.reset?.(target,h);this.run.score=0;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;this.run.lives=3;this.mode='driving';this.contactCooldown=1.5;this.updatePlayerMesh();this.snapDrivingCamera();this.ui.toast('WASTED // SCORE RESET — RESTART FROM 0','red');}
+  beginCrash(){this.wasteRun();}
+  updateCrash(){this.crash.active=false;this.wasteRun();}
+  // The third life no longer starts a crash animation or relocates the car: it
+  // only wipes the unbanked score and refills the three-hit counter.
+  wasteRun(){this.crash.active=false;this.run.score=0;this.run.lives=3;this.ui.toast('WASTED // SCORE RESET — RESTART FROM 0','red');}
 
   resolveMapCollision(){
     const s=this.getVehicleState(),position=vec(s.position||s),previous=vec(s.previousPosition||position),velocity=vec(s.velocity||{});let hit=null;
