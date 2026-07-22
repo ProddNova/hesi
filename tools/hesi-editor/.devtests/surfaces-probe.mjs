@@ -138,7 +138,7 @@ check('reset restores the lamp head', await page.evaluate(() => window.hesiEdito
 
 // Editing as parts must land in the custom library with real primitive parts:
 // a lamp is a mast plus a head, both reshapeable and texturable.
-await page.click('[data-testid="modeler-world-object-officeBuilding"]');
+await page.click('[data-testid="modeler-world-object-officeBlock"]');
 await page.waitForTimeout(700);
 await page.click('[data-testid="modeler-world-edit-as-model"]');
 await page.waitForTimeout(1000);

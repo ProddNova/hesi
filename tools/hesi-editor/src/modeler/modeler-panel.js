@@ -1523,7 +1523,7 @@ export class ModelerPanel {
     this._syncLibraryChrome();
     if (world) {
       this._renderWorldObjectList();
-      this._selectWorldObject(this.worldObject || 'officeBuilding', this.worldSlot);
+      this._selectWorldObject(this.worldObject || Object.keys(WORLD_OBJECTS)[0], this.worldSlot);
       this.onStatus('World objects · pick a type, give it a texture — every copy of it in the map changes with it');
     } else {
       this.assetGroup.visible = true;

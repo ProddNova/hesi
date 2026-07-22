@@ -14,6 +14,20 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8081';
 await mkdir(OUT, { recursive: true });
 
 const snapshot = await readFile(ASSETS, 'utf8');
+// The probe measures the swap against the GENERATED buildings, so it has to
+// start from a document that replaces none of them — otherwise a model the
+// user already saved for a building type reads as "the swap did nothing".
+// The snapshot above is written back untouched at the end either way.
+{
+  const document = JSON.parse(snapshot);
+  const cleared = Object.fromEntries(
+    Object.entries(document.worldModels || {}).filter(([key]) => !key.startsWith('facade:')),
+  );
+  if (Object.keys(cleared).length !== Object.keys(document.worldModels || {}).length) {
+    await writeFile(ASSETS, JSON.stringify({ ...document, worldModels: cleared }, null, 2));
+    console.log('starting from generated buildings (saved building models parked for the run)');
+  }
+}
 const checks = [];
 const check = (name, ok, detail = '') => { checks.push({ name, ok, detail }); };
 const errors = [];
@@ -70,7 +84,7 @@ try {
   await page.waitForSelector('[data-testid="modeler-overlay"]', { state: 'visible', timeout: 15000 });
   await page.click('[data-testid="modeler-library-world"]');
   await page.waitForTimeout(800);
-  await page.click('[data-testid="modeler-world-object-officeBuilding"]');
+  await page.click('[data-testid="modeler-world-object-officeBlock"]');
   await page.waitForTimeout(800);
   check('the office building offers the model round trip',
     /copies in the map take the new shape/i.test(await page.textContent('[data-testid="world-texture-section"]') || ''));
@@ -91,7 +105,8 @@ try {
     after.replaced === before.boxes && after.drawn < before.drawn,
     `${after.replaced}/${before.boxes} replaced, facade triangles ${before.drawn} -> ${after.drawn}`);
   const status = await page.textContent('.status-message').catch(() => '');
-  check('the status says the world followed', /every office building/i.test(status || ''), (status || '').slice(0, 90));
+  check('the status says the world followed',
+    /every office block in the map now draws it/i.test(status || ''), (status || '').slice(0, 90));
 
   const othersAfter = {};
   for (const type of otherTypes) othersAfter[type] = await shapeOf(type);
@@ -133,7 +148,7 @@ try {
   await page.waitForSelector('[data-testid="modeler-overlay"]', { state: 'visible', timeout: 15000 });
   await page.click('[data-testid="modeler-library-world"]');
   await page.waitForTimeout(800);
-  await page.click('[data-testid="modeler-world-object-officeBuilding"]');
+  await page.click('[data-testid="modeler-world-object-officeBlock"]');
   await page.waitForTimeout(700);
   await page.click('[data-testid="modeler-world-reset-model"]');
   await page.waitForTimeout(1200);

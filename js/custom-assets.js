@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -87,12 +88,17 @@ export const WORLD_SURFACES = Object.freeze({
   water: { label: 'Tokyo Bay water', description: 'Bay surface around the expressway', group: 'Terrain', kind: 'surface', preview: 'road' },
 
   // -------------------------------------------------------- repeated objects --
-  facadeOffice: { label: 'Office building', description: 'Lit office towers — the most common city block', group: 'Buildings', kind: 'object', preview: 'building' },
-  facadeDark: { label: 'Dark building', description: 'Mostly unlit blocks and tower caps', group: 'Buildings', kind: 'object', preview: 'building' },
-  facadeHotel: { label: 'Hotel building', description: 'Warm-lit narrow-window hotel blocks', group: 'Buildings', kind: 'object', preview: 'building' },
-  facadeIndustrial: { label: 'Industrial building', description: 'Warehouses and sheds along the bay', group: 'Buildings', kind: 'object', preview: 'building' },
+  // One entry per building type (js/building-types.js): every copy of a type is
+  // the same box with the same 0..1 wall UVs, so one image here is that whole
+  // category of building, everywhere in the map.
+  ...Object.fromEntries(BUILDING_TYPES.map((type) => [type.slot, {
+    label: type.label,
+    description: `${type.description} — ${type.width} x ${type.height} x ${type.depth} m`,
+    group: 'Buildings',
+    kind: 'object',
+    preview: 'building',
+  }])),
   building: { label: 'Building roofs', description: 'Flat roof caps on every generated block', group: 'Buildings', kind: 'object', preview: 'panel' },
-  shed: { label: 'Industrial shed', description: 'Low shed volumes in the dock districts', group: 'Buildings', kind: 'object', preview: 'building' },
   towerWhite: { label: 'Landmark tower', description: 'Tokyo Tower style landmark structure', group: 'Buildings', kind: 'object', preview: 'pillar' },
 
   container: { label: 'Shipping container', description: 'Stacked dock containers', group: 'Street objects', kind: 'object', preview: 'container' },
@@ -147,29 +153,20 @@ export const WORLD_SURFACES = Object.freeze({
  * neither key have no per-copy trace at all, so only their surfaces can change.
  */
 export const WORLD_OBJECTS = Object.freeze({
-  officeBuilding: {
-    label: 'Office building', description: 'Lit office towers — the most common city block', group: 'Buildings', buildingType: 'facadeOffice',
-    parts: [{ slot: 'facadeOffice', size: [9, 16, 9], position: [0, 8, 0] }, { slot: 'building', size: [9.4, 0.4, 9.4], position: [0, 16.2, 0] }],
-  },
-  darkBuilding: {
-    label: 'Dark building', description: 'Mostly unlit blocks and tower caps', group: 'Buildings', buildingType: 'facadeDark',
-    parts: [{ slot: 'facadeDark', size: [9, 14, 9], position: [0, 7, 0] }, { slot: 'building', size: [9.4, 0.4, 9.4], position: [0, 14.2, 0] }],
-  },
-  hotelBuilding: {
-    label: 'Hotel building', description: 'Warm-lit narrow-window hotel blocks', group: 'Buildings', buildingType: 'facadeHotel',
-    parts: [{ slot: 'facadeHotel', size: [8, 18, 8], position: [0, 9, 0] }, { slot: 'building', size: [8.4, 0.4, 8.4], position: [0, 18.2, 0] }],
-  },
-  industrialBuilding: {
-    label: 'Industrial building', description: 'Warehouses along the bay', group: 'Buildings', buildingType: 'facadeIndustrial',
-    parts: [{ slot: 'facadeIndustrial', size: [12, 7, 9], position: [0, 3.5, 0] }, { slot: 'building', size: [12.4, 0.4, 9.4], position: [0, 7.2, 0] }],
-  },
-  industrialShed: {
-    // No buildingType: the generator draws dock sheds from the SAME
-    // facadeIndustrial boxes as the warehouses, so the record cannot tell the
-    // two apart — replacing Industrial building covers both.
-    label: 'Industrial shed', description: 'Low shed volumes in the dock districts', group: 'Buildings',
-    parts: [{ slot: 'shed', size: [12, 5, 8], position: [0, 2.5, 0] }, { slot: 'building', size: [12.4, 0.4, 8.4], position: [0, 5.2, 0] }],
-  },
+  // The building catalogue, one object per type, each declaring the REAL box
+  // every copy of it stands in (js/building-types.js). Because that box is the
+  // same everywhere, a model saved against the type is fitted into it
+  // identically across the whole map — which is the point of the catalogue.
+  ...Object.fromEntries(BUILDING_TYPES.map((type) => [type.id, {
+    label: type.label,
+    description: `${type.description} — ${type.width} x ${type.height} x ${type.depth} m`,
+    group: 'Buildings',
+    buildingType: type.slot,
+    parts: [
+      { slot: type.slot, size: [type.width, type.height, type.depth], position: [0, type.height * 0.5, 0] },
+      { slot: BUILDING_ROOF_SLOT, size: [type.width, 0.4, type.depth], position: [0, type.height + 0.2, 0] },
+    ],
+  }])),
   landmarkTower: {
     label: 'Landmark tower', description: 'Tokyo Tower style landmark structure', group: 'Buildings', instanceType: 'box:towerWhite',
     parts: [{ slot: 'towerWhite', size: [3, 26, 3], position: [0, 13, 0] }, { slot: 'redBlink', size: [0.5, 0.5, 0.5], position: [0, 26.3, 0] }],

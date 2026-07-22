@@ -443,9 +443,11 @@ test('world model targets and their validation', () => {
   // Buildings are replaced through their facade material, behind a prefix that
   // cannot collide with a `<geometry>:<material>` instance bucket.
   assert.equal(worldObjectModelKey('shippingContainer'), 'box:container');
-  assert.equal(worldObjectModelKey('officeBuilding'), 'facade:facadeOffice');
+  // The catalogue keeps the legacy facade slots on the types that inherited
+  // their role, so models saved before it existed still find their buildings.
+  assert.equal(worldObjectModelKey('officeBlock'), 'facade:facadeOffice');
   assert.equal(worldObjectModelKey('routeSign'), null, 'archetypes with no per-copy record are not replaceable');
-  assert.equal(worldObjectForModelKey('facade:facadeOffice'), 'officeBuilding');
+  assert.equal(worldObjectForModelKey('facade:facadeOffice'), 'officeBlock');
   const document = validDocument();
   document.worldModels = { 'box:container': 'custom:0404' };
   assert.match(customAssetsDocumentErrors(document)[0], /missing asset custom:0404/);

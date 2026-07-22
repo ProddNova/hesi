@@ -4,6 +4,7 @@ import * as THREE from 'three';
 // XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
 // any extractor run).
 import ROUTE_DATA from '../data/routes-smoothed.js';
+import { BUILDING_TYPES } from './building-types.js';
 import { buildProgressiveTransitions } from './progressive-merge.js';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js';
 
@@ -84,9 +85,61 @@ export const ROAD_NETWORK_BASE_Y_OFFSET = 15.0;
 export const ROAD_NETWORK_EXTRA_Y_OFFSET = 10.0;
 export const ROAD_NETWORK_Y_OFFSET = ROAD_NETWORK_BASE_Y_OFFSET + ROAD_NETWORK_EXTRA_Y_OFFSET;
 
-// One authoritative multiplier keeps every procedural city building and all
-// height-dependent rooftop details in proportion.
+// Building sizes are no longer scaled at placement time: every type in
+// js/building-types.js declares the metres it stands in. Kept as the historical
+// factor those catalogue heights were derived with.
 export const CITY_BUILDING_HEIGHT_SCALE = 1.8;
+
+/** Catalogue types by id, for the placement tables below. */
+const BUILDING = Object.fromEntries(BUILDING_TYPES.map((type) => [type.id, type]));
+
+/**
+ * Where the city stands: per spine, the rows of buildings walked outward from
+ * the road and the type mix each row draws from.
+ *
+ * This table decides DENSITY and CHARACTER only — never size. `step` is how
+ * often along the spine a row is offered ground, `skip` how often it passes,
+ * `setback` the metres of clearance behind the carriageway edge, and `mix` the
+ * `[type, weight]` draw. Rows are listed near-to-far and compete for the same
+ * ground through _canPlaceBuilding, so tightening a row fills the gaps in front
+ * of it instead of stacking buildings into each other.
+ */
+const CITY_DISTRICTS = Object.freeze({
+  // The C1 loop: a lit canyon. Shopfronts at the barrier, blocks behind them,
+  // towers filling the sky beyond.
+  c1: {
+    step: 34,
+    rows: [
+      { setback: [14, 30], skip: 0.06, mix: [[BUILDING.shopRow, 3], [BUILDING.apartmentBlock, 2], [BUILDING.darkBlock, 2], [BUILDING.officeBlock, 2], [BUILDING.hotelSlab, 1], [BUILDING.slimTower, 1]] },
+      { setback: [50, 92], skip: 0.10, mix: [[BUILDING.officeBlock, 3], [BUILDING.hotelSlab, 2], [BUILDING.slimTower, 2], [BUILDING.officeTower, 2], [BUILDING.darkBlock, 2]] },
+      { setback: [124, 196], skip: 0.28, mix: [[BUILDING.officeTower, 3], [BUILDING.skyscraper, 2], [BUILDING.officeBlock, 2], [BUILDING.apartmentBlock, 2]] },
+    ],
+  },
+  // Route 9 Fukagawa / Route 1 Haneda: lower mixed city, still continuous.
+  mixed: {
+    step: 44,
+    rows: [
+      { setback: [14, 38], skip: 0.10, mix: [[BUILDING.shopRow, 3], [BUILDING.apartmentBlock, 3], [BUILDING.darkBlock, 2], [BUILDING.officeBlock, 2]] },
+      { setback: [70, 130], skip: 0.30, mix: [[BUILDING.officeBlock, 2], [BUILDING.hotelSlab, 2], [BUILDING.slimTower, 1], [BUILDING.apartmentBlock, 2], [BUILDING.darkBlock, 1]] },
+    ],
+  },
+  // K1 Yokohane: works and yards, with a little housing standing behind them.
+  k1: {
+    step: 40,
+    rows: [
+      { setback: [16, 52], skip: 0.08, mix: [[BUILDING.warehouse, 3], [BUILDING.depotShed, 3], [BUILDING.shopRow, 1]] },
+      { setback: [94, 176], skip: 0.32, mix: [[BUILDING.depotShed, 2], [BUILDING.warehouse, 2], [BUILDING.apartmentBlock, 2], [BUILDING.darkBlock, 1]] },
+    ],
+  },
+  // Wangan: sheds on whichever side of the Bayshore is land (see _buildCity).
+  port: {
+    step: 90,
+    rows: [
+      { setback: [70, 150], skip: 0.34, mix: [[BUILDING.depotShed, 3], [BUILDING.warehouse, 2]] },
+      { setback: [200, 330], skip: 0.52, mix: [[BUILDING.warehouse, 2], [BUILDING.depotShed, 2], [BUILDING.apartmentBlock, 1]] },
+    ],
+  },
+});
 
 // One repeat of the road texture covers this many metres of asphalt — on
 // every road surface, whatever the underlying quad/triangle happens to be.
@@ -341,7 +394,9 @@ export class HighwayMap {
 
     // Ground-level props that are not buildings and so never enter the
     // placement index, but still need land under them (see _buildTerrain).
+    // The index behind them only exists to drop anchors already covered.
     this._terrainAnchors = [];
+    this._anchorIndex = new Map();
 
     // Chunked world: key -> { group, center, alwaysVisible }
     this._chunks = new Map();
@@ -443,19 +498,18 @@ export class HighwayMap {
     const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({
       color, fog: true, toneMapped: false, ...extra,
     });
-    this._facadeSpecs = {};
-    const facade = (name, spec) => {
-      const texture = this._facadeTexture(spec);
-      this._facadeSpecs[name] = spec;
-      return texture
+    // One facade material per building type (js/building-types.js). The
+    // material IS the type: repainting it in the editor repaints every copy of
+    // that type, and nothing else.
+    const facades = {};
+    for (const type of BUILDING_TYPES) {
+      const texture = this._facadeTexture(type);
+      facades[type.slot] = texture
         ? new THREE.MeshBasicMaterial({ map: texture, fog: true, toneMapped: false })
         : lambert(0x151a24);
-    };
+    }
     return {
-      facadeOffice: facade('facadeOffice', { cols: 10, rows: 13, lit: 0.44, warm: 0.45, base: '#141823', cellW: 3.4, cellH: 3.3, seed: 0x1a2b3c }),
-      facadeDark: facade('facadeDark', { cols: 10, rows: 13, lit: 0.13, warm: 0.55, base: '#0f1219', cellW: 3.4, cellH: 3.3, seed: 0x2b3c4d }),
-      facadeHotel: facade('facadeHotel', { cols: 12, rows: 14, lit: 0.32, warm: 0.85, base: '#171a21', cellW: 2.8, cellH: 3.0, seed: 0x3c4d5e }),
-      facadeIndustrial: facade('facadeIndustrial', { cols: 7, rows: 5, lit: 0.2, warm: 0.35, base: '#171a1e', cellW: 5.5, cellH: 4.2, seed: 0x4d5e6f }),
+      ...facades,
       road: lambert(0x14171f),
       roadAlt: lambert(0x171a23),
       roadService: lambert(0x1d2029),
@@ -480,7 +534,6 @@ export class HighwayMap {
       redBlink: basic(0xff3040),
       building: lambert(0x11141e),
       neon: basic(0xffffff),
-      shed: lambert(0x1a1d24),
       crane: lambert(0x233042),
       container: lambert(0x54331f),
       water: lambert(0x061019, { transparent: true, opacity: 0.9 }),
@@ -651,10 +704,14 @@ export class HighwayMap {
   }
 
   /**
-   * Night facade texture: a grid of small emissive windows with a believable
-   * random lit pattern (warm/cool whites, dim TVs, dark floors) on a dark
-   * wall. Tiled per building with whole-window UV repeats so grids stay
-   * aligned to the silhouette — the classic PS2 Tokyo-at-night look.
+   * Night facade texture for one building type: a grid of small emissive
+   * windows with a believable random lit pattern (warm/cool whites, dim TVs,
+   * dark floors) on a dark wall — the classic PS2 Tokyo-at-night look.
+   *
+   * The walls carry plain 0..1 UVs, so the tiling lives on the TEXTURE
+   * (`repeatX`/`repeatY` from the catalogue) rather than on the geometry. Since
+   * every copy of a type is the same box, that one repeat is right everywhere,
+   * and a custom texture dropped on the slot lands on a clean 0..1 wall.
    */
   _facadeTexture(spec) {
     if (typeof document === 'undefined') return null;
@@ -704,6 +761,7 @@ export class HighwayMap {
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(spec.repeatX || 1, spec.repeatY || 1);
     texture.magFilter = THREE.LinearFilter;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.generateMipmaps = true;
@@ -1169,12 +1227,13 @@ export class HighwayMap {
 
   /**
    * A published override for a PA connector is only valid while its on-deck
-   * terminus still lands where the live connector ends. The deck rectangle
+   * terminus still belongs to the live connector. The deck rectangle
    * and its aisle are re-fitted from the live ramp geometry on every load,
    * so an override captured against older ramps can drift off the lot — or,
    * worse, land inside it but across the stall rows (the deck grew around
-   * the old footprint). Compare against the runtime-built connector's own
-   * terminus when it exists; fall back to the lot rectangle otherwise.
+   * the old footprint). Compare against the runtime-built connector, allowing
+   * an intentional endpoint trim along its curve; fall back to the lot
+   * rectangle when no runtime connector exists.
    */
   _syntheticOverrideIsStale(routeId, pointArrays) {
     if (!Array.isArray(pointArrays) || pointArrays.length < 2) return false;
@@ -1189,8 +1248,15 @@ export class HighwayMap {
       const live = area.entryRouteId === routeId
         ? runtime.curve.getPointAt(1)
         : runtime.curve.getPointAt(0);
-      return Math.hypot(terminus[0] - live.x, terminus[2] - live.z) > 12
-        || Math.abs(terminus[1] - live.y) > 1.5;
+      const endpointMatches = Math.hypot(terminus[0] - live.x, terminus[2] - live.z) <= 12
+        && Math.abs(terminus[1] - live.y) <= 1.5;
+      if (endpointMatches) return false;
+
+      // Endpoint deletion is a legal editor operation: the retained control
+      // point becomes the new terminus and still lies on the generated curve.
+      // An old override from a differently fitted PA does not.
+      const projection = this._projectToRoute(runtime, vec(terminus[0], terminus[1], terminus[2]));
+      return projection.worldDistance > 1.5;
     }
     const du = (terminus[0] - area.center.x) * area.tangent.x + (terminus[2] - area.center.z) * area.tangent.z;
     const dv = (terminus[0] - area.center.x) * area.normal.x + (terminus[2] - area.center.z) * area.normal.z;
@@ -7697,22 +7763,46 @@ export class HighwayMap {
   /**
    * Ground under a prop, WITHOUT reserving it against further placement: only
    * _buildTerrain reads these, so recording one can never move a building.
+   *
+   * An anchor already swallowed whole by one recorded next to it is dropped:
+   * the land it would carve is land that already exists, and _buildTerrain
+   * evaluates its coastline field against every disc it is given. Denser
+   * blocks therefore cost terrain time only where they actually reach new
+   * ground.
    */
   _recordGroundAnchor(x, z, r) {
-    this._terrainAnchors.push({ x, z, r });
+    const cell = 256;
+    const ci = Math.floor(x / cell);
+    const ck = Math.floor(z / cell);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        for (const disc of this._anchorIndex.get(`${ci + dx},${ck + dz}`) || []) {
+          if (Math.hypot(disc.x - x, disc.z - z) + r <= disc.r) return;
+        }
+      }
+    }
+    const anchor = { x, z, r };
+    this._terrainAnchors.push(anchor);
+    const key = `${ci},${ck}`;
+    if (!this._anchorIndex.has(key)) this._anchorIndex.set(key, []);
+    this._anchorIndex.get(key).push(anchor);
   }
 
   /**
-   * Textured building box: 4 facade quads with whole-window UV repeats into
-   * the chunk bucket for `matName`, dark roof quad. Returns the top Y.
+   * Textured building box: 4 facade quads into the chunk bucket for `matName`,
+   * dark roof quad. Returns the top Y.
+   *
+   * Each wall gets plain 0..1 UVs — one wall, one image. The window grid comes
+   * from the type's texture repeat instead (see _facadeTexture), which is only
+   * possible because every copy of a type is the same box. That is also what
+   * makes the walls a usable canvas for a custom texture.
    *
    * Every box also files a record in `buildingBoxes`: the box it occupies plus
    * the exact index ranges its facade and roof triangles hold in their chunk
    * buckets. Buildings are merged geometry — that record is what a saved model
    * replacement hides and stands in for (applyWorldBuildingOverrides).
    */
-  _pushBuildingBox(matName, random, x, z, baseY, width, height, depth, yaw) {
-    const spec = this._facadeSpecs[matName] || { cols: 10, rows: 13, cellW: 3.4, cellH: 3.3 };
+  _pushBuildingBox(matName, x, z, baseY, width, height, depth, yaw) {
     const rx = Math.cos(yaw);
     const rz = -Math.sin(yaw);
     const fx = Math.sin(yaw);
@@ -7728,20 +7818,12 @@ export class HighwayMap {
     const centerVec = vec(x, baseY, z);
     const bucket = this._bucket(centerVec, matName);
     const facadeStart = bucket.indices.length;
-    const floors = Math.max(2, Math.round(height / spec.cellH));
-    const v1 = floors / spec.rows;
     for (let i = 0; i < 4; i += 1) {
       const p0 = corners[i];
       const p1 = corners[(i + 1) % 4];
-      const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
-      const windows = Math.max(2, Math.round(len / spec.cellW));
-      const u1 = windows / spec.cols;
-      const offU = Math.floor(random() * spec.cols) / spec.cols;
-      const offV = Math.floor(random() * spec.rows) / spec.rows;
       this._pushQuad(bucket,
         vec(p1[0], baseY, p1[1]), vec(p0[0], baseY, p0[1]),
-        vec(p0[0], baseY + height, p0[1]), vec(p1[0], baseY + height, p1[1]),
-        [offU, offV, offU + u1, offV + v1]);
+        vec(p0[0], baseY + height, p0[1]), vec(p1[0], baseY + height, p1[1]));
     }
     const facadeCount = bucket.indices.length - facadeStart;
     const roof = this._bucket(centerVec, 'building');
@@ -7762,142 +7844,66 @@ export class HighwayMap {
     return baseY + height;
   }
 
-  static BILLBOARDS = [
-    ['月光タイヤ', 'GEKKO TIRES', '#7a1f4d'], ['NIGHTFUEL', '夜間燃料', '#173f78'],
-    ['ハイパー缶コーヒー', 'KAN COFFEE', '#7a4d15'], ['首都高保険', 'EXPRESSWAY INS.', '#1f6a54'],
-    ['ネオン電機', 'NEON DENKI', '#28246e'], ['湾岸ホテル', 'BAY HOTEL', '#5e1f78'],
-    ['真夜中運輸', 'MIDNIGHT EXPRESS', '#6e2424'], ['スターダスト録音', 'STARDUST AUDIO', '#1f5c78'],
-  ];
+  /**
+   * Places ONE building of a catalogue type: a single box, exactly the size the
+   * type declares, and the roof blinker the tall types carry.
+   *
+   * One type is one box on purpose. A custom model saved for the type is fitted
+   * into that box on every copy (applyWorldBuildingOverrides), so the box has to
+   * be identical everywhere AND nothing may be glued to it — no rooftop
+   * billboards, neon strips, water tanks or antennas. The walls are left bare
+   * because they are the canvas the user's own textures and models go on.
+   */
+  _placeBuilding(type, x, z, yaw, baseY = -0.1) {
+    this._pushBuildingBox(type.slot, x, z, baseY, type.width, type.height, type.depth, yaw);
+    if (type.blinker) {
+      this._instance(vec(x, baseY + type.height + 0.8, z), vec(1.15, 1.15, 1.15), null, null, 'box:redBlink');
+    }
+    this._recordFootprint(x, z, type.radius);
+    return type;
+  }
+
+  /** Weighted pick from a district row's `[type, weight]` mix. */
+  _pickBuildingType(random, mix) {
+    let total = 0;
+    for (const entry of mix) total += entry[1];
+    let roll = random() * total;
+    for (const entry of mix) {
+      roll -= entry[1];
+      if (roll <= 0) return entry[0];
+    }
+    return mix[mix.length - 1][0];
+  }
 
   /**
-   * One dressed building. Archetypes: slab office tower, stepped tower,
-   * narrow mixed-use w/ neon, low commercial w/ rooftop billboard, crown
-   * (lit top floor), hotel/residential, industrial shed, port warehouse.
-   * `opts.face` is the unit vector pointing from the building toward the road
-   * (signage/shopfront orientation).
+   * Fills both sides of a spine with a district's rows of buildings.
+   *
+   * Every station offers ground to every row, nearest row first, and
+   * _canPlaceBuilding is what actually decides: the rows compete for the same
+   * ground, the near row wins it, and the far rows take whatever the junctions
+   * and the ramps left over. That competition is what closes the bare stretches
+   * without stacking geometry where there is no room for it.
    */
-  _buildStructure(random, x, z, yaw, archetype, width, height, depth, opts = {}) {
-    height *= CITY_BUILDING_HEIGHT_SCALE;
-    const baseY = opts.baseY ?? -0.1;
-    const face = opts.face || null;
-    const rx = Math.cos(yaw);
-    const rz = -Math.sin(yaw);
-    const fx = Math.sin(yaw);
-    const fz = Math.cos(yaw);
-    const local = (dx, dz, y) => vec(x + rx * dx + fx * dz, y, z + rz * dx + fz * dz);
-    const faceHalf = face
-      ? Math.abs(face.x * rx + face.z * rz) * width * 0.5 + Math.abs(face.x * fx + face.z * fz) * depth * 0.5
-      : 0;
-    const faceLen = face
-      ? Math.abs(face.x * fx + face.z * fz) * width + Math.abs(face.x * rx + face.z * rz) * depth
-      : width;
-    const topY = baseY + height;
-    const yawQuat = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
-
-    const blinker = (y = topY + 0.8) => this._instance(vec(x, y, z), vec(1.15, 1.15, 1.15), null, null, 'box:redBlink');
-    const waterTank = () => this._instance(
-      local((random() - 0.5) * width * 0.4, (random() - 0.5) * depth * 0.4, topY + 1.25),
-      vec(2.6, 2.5, 2.6), yawQuat, null, 'box:concreteDark');
-    const antenna = () => {
-      const h = 4.5 + random() * 5;
-      this._instance(local((random() - 0.5) * width * 0.5, (random() - 0.5) * depth * 0.5, topY + h * 0.5),
-        vec(0.28, h, 0.28), null, null, 'box:concrete');
-    };
-    const rooftopBillboard = () => {
-      if (!face || typeof document === 'undefined') return;
-      const [kanji, romaji, color] = HighwayMap.BILLBOARDS[Math.floor(random() * HighwayMap.BILLBOARDS.length)];
-      const w = Math.min(16, faceLen * 0.8);
-      const h = w * 0.34;
-      const board = this._makeSignMesh(`${kanji}|${romaji}`, color, w, h, true);
-      const pos = vec(x, topY + h * 0.5 + 1.1, z);
-      board.position.copy(pos);
-      board.quaternion.copy(yawQuaternion(face));
-      this._addChunkMesh(board, pos);
+  _buildDistrict(random, spine, district) {
+    if (!spine) return;
+    for (let distance = 0; distance < spine.length; distance += district.step) {
+      if (this._isTunnel(spine, distance)) continue;
+      const center = this._sampleCenter(spine, distance, 1);
+      const normal = horizontalNormal(center.baseTangent);
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
       for (const side of [-1, 1]) {
-        this._instance(vec(x + face.x * -0.4, topY + 0.7, z + face.z * -0.4)
-          .add(vec(-face.z * side * w * 0.3, 0, face.x * side * w * 0.3)),
-        vec(0.26, 1.6, 0.26), null, null, 'box:concreteDark');
-      }
-    };
-    const wallBillboard = () => {
-      if (!face || typeof document === 'undefined') return;
-      const [kanji, romaji, color] = HighwayMap.BILLBOARDS[Math.floor(random() * HighwayMap.BILLBOARDS.length)];
-      const w = Math.min(15, faceLen * 0.72);
-      const board = this._makeSignMesh(`${kanji}|${romaji}`, color, w, w * 0.36, true);
-      const pos = vec(x + face.x * (faceHalf + 0.5), baseY + height * 0.62, z + face.z * (faceHalf + 0.5));
-      board.position.copy(pos);
-      board.quaternion.copy(yawQuaternion(face));
-      this._addChunkMesh(board, pos);
-    };
-
-    switch (archetype) {
-      case 'stepped': {
-        this._pushBuildingBox('facadeOffice', random, x, z, baseY, width, height * 0.58, depth, yaw);
-        this._pushBuildingBox('facadeOffice', random, x, z, baseY + height * 0.58, width * 0.76, height * 0.26, depth * 0.76, yaw);
-        this._pushBuildingBox('facadeDark', random, x, z, baseY + height * 0.84, width * 0.52, height * 0.16, depth * 0.52, yaw);
-        if (height > 88) blinker(); else antenna();
-        break;
-      }
-      case 'crown': {
-        this._pushBuildingBox(random() < 0.7 ? 'facadeOffice' : 'facadeDark', random, x, z, baseY, width, height, depth, yaw);
-        this._instance(vec(x, topY - 0.95, z), vec(width + 0.35, 1.5, depth + 0.35), yawQuat, 0xffedc2, 'box:neon');
-        if (height > 88) blinker(topY + 0.9);
-        waterTank();
-        break;
-      }
-      case 'narrow': {
-        this._pushBuildingBox('facadeHotel', random, x, z, baseY, width, height, depth, yaw);
-        if (face) {
-          const colors = [0xff5f7a, 0x67d7ff, 0xffc65b, 0x7dffb8, 0xff8de5];
-          this._instance(vec(x + face.x * (faceHalf + 0.45), baseY + height * 0.5, z + face.z * (faceHalf + 0.45)),
-            vec(0.75, height * 0.6, 0.75), yawQuat, colors[Math.floor(random() * colors.length)], 'box:neon');
+        for (const row of district.rows) {
+          if (random() < row.skip) continue;
+          const type = this._pickBuildingType(random, row.mix);
+          const setback = row.setback[0] + random() * (row.setback[1] - row.setback[0]);
+          const position = center.position.clone()
+            .addScaledVector(normal, side * (spine.halfWidth + setback + type.width * 0.5));
+          if (!this._canPlaceBuilding(position.x, position.z, type.radius)) continue;
+          // Buildings face the road, with only enough yaw jitter to keep the
+          // row from reading as a comb. No 90-degree flips: a custom model has
+          // a front, and every copy of a type should present the same one.
+          this._placeBuilding(type, position.x, position.z, heading + (random() - 0.5) * 0.07);
         }
-        antenna();
-        break;
-      }
-      case 'commercial': {
-        this._pushBuildingBox('facadeOffice', random, x, z, baseY, width, height, depth, yaw);
-        if (face) {
-          this._instance(vec(x + face.x * (faceHalf + 0.22), baseY + 1.5, z + face.z * (faceHalf + 0.22)),
-            vec(faceLen * 0.8, 2.4, 0.3), yawQuaternion(TMP_C.set(-face.z, 0, face.x)), 0xffd9a0, 'box:neon');
-        }
-        if (random() < 0.6) rooftopBillboard();
-        break;
-      }
-      case 'hotel': {
-        this._pushBuildingBox('facadeHotel', random, x, z, baseY, width, height, depth, yaw);
-        waterTank();
-        if (height > 88) blinker();
-        break;
-      }
-      case 'shed': {
-        this._pushBuildingBox('facadeIndustrial', random, x, z, baseY, width, height, depth, yaw);
-        for (let i = 0; i < 2; i += 1) {
-          this._instance(local((random() - 0.5) * width * 0.5, (random() - 0.5) * depth * 0.5, topY + 0.5),
-            vec(1.4, 1, 1.4), yawQuat, null, 'box:concreteDark');
-        }
-        break;
-      }
-      case 'warehouse': {
-        this._pushBuildingBox('facadeIndustrial', random, x, z, baseY, width, height, depth, yaw);
-        if (face) {
-          const doors = 2 + Math.floor(random() * 2);
-          for (let i = 0; i < doors; i += 1) {
-            const along = (i - (doors - 1) * 0.5) * (faceLen / (doors + 0.5));
-            this._instance(vec(x + face.x * (faceHalf + 0.2) - face.z * along, baseY + 1.9, z + face.z * (faceHalf + 0.2) + face.x * along),
-              vec(3.4, 3.6, 0.28), yawQuaternion(TMP_C.set(-face.z, 0, face.x)), 0xffc890, 'box:neon');
-          }
-        }
-        break;
-      }
-      case 'slab':
-      default: {
-        this._pushBuildingBox(random() < 0.62 ? 'facadeOffice' : 'facadeDark', random, x, z, baseY, width, height, depth, yaw);
-        if (random() < 0.55) waterTank();
-        if (random() < 0.5) antenna();
-        if (height > 92) blinker();
-        if (height > 34 && random() < 0.14) wallBillboard();
-        break;
       }
     }
   }
@@ -7918,103 +7924,42 @@ export class HighwayMap {
     const random = mulberry32(this.seed ^ 0xa73b91);
     this._footprints = new Map();
     this._terrainAnchors = [];
+    this._anchorIndex = new Map();
 
-    // --- C1 canyon: two rows of towers hard against both sides of the loop
-    // so the C1 reads as a lit canyon with no bare gaps. The spine is the
-    // longest C1 carriageway; _canPlaceBuilding keeps towers off the sibling
-    // carriageway and every ramp.
-    const c1 = this._groupChains('c1')[0];
-    if (!c1) return;
-    for (let distance = 0; distance < c1.length; distance += 44) {
-      const center = this._sampleCenter(c1, distance, 1);
-      if (this._isTunnel(c1, distance)) continue;
-      const normal = horizontalNormal(center.baseTangent);
-      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
-      for (const side of [-1, 1]) {
-        for (const row of [0, 1]) {
-          if (random() < (row ? 0.22 : 0.08)) continue;
-          const setback = row ? 64 + random() * 62 : 22 + random() * 26;
-          const width = row ? 26 + random() * 28 : 17 + random() * 18;
-          const depth = row ? 22 + random() * 26 : 16 + random() * 16;
-          const height = row ? 30 + Math.pow(random(), 1.5) * 108 : 18 + Math.pow(random(), 1.4) * 58;
-          const position = center.position.clone().addScaledVector(normal, side * (c1.halfWidth + setback + width * 0.5));
-          const radius = Math.max(width, depth) * 0.62;
-          if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
-          const yaw = heading + (random() - 0.5) * 0.07 + (random() < 0.22 ? Math.PI * 0.5 : 0);
-          const roll = random();
-          const archetype = row
-            ? (roll < 0.34 ? 'slab' : roll < 0.58 ? 'stepped' : roll < 0.74 ? 'crown' : 'hotel')
-            : (roll < 0.28 ? 'slab' : roll < 0.46 ? 'narrow' : roll < 0.66 ? 'commercial' : roll < 0.85 ? 'hotel' : 'stepped');
-          this._buildStructure(random, position.x, position.z, yaw, archetype, width, height, depth, {
-            face: normal.clone().multiplyScalar(-side),
-          });
-          this._recordFootprint(position.x, position.z, radius);
-        }
-      }
+    // Each spine gets its district's rows: the C1 is the lit canyon, the
+    // connectors a lower continuous city, the K1 the works and the docks.
+    this._buildDistrict(random, this._groupChains('c1')[0], CITY_DISTRICTS.c1);
+    for (const groupId of ['r9', 'r1']) {
+      this._buildDistrict(random, this._groupChains(groupId)[0], CITY_DISTRICTS.mixed);
     }
 
-    // --- Route 9 Fukagawa + Route 1 Haneda: lighter mixed rows so the
-    // connectors are not bare.
-    const mixedSpines = [this._groupChains('r9')[0], this._groupChains('r1')[0]].filter(Boolean);
-    for (const r9 of mixedSpines) {
-    for (let distance = 200; distance < r9.length - 200; distance += 70) {
-      const center = this._sampleCenter(r9, distance, 1);
-      const normal = horizontalNormal(center.baseTangent);
-      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
-      for (const side of [-1, 1]) {
-        if (random() < 0.4) continue;
-        const setback = 26 + random() * 60;
-        const width = 18 + random() * 22;
-        const depth = 16 + random() * 20;
-        const height = 14 + Math.pow(random(), 1.5) * 46;
-        const position = center.position.clone().addScaledVector(normal, side * (r9.halfWidth + setback + width * 0.5));
-        const radius = Math.max(width, depth) * 0.62;
-        if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
-        const roll = random();
-        this._buildStructure(random, position.x, position.z, heading + (random() - 0.5) * 0.1,
-          roll < 0.4 ? 'slab' : roll < 0.6 ? 'hotel' : roll < 0.8 ? 'commercial' : 'narrow',
-          width, height, depth, { face: normal.clone().multiplyScalar(-side) });
-        this._recordFootprint(position.x, position.z, radius);
-      }
-    }
-    }
-
-    // --- K1 industrial: low sheds, warehouses, smokestacks with red blinkers.
     const k1 = this._groupChains('k1')[0];
-    if (!k1) return;
-    for (let distance = 0; distance < k1.length; distance += 56) {
-      const center = this._sampleCenter(k1, distance, 1);
-      const normal = horizontalNormal(center.baseTangent);
-      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
-      for (const side of [-1, 1]) {
-        if (random() < 0.26) continue;
-        const setback = 24 + random() * 92;
-        const width = 26 + random() * 42;
-        const depth = 20 + random() * 30;
-        const height = 7 + random() * 12;
-        const position = center.position.clone().addScaledVector(normal, side * (k1.halfWidth + setback + width * 0.5));
-        const radius = Math.max(width, depth) * 0.6;
-        if (!this._canPlaceBuilding(position.x, position.z, radius)) continue;
-        this._buildStructure(random, position.x, position.z, heading + (random() < 0.3 ? Math.PI * 0.5 : 0),
-          random() < 0.72 ? 'shed' : 'warehouse', width, height, depth,
-          { face: normal.clone().multiplyScalar(-side) });
-        this._recordFootprint(position.x, position.z, radius);
-        if (random() < 0.11) {
-          const stackHeight = 34 + random() * 30;
-          const stack = position.clone();
-          stack.y = stackHeight * 0.5;
-          this._instance(stack, vec(3.2, stackHeight, 3.2), null, null, 'box:concreteDark');
-          this._instance(vec(position.x, stackHeight + 0.8, position.z), vec(1.1, 1.1, 1.1), null, null, 'box:redBlink');
-        }
+    this._buildDistrict(random, k1, CITY_DISTRICTS.k1);
+    if (k1) {
+      // Smokestacks: their own structure standing BESIDE the sheds, never
+      // through a roof — a replaced building model has to stay whole.
+      for (let distance = 0; distance < k1.length; distance += 420) {
+        const center = this._sampleCenter(k1, distance, 1);
+        const normal = horizontalNormal(center.baseTangent);
+        const side = random() < 0.5 ? -1 : 1;
+        const position = center.position.clone()
+          .addScaledVector(normal, side * (k1.halfWidth + 60 + random() * 90));
+        if (!this._canPlaceBuilding(position.x, position.z, 14)) continue;
+        const stackHeight = 34 + random() * 30;
+        const stack = position.clone();
+        stack.y = stackHeight * 0.5;
+        this._instance(stack, vec(3.2, stackHeight, 3.2), null, null, 'box:concreteDark');
+        this._instance(vec(position.x, stackHeight + 0.8, position.z), vec(1.1, 1.1, 1.1), null, null, 'box:redBlink');
+        this._recordFootprint(position.x, position.z, 14);
       }
     }
 
-    // Wangan port: cranes, container stacks, warehouses on the LAND side.
+    // Wangan port: cranes, container stacks, sheds on the LAND side.
     // Which side is land varies along the real Bayshore, so aim at the
     // nearest terrain slab centre.
     const wangan = this._groupChains('wangan')[0];
     if (!wangan) return;
-    for (let distance = 300; distance < wangan.length; distance += 110) {
+    for (let distance = 300; distance < wangan.length; distance += 90) {
       if (this._isTunnel(wangan, distance)) continue;
       const center = this._sampleCenter(wangan, distance, 1);
       const normal = horizontalNormal(center.baseTangent);
@@ -8075,19 +8020,16 @@ export class HighwayMap {
           this.blinkers.push(blinker);
         }
       }
-      if (random() < 0.32) {
-        const setback = 90 + random() * 220;
-        const width = 40 + random() * 55;
-        const depth = 24 + random() * 26;
-        const height = 10 + random() * 10;
-        const position = center.position.clone().addScaledVector(normal, landSide * (wangan.halfWidth + setback + width * 0.5));
-        const radius = Math.max(width, depth) * 0.6;
-        if (this._canPlaceBuilding(position.x, position.z, radius)) {
-          const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
-          this._buildStructure(random, position.x, position.z, heading, 'warehouse', width, height, depth,
-            { face: normal.clone().multiplyScalar(-landSide) });
-          this._recordFootprint(position.x, position.z, radius);
-        }
+      // Dock sheds, two rows deep so the land side reads as a mass, not a line.
+      const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+      for (const row of CITY_DISTRICTS.port.rows) {
+        if (random() < row.skip) continue;
+        const type = this._pickBuildingType(random, row.mix);
+        const setback = row.setback[0] + random() * (row.setback[1] - row.setback[0]);
+        const position = center.position.clone()
+          .addScaledVector(normal, landSide * (wangan.halfWidth + setback + type.width * 0.5));
+        if (!this._canPlaceBuilding(position.x, position.z, type.radius)) continue;
+        this._placeBuilding(type, position.x, position.z, heading + (random() - 0.5) * 0.07);
       }
     }
   }
@@ -8098,25 +8040,23 @@ export class HighwayMap {
     // Rainbow Bridge and behind Daikoku.
     const random = mulberry32(this.seed ^ 0x517cc1);
     const at = (lat, lon) => this._ll(lat, lon);
+    // Drawn from the same catalogue as the city so a custom model reaches the
+    // horizon too — the skyline is the same buildings, further away.
+    const tallMix = [[BUILDING.skyscraper, 3], [BUILDING.officeTower, 3], [BUILDING.hotelSlab, 2], [BUILDING.slimTower, 2], [BUILDING.officeBlock, 2]];
+    const midMix = [[BUILDING.officeBlock, 3], [BUILDING.apartmentBlock, 3], [BUILDING.darkBlock, 2], [BUILDING.hotelSlab, 1], [BUILDING.officeTower, 1]];
     const clusters = [
-      { ...at(35.6440, 139.7480), spread: 1500, count: 26, tall: 130, streak: [1, -0.2] },  // Shibaura bank, faces the bridge
-      { ...at(35.6300, 139.7950), spread: 1200, count: 18, tall: 90, streak: [-1, -0.2] },  // Daiba east bank
-      { ...at(35.4750, 139.6600), spread: 1400, count: 16, tall: 70, streak: [1, -0.1] },   // Yokohama shore behind Daikoku
-      { ...at(35.6560, 139.8300), spread: 1500, count: 16, tall: 80, streak: [-0.2, -1] },  // Tatsumi postcard
+      { ...at(35.6440, 139.7480), spread: 1500, count: 30, mix: tallMix, streak: [1, -0.2] },  // Shibaura bank, faces the bridge
+      { ...at(35.6300, 139.7950), spread: 1200, count: 22, mix: tallMix, streak: [-1, -0.2] }, // Daiba east bank
+      { ...at(35.4750, 139.6600), spread: 1400, count: 20, mix: midMix, streak: [1, -0.1] },   // Yokohama shore behind Daikoku
+      { ...at(35.6560, 139.8300), spread: 1500, count: 20, mix: midMix, streak: [-0.2, -1] },  // Tatsumi postcard
     ];
     for (const cluster of clusters) {
       for (let i = 0; i < cluster.count; i += 1) {
         const x = cluster.x + (random() - 0.5) * cluster.spread;
         const z = cluster.z + (random() - 0.5) * cluster.spread * 0.6;
-        const width = 30 + random() * 42;
-        const depth = width * (0.7 + random() * 0.5);
-        const height = 24 + Math.pow(random(), 1.4) * cluster.tall;
-        const radius = Math.max(width, depth) * 0.6;
-        if (!this._canPlaceBuilding(x, z, radius, 60)) continue;
-        const roll = random();
-        this._buildStructure(random, x, z, random() * Math.PI, roll < 0.5 ? 'slab' : roll < 0.8 ? 'stepped' : 'crown',
-          width, height, depth, {});
-        this._recordFootprint(x, z, radius);
+        const type = this._pickBuildingType(random, cluster.mix);
+        if (!this._canPlaceBuilding(x, z, type.radius, 60)) continue;
+        this._placeBuilding(type, x, z, random() * Math.PI);
       }
       // skyline reflection streaks on the bay water in front of each cluster
       if (cluster.streak) {
