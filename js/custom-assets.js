@@ -40,20 +40,319 @@ export function textureSourceUrl(record) {
   return null;
 }
 
-// Generated-map materials that accept a repeated texture override. Every key
-// exists in HighwayMap._createMaterials(); road surfaces carry world-anchored
-// UVs (see applyWorldSurfaceUVs in js/map.js) so one image repeat covers a
-// fixed number of metres of asphalt everywhere.
-export const WORLD_TEXTURE_SLOTS = Object.freeze({
-  road: { label: 'Road asphalt', description: 'Main highway surface (tiled at one fixed world scale)' },
-  roadAlt: { label: 'Road asphalt (alt)', description: 'Alternate asphalt used by some routes' },
-  roadService: { label: 'Service area asphalt', description: 'Parking-area surface at Tatsumi/Shibaura PA' },
-  concrete: { label: 'Concrete', description: 'Concrete walls and structures' },
-  barrier: { label: 'Barrier', description: 'Road-edge concrete barriers' },
-  railMetal: { label: 'Guardrails', description: 'Metal guardrails along roads and parking areas' },
-  building: { label: 'Building', description: 'Untextured background building walls' },
-  tunnelWall: { label: 'Tunnel wall', description: 'Tunnel interior walls' },
+// One repeat of a road texture covers this many metres of asphalt — mirrors
+// ROAD_TEXTURE_TILE_METERS in js/map.js, which bakes the world-anchored UVs.
+export const WORLD_SURFACE_TILE_METERS = 12;
+
+/**
+ * Every generated-map material a user can repaint, in display order.
+ *
+ * The generated world draws each material ONCE for the whole map (merged chunk
+ * quads or one instanced batch per bucket), so a material IS the archetype:
+ * repainting `facadeOffice` repaints every office building, `container` every
+ * container, `lamppost`'s `concrete` every lamp post — no per-object work.
+ * That is the contract the Surfaces editor is built on.
+ *
+ * - `group`  · section heading in the Surfaces editor.
+ * - `kind`   · 'surface' = repeated infrastructure (asphalt, walls, rails),
+ *              'object'  = a repeated placed thing (building, lamp, container).
+ * - `worldTiled` · road surfaces carry world-anchored UVs (applyWorldSurfaceUVs
+ *              in js/map.js), so their tiling is expressed in metres per tile.
+ * - `tintOnly` · emissive/marking materials that read as light, not as surface:
+ *              colour is meaningful, a photograph is not.
+ * - `assetId` · catalog asset whose real geometry previews the archetype.
+ * - `preview` · fallback preview shape when there is no catalog geometry.
+ */
+export const WORLD_SURFACES = Object.freeze({
+  // ------------------------------------------------------ repeated surfaces --
+  road: { label: 'Road asphalt', description: 'Main highway surface — every mainline carriageway', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
+  roadAlt: { label: 'Road asphalt (alt)', description: 'Alternate asphalt used by some routes and ramps', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
+  roadService: { label: 'Service area asphalt', description: 'Parking-area surface at Tatsumi/Shibaura PA', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
+  marking: { label: 'Lane markings', description: 'White lane lines, dashes and stop bars', group: 'Roads', kind: 'surface', tintOnly: true, preview: 'road' },
+  amber: { label: 'Amber markings', description: 'Amber/orange lane lines near junctions', group: 'Roads', kind: 'surface', tintOnly: true, preview: 'road' },
+  reflector: { label: 'Road reflectors', description: 'Cat-eye studs along the lane edges', group: 'Roads', kind: 'surface', tintOnly: true, preview: 'road' },
+
+  barrier: { label: 'Concrete barriers', description: 'Road-edge concrete barriers (Jersey blocks)', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:segment:barrier', preview: 'wall' },
+  railMetal: { label: 'Guardrails', description: 'Metal guardrails along roads and parking areas', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:segment:railMetal', preview: 'wall' },
+  fence: { label: 'Safety fence', description: 'Wire safety fencing behind the barrier line', group: 'Barriers & rails', kind: 'surface', preview: 'wall' },
+  concrete: { label: 'Concrete (pillars & lamp posts)', description: 'Support columns, walls — and the lamp-post masts, which share this material', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:box:concrete', preview: 'pillar' },
+  concreteDark: { label: 'Dark concrete', description: 'Darker support columns and deck undersides', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:box:concreteDark', preview: 'pillar' },
+
+  tunnelWall: { label: 'Tunnel wall', description: 'Tunnel interior walls', group: 'Tunnels', kind: 'surface', preview: 'wall' },
+  tunnelDark: { label: 'Tunnel ceiling', description: 'Dark tunnel ceiling and deep interior', group: 'Tunnels', kind: 'surface', preview: 'wall' },
+  portal: { label: 'Tunnel portal', description: 'Portal frame at each tunnel mouth', group: 'Tunnels', kind: 'surface', preview: 'wall' },
+
+  ground: { label: 'Ground', description: 'Reclaimed land and embankments', group: 'Terrain', kind: 'surface', preview: 'road' },
+  water: { label: 'Tokyo Bay water', description: 'Bay surface around the expressway', group: 'Terrain', kind: 'surface', preview: 'road' },
+
+  // -------------------------------------------------------- repeated objects --
+  facadeOffice: { label: 'Office building', description: 'Lit office towers — the most common city block', group: 'Buildings', kind: 'object', preview: 'building' },
+  facadeDark: { label: 'Dark building', description: 'Mostly unlit blocks and tower caps', group: 'Buildings', kind: 'object', preview: 'building' },
+  facadeHotel: { label: 'Hotel building', description: 'Warm-lit narrow-window hotel blocks', group: 'Buildings', kind: 'object', preview: 'building' },
+  facadeIndustrial: { label: 'Industrial building', description: 'Warehouses and sheds along the bay', group: 'Buildings', kind: 'object', preview: 'building' },
+  building: { label: 'Building roofs', description: 'Flat roof caps on every generated block', group: 'Buildings', kind: 'object', preview: 'panel' },
+  shed: { label: 'Industrial shed', description: 'Low shed volumes in the dock districts', group: 'Buildings', kind: 'object', preview: 'building' },
+  towerWhite: { label: 'Landmark tower', description: 'Tokyo Tower style landmark structure', group: 'Buildings', kind: 'object', preview: 'pillar' },
+
+  container: { label: 'Shipping container', description: 'Stacked dock containers', group: 'Street objects', kind: 'object', preview: 'container' },
+  crane: { label: 'Dock crane', description: 'Container gantry cranes at the port', group: 'Street objects', kind: 'object', preview: 'pillar' },
+  garage: { label: 'Garage structure', description: 'Garage bay walls at the service areas', group: 'Street objects', kind: 'object', assetId: 'hesi:box:garage', preview: 'building' },
+  shutter: { label: 'Garage shutter', description: 'Roller shutters on the garage bays', group: 'Street objects', kind: 'object', preview: 'panel' },
+  konbini: { label: 'Konbini store', description: 'Convenience store at the parking areas', group: 'Street objects', kind: 'object', assetId: 'hesi:box:konbini', preview: 'building' },
+  vending: { label: 'Vending machine', description: 'Drink machines at the parking areas', group: 'Street objects', kind: 'object', assetId: 'hesi:box:vending', preview: 'panel' },
+  canopy: { label: 'PA canopy', description: 'Service-area canopy roofs', group: 'Street objects', kind: 'object', assetId: 'hesi:box:canopy', preview: 'panel' },
+  parkedBody: { label: 'Parked car body', description: 'Parked cars in the service areas', group: 'Street objects', kind: 'object', preview: 'container' },
+  parkedGlass: { label: 'Parked car glass', description: 'Glasshouse of the parked cars', group: 'Street objects', kind: 'object', preview: 'panel' },
+
+  signGreen: { label: 'Route sign face', description: 'Green route direction boards', group: 'Signs', kind: 'object', preview: 'panel' },
+  signBack: { label: 'Sign structure', description: 'Gantries and backs of the route signs', group: 'Signs', kind: 'object', preview: 'wall' },
+  exitGreen: { label: 'Exit sign', description: 'Overhead green exit panels', group: 'Signs', kind: 'object', assetId: 'hesi:segment:exitGreen', preview: 'panel' },
+  chevron: { label: 'Chevron board', description: 'Yellow curve-warning chevrons', group: 'Signs', kind: 'object', preview: 'panel' },
+  matrix: { label: 'Matrix sign', description: 'Amber dot-matrix message boards', group: 'Signs', kind: 'object', tintOnly: true, preview: 'panel' },
+
+  lampSodium: { label: 'Sodium lamp head', description: 'Warm orange highway lamp heads — the signature night glow', group: 'Lights', kind: 'object', tintOnly: true, preview: 'panel' },
+  lampWhite: { label: 'White lamp head', description: 'Cool white lamp heads', group: 'Lights', kind: 'object', tintOnly: true, preview: 'panel' },
+  tunnelLampOrange: { label: 'Tunnel lamp (orange)', description: 'Orange tunnel ceiling strips', group: 'Lights', kind: 'object', tintOnly: true, preview: 'panel' },
+  tunnelLampWhite: { label: 'Tunnel lamp (white)', description: 'White tunnel ceiling strips', group: 'Lights', kind: 'object', tintOnly: true, preview: 'panel' },
+  neon: { label: 'Neon signage', description: 'Building neon boxes and rooftop signs', group: 'Lights', kind: 'object', tintOnly: true, preview: 'panel' },
+  redBlink: { label: 'Aircraft warning light', description: 'Red blinkers on tall structures', group: 'Lights', kind: 'object', tintOnly: true, preview: 'panel' },
 });
+
+/**
+ * The repeated OBJECTS of the world, each assembled from the surfaces it is
+ * actually made of — a lamp is its concrete mast plus its sodium head, a
+ * parked car is body plus glass, an office block is its facade plus its roof
+ * cap. Editing an object means reaching every one of those surfaces, which is
+ * why this table exists on top of WORLD_SURFACES.
+ *
+ * `parts` doubles as the preview body: axis-aligned boxes in metres, with the
+ * plain 0..1 per-face UVs the generator gives its quads (_pushQuad in
+ * js/map.js), so a texture previewed on them tiles the way it will in the
+ * world. `assetId` wins when the catalog holds the real geometry.
+ *
+ * Surfaces are shared on purpose where the generator shares them (every
+ * building roof is one `building` material); worldObjectsUsingSurface reports
+ * that so the UI can warn instead of surprising you.
+ */
+export const WORLD_OBJECTS = Object.freeze({
+  officeBuilding: {
+    label: 'Office building', description: 'Lit office towers — the most common city block', group: 'Buildings',
+    parts: [{ slot: 'facadeOffice', size: [9, 16, 9], position: [0, 8, 0] }, { slot: 'building', size: [9.4, 0.4, 9.4], position: [0, 16.2, 0] }],
+  },
+  darkBuilding: {
+    label: 'Dark building', description: 'Mostly unlit blocks and tower caps', group: 'Buildings',
+    parts: [{ slot: 'facadeDark', size: [9, 14, 9], position: [0, 7, 0] }, { slot: 'building', size: [9.4, 0.4, 9.4], position: [0, 14.2, 0] }],
+  },
+  hotelBuilding: {
+    label: 'Hotel building', description: 'Warm-lit narrow-window hotel blocks', group: 'Buildings',
+    parts: [{ slot: 'facadeHotel', size: [8, 18, 8], position: [0, 9, 0] }, { slot: 'building', size: [8.4, 0.4, 8.4], position: [0, 18.2, 0] }],
+  },
+  industrialBuilding: {
+    label: 'Industrial building', description: 'Warehouses along the bay', group: 'Buildings',
+    parts: [{ slot: 'facadeIndustrial', size: [12, 7, 9], position: [0, 3.5, 0] }, { slot: 'building', size: [12.4, 0.4, 9.4], position: [0, 7.2, 0] }],
+  },
+  industrialShed: {
+    label: 'Industrial shed', description: 'Low shed volumes in the dock districts', group: 'Buildings',
+    parts: [{ slot: 'shed', size: [12, 5, 8], position: [0, 2.5, 0] }, { slot: 'building', size: [12.4, 0.4, 8.4], position: [0, 5.2, 0] }],
+  },
+  landmarkTower: {
+    label: 'Landmark tower', description: 'Tokyo Tower style landmark structure', group: 'Buildings',
+    parts: [{ slot: 'towerWhite', size: [3, 26, 3], position: [0, 13, 0] }, { slot: 'redBlink', size: [0.5, 0.5, 0.5], position: [0, 26.3, 0] }],
+  },
+
+  highwayLamp: {
+    label: 'Highway lamp', description: 'Road-side lamp post and its light head', group: 'Street objects', assetId: 'hesi:lamppost:concrete',
+    parts: [{ slot: 'concrete', size: [0.35, 9, 0.35], position: [0, 4.5, 0] }, { slot: 'lampSodium', size: [1.6, 0.35, 0.6], position: [0.7, 9.1, 0] }],
+  },
+  concretePillar: {
+    label: 'Concrete pillar', description: 'Expressway support columns', group: 'Street objects', assetId: 'hesi:box:concrete',
+    parts: [{ slot: 'concrete', size: [1.6, 8, 1.6], position: [0, 4, 0] }],
+  },
+  darkPillar: {
+    label: 'Dark pillar', description: 'Darker support columns and deck undersides', group: 'Street objects', assetId: 'hesi:box:concreteDark',
+    parts: [{ slot: 'concreteDark', size: [1.6, 8, 1.6], position: [0, 4, 0] }],
+  },
+  shippingContainer: {
+    label: 'Shipping container', description: 'Stacked dock containers', group: 'Street objects',
+    parts: [{ slot: 'container', size: [6, 2.6, 2.4], position: [0, 1.3, 0] }],
+  },
+  dockCrane: {
+    label: 'Dock crane', description: 'Container gantry cranes at the port', group: 'Street objects',
+    parts: [{ slot: 'crane', size: [1.2, 14, 1.2], position: [0, 7, 0] }, { slot: 'crane', size: [12, 1, 1], position: [3, 14, 0] }],
+  },
+  garage: {
+    label: 'Garage', description: 'Garage bays at the service areas', group: 'Street objects', assetId: 'hesi:box:garage',
+    parts: [{ slot: 'garage', size: [8, 4, 6], position: [0, 2, 0] }, { slot: 'shutter', size: [3.2, 3, 0.2], position: [0, 1.5, 3.05] }],
+  },
+  konbini: {
+    label: 'Konbini store', description: 'Convenience store at the parking areas', group: 'Street objects', assetId: 'hesi:box:konbini',
+    parts: [{ slot: 'konbini', size: [8, 3.4, 6], position: [0, 1.7, 0] }],
+  },
+  vendingMachine: {
+    label: 'Vending machine', description: 'Drink machines at the parking areas', group: 'Street objects', assetId: 'hesi:box:vending',
+    parts: [{ slot: 'vending', size: [1.1, 1.9, 0.7], position: [0, 0.95, 0] }],
+  },
+  paCanopy: {
+    label: 'PA canopy', description: 'Service-area canopy roofs', group: 'Street objects', assetId: 'hesi:box:canopy',
+    parts: [{ slot: 'canopy', size: [8, 0.35, 5], position: [0, 3.4, 0] }],
+  },
+  parkedCar: {
+    label: 'Parked car', description: 'Cars parked in the service areas', group: 'Street objects',
+    parts: [{ slot: 'parkedBody', size: [4.2, 1, 1.8], position: [0, 0.5, 0] }, { slot: 'parkedGlass', size: [2.2, 0.6, 1.7], position: [-0.1, 1.3, 0] }],
+  },
+
+  concreteBarrier: {
+    label: 'Concrete barrier', description: 'Road-edge concrete barriers', group: 'Barriers & rails', assetId: 'hesi:segment:barrier',
+    parts: [{ slot: 'barrier', size: [6, 1.1, 0.4], position: [0, 0.55, 0] }],
+  },
+  guardrail: {
+    label: 'Guardrail', description: 'Metal guardrails along roads and parking areas', group: 'Barriers & rails', assetId: 'hesi:segment:railMetal',
+    parts: [{ slot: 'railMetal', size: [6, 0.7, 0.15], position: [0, 0.75, 0] }],
+  },
+  safetyFence: {
+    label: 'Safety fence', description: 'Wire safety fencing behind the barrier line', group: 'Barriers & rails',
+    parts: [{ slot: 'fence', size: [6, 2, 0.08], position: [0, 1, 0] }],
+  },
+
+  routeSign: {
+    label: 'Route sign', description: 'Green route direction boards and their gantry', group: 'Signs',
+    parts: [{ slot: 'signBack', size: [6.4, 2.2, 0.2], position: [0, 5, -0.12] }, { slot: 'signGreen', size: [6, 1.8, 0.1], position: [0, 5, 0.02] }],
+  },
+  exitSign: {
+    label: 'Exit sign', description: 'Overhead green exit panels', group: 'Signs', assetId: 'hesi:segment:exitGreen',
+    parts: [{ slot: 'exitGreen', size: [4, 1.4, 0.12], position: [0, 5, 0] }],
+  },
+  chevronBoard: {
+    label: 'Chevron board', description: 'Yellow curve-warning chevrons', group: 'Signs',
+    parts: [{ slot: 'chevron', size: [1.2, 0.9, 0.08], position: [0, 1.2, 0] }],
+  },
+  matrixSign: {
+    label: 'Matrix sign', description: 'Amber dot-matrix message boards', group: 'Signs',
+    parts: [{ slot: 'matrix', size: [3, 1, 0.1], position: [0, 4, 0] }],
+  },
+
+  neonSignage: {
+    label: 'Neon signage', description: 'Building neon boxes and rooftop signs', group: 'Lights',
+    parts: [{ slot: 'neon', size: [4, 1.2, 0.2], position: [0, 2, 0] }],
+  },
+  whiteLamp: {
+    label: 'White lamp', description: 'Cool white lamp heads', group: 'Lights',
+    parts: [{ slot: 'concrete', size: [0.35, 9, 0.35], position: [0, 4.5, 0] }, { slot: 'lampWhite', size: [1.6, 0.35, 0.6], position: [0.7, 9.1, 0] }],
+  },
+  tunnelLighting: {
+    label: 'Tunnel lighting', description: 'Orange and white ceiling strips inside the tunnels', group: 'Lights',
+    parts: [{ slot: 'tunnelLampOrange', size: [3, 0.2, 0.4], position: [-1.8, 2, 0] }, { slot: 'tunnelLampWhite', size: [3, 0.2, 0.4], position: [1.8, 2, 0] }],
+  },
+});
+
+/** Distinct surface slots of a world object, in part order, deduplicated. */
+export function worldObjectSurfaces(objectId) {
+  const entry = WORLD_OBJECTS[objectId];
+  if (!entry) return [];
+  return [...new Set(entry.parts.map((part) => part.slot))];
+}
+
+/** Ids of every world object that shares a surface — the "this also changes X" warning. */
+export function worldObjectsUsingSurface(slot) {
+  return Object.keys(WORLD_OBJECTS).filter((objectId) => worldObjectSurfaces(objectId).includes(slot));
+}
+
+/** World object groups in display order, each with its object ids. */
+export const WORLD_OBJECT_GROUPS = Object.freeze(
+  [...new Set(Object.values(WORLD_OBJECTS).map((entry) => entry.group))].map((group) => Object.freeze({
+    group,
+    objects: Object.freeze(Object.keys(WORLD_OBJECTS).filter((objectId) => WORLD_OBJECTS[objectId].group === group)),
+  })),
+);
+
+/** Surface groups in display order, each with its slot keys. */
+export const WORLD_SURFACE_GROUPS = Object.freeze(
+  [...new Set(Object.values(WORLD_SURFACES).map((entry) => entry.group))].map((group) => Object.freeze({
+    group,
+    kind: Object.entries(WORLD_SURFACES).find(([, entry]) => entry.group === group)[1].kind,
+    slots: Object.freeze(Object.keys(WORLD_SURFACES).filter((slot) => WORLD_SURFACES[slot].group === group)),
+  })),
+);
+
+// Back-compat alias: the original eight-slot table. Everything reads
+// WORLD_SURFACES now; this keeps older imports (and saved documents) valid.
+export const WORLD_TEXTURE_SLOTS = WORLD_SURFACES;
+
+/**
+ * How a world-surface image meets its surface:
+ *  - `tile`    repeats across the surface; the repeat pair sets the tile shape,
+ *              so a tile can be a rectangle, not only a square.
+ *  - `stretch` one copy pulled over the whole surface, squeezed to its shape.
+ *  - `cover`   one copy keeping the image's own proportions, overflow cropped
+ *              ("Fit & crop", the same deal the custom-object face editor offers).
+ * `stretch` and `cover` need a bounded 0..1 surface, so they are offered on the
+ * quad surfaces and not on world-anchored asphalt (see WORLD_SURFACES.worldTiled).
+ */
+export const WORLD_SURFACE_FITS = Object.freeze(['tile', 'stretch', 'cover']);
+
+const DEFAULT_SURFACE_STYLE = Object.freeze({
+  texture: null, fit: 'tile', repeat: [1, 1], aspect: 1, offset: [0, 0], rotation: 0,
+  tint: '#ffffff', brightness: 1, flipX: false, flipY: false,
+});
+
+const clamp01to = (value, min, max, fallback) => (Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback);
+
+/**
+ * Normalizes a stored world-surface entry into the full style record.
+ * Accepts the legacy plain-texture-id string, the rich object form, and null.
+ */
+export function normalizeWorldSurfaceStyle(value) {
+  if (typeof value === 'string') return { ...DEFAULT_SURFACE_STYLE, texture: value };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_SURFACE_STYLE };
+  const repeat = Array.isArray(value.repeat) && value.repeat.length === 2 && value.repeat.every(Number.isFinite)
+    ? [clamp01to(value.repeat[0], 0.01, 200, 1), clamp01to(value.repeat[1], 0.01, 200, 1)]
+    : [...DEFAULT_SURFACE_STYLE.repeat];
+  const offset = Array.isArray(value.offset) && value.offset.length === 2 && value.offset.every(Number.isFinite)
+    ? [value.offset[0], value.offset[1]]
+    : [...DEFAULT_SURFACE_STYLE.offset];
+  return {
+    texture: typeof value.texture === 'string' && value.texture ? value.texture : null,
+    fit: WORLD_SURFACE_FITS.includes(value.fit) ? value.fit : DEFAULT_SURFACE_STYLE.fit,
+    repeat,
+    aspect: clamp01to(value.aspect, 0.05, 20, 1),
+    offset,
+    rotation: clamp01to(value.rotation, -360, 360, 0),
+    tint: /^#[0-9a-f]{6}$/i.test(value.tint || '') ? value.tint : DEFAULT_SURFACE_STYLE.tint,
+    brightness: clamp01to(value.brightness, 0.05, 4, 1),
+    flipX: Boolean(value.flipX),
+    flipY: Boolean(value.flipY),
+  };
+}
+
+/** True when a normalized style still says "leave the generated look alone". */
+export function isDefaultWorldSurfaceStyle(style) {
+  const normalized = normalizeWorldSurfaceStyle(style);
+  return !normalized.texture
+    && normalized.fit === 'tile' && normalized.aspect === 1
+    && normalized.repeat[0] === 1 && normalized.repeat[1] === 1
+    && normalized.offset[0] === 0 && normalized.offset[1] === 0
+    && normalized.rotation === 0 && normalized.brightness === 1
+    && normalized.tint.toLowerCase() === '#ffffff'
+    && !normalized.flipX && !normalized.flipY;
+}
+
+/** Compacts a style for storage: only the fields that differ from the defaults. */
+export function compactWorldSurfaceStyle(style) {
+  const normalized = normalizeWorldSurfaceStyle(style);
+  if (isDefaultWorldSurfaceStyle(normalized)) return null;
+  const compact = {};
+  if (normalized.texture) compact.texture = normalized.texture;
+  if (normalized.fit !== 'tile') compact.fit = normalized.fit;
+  if (normalized.repeat[0] !== 1 || normalized.repeat[1] !== 1) compact.repeat = normalized.repeat;
+  if (normalized.aspect !== 1) compact.aspect = normalized.aspect;
+  if (normalized.offset[0] !== 0 || normalized.offset[1] !== 0) compact.offset = normalized.offset;
+  if (normalized.rotation !== 0) compact.rotation = normalized.rotation;
+  if (normalized.tint.toLowerCase() !== '#ffffff') compact.tint = normalized.tint;
+  if (normalized.brightness !== 1) compact.brightness = normalized.brightness;
+  if (normalized.flipX) compact.flipX = true;
+  if (normalized.flipY) compact.flipY = true;
+  return compact;
+}
 
 export const PART_KINDS = Object.freeze({
   box: { label: 'Box', faces: ['right', 'left', 'top', 'bottom', 'front', 'back'] },
@@ -124,9 +423,12 @@ export function customAssetsDocumentErrors(document) {
       errors.push(`textures.${id} needs a data:image/... dataUrl or a relative image url`);
     }
   }
-  for (const [slot, textureId] of Object.entries(document.worldTextures || {})) {
-    if (!Object.hasOwn(WORLD_TEXTURE_SLOTS, slot)) errors.push(`unknown world texture slot: ${slot}`);
-    else if (textureId !== null && !document.textures[textureId]) errors.push(`worldTextures.${slot} references missing texture ${textureId}`);
+  for (const [slot, entry] of Object.entries(document.worldTextures || {})) {
+    if (!Object.hasOwn(WORLD_SURFACES, slot)) { errors.push(`unknown world texture slot: ${slot}`); continue; }
+    if (entry === null) continue;
+    if (typeof entry !== 'string' && !isRecord(entry)) { errors.push(`worldTextures.${slot} must be a texture id or a style object`); continue; }
+    const textureId = normalizeWorldSurfaceStyle(entry).texture;
+    if (textureId && !document.textures[textureId]) errors.push(`worldTextures.${slot} references missing texture ${textureId}`);
   }
   for (const [id, asset] of Object.entries(document.assets)) {
     if (FORBIDDEN_KEYS.has(id) || !CUSTOM_ASSET_ID_PATTERN.test(id)) { errors.push(`invalid asset id: ${id}`); continue; }
@@ -1708,8 +2010,9 @@ export function faceTextureTransform({
  */
 export function textureFromSource(source, {
   repeat = null, fit = 'stretch', surfaceAspect = 1, flipX = false, flipY = false,
+  rotation = 0, shift = null,
 } = {}) {
-  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY)]);
+  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY), rotation || 0, shift]);
   if (textureCache.has(key)) return textureCache.get(key);
   // Outside the browser (node tests) there is no image decoding: hand back a
   // bare texture object so material wiring stays testable.
@@ -1724,7 +2027,12 @@ export function textureFromSource(source, {
     texture.wrapS = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.wrapT = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.repeat.set(...transform.repeat);
-    texture.offset.set(...transform.offset);
+    texture.offset.set(transform.offset[0] + (shift?.[0] || 0), transform.offset[1] + (shift?.[1] || 0));
+    if (rotation) {
+      // Rotate about the tile centre so a turned pattern stays where it was.
+      texture.center.set(0.5, 0.5);
+      texture.rotation = rotation * Math.PI / 180;
+    }
     // Only flag a GPU upload once image data exists; configure() also runs
     // synchronously before an async file load has produced pixels. The budget
     // downscale runs on the freshly decoded image, so oversized imports never
@@ -2187,22 +2495,77 @@ export function buildCustomAssetGroup(assetDefinition, texturesById, { resolveAs
 }
 
 /**
- * Applies saved world texture overrides (road asphalt, concrete, ...) onto the
- * generated map's material set. Materials keep working with no overrides.
+ * Applies saved world surface overrides (road asphalt, building facades,
+ * containers, lamp tint, ...) onto the generated map's material set.
+ *
+ * One material is one archetype: the generated world draws every office
+ * building from `facadeOffice` and every container from `container`, so a
+ * single override here repaints all of them at once.
+ *
+ * The pass is idempotent and reversible — each material's generated look is
+ * captured the first time it is touched, and slots without an override are
+ * restored to it. That is what lets the editor re-apply live on every edit.
  */
 export function applyWorldTextureOverrides(materials, document) {
-  const summary = { applied: 0, skipped: 0 };
-  if (!materials || !isRecord(document?.worldTextures)) return summary;
-  for (const [slot, textureId] of Object.entries(document.worldTextures)) {
+  const summary = { applied: 0, skipped: 0, cleared: 0 };
+  if (!materials) return summary;
+  const overrides = isRecord(document?.worldTextures) ? document.worldTextures : {};
+  // Keys that name no material at all (a hand-edited or future document).
+  for (const slot of Object.keys(overrides)) if (!Object.hasOwn(WORLD_SURFACES, slot)) summary.skipped += 1;
+  for (const slot of Object.keys(WORLD_SURFACES)) {
     const material = materials[slot];
-    const textureRecord = textureId ? document.textures?.[textureId] : null;
+    if (!material) { if (Object.hasOwn(overrides, slot)) summary.skipped += 1; continue; }
+    if (!material.userData) material.userData = {};
+    if (!material.userData.hesiGeneratedLook) {
+      material.userData.hesiGeneratedLook = {
+        map: material.map || null,
+        color: material.color?.getHexString ? `#${material.color.getHexString()}` : null,
+      };
+    }
+    const original = material.userData.hesiGeneratedLook;
+    if (!Object.hasOwn(overrides, slot)) {
+      // No override (any more): put the generated material back as it was.
+      if (material.userData.hesiOverridden) {
+        material.map = original.map;
+        if (original.color) material.color?.set?.(original.color);
+        material.needsUpdate = true;
+        material.userData.hesiOverridden = false;
+        summary.cleared += 1;
+      }
+      continue;
+    }
+    const style = normalizeWorldSurfaceStyle(overrides[slot]);
+    const textureRecord = style.texture ? document.textures?.[style.texture] : null;
     const textureSource = textureSourceUrl(textureRecord);
-    if (!material || !Object.hasOwn(WORLD_TEXTURE_SLOTS, slot) || !textureSource) { summary.skipped += 1; continue; }
-    const repeat = finiteVector(textureRecord.repeat, 2) ? textureRecord.repeat : null;
-    material.map = textureFromSource(textureSource, { repeat });
-    // The image now carries the surface colour; a dark tint would multiply it away.
-    material.color?.set?.('#ffffff');
+    if (style.texture && !textureSource) { summary.skipped += 1; continue; }
+    if (textureSource) {
+      // A stored per-texture repeat (the original world-texture format) still
+      // scales the image when the slot itself carries no explicit tiling.
+      const legacyRepeat = finiteVector(textureRecord.repeat, 2) ? textureRecord.repeat : null;
+      const tiling = style.repeat[0] === 1 && style.repeat[1] === 1 && legacyRepeat ? legacyRepeat : style.repeat;
+      const worldTiled = Boolean(WORLD_SURFACES[slot]?.worldTiled);
+      // Asphalt UVs run unbounded across the world, so "one image over the
+      // whole surface" has no meaning there: those slots always tile.
+      const fit = worldTiled ? 'tile' : style.fit;
+      material.map = textureFromSource(textureSource, {
+        // 'tile' and 'stretch' share the transform; only the repeat differs.
+        fit: fit === 'cover' ? 'cover' : 'stretch',
+        repeat: fit === 'tile' ? tiling : [1, 1],
+        surfaceAspect: style.aspect,
+        rotation: style.rotation,
+        shift: style.offset,
+        flipX: style.flipX,
+        flipY: style.flipY,
+      });
+    } else {
+      material.map = original.map;
+    }
+    // With an image the tint multiplies it (white = the photo untouched);
+    // without one the tint IS the new surface colour.
+    material.color?.set?.(textureSource || style.tint.toLowerCase() !== '#ffffff' ? style.tint : (original.color || style.tint));
+    if (style.brightness !== 1) material.color?.multiplyScalar?.(style.brightness);
     material.needsUpdate = true;
+    material.userData.hesiOverridden = true;
     summary.applied += 1;
   }
   return summary;

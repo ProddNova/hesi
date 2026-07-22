@@ -252,7 +252,8 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
         },
       },
       textures: { 'tex:0001': { name: 'top.png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' } },
-      worldTextures: { road: 'tex:0001' },
+      // Both stored forms: the legacy texture id and the full paint style.
+      worldTextures: { road: 'tex:0001', facadeOffice: { texture: 'tex:0001', repeat: [3, 2], rotation: 90, tint: '#88ccff' } },
     };
     const put = await fetch(`${BASE}/__hesi_editor_assets`, {
       method: 'PUT',
@@ -268,6 +269,7 @@ test('custom assets endpoint round-trips the Modeler document', async () => {
     const loaded = await get.json();
     assert.equal(loaded.document.assets['custom:0001'].label, 'Cestino test');
     assert.equal(loaded.document.worldTextures.road, 'tex:0001');
+    assert.deepEqual(loaded.document.worldTextures.facadeOffice, { texture: 'tex:0001', repeat: [3, 2], rotation: 90, tint: '#88ccff' });
     const savedTexture = loaded.document.textures['tex:0001'];
     assert.equal(savedTexture.dataUrl, undefined, 'the saved document no longer embeds image bytes');
     assert.match(savedTexture.url, /^textures\/top-[0-9a-f]{10}\.png$/);

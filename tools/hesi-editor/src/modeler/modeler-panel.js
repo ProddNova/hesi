@@ -2,13 +2,17 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
-  MESH_MAX_FACES, PART_KINDS, WORLD_TEXTURE_SLOTS, applyPartFaceProjections, applyVertexOffsets,
+  MESH_MAX_FACES, PART_KINDS, WORLD_OBJECTS, WORLD_OBJECT_GROUPS, WORLD_SURFACES,
+  isDefaultWorldSurfaceStyle, worldObjectSurfaces, worldObjectsUsingSurface,
+  applyPartFaceProjections, applyVertexOffsets,
   buildPartObject, captureUnionFaceProjection, captureViewFaceProjection, clonePartFaceToOpposite,
   convertPartToMesh, mergePartFaces, meshFacePlanarRegions, meshInsertVertexAtPoint,
   meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceCoverProjection, partFaceNames,
   partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
+import { SurfaceStyleEditor } from '../world/surface-style-editor.js';
+import { buildWorldObjectPreview, previewFocusBounds, worldObjectModelParts } from '../world/surface-preview-geometry.js';
 
 const clone = (value) => value == null ? value : structuredClone(value);
 
@@ -52,9 +56,12 @@ function blankDefinition(id) {
  * asset — and the playable game rebuilds them from the same saved document.
  */
 export class ModelerPanel {
-  constructor({ host, store, assetRegistry, onStatus = () => {}, onAssetsChanged = () => {}, onTexturesChanged = () => {}, onWorldTexturesChanged = () => {}, isAssetInUse = () => false, onOpenChange = () => {} }) {
-    Object.assign(this, { store, assetRegistry, onStatus, onAssetsChanged, onTexturesChanged, onWorldTexturesChanged, isAssetInUse, onOpenChange });
+  constructor({ host, store, assetRegistry, onStatus = () => {}, onAssetsChanged = () => {}, onTexturesChanged = () => {}, onWorldTexturesChanged = () => {}, isAssetInUse = () => false, onOpenChange = () => {}, getMaterials = () => null, onOpenSurfaces = null }) {
+    Object.assign(this, { store, assetRegistry, onStatus, onAssetsChanged, onTexturesChanged, onWorldTexturesChanged, isAssetInUse, onOpenChange, getMaterials, onOpenSurfaces });
     this.openState = false;
+    this.library = 'custom';
+    this.worldObject = null;
+    this.worldSlot = null;
     this.definition = null;
     this.editingExisting = false;
     this.mode = 'part';
@@ -81,6 +88,7 @@ export class ModelerPanel {
     this._buildDom(host);
     this._buildScene();
     this._bindEvents();
+    this._syncLibraryChrome();
   }
 
   // ------------------------------------------------------------------ DOM --
@@ -106,22 +114,53 @@ export class ModelerPanel {
     this.saveCopyButton = button('Save As Copy', 'tool-button', 'Save as a brand-new asset id');
     this.deleteButton = button('Delete Object', 'tool-button danger', 'Remove this custom asset');
     this.closeButton = button('Close ✕', 'tool-button', 'Back to the map editor');
+    this.worldSaveButton = button('Save world paint', 'tool-button accent', 'Write the world surface overrides to disk — the editor and the playable game both pick them up');
+    this.worldSaveButton.dataset.testid = 'modeler-save-world-paint';
+    this.worldSaveButton.hidden = true;
     this.dirtyChip = element('span', 'modeler-dirty', '');
-    header.append(this.nameInput, this.layerSelect, this.saveButton, this.saveCopyButton, this.deleteButton, this.dirtyChip, element('span', 'toolbar-spacer'), this.closeButton);
+    header.append(this.nameInput, this.layerSelect, this.saveButton, this.saveCopyButton, this.deleteButton, this.worldSaveButton, this.dirtyChip, element('span', 'toolbar-spacer'), this.closeButton);
 
     const body = element('div', 'modeler-body');
 
     // Left: object library + part list + add-part tools
     const left = element('aside', 'modeler-panel modeler-left');
-    left.append(element('h3', '', 'Your objects'));
+    this.leftPanel = left;
+    // Two libraries share this list: the objects you modelled, and the
+    // archetypes the map generator already placed everywhere (buildings,
+    // lamps, containers). The second kind is repainted per material, which
+    // updates every copy in the world at once.
+    this.librarySwitch = element('div', 'segmented modeler-library-switch');
+    this.librarySwitch.setAttribute('role', 'radiogroup');
+    this.librarySwitch.setAttribute('aria-label', 'Object library');
+    this.libraryButtons = {};
+    for (const [key, label, title] of [
+      ['custom', 'Your objects', 'Objects you modelled and saved into the catalog'],
+      ['world', 'World objects', 'Objects the map generator repeats everywhere — buildings, lamps, pillars, containers, signs. Repaint one, they all change.'],
+    ]) {
+      const node = element('button', 'seg-button', label);
+      node.type = 'button';
+      node.setAttribute('role', 'radio');
+      node.title = title;
+      node.dataset.testid = `modeler-library-${key}`;
+      this.libraryButtons[key] = node;
+      this.librarySwitch.append(node);
+    }
+    left.append(this.librarySwitch);
     this.newObjectButton = button('+ New Object', 'tool-button primary', 'Start a fresh object');
     left.append(this.newObjectButton);
     this.assetList = element('div', 'modeler-asset-list');
+    this.assetList.dataset.testid = 'modeler-asset-list';
     left.append(this.assetList);
-    left.append(element('h3', '', 'Parts'));
+    this.worldObjectList = element('div', 'modeler-asset-list modeler-world-list');
+    this.worldObjectList.dataset.testid = 'modeler-world-object-list';
+    this.worldObjectList.hidden = true;
+    left.append(this.worldObjectList);
+    this.partsHeading = element('h3', '', 'Parts');
+    left.append(this.partsHeading);
     this.partList = element('div', 'modeler-part-list');
     left.append(this.partList);
     const addRow = element('div', 'modeler-add-parts');
+    this.addPartsRow = addRow;
     addRow.append(element('small', '', 'Add part'));
     this.addButtons = {};
     for (const kind of PRIMITIVE_BUTTONS) {
@@ -132,6 +171,7 @@ export class ModelerPanel {
     }
     left.append(addRow);
     const catalogRow = element('div', 'modeler-add-catalog');
+    this.catalogRow = catalogRow;
     catalogRow.append(element('small', '', 'Add existing asset as part (assembly)'));
     this.catalogSelect = document.createElement('select');
     this.catalogSelect.setAttribute('aria-label', 'Catalog asset to add');
@@ -139,6 +179,7 @@ export class ModelerPanel {
     catalogRow.append(this.catalogSelect, this.addCatalogButton);
     left.append(catalogRow);
     const scaleRow = element('div', 'modeler-object-scale');
+    this.scaleRow = scaleRow;
     scaleRow.append(element('small', '', 'Object scale (all parts at once)'));
     this.scaleHalfButton = button('×½', 'tool-button small', 'Shrink the whole object to half size');
     this.scaleDoubleButton = button('×2', 'tool-button small', 'Double the whole object size');
@@ -155,6 +196,7 @@ export class ModelerPanel {
     // Center: viewport + mode switch
     const center = element('section', 'modeler-viewport-wrap');
     const modeBar = element('div', 'modeler-modebar');
+    this.modeBar = modeBar;
     this.modeButtons = {};
     for (const [mode, label, title] of [
       ['part', 'Parts', 'Select and transform whole parts (move W · rotate E · scale R)'],
@@ -195,19 +237,25 @@ export class ModelerPanel {
     this.viewportHost.dataset.testid = 'modeler-viewport';
     center.append(modeBar, this.viewportHost);
 
-    // Right: inspector for part / face / textures / world textures
+    // Right: inspector for part / face / textures — or, in world-object mode,
+    // the surface paint controls of the selected archetype.
     const right = element('aside', 'modeler-panel modeler-right');
     this.rightPanel = right;
     this.inspector = element('div', 'modeler-inspector');
     right.append(this.inspector);
     this.worldTextureSection = element('section', 'modeler-world-section');
     this.worldTextureSection.dataset.testid = 'world-texture-section';
-    this.worldTextureSection.append(element('h3', '', 'World textures'));
-    this.worldTextureSection.append(element('p', 'modeler-help', 'Replace road, parking-area, guardrail, barrier, and structure textures across the generated map.'));
-    this.worldTextureList = element('div', 'modeler-world-textures');
-    this.worldTextureSection.append(this.worldTextureList);
+    this.worldTextureSection.hidden = true;
+    // Object header + its surface list + the paint controls of the selected
+    // surface — the world-object counterpart of part list + face panel.
+    this.worldObjectHeader = element('div', 'modeler-world-object-header');
+    this.worldSurfaceList = element('div', 'modeler-world-surface-list');
+    this.worldSurfaceList.dataset.testid = 'modeler-world-surface-list';
+    this.worldStyleHost = element('div', 'modeler-world-style');
+    this.worldTextureSection.append(this.worldObjectHeader, this.worldSurfaceList, this.worldStyleHost);
     right.append(this.worldTextureSection);
-    right.append(element('h3', '', 'Texture library'));
+    this.textureLibraryHeading = element('h3', '', 'Texture library');
+    right.append(this.textureLibraryHeading);
     this.textureList = element('div', 'modeler-texture-list');
     right.append(this.textureList);
     this.uploadTextureButton = button('Upload image…', 'tool-button', 'Add an image to the texture library');
@@ -262,6 +310,11 @@ export class ModelerPanel {
     this.scene.add(this.assetGroup);
     this.handleGroup = new THREE.Group();
     this.scene.add(this.handleGroup);
+    // World-object mode swaps the modelled object for a live-material preview
+    // of the selected archetype; both never show at once.
+    this.worldPreviewGroup = new THREE.Group();
+    this.worldPreviewGroup.name = 'World archetype preview';
+    this.scene.add(this.worldPreviewGroup);
 
     this.resizeObserver = new ResizeObserver(() => this._resize());
     this.resizeObserver.observe(this.viewportHost);
@@ -286,6 +339,22 @@ export class ModelerPanel {
   _bindEvents() {
     this.closeButton.addEventListener('click', () => this.close());
     this.newObjectButton.addEventListener('click', () => this._loadDefinition(null));
+    for (const [key, node] of Object.entries(this.libraryButtons)) node.addEventListener('click', () => this._setLibrary(key));
+    this.worldSaveButton.addEventListener('click', () => this._saveStoreOnly());
+    this.worldStyleEditor = new SurfaceStyleEditor({
+      host: this.worldStyleHost,
+      store: this.store,
+      getMaterial: (slot) => this.getMaterials()?.[slot] || null,
+      onStatus: (message) => this.onStatus(message),
+      pickTexture: (title, useTexture) => this._chooseTexture(title, useTexture),
+      onEditImage: (textureId) => this._openTextureEditor(textureId),
+      onChange: () => {
+        this.dirtyChip.textContent = 'Unsaved changes';
+        this.onWorldTexturesChanged();
+        this._renderWorldObjectList();
+        this._renderWorldSurfaceRows();
+      },
+    });
     this.nameInput.addEventListener('input', () => { if (this.definition) { this.definition.label = this.nameInput.value; this._markDirty({ history: false }); } });
     this.nameInput.addEventListener('change', () => { if (this.definition) this._recordHistory(); });
     this.layerSelect.addEventListener('change', () => { if (this.definition) { this.definition.layer = this.layerSelect.value; this._markDirty(); } });
@@ -323,6 +392,7 @@ export class ModelerPanel {
         return;
       }
       if (event.button !== 0 || this.gizmo.dragging) return;
+      if (this.library === 'world') { this._pickWorldSurface(event); return; }
       this._pick(event);
     };
     this.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
@@ -335,12 +405,13 @@ export class ModelerPanel {
       const downAt = this._rightDownAt;
       this._rightDownAt = null;
       if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 5) return; // was a pan
+      if (this.library === 'world') return;
       this._rightClick(event);
     };
     this.renderer.domElement.addEventListener('contextmenu', this._onContextMenu);
 
     this._onKeyDown = (event) => {
-      if (!this.openState) return;
+      if (!this.openState || this.library === 'world') return;
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.code === 'KeyZ') {
         event.preventDefault();
@@ -375,13 +446,10 @@ export class ModelerPanel {
   }
 
   /** Opens directly at the generated-map texture controls. */
-  openWorldTextures() {
+  openWorldTextures(slot = undefined) {
     this.open();
-    requestAnimationFrame(() => {
-      this.rightPanel.scrollTop = Math.max(0, this.worldTextureSection.offsetTop - 8);
-      this.worldTextureSection.querySelector('button')?.focus({ preventScroll: true });
-    });
-    this.onStatus('World textures · choose images for roads, parking areas, guardrails, barriers, and structures');
+    this._setLibrary('world');
+    if (slot) this._selectWorldSlot(slot);
   }
 
   close() {
@@ -452,6 +520,14 @@ export class ModelerPanel {
   _renderAll() {
     this.nameInput.value = this.definition?.label || '';
     this.layerSelect.value = this.definition?.layer || 'Props';
+    if (this.library === 'world') {
+      // The world library owns the viewport and the right panel; leave the
+      // modelled object untouched underneath so switching back is instant.
+      this._renderWorldObjectList();
+      this._renderWorldObjectPanel();
+      this.dirtyChip.textContent = this.store.dirty ? 'Unsaved changes' : '';
+      return;
+    }
     this._rebuildObject();
     this._renderAssetList();
     this._renderPartList();
@@ -1147,7 +1223,7 @@ export class ModelerPanel {
         for (const style of Object.values(part.faces || {})) if (style.texture === textureId) usage += 1;
       }
     }
-    for (const slot of Object.keys(WORLD_TEXTURE_SLOTS)) if (this.store.worldTexture(slot) === textureId) usage += 1;
+    for (const slot of Object.keys(WORLD_SURFACES)) if (this.store.worldTexture(slot) === textureId) usage += 1;
     const name = record.name || textureId;
     const message = usage
       ? `Delete texture "${name}"? It is used on ${usage} face/world surface${usage === 1 ? '' : 's'} — they go back to their plain colour.`
@@ -1410,45 +1486,269 @@ export class ModelerPanel {
     this.overlay.append(dialog);
   }
 
-  _renderWorldTextures() {
-    this.worldTextureList.innerHTML = '';
-    for (const [slot, meta] of Object.entries(WORLD_TEXTURE_SLOTS)) {
-      const row = element('div', 'modeler-world-row');
-      const info = element('div', 'modeler-world-info');
-      info.append(element('b', '', meta.label), element('small', '', meta.description));
-      row.append(info);
-      const current = this.store.worldTexture(slot);
-      const currentRecord = current ? this.store.getTexture(current) : null;
-      if (currentRecord) {
-        const thumb = element('img', 'modeler-face-thumb');
-        thumb.src = textureSourceUrl(currentRecord);
-        thumb.alt = currentRecord.name || current;
-        row.append(thumb);
-      }
-      const upload = button(currentRecord ? 'Replace…' : 'Set image…', 'tool-button small', `Upload the repeated image for ${meta.label}`);
-      upload.addEventListener('click', () => this._pickImage((textureId) => {
-        this.store.setWorldTexture(slot, textureId);
-        this._markDirty({ history: false });
-        this._renderWorldTextures();
-        this.onWorldTexturesChanged();
-        this.onStatus(`${meta.label} texture set · Save Object/textures to persist, the playable game updates on reload`);
-      }));
-      row.append(upload);
-      if (currentRecord) {
-        const clear = button('Clear', 'tool-button small danger', 'Back to the original generated colour');
-        clear.addEventListener('click', () => {
-          this.store.setWorldTexture(slot, null);
-          this._markDirty({ history: false });
-          this._renderWorldTextures();
-          this.onWorldTexturesChanged();
-        });
-        row.append(clear);
-      }
-      this.worldTextureList.append(row);
+  // ------------------------------------------------------- world objects --
+  /**
+   * Switches the left library between the objects you modelled and the
+   * archetypes the map generator already repeats across the world.
+   */
+  _syncLibraryChrome() {
+    const world = this.library === 'world';
+    for (const [name, node] of Object.entries(this.libraryButtons)) node.setAttribute('aria-checked', String(name === this.library));
+    this.assetList.hidden = world;
+    this.worldObjectList.hidden = !world;
+    this.newObjectButton.hidden = world;
+    for (const node of [this.partsHeading, this.partList, this.addPartsRow, this.catalogRow, this.scaleRow]) node.hidden = world;
+    this.nameInput.hidden = world;
+    this.layerSelect.hidden = world;
+    for (const node of [this.saveButton, this.saveCopyButton, this.deleteButton]) node.hidden = world;
+    this.worldSaveButton.hidden = !world;
+    this.worldTextureSection.hidden = !world;
+    this.inspector.hidden = world;
+    this.textureLibraryHeading.hidden = world;
+    this.textureList.hidden = world;
+    this.uploadTextureButton.hidden = world;
+    this.addVerticesButton.hidden = world || this.mode !== 'vertex';
+    // World-object mode has nothing to model: the viewport is a live preview.
+    this.modeBar.hidden = world;
+  }
+
+  _setLibrary(key) {
+    this.library = key === 'world' ? 'world' : 'custom';
+    const world = this.library === 'world';
+    this._syncLibraryChrome();
+    if (world) {
+      this._renderWorldObjectList();
+      this._selectWorldObject(this.worldObject || 'officeBuilding', this.worldSlot);
+      this.onStatus('World objects · pick a type, give it a texture — every copy of it in the map changes with it');
+    } else {
+      this.assetGroup.visible = true;
+      this.worldPreviewGroup.clear();
+      this._renderAll();
+      this.onStatus('Your objects · build and texture your own models');
     }
-    const save = button('Save textures', 'tool-button accent', 'Persist texture overrides to disk (applies to editor and game)');
-    save.addEventListener('click', () => this._saveStoreOnly());
-    this.worldTextureList.append(save);
+  }
+
+  _renderWorldObjectList() {
+    this.worldObjectList.innerHTML = '';
+    for (const entry of WORLD_OBJECT_GROUPS) {
+      this.worldObjectList.append(element('h4', 'modeler-world-group', entry.group));
+      for (const objectId of entry.objects) {
+        const meta = WORLD_OBJECTS[objectId];
+        const surfaces = worldObjectSurfaces(objectId);
+        const painted = surfaces.filter((slot) => !isDefaultWorldSurfaceStyle(this.store.worldSurface(slot)));
+        const row = element('button', `modeler-asset-row${objectId === this.worldObject ? ' selected' : ''}`);
+        row.type = 'button';
+        row.dataset.testid = `modeler-world-object-${objectId}`;
+        row.title = meta.description;
+        row.append(
+          element('b', '', meta.label),
+          element('small', '', painted.length
+            ? `${painted.length}/${surfaces.length} surface${surfaces.length === 1 ? '' : 's'} painted`
+            : `${surfaces.length} surface${surfaces.length === 1 ? '' : 's'} · ${meta.description}`),
+        );
+        if (painted.length) row.classList.add('is-custom');
+        row.addEventListener('click', () => this._selectWorldObject(objectId));
+        this.worldObjectList.append(row);
+      }
+    }
+    const openSurfaces = button('Open full Surfaces editor →', 'tool-button small', 'The dedicated section for repeated surfaces: asphalt, tunnels, terrain, and every tiling control');
+    openSurfaces.addEventListener('click', () => {
+      if (!this.onOpenSurfaces) { this.onStatus('The Surfaces editor is unavailable in this scene'); return; }
+      this.close();
+      this.onOpenSurfaces(this.worldSlot);
+    });
+    this.worldObjectList.append(openSurfaces);
+  }
+
+  _selectWorldObject(objectId, slot = null) {
+    if (!WORLD_OBJECTS[objectId]) return;
+    const surfaces = worldObjectSurfaces(objectId);
+    const sameObject = this.worldObject === objectId;
+    this.worldObject = objectId;
+    this.worldSlot = surfaces.includes(slot) ? slot : surfaces[0];
+    this._renderWorldObjectList();
+    this._renderWorldObjectPanel();
+    // Switching surface inside the same object must not yank the camera away
+    // from wherever the user orbited to inspect it.
+    if (!sameObject) this._buildWorldPreview();
+  }
+
+  _selectWorldSlot(slot) {
+    if (!WORLD_SURFACES[slot]) return;
+    // A bare slot (from the Surfaces editor, or a restored session) resolves to
+    // whichever object owns it.
+    const owner = this.worldObject && worldObjectSurfaces(this.worldObject).includes(slot)
+      ? this.worldObject
+      : worldObjectsUsingSurface(slot)[0];
+    if (!owner) return;
+    this._selectWorldObject(owner, slot);
+  }
+
+  /**
+   * The right panel of world-object mode: the object, every surface it is made
+   * of, and the paint controls of the selected one — the same shape as the part
+   * list and face panel of a modelled object.
+   */
+  _renderWorldObjectPanel() {
+    this.worldObjectHeader.innerHTML = '';
+    const meta = WORLD_OBJECTS[this.worldObject];
+    if (!meta) { this.worldSurfaceList.innerHTML = ''; return; }
+    const surfaces = worldObjectSurfaces(this.worldObject);
+
+    const head = element('div', 'surface-head');
+    head.append(element('b', '', meta.label));
+    this.worldObjectHeader.append(head);
+    this.worldObjectHeader.append(element('p', 'modeler-help',
+      `${meta.description}. Made of ${surfaces.length} surface${surfaces.length === 1 ? '' : 's'} — pick one below, or click it in the preview. One material, one archetype: every ${meta.label.toLowerCase()} in the world changes with it.`));
+
+    // Two ways into the normal modeler, because they trade different things:
+    // the catalog geometry is the exact shape but can only be placed and
+    // scaled, while the composite volumes are real primitives you can reshape,
+    // texture per face, and push vertices on.
+    const editRow = element('div', 'surface-button-row');
+    const hasGeometry = Boolean(meta.assetId && this.assetRegistry?.get?.(meta.assetId));
+    if (hasGeometry) {
+      const exact = button('✎ Edit exact shape…', 'tool-button small accent',
+        "Open the world's real geometry as your own object — exact silhouette, moved/rotated/scaled and combinable with new parts");
+      exact.dataset.testid = 'modeler-world-edit-as-model';
+      exact.addEventListener('click', () => this._editWorldObjectAsModel({ exact: true }));
+      editRow.append(exact);
+    }
+    const editable = button('⬚ Edit as editable parts…', `tool-button small${hasGeometry ? '' : ' accent'}`,
+      'Open this object as primitive parts — reshape them, texture each face, drag vertices, exactly like a custom object');
+    editable.dataset.testid = hasGeometry ? 'modeler-world-edit-as-parts' : 'modeler-world-edit-as-model';
+    editable.addEventListener('click', () => this._editWorldObjectAsModel({ exact: false }));
+    editRow.append(editable);
+    this.worldObjectHeader.append(editRow);
+
+    this.worldObjectHeader.append(element('h4', 'surface-group-title', 'Surfaces of this object'));
+    this._renderWorldSurfaceRows();
+    this.worldStyleEditor.setSlot(this.worldSlot);
+  }
+
+  /**
+   * Just the surface rows (selection, thumbnail, painted state). Kept separate
+   * from the panel render because it runs on every slider tick: rebuilding the
+   * paint controls there would destroy the control being dragged.
+   */
+  _renderWorldSurfaceRows() {
+    this.worldSurfaceList.innerHTML = '';
+    if (!WORLD_OBJECTS[this.worldObject]) return;
+    for (const slot of worldObjectSurfaces(this.worldObject)) {
+      const surfaceMeta = WORLD_SURFACES[slot];
+      const style = this.store.worldSurface(slot);
+      const row = element('div', `modeler-face-row${slot === this.worldSlot ? ' selected' : ''}`);
+      row.dataset.testid = `modeler-world-surface-${slot}`;
+      const pick = element('button', 'modeler-face-pick', surfaceMeta?.label || slot);
+      pick.type = 'button';
+      pick.addEventListener('click', () => this._selectWorldObject(this.worldObject, slot));
+      row.append(pick);
+      const record = style.texture ? this.store.getTexture(style.texture) : null;
+      if (record) {
+        const thumb = element('img', 'modeler-face-thumb');
+        thumb.src = textureSourceUrl(record);
+        thumb.alt = record.name || style.texture;
+        row.append(thumb);
+      } else {
+        row.append(element('small', 'modeler-face-none', isDefaultWorldSurfaceStyle(style) ? 'generated' : 'tinted'));
+      }
+      // Materials the generator shares between archetypes: say so before the
+      // user discovers it by repainting half the city.
+      const shared = worldObjectsUsingSurface(slot).filter((objectId) => objectId !== this.worldObject);
+      if (shared.length) {
+        const tag = element('small', 'modeler-face-regions', `shared ×${shared.length + 1}`);
+        tag.title = `The map uses this same material for: ${[this.worldObject, ...shared].map((objectId) => WORLD_OBJECTS[objectId].label).join(', ')} — painting it changes all of them.`;
+        row.append(tag);
+      }
+      this.worldSurfaceList.append(row);
+    }
+  }
+
+  /**
+   * Hands the archetype to the normal modeler as an editable object: the real
+   * catalog geometry when the world has a reusable asset for it, otherwise the
+   * object's composite volumes as primitive parts. The result is YOUR object —
+   * saved to the catalog and placeable — while surface paint stays the way to
+   * change every copy already standing in the map.
+   */
+  _editWorldObjectAsModel({ exact = true } = {}) {
+    const meta = WORLD_OBJECTS[this.worldObject];
+    if (!meta) return;
+    if (exact && meta.assetId && this.assetRegistry?.get?.(meta.assetId)) {
+      this._setLibrary('custom');
+      this.editCopyOfAsset(meta.assetId);
+      this.onStatus(`${meta.label} opened with its exact world geometry · add parts around it, then Save Object · the copies already in the map keep their surface paint`);
+      return;
+    }
+    const parts = worldObjectModelParts(this.worldObject, this.getMaterials());
+    if (!parts.length) { this.onStatus(`${meta.label} has no geometry to model in this scene`); return; }
+    this._setLibrary('custom');
+    this.definition = {
+      id: this.store.newAssetId(),
+      label: `${meta.label} custom`,
+      description: `Based on the generated ${meta.label.toLowerCase()}`,
+      layer: 'Props',
+      createdAt: new Date().toISOString(),
+      parts,
+    };
+    this.editingExisting = false;
+    this.selectedPart = 0;
+    this.selectedFace = null;
+    this.selectedVertex = -1;
+    this._resetHistory();
+    this._renderAll();
+    this._markDirty({ history: false });
+    this.onStatus(`${meta.label} opened as ${parts.length} editable part${parts.length === 1 ? '' : 's'} · reshape and texture it like any object, then Save Object`);
+  }
+
+  /**
+   * Shows the selected archetype in the modeler viewport, every part carrying
+   * the LIVE map material of its surface — so a texture change is visible here
+   * exactly as it lands out in the map, and clicking a part picks its surface.
+   */
+  _buildWorldPreview() {
+    this.worldPreviewGroup.clear();
+    this.assetGroup.visible = false;
+    this._detachGizmo();
+    const meshes = buildWorldObjectPreview(this.worldObject, {
+      materials: this.getMaterials(),
+      assetRegistry: this.assetRegistry,
+    });
+    if (!meshes.length) {
+      this.onStatus(`${WORLD_OBJECTS[this.worldObject]?.label || 'This object'} · no live map material in this scene — the paint controls still work and apply on reload`);
+      return;
+    }
+    for (const mesh of meshes) this.worldPreviewGroup.add(mesh);
+    const bounds = previewFocusBounds(this.worldPreviewGroup);
+    if (bounds.isEmpty()) return;
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const radius = Math.max(1.2, size.length() * 0.75);
+    this.orbit.target.copy(center);
+    this.camera.position.set(center.x + radius * 1.1, center.y + radius * 0.75, center.z + radius * 1.4);
+    this.camera.near = Math.max(0.02, radius / 500);
+    this.camera.far = radius * 80;
+    this.camera.updateProjectionMatrix();
+    this.orbit.update();
+  }
+
+  /** Click in the world preview: select the surface of the part that was hit. */
+  _pickWorldSurface(event) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObjects(this.worldPreviewGroup.children, true)[0];
+    const slot = hit?.object?.userData?.surfaceSlot;
+    if (!slot || slot === this.worldSlot) return;
+    this._selectWorldObject(this.worldObject, slot);
+    this.onStatus(`${WORLD_SURFACES[slot]?.label || slot} selected · paint it on the right`);
+  }
+
+  /** Kept for callers that refresh after a texture-library change. */
+  _renderWorldTextures() {
+    if (this.library !== 'world') return;
+    this._renderWorldObjectList();
+    this._renderWorldObjectPanel();
   }
 
   _syncModeButtons() {

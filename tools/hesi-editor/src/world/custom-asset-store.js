@@ -1,6 +1,8 @@
 import {
   blankCustomAssetsDocument,
+  compactWorldSurfaceStyle,
   customAssetsDocumentErrors,
+  normalizeWorldSurfaceStyle,
 } from '/js/custom-assets.js';
 
 const clone = (value) => value == null ? value : structuredClone(value);
@@ -71,7 +73,13 @@ export class CustomAssetStore {
   getTexture(id) { return this.document.textures[id] || null; }
   textures() { return Object.entries(this.document.textures).map(([id, texture]) => ({ id, ...texture })); }
   texturesById() { return this.document.textures; }
-  worldTexture(slot) { return this.document.worldTextures?.[slot] || null; }
+  worldTexture(slot) { return this.worldSurface(slot).texture; }
+
+  /** Full paint style of one generated-map surface (tiling, tint, image). */
+  worldSurface(slot) { return normalizeWorldSurfaceStyle(this.document.worldTextures?.[slot]); }
+
+  /** True when the slot carries any saved override at all. */
+  hasWorldSurface(slot) { return Object.hasOwn(this.document.worldTextures || {}, slot); }
 
   newAssetId() { return nextId('custom', Object.keys(this.document.assets)); }
 
@@ -137,22 +145,35 @@ export class CustomAssetStore {
         }
       }
     }
-    for (const [slot, textureId] of Object.entries(this.document.worldTextures || {})) {
-      if (textureId === id) delete this.document.worldTextures[slot];
+    for (const [slot, entry] of Object.entries(this.document.worldTextures || {})) {
+      if (normalizeWorldSurfaceStyle(entry).texture !== id) continue;
+      // Tiling/tint the user dialled in survives; only the image goes away.
+      this.setWorldSurface(slot, { texture: null });
     }
     this.dirty = true;
     return true;
   }
 
   setWorldTexture(slot, textureId, { repeat = null } = {}) {
+    if (textureId && repeat && this.document.textures[textureId]) this.document.textures[textureId].repeat = repeat;
+    this.setWorldSurface(slot, textureId ? { texture: textureId } : null);
+  }
+
+  /**
+   * Patches one surface's paint style. `null` removes the override entirely
+   * (back to the generated look); a patch merges into the current style and is
+   * stored compacted, so an all-default style never bloats the document.
+   */
+  setWorldSurface(slot, patch) {
     if (!this.document.worldTextures) this.document.worldTextures = {};
-    if (textureId) {
-      this.document.worldTextures[slot] = textureId;
-      if (repeat && this.document.textures[textureId]) this.document.textures[textureId].repeat = repeat;
-    } else {
-      delete this.document.worldTextures[slot];
+    if (patch === null) delete this.document.worldTextures[slot];
+    else {
+      const next = compactWorldSurfaceStyle({ ...this.worldSurface(slot), ...patch });
+      if (next) this.document.worldTextures[slot] = next;
+      else delete this.document.worldTextures[slot];
     }
     this.dirty = true;
+    return this.worldSurface(slot);
   }
 
 }

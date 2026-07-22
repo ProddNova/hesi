@@ -156,9 +156,22 @@ full-screen modeling section that is always available inside the editor:
   selection into a single custom asset
 - **Edit existing objects**: custom assets reopen in the Modeler with *Edit*;
   built-in world assets open as a customizable copy with *Customize*
-- **World textures**: replace the repeated textures of the generated map —
-  road asphalt (tiled per road segment), alternate/service asphalt, concrete,
-  barriers, buildings, and tunnel walls — with uploaded images
+- **World objects library**: the left panel switches between *Your objects*
+  (what you modelled) and *World objects* — the archetypes the map generator
+  repeats everywhere: buildings, lamp posts and pillars, containers, garage and
+  PA props, signs, barriers and rails. Picking one previews it in the viewport
+  built from the live map materials, and the right panel lists **every surface
+  the object is made of** (a lamp is its concrete mast *and* its sodium head, a
+  parked car its body *and* its glass): select one there or click it in the
+  preview, then paint it. Surfaces the generator shares between archetypes are
+  tagged `shared ×N` with the full list in the tooltip, because painting one
+  changes all of them. Two ways out into normal modelling:
+  *Edit exact shape…* hands over the world's real geometry as an assembled
+  part, and *Edit as editable parts…* hands over the object's volumes as
+  primitives you can reshape, texture per face and drag vertices on — from
+  there it is an ordinary custom object, saved to the catalog and placeable.
+  (Editing the model makes *your* object; surface paint is what changes the
+  copies already standing in the map.)
 
 - **Map Inspector face textures**: select a rendered wall, floor, placed box,
   or other non-instanced object and assign/upload an image per exposed face
@@ -174,8 +187,71 @@ fresh uploads/edits travel as embedded data URLs only until the next save), so
 the JSON document stays tiny and the playable game starts instantly while the
 texture images stream in. Builds
 reference them with `place-custom` operations; the playable game rebuilds
-them — and applies world texture overrides — from the same saved document via
+them — and applies world surface overrides — from the same saved document via
 `js/custom-assets.js` (shared builder) and `js/editor-map-patch.js`.
+
+## Surfaces (repeated textures and repeated objects)
+
+The toolbar **Surfaces** button opens the section dedicated to everything the
+world repeats. The generated map draws each material *once* for the whole
+world — merged chunk quads or one instanced batch per bucket — so a material
+IS an archetype: repainting `road` repaints every metre of asphalt,
+`facadeOffice` every office building, `container` every container. There is no
+per-object work to do, and no way to get out of sync.
+
+Two tabs split the catalog the way the world does:
+
+- **Repeated surfaces** — road/alternate/service asphalt, lane and amber
+  markings, reflectors, concrete barriers, guardrails, safety fence, concrete
+  (pillars, walls, and the lamp-post masts that share the material), dark
+  concrete, tunnel walls/ceiling/portals, ground and bay water.
+- **Repeated objects** — grouped by object rather than by material, each block
+  showing every surface that object is made of: office/dark/hotel/industrial
+  buildings (facade + roof), industrial sheds, the landmark tower, the highway
+  lamp (mast + head), pillars, containers, dock cranes, the garage (walls +
+  shutter), konbini, vending machines, PA canopies, parked cars (body + glass),
+  route signs (panel + gantry), exit/chevron/matrix boards and neon.
+
+Each surface card shows what it currently looks like (its own generated
+texture, or an uploaded image tiled at the chosen repeat). Selecting one gives:
+
+- a **live 3D preview** built from the map's real materials, showing the whole
+  object a surface belongs to — the catalog geometry where one exists (lamp,
+  barrier segment, guardrail, konbini, vending, canopy, garage), otherwise the
+  object's composite volumes, which carry the same 0..1 UVs the generator gives
+  its quads. Additive glow decals are drawn but excluded from the framing, so a
+  lamp is not shrunk to a speck by its own 40 m light streak. `☀/🌙` switches
+  between inspection light and the night-game light so emissive surfaces read
+  true.
+- **Image**: set, replace, crop/erase, or clear the repeated picture.
+- **Image fit**, the same three the custom-object face editor offers:
+  *Tile* (the picture repeats — the default), *Stretch* (one copy pulled over
+  the whole surface, squeezed to its shape), and *Fit & crop* (one copy keeping
+  the image's own proportions, overflow cut away, with a **Surface shape**
+  width ÷ height control so the crop matches the real surface). Stretch and
+  Fit & crop need a bounded 0..1 surface, so they are offered on the quad
+  surfaces and not on world-anchored asphalt — one image cannot "fit" 12 km of
+  road.
+- **Tile shape**: tiles are not forced square. Road surfaces get two
+  independent metre fields, **Tile size X** and **Tile size Z** (with a
+  🔗/⛓ toggle and 3/6/12/24/48 m presets), so a tile can be 4 m one way and
+  24 m the other; those are world axes, and *Rotation* turns the whole tile
+  grid. Everything else gets **repeat across/down** with the same link toggle.
+  Because road UVs are anchored to world coordinates, a tile stays the same
+  number of metres everywhere — across lanes, chunks, curves and junctions.
+- **Placement**: shift across/down, rotation, and horizontal/vertical flips.
+- **Colour & light**: a tint that multiplies the image (white leaves the photo
+  untouched) and a brightness multiplier. Lamp heads, markings and matrix
+  boards are colour-only — they read as light, not as material.
+- **Reset to generated**: drops every override on that surface and restores the
+  material exactly as the generator made it.
+
+Every control writes straight through to the live map, so the world updates
+while the slider is still moving. *Save* persists to
+`data/editor/custom-assets.json`; the playable game applies the same overrides
+on load. Overrides are stored compacted (`{ texture, fit, repeat, aspect,
+offset, rotation, tint, brightness, flipX, flipY }`, only the non-default
+fields), and the older plain-texture-id form still loads unchanged.
 
 ## Commits (map versions)
 

@@ -18,6 +18,7 @@ import { getScene, sceneFromSearch } from './scenes/scene-registry.js';
 import { CustomAssetStore } from './world/custom-asset-store.js';
 import { assembleDefinitionFromEntities, registerCustomAssets } from './world/custom-asset-integration.js';
 import { ModelerPanel } from './modeler/modeler-panel.js';
+import { SurfacesPanel } from './surfaces/surfaces-panel.js';
 import { FaceTextureController } from './interaction/face-texture-controller.js';
 import { applyWorldTextureOverrides } from '/js/custom-assets.js';
 import { SkyboxController } from './world/skybox-controller.js';
@@ -45,6 +46,7 @@ export async function createEditorApp(root) {
   let routePersistence = null;
   let customAssetStore = null;
   let modeler = null;
+  let surfaces = null;
   let faceTextureController = null;
   let skyboxController = null;
   let disposed = false;
@@ -209,8 +211,8 @@ export async function createEditorApp(root) {
     else shell.setStatus('The Modeler is available once the world has loaded');
   });
   shell.onToolbar('open-world-textures', () => {
-    if (modeler) modeler.openWorldTextures();
-    else shell.setStatus('World textures are available once the world has loaded');
+    if (surfaces) surfaces.open();
+    else shell.setStatus('Surfaces are available once the world has loaded');
   });
   shell.onToolbar('open-skybox', () => {
     shell.showTab('skybox');
@@ -540,9 +542,26 @@ export async function createEditorApp(root) {
       onTexturesChanged: () => shell.setTextures(customAssetStore.textures()),
       onWorldTexturesChanged: () => {
         if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
+        surfaces?.refresh();
       },
       isAssetInUse: (assetId) => projectState.toJSON().placedObjects.some((placedRecord) => placedRecord.assetId === assetId),
       onOpenChange: (open) => viewport.setNavigationBlocked(open, 'modeler-overlay'),
+      getMaterials: () => adapter.map?.materials || null,
+      onOpenSurfaces: (slot) => surfaces?.open(slot),
+    });
+    // Surfaces: the repeated textures and repeated objects of the generated
+    // world, each one material shared by every copy out in the map.
+    surfaces = new SurfacesPanel({
+      host: shell.root,
+      store: customAssetStore,
+      assetRegistry,
+      getMaterials: () => adapter.map?.materials || null,
+      onStatus: (message) => shell.setStatus(message),
+      onTexturesChanged: () => shell.setTextures(customAssetStore.textures()),
+      onWorldTexturesChanged: () => {
+        if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
+      },
+      onOpenChange: (open) => viewport.setNavigationBlocked(open, 'surfaces-overlay'),
     });
     shell.setAssets(assetRegistry.catalog());
     syncViewState();

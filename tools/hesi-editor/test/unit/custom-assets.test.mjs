@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PART_KINDS,
+  WORLD_OBJECTS,
+  WORLD_OBJECT_GROUPS,
+  WORLD_SURFACES,
+  WORLD_SURFACE_GROUPS,
   WORLD_TEXTURE_SLOTS,
+  compactWorldSurfaceStyle,
+  worldObjectSurfaces,
+  worldObjectsUsingSurface,
+  isDefaultWorldSurfaceStyle,
+  normalizeWorldSurfaceStyle,
   applyObjectFaceStyles,
   applyPartFaceProjections,
   applyVertexOffsets,
@@ -310,6 +319,98 @@ test('AssetRegistry registers custom assets and lists them first in the catalog'
   assert.ok(!registry.catalog().some((entry) => entry.id === 'custom:0001'));
 });
 
+test('world surface styles normalize, compact, and round-trip both stored forms', () => {
+  // Legacy documents stored a bare texture id; the rich form adds tiling.
+  assert.equal(normalizeWorldSurfaceStyle('tex:0001').texture, 'tex:0001');
+  assert.deepEqual(normalizeWorldSurfaceStyle('tex:0001').repeat, [1, 1]);
+  assert.ok(isDefaultWorldSurfaceStyle(normalizeWorldSurfaceStyle(null)));
+  assert.equal(compactWorldSurfaceStyle({ tint: '#ffffff' }), null, 'an all-default style is not stored at all');
+  const compact = compactWorldSurfaceStyle({ texture: 'tex:0001', repeat: [4, 2], rotation: 90, brightness: 1 });
+  assert.deepEqual(compact, { texture: 'tex:0001', repeat: [4, 2], rotation: 90 });
+  // Out-of-range values are clamped rather than trusted into the material.
+  assert.equal(normalizeWorldSurfaceStyle({ brightness: 99 }).brightness, 4);
+  assert.equal(normalizeWorldSurfaceStyle({ tint: 'javascript:x' }).tint, '#ffffff');
+});
+
+test('applyWorldTextureOverrides tiles, tints, and restores the generated look', () => {
+  const materials = {
+    road: new THREE.MeshLambertMaterial({ color: 0x14171f }),
+    lampSodium: new THREE.MeshBasicMaterial({ color: 0xff8a2e }),
+  };
+  const document = {
+    version: 1,
+    assets: {},
+    textures: { 'tex:0001': { dataUrl: PIXEL_PNG } },
+    worldTextures: { road: { texture: 'tex:0001', repeat: [4, 4], rotation: 45 }, lampSodium: { tint: '#00ff88' } },
+  };
+  applyWorldTextureOverrides(materials, document);
+  assert.ok(materials.road.map, 'road took the image');
+  assert.equal(materials.lampSodium.color.getHexString(), '00ff88', 'a tint-only slot recolours without an image');
+  // Dropping the overrides puts the generated materials back exactly.
+  delete document.worldTextures.road;
+  delete document.worldTextures.lampSodium;
+  const summary = applyWorldTextureOverrides(materials, document);
+  assert.equal(summary.cleared, 2);
+  assert.equal(materials.road.map, null);
+  assert.equal(materials.road.color.getHexString(), '14171f');
+  assert.equal(materials.lampSodium.color.getHexString(), 'ff8a2e');
+});
+
+test('world surface fit modes drive the texture transform', () => {
+  const materials = {
+    facadeOffice: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    road: new THREE.MeshLambertMaterial({ color: 0x14171f }),
+  };
+  const document = {
+    version: 1,
+    assets: {},
+    textures: { 'tex:0001': { dataUrl: PIXEL_PNG } },
+    // A rectangular tile: the two axes are independent, not locked square.
+    worldTextures: { road: { texture: 'tex:0001', repeat: [3, 0.5] } },
+  };
+  applyWorldTextureOverrides(materials, document);
+  assert.deepEqual(materials.road.map.repeat.toArray(), [3, 0.5], 'tiles can be rectangles');
+
+  // Stretch and Fit & crop pull ONE copy over the surface, so neither tiles.
+  for (const fit of ['stretch', 'cover']) {
+    document.worldTextures.facadeOffice = { texture: 'tex:0001', fit, repeat: [4, 4] };
+    applyWorldTextureOverrides(materials, document);
+    assert.deepEqual(materials.facadeOffice.map.repeat.toArray(), [1, 1], fit + ' ignores the tiling');
+  }
+  assert.equal(materials.facadeOffice.map.wrapS, THREE.ClampToEdgeWrapping, 'Fit & crop clamps instead of repeating');
+
+  // Asphalt UVs are unbounded, so those slots tile whatever the fit says.
+  document.worldTextures.road = { texture: 'tex:0001', fit: 'cover', repeat: [3, 0.5] };
+  applyWorldTextureOverrides(materials, document);
+  assert.deepEqual(materials.road.map.repeat.toArray(), [3, 0.5], 'world-anchored asphalt keeps tiling');
+
+  assert.equal(normalizeWorldSurfaceStyle({ fit: 'nonsense' }).fit, 'tile');
+  assert.deepEqual(compactWorldSurfaceStyle({ fit: 'cover', aspect: 3 }), { fit: 'cover', aspect: 3 });
+});
+
+test('world objects are composites of real surfaces', () => {
+  const grouped = WORLD_OBJECT_GROUPS.flatMap((entry) => entry.objects);
+  assert.equal(grouped.length, Object.keys(WORLD_OBJECTS).length);
+  assert.equal(new Set(grouped).size, grouped.length, 'every object appears in exactly one group');
+  for (const [objectId, meta] of Object.entries(WORLD_OBJECTS)) {
+    assert.ok(meta.label && meta.description && meta.group, objectId + ' needs label/description/group');
+    assert.ok(meta.parts.length, objectId + ' needs at least one part');
+    for (const part of meta.parts) {
+      assert.ok(Object.hasOwn(WORLD_SURFACES, part.slot), objectId + ' references unknown surface ' + part.slot);
+      assert.equal(part.size.length, 3);
+      assert.equal(part.position.length, 3);
+    }
+    // Every surface of an object must be reachable from that object.
+    for (const slot of worldObjectSurfaces(objectId)) {
+      assert.ok(worldObjectsUsingSurface(slot).includes(objectId));
+    }
+  }
+  // A lamp is its mast AND its head — the case that motivated the composite.
+  assert.deepEqual(worldObjectSurfaces('highwayLamp'), ['concrete', 'lampSodium']);
+  // The mast material is shared with the pillars, and the UI must be able to say so.
+  assert.ok(worldObjectsUsingSurface('concrete').length > 1);
+});
+
 test('world texture slots stay aligned with the map material names', () => {
   // Guard against typos: every slot key must be a plausible material key.
   for (const slot of Object.keys(WORLD_TEXTURE_SLOTS)) {
@@ -317,4 +418,13 @@ test('world texture slots stay aligned with the map material names', () => {
   }
   assert.equal(WORLD_TEXTURE_SLOTS.roadService.label, 'Service area asphalt');
   assert.equal(WORLD_TEXTURE_SLOTS.railMetal.label, 'Guardrails');
+  // Every surface must declare the metadata the Surfaces editor renders from,
+  // and every slot must appear in exactly one display group.
+  const grouped = WORLD_SURFACE_GROUPS.flatMap((entry) => entry.slots);
+  assert.equal(grouped.length, Object.keys(WORLD_SURFACES).length);
+  assert.equal(new Set(grouped).size, grouped.length);
+  for (const [slot, meta] of Object.entries(WORLD_SURFACES)) {
+    assert.ok(meta.label && meta.description, `${slot} needs a label and description`);
+    assert.ok(['surface', 'object'].includes(meta.kind), `${slot} needs a kind`);
+  }
 });

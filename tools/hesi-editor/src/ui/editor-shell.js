@@ -134,7 +134,7 @@ export function createEditorShell(root) {
     toolGroup('Create',
       button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
       button('Modeler', 'open-modeler', { title: 'Open the Object Modeler: create and texture PSX-style objects' }),
-      button('Textures', 'open-world-textures', { title: 'Change road, parking-area, guardrail, barrier, and structure textures' }),
+      button('Surfaces', 'open-world-textures', { title: 'Repaint the repeated surfaces and repeated objects of the world: asphalt, tunnels, barriers, buildings, containers, lamps — one material, every copy' }),
       button('Skybox', 'open-skybox', { title: 'Add and manage an unreachable photographic sky around the scene' }),
     ),
     element('span', 'toolbar-divider'),
