@@ -5069,6 +5069,42 @@
     "tex:0124": {
       "name": "building_mag.png",
       "url": "textures/building-mag-8ac4cffdb5.png"
+    },
+    "tex:0125": {
+      "name": "Building-appartment.png",
+      "url": "textures/building-appartment-ce733d4464.png"
+    },
+    "tex:0126": {
+      "name": "Building-appartment2.png",
+      "url": "textures/building-appartment2-8c83b3e549.png"
+    },
+    "tex:0127": {
+      "name": "hotel.png",
+      "url": "textures/hotel-92c097983f.png"
+    },
+    "tex:0128": {
+      "name": "buildings_thin.png",
+      "url": "textures/buildings-thin-65a81d8ef3.png"
+    },
+    "tex:0129": {
+      "name": "building_medium-small.png",
+      "url": "textures/building-medium-small-0890729707.png"
+    },
+    "tex:0130": {
+      "name": "building_big.png",
+      "url": "textures/building-big-7d166a2108.png"
+    },
+    "tex:0131": {
+      "name": "building_huge.png",
+      "url": "textures/building-huge-f5e0d1955b.png"
+    },
+    "tex:0132": {
+      "name": "building_wherrehouse.png",
+      "url": "textures/building-wherrehouse-58a88143a1.png"
+    },
+    "tex:0133": {
+      "name": "building_mag.png",
+      "url": "textures/building-mag-8ac4cffdb5.png"
     }
   },
   "worldTextures": {
@@ -5087,38 +5123,38 @@
       "brightness": 1.1
     },
     "facadeHotel": {
-      "texture": "tex:0117",
+      "texture": "tex:0127",
       "brightness": 0.5
     },
     "facadeTower": {
-      "texture": "tex:0118",
+      "texture": "tex:0130",
       "brightness": 0.55
     },
     "facadeSky": {
-      "texture": "tex:0119",
+      "texture": "tex:0131",
       "brightness": 0.65
     },
     "towerWhite": {
       "texture": "tex:0114"
     },
     "facadeApartment": {
-      "texture": "tex:0120",
+      "texture": "tex:0125",
       "brightness": 0.85
     },
     "facadeIndustrial": {
-      "texture": "tex:0121",
+      "texture": "tex:0132",
       "brightness": 1.2
     },
     "facadeDark": {
-      "texture": "tex:0122",
+      "texture": "tex:0126",
       "brightness": 0.8
     },
     "facadeSlim": {
-      "texture": "tex:0123",
+      "texture": "tex:0128",
       "brightness": 0.8
     },
     "facadeDepot": {
-      "texture": "tex:0124",
+      "texture": "tex:0133",
       "brightness": 1.15
     }
   },
