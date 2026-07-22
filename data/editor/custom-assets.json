@@ -4837,6 +4837,10 @@
     "tex:0104": {
       "name": "pizza_side.png",
       "url": "textures/pizza-side-f2dfacbee1.png"
+    },
+    "tex:0105": {
+      "name": "bg.png",
+      "url": "textures/bg-170d1259f7.png"
     }
   },
   "worldTextures": {

@@ -327,5 +327,23 @@
   },
   "placedObjects": [],
   "groups": [],
+  "environment": {
+    "skybox": {
+      "enabled": true,
+      "flipX": false,
+      "intensity": 1,
+      "offset": [
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "texture": "tex:0105",
+      "zoom": 0.25
+    }
+  },
   "editorState": {}
 }

@@ -1,11 +1,29 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-20T17:07:31.156Z",
+  "generatedAt": "2026-07-22T13:57:30.482Z",
   "project": {
-    "draftSignature": "fnv1a32:105ba203",
+    "draftSignature": "fnv1a32:2d74a47e",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
+  },
+  "environment": {
+    "skybox": {
+      "enabled": true,
+      "flipX": false,
+      "intensity": 1,
+      "offset": [
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "texture": "tex:0105",
+      "zoom": 0.25
+    }
   },
   "operations": [
     {
@@ -180,9 +198,9 @@
         0,
         0,
         0,
-        1073.85193,
-        68.65737,
-        -5224.99268,
+        1071.97693,
+        68.89671,
+        -5225.73291,
         1
       ],
       "mesh": "chunk 1,-9 pool:lightPool",
@@ -203,9 +221,9 @@
         0,
         0,
         0,
-        1074.17419,
-        68.65732,
-        -5224.75537,
+        1073.68604,
+        68.76106,
+        -5223.75391,
         1
       ],
       "mesh": "chunk 1,-9 pool:lightStreak",
@@ -479,9 +497,9 @@
         0,
         0,
         0,
-        4579.65234,
-        49.08009,
-        -3771.57617,
+        4580.99609,
+        49.14489,
+        -3769.83813,
         1
       ],
       "mesh": "chunk 7,-7 pool:lightPool",
@@ -502,9 +520,9 @@
         0,
         0,
         0,
-        4579.70166,
-        49.11142,
-        -3771.97314,
+        4579.896,
+        49.18209,
+        -3772.15063,
         1
       ],
       "mesh": "chunk 7,-7 pool:lightStreak",
