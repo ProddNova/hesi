@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { applyEntityTransform, setEntityVisible, snapshotTransform } from '../../src/interaction/entity-transform.js';
+import {
+  applyEntityTransform, decomposeFiniteMatrix, setEntityVisible, snapshotTransform,
+} from '../../src/interaction/entity-transform.js';
 import { WorldProjectState } from '../../src/overrides/world-project-state.js';
 import { AssetRegistry } from '../../src/world/asset-registry.js';
 
@@ -44,6 +46,37 @@ test('generated instance overrides move one occurrence and its components withou
   assert.equal(new THREE.Vector3().setFromMatrixScale(instanceWorld(pole, 0)).length(), 0);
   setEntityVisible(entity, true);
   assert.ok(new THREE.Vector3().setFromMatrixScale(instanceWorld(pole, 0)).length() > 0);
+});
+
+test('zero-scale tombstone instances stay finite when a saved project hides them', () => {
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial(), 1);
+  const source = new THREE.Matrix4().compose(
+    new THREE.Vector3(12, 34, 56),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.8),
+    new THREE.Vector3(0, 0, 0),
+  );
+  mesh.setMatrixAt(0, source);
+  mesh.updateMatrixWorld(true);
+
+  const proxy = new THREE.Object3D();
+  const decomposedNormally = decomposeFiniteMatrix(source, proxy.position, proxy.quaternion, proxy.scale);
+  assert.equal(decomposedNormally, false, 'the singular matrix takes the finite fallback');
+  assert.ok([...proxy.position.toArray(), ...proxy.quaternion.toArray(), ...proxy.scale.toArray()].every(Number.isFinite));
+
+  const sourceWorldMatrix = instanceWorld(mesh, 0).toArray();
+  const entity = {
+    object3D: proxy,
+    metadata: {
+      sourceWorldMatrix,
+      instanceComponents: [{ mesh, instanceIndex: 0, sourceWorldMatrix }],
+    },
+  };
+  setEntityVisible(entity, false);
+  const hidden = new THREE.Matrix4();
+  mesh.getMatrixAt(0, hidden);
+  assert.ok(hidden.toArray().every(Number.isFinite), 'hidden instance matrix contains no NaN/Infinity');
+  assert.deepEqual(new THREE.Vector3().setFromMatrixPosition(hidden).toArray(), [12, 34, 56]);
+  assert.equal(new THREE.Vector3().setFromMatrixScale(hidden).length(), 0);
 });
 
 test('placed objects share asset geometry and project JSON remains declarative', () => {

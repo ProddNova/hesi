@@ -339,16 +339,22 @@ test('world surface styles normalize, compact, and round-trip both stored forms'
 test('applyWorldTextureOverrides tiles, tints, and restores the generated look', () => {
   const materials = {
     road: new THREE.MeshLambertMaterial({ color: 0x14171f }),
+    marking: new THREE.MeshBasicMaterial({ color: 0xd8d6bf }),
     lampSodium: new THREE.MeshBasicMaterial({ color: 0xff8a2e }),
   };
   const document = {
     version: 1,
     assets: {},
     textures: { 'tex:0001': { dataUrl: PIXEL_PNG } },
-    worldTextures: { road: { texture: 'tex:0001', repeat: [4, 4], rotation: 45 }, lampSodium: { tint: '#00ff88' } },
+    worldTextures: {
+      road: { texture: 'tex:0001', repeat: [4, 4], rotation: 45 },
+      marking: { texture: 'tex:0001' },
+      lampSodium: { tint: '#00ff88' },
+    },
   };
   applyWorldTextureOverrides(materials, document);
   assert.ok(materials.road.map, 'road took the image');
+  assert.ok(materials.marking.map, 'lane markings took the image');
   assert.equal(materials.lampSodium.color.getHexString(), '00ff88', 'a tint-only slot recolours without an image');
   // Dropping the overrides puts the generated materials back exactly.
   delete document.worldTextures.road;
@@ -487,6 +493,9 @@ test('world texture slots stay aligned with the map material names', () => {
   }
   assert.equal(WORLD_TEXTURE_SLOTS.roadService.label, 'Service area asphalt');
   assert.equal(WORLD_TEXTURE_SLOTS.railMetal.label, 'Guardrails');
+  assert.equal(WORLD_TEXTURE_SLOTS.marking.tintOnly, undefined, 'white lane markings accept uploaded images');
+  assert.equal(WORLD_TEXTURE_SLOTS.amber.tintOnly, undefined, 'amber lane markings accept uploaded images');
+  assert.equal(WORLD_TEXTURE_SLOTS.reflector.tintOnly, true, 'point reflectors remain colour-only');
   // Every surface must declare the metadata the Surfaces editor renders from,
   // and every slot must appear in exactly one display group.
   const grouped = WORLD_SURFACE_GROUPS.flatMap((entry) => entry.slots);

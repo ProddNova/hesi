@@ -254,8 +254,10 @@ texture, or an uploaded image tiled at the chosen repeat). Selecting one gives:
   number of metres everywhere — across lanes, chunks, curves and junctions.
 - **Placement**: shift across/down, rotation, and horizontal/vertical flips.
 - **Colour & light**: a tint that multiplies the image (white leaves the photo
-  untouched) and a brightness multiplier. Lamp heads, markings and matrix
-  boards are colour-only — they read as light, not as material.
+  untouched) and a brightness multiplier. White and amber lane markings accept
+  uploaded images like the other painted surfaces; lamp heads, road reflectors
+  and matrix boards remain colour-only because they read as light, not as
+  material.
 - **Reset to generated**: drops every override on that surface and restores the
   material exactly as the generator made it.
 

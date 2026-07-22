@@ -5113,14 +5113,36 @@
     "tex:0135": {
       "name": "terrain1.png",
       "url": "textures/terrain1-795be58c89.png"
+    },
+    "tex:0136": {
+      "name": "asphalt1_test.png",
+      "url": "textures/asphalt1-test-4ba14e4362.png"
+    },
+    "tex:0137": {
+      "name": "asphalt2_test.png",
+      "url": "textures/asphalt2-test-9d06480440.png"
+    },
+    "tex:0138": {
+      "name": "lanes.png",
+      "url": "textures/lanes-d8a5b055a2.png"
     }
   },
   "worldTextures": {
-    "road": "tex:0014",
-    "roadAlt": "tex:0015",
-    "roadService": "tex:0013",
+    "road": {
+      "texture": "tex:0137",
+      "brightness": 2
+    },
+    "roadAlt": {
+      "texture": "tex:0137",
+      "brightness": 2
+    },
+    "roadService": {
+      "texture": "tex:0137",
+      "brightness": 2
+    },
     "barrier": {
-      "texture": "tex:0107"
+      "texture": "tex:0107",
+      "fit": "stretch"
     },
     "facadeShop": {
       "texture": "tex:0115",
@@ -5195,6 +5217,13 @@
     "ground": {
       "texture": "tex:0135",
       "brightness": 3
+    },
+    "marking": {
+      "texture": "tex:0138",
+      "fit": "stretch"
+    },
+    "water": {
+      "brightness": 2
     }
   },
   "worldModels": {}

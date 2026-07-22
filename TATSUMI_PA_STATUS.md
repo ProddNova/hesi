@@ -138,3 +138,36 @@ banned by the placement probe (§6) as before.
   unbuilt (deliberate).
 - Map build time and the junction-finishing/network-test failures inherited
   from the editor map edits are unchanged (pre-existing, see Verification).
+
+## Amendment (23 Jul 2026): trucks + open lot edge, and the bay swell
+
+Three requested tweaks, all visual-only (lot collision stays the flat slab):
+
+- **Box-truck row parked empty.** The 17-stall diagonal large-vehicle row is
+  still painted, but the truck bodies/cabs that filled it are removed for
+  good — `_buildTatsumiPaDressing` now instances them at zero scale (this
+  file's removal convention, cf. the `_buildDeadEnd` cushion tombstones). The
+  rng draws and instance slots are kept: `random` is one stream shared by
+  every service area, so dropping the draws would re-roll every parked car
+  after it, and dropping the instances would shift the `parkedBody`/
+  `parkedGlass` indices the editor's saved edits address. This also retires
+  the user's editor hides on `prop:ramp-8:0086..0089` (the four cabs) —
+  now permanent in the generator. Small-car row is untouched.
+- **Open lot edge (no parapet).** The Shutoko parapet is skipped for the
+  Tatsumi deck (`openEdged = area.dressing === 'tatsumi'`): the wall/coping/
+  rail/posts instance at zero scale, kerb line stays. Same index-preservation
+  reason as above.
+- **Tokyo Bay reads as a night sea.** `_waterTexture()` builds a seamless
+  256² greyscale swell tile (three sine lobes + sparse crest glints) that only
+  darkens the dark-navy `water` material (`0x121e2a`, opaque now so it no
+  longer sorts against the reflection streaks 0.12 m above it); the tile is
+  ~220 m across the bay and drifts in `update()`. Deliberately understated —
+  no bright blue. New QA: `.devtests/bay-water-shots.mjs` (BAY-* grazing/
+  top-down/deck-edge).
+
+Editor-address safety: `.devtests/editor-refs-snapshot.mjs` diffed byte-for-
+byte identical across every instanced bucket and every discovered entity id
+before/after (0 drift); `editor-build-ops-probe` still reports only the 4
+pre-existing `chunk 6,-7 box:marking` drifts. The saved `Tokyo Bay` visibility
+hide was dropped from `hesi-world-build.json`/`hesi-world-project.json` so the
+bay shows.

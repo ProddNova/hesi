@@ -60,8 +60,9 @@ export const WORLD_SURFACE_TILE_METERS = 12;
  *              'object'  = a repeated placed thing (building, lamp, container).
  * - `worldTiled` · road surfaces carry world-anchored UVs (applyWorldSurfaceUVs
  *              in js/map.js), so their tiling is expressed in metres per tile.
- * - `tintOnly` · emissive/marking materials that read as light, not as surface:
- *              colour is meaningful, a photograph is not.
+ * - `tintOnly` · glowing materials and point reflectors that read as light,
+ *              not as a paintable surface: colour is meaningful, a photograph
+ *              is not. Lane paint deliberately remains textureable.
  * - `assetId` · catalog asset whose real geometry previews the archetype.
  * - `preview` · fallback preview shape when there is no catalog geometry.
  */
@@ -70,19 +71,19 @@ export const WORLD_SURFACES = Object.freeze({
   road: { label: 'Road asphalt', description: 'Main highway surface — every mainline carriageway', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
   roadAlt: { label: 'Road asphalt (alt)', description: 'Alternate asphalt used by some routes and ramps', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
   roadService: { label: 'Service area asphalt', description: 'Parking-area surface at Tatsumi/Shibaura PA', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
-  marking: { label: 'Lane markings', description: 'White lane lines, dashes and stop bars', group: 'Roads', kind: 'surface', tintOnly: true, preview: 'road' },
-  amber: { label: 'Amber markings', description: 'Amber/orange lane lines near junctions', group: 'Roads', kind: 'surface', tintOnly: true, preview: 'road' },
+  marking: { label: 'Lane markings', description: 'White lane lines, dashes and stop bars', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
+  amber: { label: 'Amber markings', description: 'Amber/orange lane lines near junctions', group: 'Roads', kind: 'surface', worldTiled: true, preview: 'road' },
   reflector: { label: 'Road reflectors', description: 'Cat-eye studs along the lane edges', group: 'Roads', kind: 'surface', tintOnly: true, preview: 'road' },
 
-  barrier: { label: 'Concrete barriers', description: 'Road-edge concrete barriers (Jersey blocks)', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:segment:barrier', preview: 'wall' },
-  railMetal: { label: 'Guardrails', description: 'Metal guardrails along roads and parking areas', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:segment:railMetal', preview: 'wall' },
-  fence: { label: 'Safety fence', description: 'Wire safety fencing behind the barrier line', group: 'Barriers & rails', kind: 'surface', preview: 'wall' },
-  concrete: { label: 'Concrete (pillars & lamp posts)', description: 'Support columns, walls — and the lamp-post masts, which share this material', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:box:concrete', preview: 'pillar' },
-  concreteDark: { label: 'Dark concrete', description: 'Darker support columns and deck undersides', group: 'Barriers & rails', kind: 'surface', assetId: 'hesi:box:concreteDark', preview: 'pillar' },
+  barrier: { label: 'Concrete barriers', description: 'Road-edge concrete barriers (Jersey blocks)', group: 'Barriers & rails', kind: 'surface', worldTiled: true, assetId: 'hesi:segment:barrier', preview: 'wall' },
+  railMetal: { label: 'Guardrails', description: 'Metal guardrails along roads and parking areas', group: 'Barriers & rails', kind: 'surface', worldTiled: true, assetId: 'hesi:segment:railMetal', preview: 'wall' },
+  fence: { label: 'Safety fence', description: 'Wire safety fencing behind the barrier line', group: 'Barriers & rails', kind: 'surface', worldTiled: true, preview: 'wall' },
+  concrete: { label: 'Concrete (pillars & lamp posts)', description: 'Support columns, walls — and the lamp-post masts, which share this material', group: 'Barriers & rails', kind: 'surface', worldTiled: true, assetId: 'hesi:box:concrete', preview: 'pillar' },
+  concreteDark: { label: 'Dark concrete', description: 'Darker support columns and deck undersides', group: 'Barriers & rails', kind: 'surface', worldTiled: true, assetId: 'hesi:box:concreteDark', preview: 'pillar' },
 
-  tunnelWall: { label: 'Tunnel wall', description: 'Tunnel interior walls', group: 'Tunnels', kind: 'surface', preview: 'wall' },
-  tunnelDark: { label: 'Tunnel ceiling', description: 'Dark tunnel ceiling and deep interior', group: 'Tunnels', kind: 'surface', preview: 'wall' },
-  portal: { label: 'Tunnel portal', description: 'Portal frame at each tunnel mouth', group: 'Tunnels', kind: 'surface', preview: 'wall' },
+  tunnelWall: { label: 'Tunnel wall', description: 'Tunnel interior walls', group: 'Tunnels', kind: 'surface', worldTiled: true, preview: 'wall' },
+  tunnelDark: { label: 'Tunnel ceiling', description: 'Dark tunnel ceiling and deep interior', group: 'Tunnels', kind: 'surface', worldTiled: true, preview: 'wall' },
+  portal: { label: 'Tunnel portal', description: 'Portal frame at each tunnel mouth', group: 'Tunnels', kind: 'surface', worldTiled: true, preview: 'wall' },
 
   ground: { label: 'Ground', description: 'Reclaimed land and embankments', group: 'Terrain', kind: 'surface', preview: 'road' },
   water: { label: 'Tokyo Bay water', description: 'Bay surface around the expressway', group: 'Terrain', kind: 'surface', preview: 'road' },
@@ -2851,6 +2852,10 @@ export function applyWorldTextureOverrides(materials, document) {
       material.userData.hesiGeneratedLook = {
         map: material.map || null,
         color: material.color?.getHexString ? `#${material.color.getHexString()}` : null,
+        // Emissive too: at night the bay (and the barriers' readable floor) is
+        // driven by emissive, not the lit base colour, so Brightness has to
+        // scale it or the slider does nothing to those surfaces.
+        emissive: material.emissive?.getHexString ? `#${material.emissive.getHexString()}` : null,
       };
     }
     const original = material.userData.hesiGeneratedLook;
@@ -2859,6 +2864,7 @@ export function applyWorldTextureOverrides(materials, document) {
       if (material.userData.hesiOverridden) {
         material.map = original.map;
         if (original.color) material.color?.set?.(original.color);
+        if (original.emissive) material.emissive?.set?.(original.emissive);
         material.needsUpdate = true;
         material.userData.hesiOverridden = false;
         summary.cleared += 1;
@@ -2895,6 +2901,13 @@ export function applyWorldTextureOverrides(materials, document) {
     // without one the tint IS the new surface colour.
     material.color?.set?.(textureSource || style.tint.toLowerCase() !== '#ffffff' ? style.tint : (original.color || style.tint));
     if (style.brightness !== 1) material.color?.multiplyScalar?.(style.brightness);
+    // Brightness is a whole-material luminance dial: re-seat the generated
+    // emissive first (idempotent on re-apply) then scale it too, so raising
+    // Brightness actually lifts an emissive-lit surface like the bay water.
+    if (original.emissive) {
+      material.emissive?.set?.(original.emissive);
+      if (style.brightness !== 1) material.emissive?.multiplyScalar?.(style.brightness);
+    }
     material.needsUpdate = true;
     material.userData.hesiOverridden = true;
     summary.applied += 1;

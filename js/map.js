@@ -76,6 +76,10 @@ const UP_NORMAL = [0, 1, 0];
 // land still spans -1.12 m to -0.12 m in world space, just above the bay.
 const TERRAIN_TOP_Y = 0.5;
 const TERRAIN_BOTTOM_Y = -0.5;
+// Metres of bay per swell tile, and how fast the tile drifts across it (m/s,
+// two axes at different rates so the sea never reads as one sliding image).
+const WATER_TILE = 220;
+const WATER_DRIFT = [0.9, 1.7];
 
 // Preserve the existing 15 m terrain lift and add the requested 10 m raise.
 // Apply the total once, at the authoritative data-control-point boundary, so
@@ -213,6 +217,25 @@ export const ROAD_TEXTURE_TILE_METERS = 12;
 // Material buckets that ARE drivable asphalt and therefore get the
 // world-anchored UVs below (see WORLD_TEXTURE_SLOTS in js/custom-assets.js).
 export const ROAD_SURFACE_MATERIAL_NAMES = Object.freeze(['road', 'roadAlt', 'roadService']);
+// Flat surfaces that lie in the ground plane — asphalt and the painted lane
+// lines on top of it — get the asphalt's planar XZ projection: continuous,
+// aspect-true, tiled at metres-per-tile. Lane lines are thin, so the picture
+// runs along them; a worn-paint tile reads correctly at any orientation.
+export const PLANAR_UV_SURFACE_MATERIAL_NAMES = Object.freeze([
+  ...ROAD_SURFACE_MATERIAL_NAMES, 'marking', 'amber',
+]);
+// Upright surfaces — barrier walls, guardrails, fences, median/parapet
+// concrete, tunnel walls — need the OTHER projection: the image must stand
+// full height on the wall (a barrier photo is one barrier tall) and repeat
+// ALONG the run. A planar XZ projection would map only height/tile of the
+// picture onto a ~1 m parapet, i.e. a flat sliver — the "stretched/broken"
+// look. applyWallSurfaceUVs fills v across each face's own height and tiles u
+// by world distance along the wall. Both sets are the `worldTiled` slots in
+// js/custom-assets.js, so the editor tiles them by metres-per-tile.
+export const WALL_UV_SURFACE_MATERIAL_NAMES = Object.freeze([
+  'barrier', 'railMetal', 'fence', 'concrete', 'concreteDark',
+  'tunnelWall', 'tunnelDark', 'portal',
+]);
 
 // TEMPORARY (lateral-junction rebuild): the synthesized PA access lanes —
 // the decel/accel legs and descent spirals _defineServiceAreas builds around
@@ -357,6 +380,111 @@ export function applyWorldSurfaceUVs(geometry, matrixWorld = null, tileMeters = 
     if (ny >= nx && ny >= nz) { u = x; v = z; } else if (nx >= nz) { u = z; v = y; } else { u = x; v = y; }
     uvArray[vertex * 2] = u / tileMeters;
     uvArray[vertex * 2 + 1] = v / tileMeters;
+  }
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvArray, 2));
+  return geometry;
+}
+
+/**
+ * UVs for UPRIGHT surfaces (barrier walls, guardrails, fences, median and
+ * parapet concrete, tunnel walls). The painted texture must stand its full
+ * height on the wall and repeat along the run — a barrier photo is one barrier
+ * tall — which the asphalt's planar projection cannot do (it maps only
+ * height/tile of the picture onto a ~1 m parapet, the flat sliver that reads
+ * as "stretched/broken").
+ *
+ * Same connected-component analysis as applyWorldSurfaceUVs, but each
+ * component is classified by its dominant face normal:
+ *   - near-horizontal (a median cap, a deck underside) keeps the planar XZ
+ *     projection, so it agrees with the road it meets;
+ *   - upright faces run u along the wall by world distance (continuous across
+ *     neighbouring segments, tiled at metres-per-tile) and v from 0 at the
+ *     component's foot to 1 at its top, so the image fills the wall height
+ *     whatever that height is (0.9 m service parapet, 1.15 m mainline, a tall
+ *     soundwall). The barrier's outer face is a single quad from base to cap,
+ *     so v maps the whole picture onto it exactly once.
+ */
+export function applyWallSurfaceUVs(geometry, matrixWorld = null, tileMeters = ROAD_TEXTURE_TILE_METERS) {
+  const position = geometry.getAttribute('position');
+  if (!position || !(tileMeters > 0)) return geometry;
+  const index = geometry.index;
+  const cornerCount = index ? index.count : position.count;
+  const a = TMP_A;
+  const b = TMP_B;
+  const c = TMP_C;
+
+  const parent = new Int32Array(position.count);
+  for (let vertex = 0; vertex < position.count; vertex += 1) parent[vertex] = vertex;
+  const find = (vertex) => {
+    let root = vertex;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[vertex] !== root) { const next = parent[vertex]; parent[vertex] = root; vertex = next; }
+    return root;
+  };
+  const union = (left, right) => { parent[find(left)] = find(right); };
+
+  const world = new Float64Array(position.count * 3);
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    a.fromBufferAttribute(position, vertex);
+    if (matrixWorld) a.applyMatrix4(matrixWorld);
+    world[vertex * 3] = a.x;
+    world[vertex * 3 + 1] = a.y;
+    world[vertex * 3 + 2] = a.z;
+  }
+  for (let corner = 0; corner + 2 < cornerCount; corner += 3) {
+    const i0 = index ? index.getX(corner) : corner;
+    const i1 = index ? index.getX(corner + 1) : corner + 1;
+    const i2 = index ? index.getX(corner + 2) : corner + 2;
+    union(i0, i1);
+    union(i1, i2);
+  }
+  const normalByRoot = new Map();
+  for (let corner = 0; corner + 2 < cornerCount; corner += 3) {
+    const i0 = index ? index.getX(corner) : corner;
+    const i1 = index ? index.getX(corner + 1) : corner + 1;
+    const i2 = index ? index.getX(corner + 2) : corner + 2;
+    a.set(world[i0 * 3], world[i0 * 3 + 1], world[i0 * 3 + 2]);
+    b.set(world[i1 * 3], world[i1 * 3 + 1], world[i1 * 3 + 2]);
+    c.set(world[i2 * 3], world[i2 * 3 + 1], world[i2 * 3 + 2]);
+    b.sub(a);
+    c.sub(a);
+    a.crossVectors(b, c);
+    const root = find(i0);
+    const sum = normalByRoot.get(root) || [0, 0, 0];
+    sum[0] += Math.abs(a.x);
+    sum[1] += Math.abs(a.y);
+    sum[2] += Math.abs(a.z);
+    normalByRoot.set(root, sum);
+  }
+  // Each upright component fills v across its own foot-to-top height, so the
+  // picture stands full height on a wall of any height.
+  const footByRoot = new Map();
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    const root = find(vertex);
+    const y = world[vertex * 3 + 1];
+    const span = footByRoot.get(root);
+    if (!span) footByRoot.set(root, [y, y]);
+    else { if (y < span[0]) span[0] = y; if (y > span[1]) span[1] = y; }
+  }
+
+  const uvArray = new Float32Array(position.count * 2);
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    const root = find(vertex);
+    const [nx, ny, nz] = normalByRoot.get(root) || [0, 1, 0];
+    const x = world[vertex * 3];
+    const y = world[vertex * 3 + 1];
+    const z = world[vertex * 3 + 2];
+    if (ny >= nx && ny >= nz) {
+      // Near-horizontal: planar, agreeing with the road/ground it meets.
+      uvArray[vertex * 2] = x / tileMeters;
+      uvArray[vertex * 2 + 1] = z / tileMeters;
+    } else {
+      // Upright: u along the wall by world distance, v filling the height.
+      const span = footByRoot.get(root);
+      const height = Math.max(span[1] - span[0], 1e-4);
+      uvArray[vertex * 2] = (nx >= nz ? z : x) / tileMeters;
+      uvArray[vertex * 2 + 1] = (y - span[0]) / height;
+    }
   }
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvArray, 2));
   return geometry;
@@ -602,7 +730,14 @@ export class HighwayMap {
       neon: basic(0xffffff),
       crane: lambert(0x233042),
       container: lambert(0x54331f),
-      water: lambert(0x061019, { transparent: true, opacity: 0.9 }),
+      // Tokyo Bay. Opaque: the plane is 30 km wide, and as a transparent it
+      // sorted against the additive reflection streaks lying 0.12 m above it.
+      // The swell tile (greyscale, see _waterTexture) only ever darkens the
+      // base colour, so the bay stays a black-navy night sea — the ripples
+      // read off the emissive floor, not off a brighter blue.
+      water: lambert(0x121e2a, {
+        map: this._waterTexture(), emissive: 0x0b131c, emissiveMap: this._waterTexture(),
+      }),
       ground: lambert(0x080a11),
       towerWhite: lambert(0xb8bcc4),
       cable: basic(0x9aa3ad),
@@ -642,6 +777,61 @@ export class HighwayMap {
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }),
     };
+  }
+
+  /**
+   * Seamless swell tile for the bay, so the water off the expressway reads as
+   * a surface instead of a flat plate. Three sine lobes at whole-tile
+   * frequencies (hence seamless in both axes) plus a sparse scatter of glints
+   * on the crests. Greyscale and never white: the material colour above is
+   * what sets the hue, and this tile can only darken it.
+   *
+   * The whole effect is this texture drifting — HighwayMap.update slides its
+   * offset — so the bay costs one extra map lookup on one already-drawn plane.
+   */
+  _waterTexture() {
+    if (typeof document === 'undefined') return null;
+    if (this._waterTex) return this._waterTex;
+    const SIZE = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const context = canvas.getContext('2d');
+    const image = context.createImageData(SIZE, SIZE);
+    for (let y = 0; y < SIZE; y += 1) {
+      const v = (y / SIZE) * Math.PI * 2;
+      for (let x = 0; x < SIZE; x += 1) {
+        const u = (x / SIZE) * Math.PI * 2;
+        const swell = Math.sin(v * 2 + Math.sin(u) * 0.8) * 0.52
+          + Math.sin(v * 5 - u * 3) * 0.3
+          + Math.sin(u * 4 + v) * 0.18;
+        const level = Math.round(150 + swell * 68);
+        const offset = (y * SIZE + x) * 4;
+        // Crests catch a touch more of the cool sky than the troughs do.
+        image.data[offset] = level * 0.9;
+        image.data[offset + 1] = level * 0.96;
+        image.data[offset + 2] = level;
+        image.data[offset + 3] = 255;
+      }
+    }
+    context.putImageData(image, 0, 0);
+    const random = mulberry32(0x5f3a91c7);
+    context.fillStyle = 'rgba(232, 238, 248, 0.5)';
+    for (let i = 0; i < 220; i += 1) {
+      const x = random() * SIZE;
+      const y = random() * SIZE;
+      context.fillRect(x, y, 1 + random(), 1);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    // repeat is set in _buildEnvironment, where the plane's metres are known.
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.anisotropy = 4;
+    this._ownedTextures.add(texture);
+    this._waterTex = texture;
+    return texture;
   }
 
   /** Yellow curve-warning chevron board texture (3 arrows pointing right). */
@@ -4832,9 +5022,13 @@ export class HighwayMap {
         geometry.setIndex(bucket.indices.length > 65535 * 3 || bucket.positions.length / 3 > 65535
           ? new THREE.Uint32BufferAttribute(bucket.indices, 1)
           : new THREE.Uint16BufferAttribute(bucket.indices, 1));
-        // Asphalt buckets replace their per-quad 0..1 UVs with world-anchored
-        // ones: uniform texture density on every deck, clip, and flap.
-        if (ROAD_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWorldSurfaceUVs(geometry);
+        // Replace the per-quad 0..1 UVs (which stretch a painted texture over
+        // each segment) with world-anchored ones. Flat surfaces — asphalt and
+        // the lane lines on it — get the planar XZ projection; upright ones —
+        // barriers, rails, walls — get the wall projection that stands the
+        // image full height and tiles it along the run.
+        if (PLANAR_UV_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWorldSurfaceUVs(geometry);
+        else if (WALL_UV_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWallSurfaceUVs(geometry);
         geometry.computeVertexNormals();
         geometry.computeBoundingSphere();
         const mesh = new THREE.Mesh(geometry, this.materials[materialName] || this.materials.concrete);
@@ -4930,10 +5124,15 @@ export class HighwayMap {
         maxZ = Math.max(maxZ, sample.point.z);
       }
     }
+    const width = maxX - minX + 24000;
+    const depth = maxZ - minZ + 24000;
     const water = new THREE.Mesh(
-      new THREE.PlaneGeometry(maxX - minX + 24000, maxZ - minZ + 24000, 1, 1),
+      new THREE.PlaneGeometry(width, depth, 1, 1),
       this.materials.water,
     );
+    // ~220 m of bay per swell tile: coarse enough that the repeat disappears
+    // into the fog, fine enough to read as water from the deck.
+    this._waterTex?.repeat.set(width / WATER_TILE, depth / WATER_TILE);
     water.name = 'Tokyo Bay';
     water.rotation.x = -Math.PI * 0.5;
     water.position.set((minX + maxX) * 0.5, -0.9, (minZ + maxZ) * 0.5);
@@ -7345,24 +7544,32 @@ export class HighwayMap {
       // posts — the classic 首都高 elevated-deck barrier. Same footprint as
       // the old rail, visual only (edge collision stays the analytic lot).
       const acrossOrientation = yawQuaternion(area.normal);
+      // The Tatsumi lot is left open-edged on purpose: no parapet at all, just
+      // the kerb line. Every piece is still instanced, at zero scale, so the
+      // barrier/concrete/railMetal indices the editor's saved edits address
+      // stay exactly where they were (this file's removal convention — see the
+      // crash-cushion tombstones in _buildDeadEnd). Edge collision is the
+      // analytic lot slab either way, so this is a visual change only.
+      const openEdged = area.dressing === 'tatsumi';
+      const edgeSize = (x, y, z) => (openEdged ? vec(0, 0, 0) : vec(x, y, z));
       const parapet = (center, alongDir, runLength, quaternion) => {
         const wall = center.clone();
         wall.y = area.elevation + 0.41;
-        this._instance(wall, vec(0.34, 0.82, runLength), quaternion, null, 'box:barrier');
+        this._instance(wall, edgeSize(0.34, 0.82, runLength), quaternion, null, 'box:barrier');
         const coping = center.clone();
         coping.y = area.elevation + 0.87;
-        this._instance(coping, vec(0.44, 0.1, runLength), quaternion, null, 'box:concrete');
+        this._instance(coping, edgeSize(0.44, 0.1, runLength), quaternion, null, 'box:concrete');
         for (const pipeY of [1.08, 1.3]) {
           const pipe = center.clone();
           pipe.y = area.elevation + pipeY;
-          this._instance(pipe, vec(0.09, 0.09, runLength), quaternion, null, 'box:railMetal');
+          this._instance(pipe, edgeSize(0.09, 0.09, runLength), quaternion, null, 'box:railMetal');
         }
         const bays = Math.max(1, Math.round(runLength / 4));
         for (let i = 0; i <= bays; i += 1) {
           const along = runLength * (i / bays - 0.5) * 0.99;
           const post = center.clone().addScaledVector(alongDir, along);
           post.y = area.elevation + 1.12;
-          this._instance(post, vec(0.08, 0.52, 0.14), quaternion, null, 'box:railMetal');
+          this._instance(post, edgeSize(0.08, 0.52, 0.14), quaternion, null, 'box:railMetal');
         }
       };
       for (const side of [-1, 1]) {
@@ -7385,7 +7592,7 @@ export class HighwayMap {
               .addScaledVector(area.tangent, endU)
               .addScaledVector(area.normal, side * (area.width * 0.5 - 0.3));
             post.y = area.elevation + 0.7;
-            this._instance(post, vec(0.42, 1.4, 0.42), orientation, null, 'box:barrier');
+            this._instance(post, edgeSize(0.42, 1.4, 0.42), orientation, null, 'box:barrier');
           }
         }
       }
@@ -7603,6 +7810,14 @@ export class HighwayMap {
       centre.y = area.elevation + 0.03;
       this._instance(centre, vec(0.14, 0.03, divLen), truckQ, null, 'box:marking');
     }
+    // The row is painted but parked EMPTY: the box trucks that used to fill it
+    // at ~35 % occupancy are gone for good. Both the rng draws and the instance
+    // slots stay behind — `random` is ONE stream shared by every service area,
+    // so dropping the draws would re-roll every parked car placed after this
+    // point, and dropping the instances would shift the parkedBody/parkedGlass
+    // indices the editor's saved edits address. Zero scale is this file's
+    // removal convention (see the crash-cushion tombstones in _buildDeadEnd).
+    const removedScale = vec(0, 0, 0);
     const truckColors = [0xdfe3e6, 0xc3cbd1, 0x9fb2c9, 0xd8d2c4];
     for (let i = 0; i < TRUCK_COUNT; i += 1) {
       const u = truckU0 + (i + 0.5) * TRUCK_PITCH;
@@ -7612,10 +7827,10 @@ export class HighwayMap {
       const color = truckColors[Math.floor(random() * truckColors.length)];
       const body = truckBack(u).addScaledVector(truckAxis, -(0.9 + 4.3));
       body.y = area.elevation + 1.25;
-      this._instance(body, vec(2.28, 2.2, 8.6), truckQ, color, 'box:parkedBody');
+      this._instance(body, removedScale, truckQ, color, 'box:parkedBody');
       const cab = truckBack(u).addScaledVector(truckAxis, -2.1);
       cab.y = area.elevation + 1.95;
-      this._instance(cab, vec(2.1, 0.55, 1.35), truckQ, null, 'box:parkedGlass');
+      this._instance(cab, removedScale, truckQ, null, 'box:parkedGlass');
     }
 
     // --- 29 + 1 perpendicular small-car stalls (far side, backed in) ---
@@ -9374,6 +9589,14 @@ export class HighwayMap {
     }
     const blinkOn = Math.floor(timeSeconds * 0.9) % 2 === 0;
     for (const blinker of this.blinkers) blinker.visible = blinkOn;
+    // The bay's whole animation: the swell tile drifting over a static plane.
+    // Offset is in tile units, so metres/second divided by the tile size.
+    if (this._waterTex) {
+      this._waterTex.offset.set(
+        (timeSeconds * WATER_DRIFT[0] / WATER_TILE) % 1,
+        (timeSeconds * WATER_DRIFT[1] / WATER_TILE) % 1,
+      );
+    }
   }
 
   dispose() {

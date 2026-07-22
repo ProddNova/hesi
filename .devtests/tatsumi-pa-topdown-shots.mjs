@@ -38,8 +38,15 @@ const port = server.address().port;
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const context = await browser.newContext({ viewport: { width: 1200, height: 500 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 await context.route('https://cdn.jsdelivr.net/**', async (route) => {
-  const body = await readFile(join(ROOT, 'node_modules/three/build/three.module.js'));
-  await route.fulfill({ status: 200, contentType: 'text/javascript', body });
+  // Serve the whole three package, not just the core build: js/custom-assets.js
+  // imports three/addons/utils/BufferGeometryUtils.js.
+  const rel = new URL(route.request().url()).pathname.replace(/^\/npm\/three@[^/]+\//, '');
+  try {
+    const body = await readFile(join(ROOT, 'node_modules/three', rel));
+    await route.fulfill({ status: 200, contentType: 'text/javascript', body });
+  } catch {
+    await route.fulfill({ status: 404, body: 'nope' });
+  }
 });
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());

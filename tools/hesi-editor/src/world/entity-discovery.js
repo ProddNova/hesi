@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { chunkId, compareChunkKeys, deterministicEntityId, stableIndex, stableSlug } from './stable-id.js';
 import { boxForInstance, boxForObject, instanceWorldMatrix, objectRenderMetadata, sourceTransform } from './world-metadata.js';
+import { decomposeFiniteMatrix } from '../interaction/entity-transform.js';
 
 const MATERIAL_CLASS = Object.freeze({
   road: ['Roads', 'road-surface', 'Road surface'],
@@ -99,7 +100,7 @@ function routeContext(map, position, maxDistance = 800) {
 function makeInstanceProxy(mesh, instanceIndex, name) {
   const matrix = instanceWorldMatrix(mesh, instanceIndex);
   const proxy = new THREE.Object3D();
-  matrix.decompose(proxy.position, proxy.quaternion, proxy.scale);
+  decomposeFiniteMatrix(matrix, proxy.position, proxy.quaternion, proxy.scale);
   proxy.name = name;
   proxy.userData.editorInstanceProxy = true;
   proxy.userData.editorHelper = true;

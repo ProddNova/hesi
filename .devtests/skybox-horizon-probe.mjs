@@ -31,8 +31,13 @@ const port = server.address().port;
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const context = await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1.5, hasTouch: true });
 await context.route('https://cdn.jsdelivr.net/**', async (route) => {
-  const body = await readFile(join(ROOT, 'node_modules/three/build/three.module.js'));
-  await route.fulfill({ status: 200, contentType: 'text/javascript', body });
+  const rel = new URL(route.request().url()).pathname.replace(/^\/npm\/three@[^/]+\//, '');
+  try {
+    const body = await readFile(join(ROOT, 'node_modules/three', rel));
+    await route.fulfill({ status: 200, contentType: 'text/javascript', body });
+  } catch {
+    await route.fulfill({ status: 404, body: 'nope' });
+  }
 });
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());

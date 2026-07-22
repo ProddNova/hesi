@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-22T22:19:45.013Z",
+  "generatedAt": "2026-07-22T23:42:37.820Z",
   "project": {
-    "draftSignature": "fnv1a32:0fd075c8",
+    "draftSignature": "fnv1a32:c89b9e27",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -2988,28 +2988,6 @@
       ],
       "mesh": "chunk 6,-7 box:parkedGlass",
       "op": "instance"
-    },
-    {
-      "name": "Tokyo Bay",
-      "nameIndex": 0,
-      "op": "object",
-      "position": [
-        -3989.77957,
-        -0.9,
-        -12401.24326
-      ],
-      "quaternion": [
-        -0.70711,
-        0,
-        0,
-        0.70711
-      ],
-      "scale": [
-        1,
-        1,
-        1
-      ],
-      "visible": false
     }
   ]
 }

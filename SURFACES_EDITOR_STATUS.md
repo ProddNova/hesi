@@ -372,3 +372,43 @@ Earlier work:
 - Lamp glow (`lightPool`, `lightStreak`) is deliberately absent: it is driven by
   per-instance colour with a white base, so a slot tint there would fight the
   per-lamp tint rather than replace it.
+
+## Follow-up: painted edge surfaces stretched, and the bay Brightness dial
+
+Two reports against the live game booted from the saved document.
+
+**Barriers and lane lines smeared their painted texture.** Only `road`,
+`roadAlt`, `roadService` got the world-anchored UVs `applyWorldSurfaceUVs`
+bakes; every other merged surface kept the plain 0..1 UVs `_pushQuad` gives a
+quad, so a painted image was squeezed to ONE copy per segment — aspect
+distorted, density jumping with segment length (the user's `barrier` and
+`marking` slots even carried `fit:stretch`, one image over the whole wall).
+
+Two projections now cover them, both baked in `_finalizeChunks`
+(`js/map.js`), and the slots are `worldTiled` so the editor tiles them by
+metres-per-tile and forces `tile` (the saved `stretch` is ignored):
+
+- **`PLANAR_UV_SURFACE_MATERIAL_NAMES`** — asphalt + `marking`/`amber`. Flat,
+  ground-plane surfaces keep the asphalt's planar XZ projection; a worn-paint
+  lane tile reads correctly at any orientation.
+- **`WALL_UV_SURFACE_MATERIAL_NAMES`** — `barrier`, `railMetal`, `fence`,
+  `concrete`, `concreteDark`, `tunnelWall`, `tunnelDark`, `portal`.
+  `applyWallSurfaceUVs` classifies each connected component by its dominant
+  normal: near-horizontal faces stay planar (a median cap agrees with the road
+  it meets), upright faces run `u` along the wall by world distance and `v`
+  from 0 at the foot to 1 at the top — so a barrier photo (one barrier tall)
+  stands full height and repeats along the run. The barrier's outer face is a
+  single base→cap quad, so `v` maps the picture onto it exactly once.
+
+**Raising Brightness on the bay water did nothing.** At night the sea (and the
+barriers' readable floor) is lit by `emissive`/`emissiveMap`, not the base
+colour, and `applyWorldTextureOverrides` only scaled `color`. It now captures
+the generated `emissive` in `hesiGeneratedLook`, restores it on clear, and
+re-seats-then-scales it by Brightness — so the Brightness slider lifts the bay,
+idempotently and reversibly.
+
+Evidence: `npm test` in `tools/hesi-editor` still 121/0. Driver-eye probe
+(`.devtests/surface-verify.mjs`, new) confirms in the running game: the
+`barrier` wall carries full-height `v` 0..1 UVs (was a `y/12` sliver), the
+concrete photo stands upright and tiles along the run, and water Brightness 3
+visibly brightens the bay then restores to the generated navy when cleared.

@@ -24,6 +24,35 @@ export function applyTransformToObject(object, transform) {
   object.updateMatrixWorld(true);
 }
 
+/**
+ * Matrix4.decompose cannot derive a rotation from a zero-scale matrix: its
+ * normalization divides by zero and leaves the quaternion full of NaNs. The
+ * generated map deliberately contains zero-scale tombstones so removing an
+ * instance does not renumber every saved editor reference after it. Give
+ * those records a finite proxy transform; their lost rotation is immaterial
+ * while every scale axis is zero.
+ */
+export function decomposeFiniteMatrix(matrix, position, quaternion, scale) {
+  matrix.decompose(position, quaternion, scale);
+  const finite = (values) => values.every(Number.isFinite);
+  if (finite(position.toArray()) && finite(quaternion.toArray()) && finite(scale.toArray())) return true;
+  const elements = matrix.elements;
+  position.set(
+    Number.isFinite(elements[12]) ? elements[12] : 0,
+    Number.isFinite(elements[13]) ? elements[13] : 0,
+    Number.isFinite(elements[14]) ? elements[14] : 0,
+  );
+  const signedX = matrix.determinant() < 0 ? -1 : 1;
+  scale.set(
+    signedX * Math.hypot(elements[0], elements[1], elements[2]),
+    Math.hypot(elements[4], elements[5], elements[6]),
+    Math.hypot(elements[8], elements[9], elements[10]),
+  );
+  if (!finite(scale.toArray())) scale.set(0, 0, 0);
+  quaternion.identity();
+  return false;
+}
+
 function componentWorldMatrices(entity, targetTransform) {
   const baseSource = new THREE.Matrix4().fromArray(entity.metadata.sourceWorldMatrix);
   const baseTarget = new THREE.Matrix4().compose(
@@ -31,7 +60,18 @@ function componentWorldMatrices(entity, targetTransform) {
     new THREE.Quaternion().fromArray(targetTransform.quaternion),
     new THREE.Vector3().fromArray(targetTransform.scale),
   );
-  const delta = baseTarget.multiply(baseSource.clone().invert());
+  const determinant = baseSource.determinant();
+  let delta;
+  if (Number.isFinite(determinant) && Math.abs(determinant) > EPSILON) {
+    delta = baseTarget.multiply(baseSource.clone().invert());
+  } else {
+    // A zero-scale tombstone has no invertible basis. Preserve its component
+    // matrices and apply only a possible proxy translation; rotation/scale
+    // cannot restore information the zero matrix no longer contains.
+    const from = new THREE.Vector3().setFromMatrixPosition(baseSource);
+    const to = new THREE.Vector3().fromArray(targetTransform.position);
+    delta = new THREE.Matrix4().makeTranslation(to.x - from.x, to.y - from.y, to.z - from.z);
+  }
   return entity.metadata.instanceComponents.map((component) => ({
     ...component,
     worldMatrix: delta.clone().multiply(new THREE.Matrix4().fromArray(component.sourceWorldMatrix)),
@@ -51,10 +91,19 @@ export function applyEntityTransform(entity, transform, { visible = !entity.meta
     mesh.updateWorldMatrix(true, false);
     const local = mesh.matrixWorld.clone().invert().multiply(component.worldMatrix);
     if (!visible) {
-      const position = new THREE.Vector3();
-      const quaternion = new THREE.Quaternion();
-      local.decompose(position, quaternion, new THREE.Vector3());
-      local.compose(position, quaternion, new THREE.Vector3(0, 0, 0));
+      // Do not decompose here: a component may already be a zero-scale
+      // tombstone, for which Matrix4.decompose creates a NaN quaternion.
+      // Rotation is irrelevant at zero scale, so retain only translation.
+      const elements = local.elements;
+      const x = Number.isFinite(elements[12]) ? elements[12] : 0;
+      const y = Number.isFinite(elements[13]) ? elements[13] : 0;
+      const z = Number.isFinite(elements[14]) ? elements[14] : 0;
+      local.set(
+        0, 0, 0, x,
+        0, 0, 0, y,
+        0, 0, 0, z,
+        0, 0, 0, 1,
+      );
     }
     mesh.setMatrixAt(component.instanceIndex, local);
     mesh.instanceMatrix.needsUpdate = true;
