@@ -1,6 +1,7 @@
 import { sceneList } from '../scenes/scene-registry.js';
 import { GRID_SNAP_STEPS } from '../interaction/grid-snap.js';
 import { objectFaceSlots, textureSourceUrl } from '/js/custom-assets.js';
+import { normalizeSkyboxConfig } from '/js/skybox-config.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -134,6 +135,7 @@ export function createEditorShell(root) {
       button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
       button('Modeler', 'open-modeler', { title: 'Open the Object Modeler: create and texture PSX-style objects' }),
       button('Textures', 'open-world-textures', { title: 'Change road, parking-area, guardrail, barrier, and structure textures' }),
+      button('Skybox', 'open-skybox', { title: 'Add and manage an unreachable photographic sky around the scene' }),
     ),
     element('span', 'toolbar-divider'),
     toolGroup('Transform',
@@ -381,15 +383,17 @@ export function createEditorShell(root) {
   const assetsTab = element('button', 'tab-button active', 'Assets');
   const editTab = element('button', 'tab-button', 'Edit');
   const projectTab = element('button', 'tab-button', 'Project');
+  const skyboxTab = element('button', 'tab-button', 'Skybox');
   const worldTab = element('button', 'tab-button', 'World');
   const helpTab = element('button', 'tab-button', 'Help');
-  assetsTab.type = editTab.type = projectTab.type = worldTab.type = helpTab.type = 'button';
+  assetsTab.type = editTab.type = projectTab.type = skyboxTab.type = worldTab.type = helpTab.type = 'button';
   assetsTab.dataset.tab = 'assets';
   editTab.dataset.tab = 'edit';
   projectTab.dataset.tab = 'project';
+  skyboxTab.dataset.tab = 'skybox';
   worldTab.dataset.tab = 'world';
   helpTab.dataset.tab = 'help';
-  tabs.append(assetsTab, editTab, projectTab, worldTab, helpTab);
+  tabs.append(assetsTab, editTab, skyboxTab, projectTab, worldTab, helpTab);
   const bottomCaption = element('small', '', 'Loading metadata');
   bottomHeader.append(tabs, bottomCaption);
   const bottomContent = element('div', 'panel-content');
@@ -433,6 +437,7 @@ export function createEditorShell(root) {
   let selectedIds = null;
   let assetEntries = [];
   let textureEntries = [];
+  let skyboxState = { configured: false, config: normalizeSkyboxConfig({ enabled: false }), texture: null };
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
   let actionHandler = () => {};
@@ -591,15 +596,138 @@ export function createEditorShell(root) {
     return panel;
   };
 
+  const renderSkybox = () => {
+    const panel = element('div', 'skybox-panel');
+    const config = normalizeSkyboxConfig(skyboxState.config);
+    const currentTexture = textureEntries.find((entry) => entry.id === config.texture) || skyboxState.texture;
+
+    const intro = element('section', 'skybox-card skybox-intro');
+    const introCopy = element('div');
+    introCopy.append(
+      element('h3', '', 'Infinite photographic sky'),
+      element('p', '', 'The panorama follows the camera at infinite distance: the player can never reach it and it has no collision. A 2:1 equirectangular JPG, PNG, or WebP gives the cleanest 360° result.'),
+    );
+    const badge = element('span', `skybox-badge ${config.enabled && currentTexture ? 'active' : ''}`, config.enabled && currentTexture ? 'Active' : 'Inactive');
+    intro.append(introCopy, badge);
+
+    const imageCard = element('section', 'skybox-card skybox-image-card');
+    imageCard.append(element('h3', '', 'Image'));
+    const imageBody = element('div', 'skybox-image-body');
+    const preview = element('div', 'skybox-preview');
+    if (currentTexture) {
+      const image = element('img');
+      image.src = textureSourceUrl(currentTexture);
+      image.alt = currentTexture.name || config.texture || 'Skybox panorama';
+      preview.append(image, element('span', '', currentTexture.name || config.texture));
+    } else {
+      preview.append(element('span', '', 'No panorama selected'));
+    }
+    const imageControls = element('div', 'skybox-image-controls');
+    const selectLabel = element('label', 'skybox-field');
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', 'Skybox image');
+    select.dataset.testid = 'skybox-texture';
+    select.add(new Option('No image', ''));
+    for (const entry of textureEntries) select.add(new Option(entry.name || entry.id, entry.id));
+    select.value = config.texture || '';
+    select.addEventListener('change', () => triggerAction('skybox-texture', select.value || null));
+    selectLabel.append(element('span', '', 'Stored image'), select);
+    const upload = button('Upload panorama…', '', { title: 'Import a JPG, PNG, WebP, GIF, or AVIF up to 24 MB' });
+    upload.classList.add('primary');
+    upload.dataset.testid = 'skybox-upload';
+    upload.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/jpeg,image/png,image/webp,image/gif,image/avif';
+      input.addEventListener('change', () => {
+        if (input.files?.[0]) triggerAction('skybox-upload', input.files[0]);
+      }, { once: true });
+      input.click();
+    });
+    const enabledLabel = element('label', 'skybox-toggle');
+    const enabled = document.createElement('input');
+    enabled.type = 'checkbox';
+    enabled.checked = config.enabled;
+    enabled.disabled = !config.texture;
+    enabled.dataset.testid = 'skybox-enabled';
+    enabled.addEventListener('change', () => triggerAction('skybox-update', { patch: { enabled: enabled.checked }, label: enabled.checked ? 'Enable skybox' : 'Disable skybox' }));
+    enabledLabel.append(enabled, element('span', '', 'Visible in this scene'));
+    imageControls.append(selectLabel, upload, enabledLabel);
+    imageBody.append(preview, imageControls);
+    imageCard.append(imageBody);
+
+    const placement = element('section', 'skybox-card skybox-placement');
+    placement.append(element('h3', '', 'Placement & look'));
+    const fields = element('div', 'skybox-fields');
+    const numeric = (label, value, { min, max, step }, change) => {
+      const field = element('label', 'skybox-field');
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.value = String(value);
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.addEventListener('change', () => change(Number(input.value)));
+      field.append(element('span', '', label), input);
+      fields.append(field);
+      return input;
+    };
+    const degrees = config.rotation.map((value) => Math.round(value * 180 / Math.PI * 100) / 100);
+    const rotationChange = (index, label) => (value) => {
+      const rotation = [...config.rotation];
+      rotation[index] = value * Math.PI / 180;
+      triggerAction('skybox-update', { patch: { rotation }, label });
+    };
+    const offsetChange = (index, label) => (value) => {
+      const offset = [...config.offset];
+      offset[index] = value;
+      triggerAction('skybox-update', { patch: { offset }, label });
+    };
+    numeric('Heading / rotate Y (°)', degrees[1], { min: -360, max: 360, step: 1 }, rotationChange(1, 'Rotate skybox heading'));
+    numeric('Horizon / tilt X (°)', degrees[0], { min: -180, max: 180, step: 1 }, rotationChange(0, 'Tilt skybox horizon'));
+    numeric('Roll Z (°)', degrees[2], { min: -180, max: 180, step: 1 }, rotationChange(2, 'Roll skybox'));
+    numeric('Move horizontal', config.offset[0], { min: -1, max: 1, step: 0.01 }, offsetChange(0, 'Move skybox horizontally'));
+    numeric('Move vertical', config.offset[1], { min: -1, max: 1, step: 0.01 }, offsetChange(1, 'Move skybox vertically'));
+    numeric('Zoom', config.zoom, { min: 0.25, max: 4, step: 0.05 }, (value) => triggerAction('skybox-update', { patch: { zoom: value }, label: 'Zoom skybox' }));
+    numeric('Brightness', config.intensity, { min: 0.1, max: 2.5, step: 0.05 }, (value) => triggerAction('skybox-update', { patch: { intensity: value }, label: 'Adjust skybox brightness' }));
+    const flipLabel = element('label', 'skybox-toggle skybox-flip');
+    const flip = document.createElement('input');
+    flip.type = 'checkbox';
+    flip.checked = config.flipX;
+    flip.addEventListener('change', () => triggerAction('skybox-update', { patch: { flipX: flip.checked }, label: 'Flip skybox horizontally' }));
+    flipLabel.append(flip, element('span', '', 'Mirror image horizontally'));
+    fields.append(flipLabel);
+    placement.append(fields);
+    const actions = element('div', 'skybox-actions');
+    const reset = button('Reset placement', '', { title: 'Restore rotation, movement, zoom, brightness, and mirroring' });
+    reset.addEventListener('click', () => triggerAction('skybox-reset'));
+    const remove = button('Remove skybox', '', { title: 'Remove the skybox from this scene; the image stays in the shared texture library' });
+    remove.classList.add('danger');
+    remove.disabled = !skyboxState.configured;
+    remove.addEventListener('click', () => {
+      if (window.confirm('Remove the skybox from this scene? The imported image will remain available in the texture library.')) triggerAction('skybox-remove');
+    });
+    actions.append(reset, remove);
+    placement.append(actions);
+
+    panel.append(intro, imageCard, placement);
+    return panel;
+  };
+
   const renderBottom = () => {
     assetsTab.classList.toggle('active', currentTab === 'assets');
     editTab.classList.toggle('active', currentTab === 'edit');
     projectTab.classList.toggle('active', currentTab === 'project');
+    skyboxTab.classList.toggle('active', currentTab === 'skybox');
     worldTab.classList.toggle('active', currentTab === 'world');
     helpTab.classList.toggle('active', currentTab === 'help');
     bottomContent.innerHTML = '';
     if (currentTab === 'assets') {
       bottomContent.append(renderAssets());
+      return;
+    }
+    if (currentTab === 'skybox') {
+      bottomContent.append(renderSkybox());
       return;
     }
     if (currentTab === 'project') {
@@ -1239,7 +1367,7 @@ export function createEditorShell(root) {
       if (currentTab === 'project') renderBottom();
     },
     showTab(tab) {
-      if (!['assets', 'edit', 'project', 'world', 'help'].includes(tab)) return false;
+      if (!['assets', 'edit', 'skybox', 'project', 'world', 'help'].includes(tab)) return false;
       currentTab = tab;
       renderBottom();
       return true;
@@ -1303,6 +1431,15 @@ export function createEditorShell(root) {
     setTextures(entries) {
       textureEntries = Array.isArray(entries) ? entries : [];
       renderInspector();
+      if (currentTab === 'skybox') renderBottom();
+    },
+    setSkyboxState(state) {
+      skyboxState = {
+        configured: Boolean(state?.configured),
+        config: normalizeSkyboxConfig(state?.config || { enabled: false }),
+        texture: state?.texture || null,
+      };
+      if (currentTab === 'skybox') renderBottom();
     },
     setRoadEdit(state) {
       roadState = state?.active ? state : null;

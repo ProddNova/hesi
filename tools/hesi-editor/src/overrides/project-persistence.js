@@ -124,6 +124,7 @@ export class ProjectPersistence {
       entityOverrides,
       placedObjects,
       groups: clone(raw.groups || []),
+      environment: clone(raw.environment || {}),
       editorState: clone(raw.editorState || {}),
     };
     validateProjectDocument(document, this.validationOptions());

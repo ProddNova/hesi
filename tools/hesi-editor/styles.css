@@ -495,6 +495,33 @@ input, select { accent-color: var(--accent); }
 
 .asset-grid, .world-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 7px; }
 
+/* Skybox environment editor: a compact, fully visible control surface in the
+   bottom panel. The sky itself is camera-centred and never world geometry. */
+.skybox-panel { display: grid; grid-template-columns: minmax(290px, .85fr) minmax(430px, 1.5fr); gap: 8px; align-content: start; }
+.skybox-card { min-width: 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-raised); }
+.skybox-card h3 { margin: 0 0 7px; color: var(--text); font-size: 12px; }
+.skybox-intro { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.skybox-intro h3 { margin-bottom: 3px; }
+.skybox-intro p { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.skybox-badge { flex: none; padding: 3px 9px; border: 1px solid var(--line); border-radius: 10px; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.skybox-badge.active { border-color: #28794b; background: rgba(53, 170, 94, .13); color: #89e5a9; }
+.skybox-image-body { display: grid; grid-template-columns: minmax(130px, .9fr) minmax(150px, 1.1fr); gap: 10px; }
+.skybox-preview { position: relative; min-height: 105px; overflow: hidden; border: 1px solid var(--line); border-radius: 3px; background: #101014; display: grid; place-items: center; color: var(--text-faint); font-size: 10px; }
+.skybox-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.skybox-preview img + span { position: absolute; inset: auto 0 0; padding: 4px 6px; overflow: hidden; background: rgba(0, 0, 0, .68); color: #fff; text-overflow: ellipsis; white-space: nowrap; }
+.skybox-image-controls { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
+.skybox-field { min-width: 0; display: grid; gap: 3px; color: var(--text-muted); font-size: 10px; }
+.skybox-field input, .skybox-field select { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--line); border-radius: 2px; background: var(--surface-input); color: var(--text); font-variant-numeric: tabular-nums; }
+.skybox-toggle { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; }
+.skybox-fields { display: grid; grid-template-columns: repeat(4, minmax(105px, 1fr)); gap: 7px; }
+.skybox-flip { align-self: end; min-height: 26px; }
+.skybox-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 9px; }
+@media (max-width: 1000px) {
+  .skybox-panel { grid-template-columns: 1fr; }
+  .skybox-intro { grid-column: 1; }
+  .skybox-fields { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+}
+
 /* Help tab: shortcut reference grouped by topic. */
 .help-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 9px; align-content: start; }
 .help-section { padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--surface-raised); }

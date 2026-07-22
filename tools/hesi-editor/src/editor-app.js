@@ -20,6 +20,7 @@ import { assembleDefinitionFromEntities, registerCustomAssets } from './world/cu
 import { ModelerPanel } from './modeler/modeler-panel.js';
 import { FaceTextureController } from './interaction/face-texture-controller.js';
 import { applyWorldTextureOverrides } from '/js/custom-assets.js';
+import { SkyboxController } from './world/skybox-controller.js';
 
 export async function createEditorApp(root) {
   if (!root) throw new Error('Editor root element is missing');
@@ -45,6 +46,7 @@ export async function createEditorApp(root) {
   let customAssetStore = null;
   let modeler = null;
   let faceTextureController = null;
+  let skyboxController = null;
   let disposed = false;
   const collisionOverlay = new CollisionOverlay({ viewport });
   const viewFlags = { grid: true, axes: false, debugBounds: false, debugPivot: false, debugCollision: false };
@@ -210,6 +212,10 @@ export async function createEditorApp(root) {
     if (modeler) modeler.openWorldTextures();
     else shell.setStatus('World textures are available once the world has loaded');
   });
+  shell.onToolbar('open-skybox', () => {
+    shell.showTab('skybox');
+    shell.setStatus('Skybox · upload a 2:1 panorama, then rotate, move, zoom, and tune it below');
+  });
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));
@@ -279,6 +285,15 @@ export async function createEditorApp(root) {
       'face-texture-style': () => faceTextureController?.setStyle(selection?.selected, detail.slotKey, detail.patch),
       'face-texture-upload': () => faceTextureController?.assignFile(selection?.selected, detail.slotKey, detail.file)
         .catch((error) => shell.setStatus(`Texture upload failed · ${error.message}`)),
+      'skybox-texture': () => {
+        try { skyboxController?.setTexture(detail); }
+        catch (error) { shell.setStatus(`Skybox image failed · ${error.message}`); }
+      },
+      'skybox-upload': () => skyboxController?.upload(detail)
+        .catch((error) => shell.setStatus(`Skybox upload failed · ${error.message}`)),
+      'skybox-update': () => skyboxController?.update(detail?.patch || {}, detail?.label || 'Edit skybox'),
+      'skybox-reset': () => skyboxController?.resetPlacement(),
+      'skybox-remove': () => skyboxController?.remove(),
     };
     if (viewActions[action]) { viewActions[action](); return; }
     if (!editActions || !transformManager) return;
@@ -455,6 +470,15 @@ export async function createEditorApp(root) {
     } catch (error) {
       shell.setStatus(`Custom assets unavailable · ${error.message}`);
     }
+    skyboxController = new SkyboxController({
+      viewport, projectState, history, store: customAssetStore,
+      onChange: (state) => shell.setSkyboxState(state),
+      onTexturesChanged: () => {
+        shell.setTextures(customAssetStore.textures());
+        skyboxController?.refresh();
+      },
+      onStatus: (message) => shell.setStatus(message),
+    });
     transformManager = new TransformManager({
       viewport, history, projectState, registry,
       onChange: (entity) => {
@@ -570,6 +594,7 @@ export async function createEditorApp(root) {
     collisionOverlay.dispose();
     editActions?.exitIsolation();
     persistence?.dispose();
+    skyboxController?.dispose();
     transformManager?.dispose();
     selection?.dispose();
     registry.clear();
@@ -608,6 +633,7 @@ export async function createEditorApp(root) {
     get routePersistence() { return routePersistence; },
     get modeler() { return modeler; },
     get customAssetStore() { return customAssetStore; },
+    get skyboxController() { return skyboxController; },
     get adapter() { return adapter; },
     applyPreset,
     showError(message) { shell.showError(message instanceof Error ? message : new Error(String(message))); },

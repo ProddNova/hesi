@@ -86,6 +86,31 @@ try {
     throw new Error(`Draft/game actions are not explicit: ${JSON.stringify(saveLabels)}`);
   }
 
+  // Photographic skybox: reuse one shared texture so the smoke remains
+  // self-contained, then prove the UI edits the infinite camera-centred mesh,
+  // serializes the environment settings, and cleanly undoes to no skybox.
+  await page.locator('[data-action="open-skybox"]').click();
+  await page.waitForSelector('.skybox-panel');
+  const skyboxTexture = await page.locator('[data-testid="skybox-texture"] option').nth(1).getAttribute('value');
+  if (!skyboxTexture) throw new Error('The shared texture library is empty in the Skybox panel');
+  await page.locator('[data-testid="skybox-texture"]').selectOption(skyboxTexture);
+  const headingInput = page.locator('.skybox-field').filter({ hasText: 'Heading / rotate Y' }).locator('input');
+  await headingInput.fill('37');
+  await headingInput.press('Enter');
+  await page.waitForFunction(() => {
+    const app = window.hesiEditor;
+    const config = app.projectState.getSkybox();
+    const mesh = app.viewport.scene.getObjectByName('HESI infinite skybox');
+    return config?.texture && Math.abs(config.rotation?.[1] - 37 * Math.PI / 180) < 1e-5 && mesh?.visible;
+  });
+  const persistedSkybox = await page.evaluate(() => window.hesiEditor.persistence.toPersistedDocument().environment?.skybox || null);
+  if (persistedSkybox?.texture !== skyboxTexture || persistedSkybox.enabled !== true) {
+    throw new Error(`Skybox failed project persistence: ${JSON.stringify(persistedSkybox)}`);
+  }
+  await page.screenshot({ path: path.join(OUT, 'checkpoint-skybox-editor.png'), fullPage: true });
+  await page.evaluate(() => { window.hesiEditor.history.undo(); window.hesiEditor.history.undo(); });
+  if (await page.evaluate(() => window.hesiEditor.projectState.getSkybox()) !== null) throw new Error('Skybox undo did not restore an empty environment');
+
   // Playwright auto-scrolls toolbar buttons into view; on viewports narrower
   // than the toolbar that shifts the whole #app container sideways, and any
   // canvas screen-space math afterwards would click outside the real canvas.
@@ -638,7 +663,8 @@ try {
   });
   if (disposed.entities !== 0 || disposed.canvasPresent) throw new Error('Editor disposal left live registry or canvas state');
   if (errors.length) throw new Error(`Browser console errors: ${errors.join(' | ')}`);
-  console.log(`PASS real map default (${state.entities} semantic entities), aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, garage floor/face textures/modeler fixed crop+flip, explicit demo, disposal`);
+  console.log(`PASS real map default (${state.entities} semantic entities), photographic skybox UI/persistence, aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, garage floor/face textures/modeler fixed crop+flip, explicit demo, disposal`);
+  console.log(`SKYBOX SCREENSHOT ${path.join(OUT, 'checkpoint-skybox-editor.png')}`);
   console.log(`ROAD SCREENSHOT ${path.join(OUT, 'checkpoint-road-tatsumi-editing.png')}`);
   console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-3-real-lamp-editing.png')}`);
 } finally {

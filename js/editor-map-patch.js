@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { applyObjectFaceStyles, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
+import { SkyboxRenderer } from './skybox.js';
 
 // Applies HESI world-editor builds to the running game.
 //
@@ -236,7 +237,27 @@ export function applyGarageBuild(garageRoot, build, customAssets = null) {
   return summary;
 }
 
-export async function applyEditorBuilds({ map = null, garageRoot = null } = {}) {
+export function applyBuildSkybox(scene, build, customAssets = null) {
+  if (!scene) return false;
+  let renderer = scene.userData?.hesiSkyboxRenderer || null;
+  const config = build?.environment?.skybox || null;
+  if (!config) {
+    renderer?.set({ enabled: false }, {});
+    return false;
+  }
+  if (!renderer) {
+    renderer = new SkyboxRenderer(scene, {
+      // The source file stays full-resolution on disk; the runtime upload is
+      // bounded independently so an 8K panorama cannot dominate game VRAM.
+      maxTextureSize: 2048,
+      onError: (message) => console.warn(`[editor-map-patch] ${message}`),
+    });
+    scene.userData.hesiSkyboxRenderer = renderer;
+  }
+  return renderer.set(config, customAssets?.textures || {});
+}
+
+export async function applyEditorBuilds({ map = null, garageRoot = null, roadScene = null, garageScene = null } = {}) {
   const summary = { applied: 0, skipped: 0, scenes: [] };
   const merge = (scene, partial) => {
     summary.applied += partial.applied;
@@ -257,9 +278,11 @@ export async function applyEditorBuilds({ map = null, garageRoot = null } = {}) 
       const textures = applyWorldTextureOverrides(map.materials, customAssets);
       if (textures.applied) summary.scenes.push({ scene: 'world-textures', ...textures });
     }
+    if (applyBuildSkybox(roadScene, highwayBuild, customAssets)) merge('highway-skybox', { applied: 1, skipped: 0 });
     if (highwayBuild) merge('highway', applyHighwayBuild(map, highwayBuild, customAssets));
   }
   if (garageRoot) {
+    if (applyBuildSkybox(garageScene, garageBuild, customAssets)) merge('garage-skybox', { applied: 1, skipped: 0 });
     if (garageBuild) merge('garage', applyGarageBuild(garageRoot, garageBuild, customAssets));
   }
   return summary;

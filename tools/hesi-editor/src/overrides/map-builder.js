@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BUILD_SCHEMA_VERSION, buildDraftSignature, validateBuildDocument } from './build-schema.js';
+import { normalizeSkyboxConfig } from '../../../../js/skybox-config.js';
 
 /**
  * Resolves a saved project document against the live world into a flat build
@@ -152,6 +153,9 @@ export function buildSceneDocument({ sceneId, adapter, registry, assetRegistry, 
       path: projectPath,
       draftSignature: buildDraftSignature(projectDocument),
     },
+    environment: projectDocument.environment?.skybox
+      ? { skybox: normalizeSkyboxConfig(projectDocument.environment.skybox) }
+      : {},
     operations,
   };
   validateBuildDocument(document);

@@ -66,3 +66,21 @@ test('project schema persists per-face texture styles and checks texture referen
     entityIds: new Set(['wall']), textureIds: new Set(['tex:9999']),
   }), /missing texture/);
 });
+
+test('project schema persists a photographic skybox and validates its image reference', () => {
+  const document = blankProjectDocument('Skybox');
+  document.environment.skybox = {
+    enabled: true,
+    texture: 'tex:0042',
+    rotation: [0.1, 0.2, 0],
+    offset: [0.25, -0.1],
+    zoom: 1.4,
+    intensity: 0.8,
+    flipX: false,
+  };
+  assert.equal(validateProjectDocument(document, { textureIds: new Set(['tex:0042']) }), true);
+  const serialized = serializeProjectDocument(document);
+  assert.match(serialized, /"environment"/);
+  assert.match(serialized, /"texture": "tex:0042"/);
+  assert.throws(() => validateProjectDocument(document, { textureIds: new Set() }), /missing texture tex:0042/);
+});

@@ -6,7 +6,7 @@ import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260722a';
-import { applyEditorBuilds } from './editor-map-patch.js?v=20260722a';
+import { applyEditorBuilds } from './editor-map-patch.js?v=20260722b';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
 import { setTextureSizeBudget } from './custom-assets.js';
@@ -128,7 +128,7 @@ class ShutokoNights {
     this.garage.root.visible=false;this.roadScene.add(this.camera);
     // World-editor builds (data/editor/*-build.json): replay saved map edits on
     // the freshly generated highway and garage. No build files -> no-op.
-    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.prewarmGpuResources();});
+    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root,roadScene:this.roadScene,garageScene:this.garageScene}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.prewarmGpuResources();});
     this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
     // The garage always displays the Toyota Chaser GLB as its showroom car,
     // independent of the on-road custom-car toggle. Kick the load off now so it

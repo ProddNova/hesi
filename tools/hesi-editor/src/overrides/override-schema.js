@@ -1,3 +1,5 @@
+import { normalizeSkyboxConfig, skyboxConfigErrors } from '../../../../js/skybox-config.js';
+
 export const PROJECT_SCHEMA_VERSION = 1;
 export const DEFAULT_PROJECT_PATH = 'data/editor/hesi-world-project.json';
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -103,6 +105,15 @@ export function validateProjectDocument(document, { entityIds = null, assetIds =
     });
   }
   if (!Array.isArray(document.groups)) errors.push('groups must be an array');
+  if (document.environment !== undefined) {
+    if (!isRecord(document.environment)) errors.push('environment must be an object');
+    else if (document.environment.skybox !== undefined && document.environment.skybox !== null) {
+      errors.push(...skyboxConfigErrors(document.environment.skybox, {
+        textureIds,
+        path: 'environment.skybox',
+      }));
+    }
+  }
   if (!isRecord(document.editorState)) errors.push('editorState must be an object');
   validateJsonValue(document, 'projectDocument', errors);
   if (errors.length) throw new ProjectValidationError(errors);
@@ -123,12 +134,14 @@ export function canonicalizeProjectDocument(document) {
   const entityOverrides = Object.fromEntries(Object.keys(document.entityOverrides).sort().map((id) => [id, stableValue(document.entityOverrides[id])]));
   const placedObjects = document.placedObjects.map(stableValue).sort((a, b) => a.id.localeCompare(b.id));
   const groups = document.groups.map(stableValue).sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+  const skybox = document.environment?.skybox ? normalizeSkyboxConfig(document.environment.skybox) : null;
   return {
     version: PROJECT_SCHEMA_VERSION,
     project: stableValue(document.project),
     entityOverrides,
     placedObjects,
     groups,
+    environment: skybox ? { skybox: stableValue(skybox) } : {},
     editorState: stableValue(document.editorState),
   };
 }
@@ -146,5 +159,5 @@ export function parseProjectDocument(text, options = {}) {
 }
 
 export function blankProjectDocument(name = 'HESI Main World') {
-  return { version: PROJECT_SCHEMA_VERSION, project: { name }, entityOverrides: {}, placedObjects: [], groups: [], editorState: {} };
+  return { version: PROJECT_SCHEMA_VERSION, project: { name }, entityOverrides: {}, placedObjects: [], groups: [], environment: {}, editorState: {} };
 }

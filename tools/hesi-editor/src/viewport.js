@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FlyCameraController } from './navigation/fly-camera-controller.js';
+import { SkyboxRenderer } from '../../../js/skybox.js';
 
 const DEFAULT_POSITION = new THREE.Vector3(105, 72, 118);
 const DEFAULT_TARGET = new THREE.Vector3(0, 7, 0);
@@ -29,6 +30,10 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
   renderer.domElement.setAttribute('aria-label', 'HESI editor 3D viewport');
   renderer.domElement.dataset.testid = 'editor-canvas';
   host.append(renderer.domElement);
+  const skybox = new SkyboxRenderer(scene, {
+    maxTextureSize: 4096,
+    onError: (message) => console.warn(`[hesi-editor] ${message}`),
+  });
 
   const orbit = new OrbitControls(camera, renderer.domElement);
   orbit.enableDamping = true;
@@ -270,6 +275,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
       view.fogFull = Boolean(full);
       applyViewState();
     },
+    setSkybox(config, texturesById = {}) { return skybox.set(config, texturesById); },
     viewState() { return { ...view }; },
     dispose() {
       if (disposed) return;
@@ -284,6 +290,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
       }
       axes.geometry.dispose();
       axes.material.dispose();
+      skybox.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     },

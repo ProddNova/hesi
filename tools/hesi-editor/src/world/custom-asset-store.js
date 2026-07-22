@@ -11,9 +11,14 @@ async function responseJson(response) {
   return payload;
 }
 
-function assertTextureDataUrl(name, dataUrl) {
+const DEFAULT_TEXTURE_BYTES = 3 * 1024 * 1024;
+
+function assertTextureDataUrl(name, dataUrl, maxBytes = DEFAULT_TEXTURE_BYTES) {
   if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) throw new Error(`${name} is not an image`);
-  if (dataUrl.length > 4 * 1024 * 1024) throw new Error(`${name} is too large — keep textures under ~3 MB (small PSX-style images work best)`);
+  // Base64 costs roughly four characters per three source bytes.
+  if (dataUrl.length > Math.ceil(maxBytes * 4 / 3) + 1024) {
+    throw new Error(`${name} is too large — maximum ${(maxBytes / 1024 / 1024).toFixed(0)} MB`);
+  }
 }
 
 function nextId(prefix, existing) {
@@ -85,19 +90,21 @@ export class CustomAssetStore {
   }
 
   /** Registers an uploaded image file, returning its texture id. */
-  async addTextureFile(file) {
+  async addTextureFile(file, { maxBytes = DEFAULT_TEXTURE_BYTES } = {}) {
+    if (!file || !String(file.type || '').startsWith('image/')) throw new Error(`${file?.name || 'Selected file'} is not an image`);
+    if (Number(file.size) > maxBytes) throw new Error(`${file.name} is too large — maximum ${(maxBytes / 1024 / 1024).toFixed(0)} MB`);
     const dataUrl = await new Promise((resolvePromise, rejectPromise) => {
       const reader = new FileReader();
       reader.onload = () => resolvePromise(reader.result);
       reader.onerror = () => rejectPromise(new Error(`Cannot read ${file.name}`));
       reader.readAsDataURL(file);
     });
-    return this.addTextureFromDataUrl(file.name, dataUrl);
+    return this.addTextureFromDataUrl(file.name, dataUrl, { maxBytes });
   }
 
   /** Registers an image data URL (e.g. an edited canvas), returning its texture id. */
-  addTextureFromDataUrl(name, dataUrl) {
-    assertTextureDataUrl(name, dataUrl);
+  addTextureFromDataUrl(name, dataUrl, { maxBytes = DEFAULT_TEXTURE_BYTES } = {}) {
+    assertTextureDataUrl(name, dataUrl, maxBytes);
     const id = nextId('tex', Object.keys(this.document.textures));
     this.document.textures[id] = { name: String(name || id), dataUrl };
     this.dirty = true;

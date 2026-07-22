@@ -47,3 +47,22 @@ test('build operations validate persisted face texture styles', () => {
   build.operations[0].faceTextures['bad-slot'] = { texture: 'nope' };
   assert.throws(() => validateBuildDocument(build), BuildValidationError);
 });
+
+test('build schema carries validated skybox environment settings', () => {
+  const build = {
+    version: 1,
+    scene: 'highway',
+    generatedAt: new Date(0).toISOString(),
+    project: { name: 'Night panorama', path: 'data/editor/hesi-world-project.json' },
+    environment: {
+      skybox: {
+        enabled: true, texture: 'tex:0007', rotation: [0, 1, 0], offset: [0, 0],
+        zoom: 1, intensity: 1.2, flipX: false,
+      },
+    },
+    operations: [],
+  };
+  assert.equal(validateBuildDocument(build), true);
+  build.environment.skybox.zoom = 99;
+  assert.throws(() => validateBuildDocument(build), BuildValidationError);
+});

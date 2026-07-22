@@ -102,6 +102,21 @@ junction boundaries. If the normal raw-route smoothing pipeline later
 regenerates `data/routes-smoothed.*`, press **Apply to Game** again to reapply
 the saved editor source.
 
+## Photographic skybox
+
+Open **Skybox** from the toolbar or the bottom-panel tab. Upload a JPG, PNG,
+WebP, GIF, or AVIF (up to 24 MB); a 2:1 equirectangular panorama gives the
+cleanest seamless 360° result. The panel can enable/disable or replace the
+image and adjust heading, horizon tilt, roll, horizontal/vertical panorama
+movement, zoom, brightness, and horizontal mirroring.
+
+The editor preview and playable game use the same camera-centred inverted
+sphere. It follows the camera at the far plane, is excluded from world entity,
+raycast, and collision data, and is therefore always unreachable. Skybox
+settings belong to the current scene project: **Save Draft** persists them,
+and **Apply to Game** copies them into that scene's build file. Uploaded images
+are externalized into the content-hashed `data/editor/textures/` library.
+
 ## Object Modeler
 
 The toolbar's **Modeler** button (also reachable from the Assets tab) opens a

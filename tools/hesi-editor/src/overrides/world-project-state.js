@@ -10,6 +10,7 @@ export class WorldProjectState {
       entityOverrides: {},
       placedObjects: [],
       groups: [],
+      environment: {},
       editorState: {},
     };
     this.listeners = new Set();
@@ -64,6 +65,15 @@ export class WorldProjectState {
     delete this.document.entityOverrides[id];
     this._emit({ type: 'placed-remove', id });
     return clone(record);
+  }
+
+  getSkybox() { return clone(this.document.environment?.skybox ?? null); }
+
+  replaceSkybox(value) {
+    if (!this.document.environment || typeof this.document.environment !== 'object') this.document.environment = {};
+    if (value == null) delete this.document.environment.skybox;
+    else this.document.environment.skybox = clone(value);
+    this._emit({ type: 'skybox' });
   }
 
   toJSON() { return clone(this.document); }

@@ -6,6 +6,7 @@
     "editor:dev": "node tools/hesi-editor/server.mjs",
     "editor:test": "node --test \"tools/hesi-editor/test/unit/*.test.mjs\" tools/hesi-editor/test/server.test.mjs",
     "editor:smoke": "node tools/hesi-editor/test/smoke/editor.smoke.mjs",
+    "editor:smoke:skybox": "node tools/hesi-editor/test/smoke/skybox-render.smoke.mjs",
     "start": "python -m http.server 8080"
   },
   "dependencies": {

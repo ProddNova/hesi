@@ -1,3 +1,5 @@
+import { normalizeSkyboxConfig, skyboxConfigErrors } from '../../../../js/skybox-config.js';
+
 /**
  * Built-map document schema.
  *
@@ -133,6 +135,12 @@ export function validateBuildDocument(document) {
       validator(op, path, errors);
     });
   }
+  if (document.environment !== undefined) {
+    if (!isRecord(document.environment)) errors.push('environment must be an object');
+    else if (document.environment.skybox !== undefined && document.environment.skybox !== null) {
+      errors.push(...skyboxConfigErrors(document.environment.skybox, { path: 'environment.skybox' }));
+    }
+  }
   if (errors.length) throw new BuildValidationError(errors);
   return true;
 }
@@ -166,6 +174,9 @@ export function serializeBuildDocument(document) {
     scene: document.scene,
     generatedAt: document.generatedAt,
     project: stableValue(document.project),
+    environment: document.environment?.skybox
+      ? { skybox: stableValue(normalizeSkyboxConfig(document.environment.skybox)) }
+      : {},
     operations: document.operations.map(stableValue),
   };
   return `${JSON.stringify(canonical, null, 2)}\n`;
