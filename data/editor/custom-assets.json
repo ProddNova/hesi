@@ -4841,11 +4841,20 @@
     "tex:0105": {
       "name": "bg.png",
       "url": "textures/bg-170d1259f7.png"
+    },
+    "tex:0106": {
+      "name": "barrier_test1.png",
+      "url": "textures/barrier-test1-ab59e5dee6.png"
+    },
+    "tex:0107": {
+      "name": "barrier_test2.png",
+      "url": "textures/barrier-test2-055de6a691.png"
     }
   },
   "worldTextures": {
     "road": "tex:0014",
     "roadAlt": "tex:0015",
-    "roadService": "tex:0013"
+    "roadService": "tex:0013",
+    "barrier": "tex:0107"
   }
 }

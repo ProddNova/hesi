@@ -323,6 +323,9 @@
           1.04501
         ]
       }
+    },
+    "terrain-region:tokyo-bay:0012": {
+      "visible": false
     }
   },
   "placedObjects": [],
@@ -334,7 +337,7 @@
       "intensity": 1,
       "offset": [
         0,
-        0
+        -0.1
       ],
       "rotation": [
         0,
