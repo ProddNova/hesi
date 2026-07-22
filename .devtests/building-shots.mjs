@@ -57,6 +57,9 @@ const spots = [
   { name: 'c1-high', route: 'c1', frac: 0.52, up: 120, back: 210, pitch: -0.34 },
   { name: 'r9-mixed', route: 'r9', frac: 0.45, up: 18, back: 36, pitch: -0.14 },
   { name: 'k1-works', route: 'k1', frac: 0.5, up: 22, back: 34, pitch: -0.18 },
+  // The Tatsumi PA spawn looks straight down this stretch, so it is the one
+  // place a thin type mix is guaranteed to be seen (js/map.js CITY_INFILL).
+  { name: 'wangan-tatsumi', route: 'wangan_0', frac: 0.0303, up: 26, back: 40, pitch: -0.16 },
 ];
 for (const spot of spots) {
   await page.evaluate((s) => {

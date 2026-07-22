@@ -5156,6 +5156,30 @@
     "facadeDepot": {
       "texture": "tex:0133",
       "brightness": 1.15
+    },
+    "facadeTownHouse": {
+      "texture": "tex:0115",
+      "brightness": 0.75
+    },
+    "facadeRetail": {
+      "texture": "tex:0115",
+      "brightness": 0.9
+    },
+    "facadeTenement": {
+      "texture": "tex:0125",
+      "brightness": 0.85
+    },
+    "facadeWorksOffice": {
+      "texture": "tex:0116",
+      "brightness": 1.1
+    },
+    "facadeWorks": {
+      "texture": "tex:0132",
+      "brightness": 1.2
+    },
+    "facadeColdStore": {
+      "texture": "tex:0133",
+      "brightness": 1.0
     }
   },
   "worldModels": {}

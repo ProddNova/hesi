@@ -118,6 +118,49 @@ export const BUILDING_TYPES = Object.freeze([
     cols: 16, depthCols: 8, cellW: 5.5, rows: 3, cellH: 4.5,
     base: '#16181d', lit: 0.12, warm: 0.3, seed: 0xabbccd,
   }),
+
+  // ---------------------------------------------------------- the small six --
+  // A type is one fixed box, so the ONLY way a street stops reading as copies
+  // of itself is more types standing in it. The ten above are the city's big
+  // masses; these six are the small ones that stand between them, and every
+  // one of them has a footprint small enough to fit where the big boxes are
+  // refused (_canPlaceBuilding) — which is exactly where the gaps were.
+  sized({
+    id: 'townHouse', slot: 'facadeTownHouse', label: 'Town house', group: 'low',
+    description: 'Narrow three-storey infill house — what stands in the gap between two blocks',
+    cols: 4, depthCols: 4, cellW: 3.2, rows: 3, cellH: 3.3,
+    base: '#1a1d23', lit: 0.55, warm: 0.88, seed: 0x1c2d3e,
+  }),
+  sized({
+    id: 'roadsideRetail', slot: 'facadeRetail', label: 'Roadside retail', group: 'low',
+    description: 'Wide two-storey roadside store — flat, bright and low against the barrier',
+    cols: 9, depthCols: 7, cellW: 3.6, rows: 2, cellH: 4.6,
+    base: '#1d2028', lit: 0.7, warm: 0.66, seed: 0x2d3e4f,
+  }),
+  sized({
+    id: 'tenementBlock', slot: 'facadeTenement', label: 'Tenement block', group: 'mid',
+    description: 'Small six-storey walk-up — height on a footprint the big blocks cannot use',
+    cols: 5, depthCols: 5, cellW: 3.4, rows: 6, cellH: 3.1,
+    base: '#171a21', lit: 0.46, warm: 0.86, seed: 0x3e4f60,
+  }),
+  sized({
+    id: 'worksOffice', slot: 'facadeWorksOffice', label: 'Works office', group: 'industrial',
+    description: 'Four-storey office standing at the gate of a yard',
+    cols: 6, depthCols: 4, cellW: 3.6, rows: 4, cellH: 3.4,
+    base: '#161a22', lit: 0.4, warm: 0.5, seed: 0x4f6071,
+  }),
+  sized({
+    id: 'machineWorks', slot: 'facadeWorks', label: 'Machine works', group: 'industrial',
+    description: 'Factory hall — taller and half the length of a depot shed',
+    cols: 8, depthCols: 5, cellW: 5.0, rows: 3, cellH: 5.4,
+    base: '#181b20', lit: 0.24, warm: 0.42, seed: 0x607182,
+  }),
+  sized({
+    id: 'coldStore', slot: 'facadeColdStore', label: 'Cold store', group: 'industrial',
+    description: 'Blank refrigerated block — the one thing with height in a low industrial band',
+    cols: 7, depthCols: 7, cellW: 4.0, rows: 8, cellH: 3.6,
+    base: '#13161c', lit: 0.06, warm: 0.4, seed: 0x718293,
+  }),
 ]);
 
 /** Material slot -> type, the lookup both the generator and the editor use. */

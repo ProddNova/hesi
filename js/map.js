@@ -141,6 +141,72 @@ const CITY_DISTRICTS = Object.freeze({
   },
 });
 
+/**
+ * The infill: the SMALL types, dropped into the ground the rows above left
+ * over. Same row shape as CITY_DISTRICTS, walked by _buildInfill.
+ *
+ * Why a second table and a second pass instead of widening the mixes above:
+ *
+ *  - A district row places one building per station, so widening its mix only
+ *    swaps which big box stands there — it can never put a small one BESIDE
+ *    it. The gaps between a 88 m depot shed and the next are what read as
+ *    "all the same", and only a pass that runs after them can see those gaps.
+ *  - The infill sits at setbacks the primary rows do not use (in front of the
+ *    near row, or in the band between two rows), so it thickens the street
+ *    edge rather than competing for the same ground.
+ *  - It runs last, on its own rng, and every type it places is footprint-only
+ *    geometry (no blinkers, no instances). That keeps every InstancedMesh in
+ *    the world at the index it already had, which is how the editor addresses
+ *    the props the user has already edited (data/editor/hesi-world-build.json).
+ *
+ * `landSideOnly` is for the Bayshore: fill the land side of the deck, never
+ * the bay side. Nothing here may carve new coastline either — _buildInfill
+ * refuses any spot that is not already on ground the terrain pass builds.
+ */
+const CITY_INFILL = Object.freeze({
+  // C1 canyon: houses and walk-ups wedged between the blocks and the towers.
+  c1: {
+    step: 30,
+    rows: [
+      { setback: [32, 46], skip: 0.24, mix: [[BUILDING.townHouse, 3], [BUILDING.tenementBlock, 3], [BUILDING.roadsideRetail, 2], [BUILDING.shopRow, 1]] },
+      { setback: [98, 120], skip: 0.42, mix: [[BUILDING.tenementBlock, 3], [BUILDING.townHouse, 2], [BUILDING.roadsideRetail, 1]] },
+    ],
+  },
+  // R9 / R1: the same, plus the odd small works — this is where the city
+  // turns into the yards.
+  mixed: {
+    step: 32,
+    rows: [
+      { setback: [40, 62], skip: 0.26, mix: [[BUILDING.townHouse, 3], [BUILDING.tenementBlock, 2], [BUILDING.roadsideRetail, 2], [BUILDING.worksOffice, 1], [BUILDING.shopRow, 1]] },
+      { setback: [136, 186], skip: 0.44, mix: [[BUILDING.tenementBlock, 2], [BUILDING.townHouse, 2], [BUILDING.machineWorks, 1], [BUILDING.roadsideRetail, 1]] },
+    ],
+  },
+  // K1 works: small halls and gate offices between the big sheds.
+  k1: {
+    step: 34,
+    rows: [
+      { setback: [20, 50], skip: 0.40, mix: [[BUILDING.worksOffice, 3], [BUILDING.townHouse, 2], [BUILDING.roadsideRetail, 2]] },
+      { setback: [58, 88], skip: 0.30, mix: [[BUILDING.worksOffice, 3], [BUILDING.machineWorks, 3], [BUILDING.coldStore, 2], [BUILDING.townHouse, 2], [BUILDING.roadsideRetail, 1]] },
+      { setback: [96, 174], skip: 0.34, mix: [[BUILDING.machineWorks, 3], [BUILDING.coldStore, 3], [BUILDING.worksOffice, 2], [BUILDING.tenementBlock, 1]] },
+      { setback: [182, 250], skip: 0.46, mix: [[BUILDING.coldStore, 2], [BUILDING.tenementBlock, 2], [BUILDING.machineWorks, 2], [BUILDING.townHouse, 1]] },
+    ],
+  },
+  // Wangan: the near band the port rows never reach. This is the view from
+  // the Tatsumi deck, so it carries the most variety of any infill row.
+  wangan: {
+    step: 34, landSideOnly: true,
+    rows: [
+      { setback: [18, 62], skip: 0.24, mix: [[BUILDING.worksOffice, 3], [BUILDING.machineWorks, 3], [BUILDING.townHouse, 2], [BUILDING.roadsideRetail, 2], [BUILDING.coldStore, 2], [BUILDING.shopRow, 1]] },
+      // Straight into the port row's own band. A depot shed keeps 49 m clear
+      // and stands every 90 m, so this row cannot displace one — it can only
+      // take the holes between them, which is what stops six identical sheds
+      // from reading as a row of copies.
+      { setback: [72, 150], skip: 0.26, mix: [[BUILDING.machineWorks, 3], [BUILDING.coldStore, 3], [BUILDING.worksOffice, 2], [BUILDING.roadsideRetail, 1], [BUILDING.tenementBlock, 1]] },
+      { setback: [156, 210], skip: 0.40, mix: [[BUILDING.coldStore, 3], [BUILDING.machineWorks, 2], [BUILDING.worksOffice, 2], [BUILDING.tenementBlock, 1]] },
+    ],
+  },
+});
+
 // One repeat of the road texture covers this many metres of asphalt — on
 // every road surface, whatever the underlying quad/triangle happens to be.
 export const ROAD_TEXTURE_TILE_METERS = 12;
@@ -4841,6 +4907,10 @@ export class HighwayMap {
     this._buildServiceAreaDressing();
     this._buildCity();
     this._buildBackdrop();
+    // Last of the three, deliberately: the infill only ever ADDS boxes to the
+    // ground the two above left over, so everything they placed — and every
+    // instance index the editor saved against it — stays exactly where it is.
+    this._buildInfill();
     this._buildTerrain();
     this._finalizeChunks();
   }
@@ -7863,6 +7933,54 @@ export class HighwayMap {
     return type;
   }
 
+  /**
+   * Which side of the deck is land here: the side the nearest terrain slab
+   * centre lies on. Along the Bayshore that flips from stretch to stretch,
+   * and the other side is open bay.
+   */
+  _landSideAt(position, normal) {
+    let nearest = null;
+    let nearestSq = Infinity;
+    for (const slab of this._terrainSlabs) {
+      const dx = slab.x - position.x;
+      const dz = slab.z - position.z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq < nearestSq) { nearestSq = dSq; nearest = slab; }
+    }
+    if (!nearest) return 1;
+    const toLand = TMP_A.set(nearest.x - position.x, 0, nearest.z - position.z);
+    return toLand.dot(normal) >= 0 ? 1 : -1;
+  }
+
+  /**
+   * Is this spot standing on ground the terrain pass already builds?
+   * _buildTerrain contours the union of the road halo and every recorded
+   * anchor, so a footprint inside that union costs no new coastline.
+   *
+   * `reach` is how far past the existing edge the footprint may hang: 0 means
+   * the whole circle has to fit. The infill uses the building's own radius,
+   * which is the difference between "only where land already is" and "welded
+   * to land that already is". On the bayside the primary sheds stand on their
+   * own separate discs with open water between them — a strict test refuses
+   * every gap and leaves the shed row reading as a line of islands, so the
+   * infill is allowed to bridge by its own footprint and no further.
+   */
+  _onExistingGround(x, z, radius, reach = 0) {
+    const need = Math.max(radius - reach, 0);
+    if (this._distanceToRouteXZ(vec(x, 0, z)) + need <= TERRAIN_ROAD_HALO) return true;
+    const cell = 256;
+    const ci = Math.floor(x / cell);
+    const ck = Math.floor(z / cell);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        for (const disc of this._anchorIndex.get(`${ci + dx},${ck + dz}`) || []) {
+          if (Math.hypot(disc.x - x, disc.z - z) + need <= disc.r) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /** Weighted pick from a district row's `[type, weight]` mix. */
   _pickBuildingType(random, mix) {
     let total = 0;
@@ -7903,6 +8021,54 @@ export class HighwayMap {
           // row from reading as a comb. No 90-degree flips: a custom model has
           // a front, and every copy of a type should present the same one.
           this._placeBuilding(type, position.x, position.z, heading + (random() - 0.5) * 0.07);
+        }
+      }
+    }
+  }
+
+  /**
+   * Second pass over the spines with the small types (CITY_INFILL).
+   *
+   * Runs after every district and after the port dressing, on an rng of its
+   * own, and places nothing but merged building boxes — so it adds buildings
+   * without moving a single instance the editor already addresses by index.
+   *
+   * Two things it does that a district row cannot:
+   *  - it jitters ALONG the spine as well as across it, because a second row
+   *    on the primary row's own station grid would deepen the comb it exists
+   *    to break up;
+   *  - it refuses ground that is not already land (_onExistingGround), so
+   *    filling the bayside never grows the bayside.
+   */
+  _buildInfill() {
+    const random = mulberry32(this.seed ^ 0x2f6b15);
+    for (const [groupId, infill] of [
+      ['c1', CITY_INFILL.c1],
+      ['r9', CITY_INFILL.mixed],
+      ['r1', CITY_INFILL.mixed],
+      ['k1', CITY_INFILL.k1],
+      ['wangan', CITY_INFILL.wangan],
+    ]) {
+      const spine = this._groupChains(groupId)[0];
+      if (!spine) continue;
+      for (let distance = 0; distance < spine.length; distance += infill.step) {
+        const along = clamp(distance + (random() - 0.5) * infill.step * 0.8, 0, spine.length);
+        if (this._isTunnel(spine, along)) continue;
+        const center = this._sampleCenter(spine, along, 1);
+        const normal = horizontalNormal(center.baseTangent);
+        const heading = Math.atan2(center.baseTangent.x, center.baseTangent.z);
+        const sides = infill.landSideOnly ? [this._landSideAt(center.position, normal)] : [-1, 1];
+        for (const side of sides) {
+          for (const row of infill.rows) {
+            if (random() < row.skip) continue;
+            const type = this._pickBuildingType(random, row.mix);
+            const setback = row.setback[0] + random() * (row.setback[1] - row.setback[0]);
+            const position = center.position.clone()
+              .addScaledVector(normal, side * (spine.halfWidth + setback + type.width * 0.5));
+            if (!this._onExistingGround(position.x, position.z, type.radius, type.radius)) continue;
+            if (!this._canPlaceBuilding(position.x, position.z, type.radius)) continue;
+            this._placeBuilding(type, position.x, position.z, heading + (random() - 0.5) * 0.07);
+          }
         }
       }
     }
@@ -7963,21 +8129,7 @@ export class HighwayMap {
       if (this._isTunnel(wangan, distance)) continue;
       const center = this._sampleCenter(wangan, distance, 1);
       const normal = horizontalNormal(center.baseTangent);
-      let landSide = 1;
-      {
-        let nearest = null;
-        let nearestSq = Infinity;
-        for (const slab of this._terrainSlabs) {
-          const dx = slab.x - center.position.x;
-          const dz = slab.z - center.position.z;
-          const dSq = dx * dx + dz * dz;
-          if (dSq < nearestSq) { nearestSq = dSq; nearest = slab; }
-        }
-        if (nearest) {
-          const toLand = TMP_A.set(nearest.x - center.position.x, 0, nearest.z - center.position.z);
-          landSide = toLand.dot(normal) >= 0 ? 1 : -1;
-        }
-      }
+      const landSide = this._landSideAt(center.position, normal);
       if (random() < 0.35) {
         // container stack rows
         const setback = 40 + random() * 120;
