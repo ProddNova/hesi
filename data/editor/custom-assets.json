@@ -5025,6 +5025,10 @@
     "tex:0113": {
       "name": "building_medium-small.png",
       "url": "textures/building-medium-small-adcfc0fb12.png"
+    },
+    "tex:0114": {
+      "name": "GREEN.png",
+      "url": "textures/green-d34df61aed.png"
     }
   },
   "worldTextures": {
@@ -5033,10 +5037,40 @@
     "roadService": "tex:0013",
     "barrier": {
       "texture": "tex:0107"
+    },
+    "facadeShop": {
+      "texture": "tex:0114"
+    },
+    "facadeApartment": {
+      "texture": "tex:0114"
+    },
+    "facadeDark": {
+      "texture": "tex:0114"
+    },
+    "facadeOffice": {
+      "texture": "tex:0114"
+    },
+    "facadeHotel": {
+      "texture": "tex:0114"
+    },
+    "facadeSlim": {
+      "texture": "tex:0114"
+    },
+    "facadeTower": {
+      "texture": "tex:0114"
+    },
+    "facadeSky": {
+      "texture": "tex:0114"
+    },
+    "facadeIndustrial": {
+      "texture": "tex:0114"
+    },
+    "facadeDepot": {
+      "texture": "tex:0114"
+    },
+    "towerWhite": {
+      "texture": "tex:0114"
     }
   },
-  "worldModels": {
-    "facade:facadeOffice": "custom:0031",
-    "facade:facadeIndustrial": "custom:0034"
-  }
+  "worldModels": {}
 }

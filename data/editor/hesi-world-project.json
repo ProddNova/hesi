@@ -4,7 +4,7 @@
     "name": "HESI Main World"
   },
   "entityOverrides": {
-    "barrier:tatsumi-pa-exit:0003": {
+    "barrier:wangan-1:0002": {
       "visible": false
     },
     "generated-prop-batch:6-n7-unknown-garage-transition-marker-10": {
@@ -103,6 +103,9 @@
     "marking:wangan-0:0002": {
       "visible": false
     },
+    "marking:wangan-0:0020": {
+      "visible": false
+    },
     "marking:wangan-0:0021": {
       "transform": {
         "position": [
@@ -120,7 +123,8 @@
           0.02,
           86.52751
         ]
-      }
+      },
+      "visible": false
     },
     "marking:wangan-0:0022": {
       "visible": false
@@ -212,6 +216,57 @@
     "marking:wangan-0:0034": {
       "visible": false
     },
+    "marking:wangan-0:0035": {
+      "visible": false
+    },
+    "marking:wangan-0:0036": {
+      "visible": false
+    },
+    "marking:wangan-0:0037": {
+      "visible": false
+    },
+    "marking:wangan-0:0038": {
+      "visible": false
+    },
+    "marking:wangan-0:0039": {
+      "visible": false
+    },
+    "marking:wangan-0:0040": {
+      "visible": false
+    },
+    "marking:wangan-0:0041": {
+      "visible": false
+    },
+    "marking:wangan-0:0042": {
+      "visible": false
+    },
+    "marking:wangan-0:0043": {
+      "visible": false
+    },
+    "marking:wangan-0:0044": {
+      "visible": false
+    },
+    "marking:wangan-0:0045": {
+      "visible": false
+    },
+    "marking:wangan-0:0046": {
+      "visible": false
+    },
+    "marking:wangan-0:0047": {
+      "visible": false
+    },
+    "marking:wangan-0:0048": {
+      "visible": false
+    },
+    "marking:wangan-0:0049": {
+      "visible": false
+    },
+    "marking:wangan-0:0050": {
+      "visible": false
+    },
+    "marking:wangan-0:0051": {
+      "visible": false
+    },
     "marking:wangan-1:0032": {
       "visible": false
     },
@@ -251,6 +306,48 @@
     "marking:wangan-1:0045": {
       "visible": false
     },
+    "marking:wangan-1:0058": {
+      "visible": false
+    },
+    "marking:wangan-1:0059": {
+      "visible": false
+    },
+    "marking:wangan-1:0060": {
+      "visible": false
+    },
+    "marking:wangan-1:0061": {
+      "visible": false
+    },
+    "marking:wangan-1:0062": {
+      "visible": false
+    },
+    "marking:wangan-1:0063": {
+      "visible": false
+    },
+    "marking:wangan-1:0064": {
+      "visible": false
+    },
+    "marking:wangan-1:0065": {
+      "visible": false
+    },
+    "marking:wangan-1:0066": {
+      "visible": false
+    },
+    "marking:wangan-1:0067": {
+      "visible": false
+    },
+    "marking:wangan-1:0068": {
+      "visible": false
+    },
+    "marking:wangan-1:0069": {
+      "visible": false
+    },
+    "marking:wangan-1:0070": {
+      "visible": false
+    },
+    "marking:wangan-1:0071": {
+      "visible": false
+    },
     "pillar:ramp-9:0004": {
       "visible": false
     },
@@ -266,7 +363,22 @@
     "prop:ramp-8:0066": {
       "visible": false
     },
+    "prop:ramp-8:0079": {
+      "visible": false
+    },
+    "prop:ramp-8:0080": {
+      "visible": false
+    },
+    "prop:ramp-8:0081": {
+      "visible": false
+    },
+    "prop:ramp-8:0082": {
+      "visible": false
+    },
     "prop:ramp-9:0045": {
+      "visible": false
+    },
+    "prop:ramp-9:0046": {
       "visible": false
     },
     "prop:ramp-9:0081": {
@@ -284,7 +396,19 @@
     "prop:ramp-9:0085": {
       "visible": false
     },
-    "prop:tatsumi-pa-exit:0005": {
+    "prop:ramp-9:0086": {
+      "visible": false
+    },
+    "prop:wangan-0:3121": {
+      "visible": false
+    },
+    "prop:wangan-0:3122": {
+      "visible": false
+    },
+    "prop:wangan-0:3123": {
+      "visible": false
+    },
+    "prop:wangan-0:3124": {
       "visible": false
     },
     "prop:wangan-0:3134": {
@@ -300,6 +424,9 @@
       "visible": false
     },
     "prop:wangan-0:3138": {
+      "visible": false
+    },
+    "prop:wangan-1:3204": {
       "visible": false
     },
     "prop:wangan-1:3210": {
@@ -334,9 +461,9 @@
     "skybox": {
       "enabled": true,
       "flipX": false,
-      "intensity": 1,
+      "intensity": 1.2,
       "offset": [
-        0,
+        0.2,
         -0.1
       ],
       "rotation": [

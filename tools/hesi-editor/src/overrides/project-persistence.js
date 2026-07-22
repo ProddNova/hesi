@@ -74,6 +74,23 @@ export class ProjectPersistence {
     };
   }
 
+  /**
+   * Generated map entities can legitimately disappear after a road is
+   * shortened or the procedural world is rebuilt. Their saved overrides are
+   * no longer actionable, so ignore only those stale references while keeping
+   * structural, asset, texture, and placed-object validation strict.
+   */
+  prepareLoadedDocument(document) {
+    const options = this.validationOptions();
+    validateProjectDocument(document, { ...options, entityIds: null });
+    const prepared = clone(document);
+    const staleEntityIds = Object.keys(prepared.entityOverrides)
+      .filter((id) => !options.entityIds.has(id));
+    for (const id of staleEntityIds) delete prepared.entityOverrides[id];
+    validateProjectDocument(prepared, options);
+    return { document: canonicalizeProjectDocument(prepared), staleEntityIds };
+  }
+
   recentProjects() {
     try { return JSON.parse(localStorage.getItem(sceneKey(RECENTS_KEY, this.scene.id)) || '[]').filter((item) => typeof item === 'string').slice(0, 8); }
     catch { return []; }
@@ -223,32 +240,43 @@ export class ProjectPersistence {
       this.onProjectChange(this.state());
       return null;
     }
-    validateProjectDocument(result.document, this.validationOptions());
+    const loaded = this.prepareLoadedDocument(result.document);
+    const staleEntityIds = new Set(loaded.staleEntityIds);
+    const loadedDocument = loaded.document;
     this.currentPath = normalized;
-    this.lastSavedDocument = clone(result.document);
+    this.lastSavedDocument = clone(loadedDocument);
     this.lastSavedModifiedMs = result.modifiedMs || 0;
-    this.applyDocument(result.document, { resetHistory: true });
+    this.applyDocument(loadedDocument, { resetHistory: true });
     this.history.markSaved();
     this.remember(normalized);
     let recovered = false;
+    let recoveryNotice = '';
     if (recover) {
       const recovery = await this.read(autosavePath(normalized)).catch(() => null);
-      if (recovery && recovery.modifiedMs > this.lastSavedModifiedMs && serializeProjectDocument(recovery.document) !== serializeProjectDocument(result.document)) {
-        const saved = clone(result.document);
-        const autosaved = clone(recovery.document);
-        this.applyDocument(autosaved, { resetHistory: true });
-        this.history.execute({
-          label: 'Recovered autosave',
-          redo: () => this.applyDocument(autosaved),
-          undo: () => this.applyDocument(saved),
-        }, { alreadyApplied: true });
-        this.onRecovery(`Recovered newer autosave for ${normalized}. Save to confirm or Reset Unsaved Changes to discard it.`);
-        recovered = true;
+      if (recovery && recovery.modifiedMs > this.lastSavedModifiedMs) {
+        const preparedRecovery = this.prepareLoadedDocument(recovery.document);
+        preparedRecovery.staleEntityIds.forEach((id) => staleEntityIds.add(id));
+        const autosaved = preparedRecovery.document;
+        if (serializeProjectDocument(autosaved) !== serializeProjectDocument(loadedDocument)) {
+          const saved = clone(loadedDocument);
+          this.applyDocument(autosaved, { resetHistory: true });
+          this.history.execute({
+            label: 'Recovered autosave',
+            redo: () => this.applyDocument(autosaved),
+            undo: () => this.applyDocument(saved),
+          }, { alreadyApplied: true });
+          recoveryNotice = `Recovered newer autosave for ${normalized}. Save to confirm or Reset Unsaved Changes to discard it.`;
+          recovered = true;
+        }
       }
     }
     this.onStatus(`${recovered ? 'Recovered' : 'Loaded'} project · ${normalized}`);
+    const staleNotice = staleEntityIds.size
+      ? `Ignored ${staleEntityIds.size} obsolete generated-entity override${staleEntityIds.size === 1 ? '' : 's'} (${[...staleEntityIds].join(', ')}). Save Draft to remove them from disk.`
+      : '';
+    if (recoveryNotice || staleNotice) this.onRecovery([recoveryNotice, staleNotice].filter(Boolean).join(' '));
     this.onProjectChange(this.state());
-    return result.document;
+    return loadedDocument;
   }
 
   buildDocument(document = null) {

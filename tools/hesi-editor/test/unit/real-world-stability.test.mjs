@@ -29,6 +29,12 @@ function buildIdentitySnapshot() {
   try {
     const discovery = discoverHesiEntities(map);
     const tatsumiExit = map.routes.get('tatsumi_pa_exit');
+    const publishedExitOverride = ROUTE_DATA.meta?.editorRoadOverrides?.syntheticRoutes?.tatsumi_pa_exit?.points;
+    const publishedOverrideApplied = Array.isArray(publishedExitOverride)
+      && publishedExitOverride.length === tatsumiExit?.points.length
+      && publishedExitOverride.every((point, index) => tatsumiExit.points[index].distanceTo(
+        new THREE.Vector3(point[0], point[1], point[2]),
+      ) < 1e-4);
     const editedExitPoints = tatsumiExit?.points.map((point) => point.toArray()) || [];
     if (editedExitPoints.length > 2) editedExitPoints[1][0] += 0.75;
     const exitEndpointBefore = tatsumiExit?.points.at(-1).clone();
@@ -51,6 +57,7 @@ function buildIdentitySnapshot() {
         exists: Boolean(tatsumiExit),
         synthetic: Boolean(tatsumiExit?.synthetic),
         discovered: discovery.entities.some((entity) => entity.metadata?.routeId === 'tatsumi_pa_exit'),
+        publishedOverrideApplied,
         previewApplied: syntheticPreviewApplied,
         changed: Math.abs((tatsumiExit?.points[1]?.x || 0) - (editedExitPoints[1]?.[0] || 0)) < 1e-6,
         endpointPreserved: Boolean(exitEndpointBefore?.distanceTo(tatsumiExit?.points.at(-1)) < 1e-6),
@@ -79,6 +86,7 @@ test('two independent real-world builds produce identical stable entity IDs and 
     exists: true,
     synthetic: true,
     discovered: true,
+    publishedOverrideApplied: true,
     previewApplied: true,
     changed: true,
     endpointPreserved: true,

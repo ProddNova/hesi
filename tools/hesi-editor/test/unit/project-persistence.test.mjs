@@ -39,6 +39,26 @@ test('project persistence still rejects a genuinely orphaned face texture', () =
   );
 });
 
+test('loading drops overrides for generated entities removed by a world rebuild', () => {
+  const persistence = fixture({ texturesById: () => ({ 'tex:0023': { dataUrl: 'data:image/png;base64,AA==' } }) });
+  const source = {
+    version: 1,
+    project: { name: 'Rebuilt road' },
+    entityOverrides: {
+      'garage-part:0001': { visible: false },
+      'barrier:removed-route:0003': { visible: false },
+    },
+    placedObjects: [],
+    groups: [],
+    environment: {},
+    editorState: {},
+  };
+  const prepared = persistence.prepareLoadedDocument(source);
+  assert.deepEqual(prepared.staleEntityIds, ['barrier:removed-route:0003']);
+  assert.deepEqual(Object.keys(prepared.document.entityOverrides), ['garage-part:0001']);
+  assert.ok(source.entityOverrides['barrier:removed-route:0003'], 'the server response is not mutated');
+});
+
 test('project save writes a dirty shared texture library before its referencing document', async () => {
   const events = [];
   const store = {
