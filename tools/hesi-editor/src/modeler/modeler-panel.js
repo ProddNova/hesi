@@ -8,7 +8,8 @@ import {
   buildPartObject, captureUnionFaceProjection, captureViewFaceProjection, clonePartFaceToOpposite,
   convertPartToMesh, mergePartFaces, meshFacePlanarRegions, meshInsertVertexAtPoint,
   meshRemoveVertex, meshTopologyIssues, oppositePartFace, partFaceCoverProjection, partFaceNames,
-  partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace, weldedVertices,
+  buildCustomAssetGroup, partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace,
+  weldedVertices,
 } from '/js/custom-assets.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 import { SurfaceStyleEditor } from '../world/surface-style-editor.js';
@@ -56,12 +57,15 @@ function blankDefinition(id) {
  * asset — and the playable game rebuilds them from the same saved document.
  */
 export class ModelerPanel {
-  constructor({ host, store, assetRegistry, onStatus = () => {}, onAssetsChanged = () => {}, onTexturesChanged = () => {}, onWorldTexturesChanged = () => {}, isAssetInUse = () => false, onOpenChange = () => {}, getMaterials = () => null, onOpenSurfaces = null }) {
-    Object.assign(this, { store, assetRegistry, onStatus, onAssetsChanged, onTexturesChanged, onWorldTexturesChanged, isAssetInUse, onOpenChange, getMaterials, onOpenSurfaces });
+  constructor({ host, store, assetRegistry, onStatus = () => {}, onAssetsChanged = () => {}, onTexturesChanged = () => {}, onWorldTexturesChanged = () => {}, isAssetInUse = () => false, onOpenChange = () => {}, getMaterials = () => null, onOpenSurfaces = null, onWorldModelsChanged = () => {}, getMap = () => null }) {
+    Object.assign(this, { store, assetRegistry, onStatus, onAssetsChanged, onTexturesChanged, onWorldTexturesChanged, isAssetInUse, onOpenChange, getMaterials, onOpenSurfaces, onWorldModelsChanged, getMap });
     this.openState = false;
     this.library = 'custom';
     this.worldObject = null;
     this.worldSlot = null;
+    // Set while a world archetype is being modelled, so Save Object can put the
+    // finished model straight back onto every copy in the map.
+    this.modelTargetObject = null;
     this.definition = null;
     this.editingExisting = false;
     this.mode = 'part';
@@ -461,6 +465,7 @@ export class ModelerPanel {
   }
 
   _loadDefinition(assetId) {
+    this.modelTargetObject = null;
     const existing = assetId ? this.store.getAsset(assetId) : null;
     this.definition = existing ? clone(existing) : blankDefinition(this.store.newAssetId());
     this.editingExisting = Boolean(existing);
@@ -1601,10 +1606,24 @@ export class ModelerPanel {
     this.worldObjectHeader.append(element('p', 'modeler-help',
       `${meta.description}. Made of ${surfaces.length} surface${surfaces.length === 1 ? '' : 's'} — pick one below, or click it in the preview. One material, one archetype: every ${meta.label.toLowerCase()} in the world changes with it.`));
 
-    // Two ways into the normal modeler, because they trade different things:
-    // the catalog geometry is the exact shape but can only be placed and
-    // scaled, while the composite volumes are real primitives you can reshape,
-    // texture per face, and push vertices on.
+    // ------------------------------------------------------------- the model --
+    // The generator draws instanced archetypes from ONE shared geometry, so a
+    // saved model can stand in for it and every copy changes. Merged-quad
+    // archetypes (facades, roofs, route signs) have no per-copy record: say so
+    // instead of offering a round trip that cannot land.
+    this.worldObjectHeader.append(element('h4', 'surface-group-title', 'Model'));
+    const replacement = meta.instanceType ? this.store.worldModel(meta.instanceType) : null;
+    const replacementAsset = replacement ? this.store.getAsset(replacement) : null;
+    if (meta.instanceType) {
+      const count = this._instanceCount(meta.instanceType);
+      this.worldObjectHeader.append(element('p', 'modeler-help', replacementAsset
+        ? `Every one of these draws your object "${replacementAsset.label}" instead of the generated shape${count ? ` · ${count} in the map` : ''}.`
+        : `Model this object and save it, and all ${count ? `${count} ` : ''}copies in the map take the new shape — in the editor and in the game.`));
+    } else {
+      this.worldObjectHeader.append(element('p', 'modeler-help',
+        'The map bakes these into merged chunk geometry with no record of each copy, so their SHAPE cannot be replaced — painting the surfaces below is what changes all of them. Modelling it still gives you your own object to place by hand.'));
+    }
+
     const editRow = element('div', 'surface-button-row');
     const hasGeometry = Boolean(meta.assetId && this.assetRegistry?.get?.(meta.assetId));
     if (hasGeometry) {
@@ -1619,6 +1638,20 @@ export class ModelerPanel {
     editable.dataset.testid = hasGeometry ? 'modeler-world-edit-as-parts' : 'modeler-world-edit-as-model';
     editable.addEventListener('click', () => this._editWorldObjectAsModel({ exact: false }));
     editRow.append(editable);
+    if (meta.instanceType) {
+      const pick = button('Use a saved object…', 'tool-button small',
+        'Point this archetype at an object you already modelled');
+      pick.dataset.testid = 'modeler-world-pick-model';
+      pick.addEventListener('click', () => this._chooseWorldModel(meta));
+      editRow.append(pick);
+      if (replacementAsset) {
+        const reset = button('Back to generated shape', 'tool-button small danger',
+          'Drop the replacement model; every copy goes back to the shape the generator makes');
+        reset.dataset.testid = 'modeler-world-reset-model';
+        reset.addEventListener('click', () => this._setWorldModel(meta, null));
+        editRow.append(reset);
+      }
+    }
     this.worldObjectHeader.append(editRow);
 
     this.worldObjectHeader.append(element('h4', 'surface-group-title', 'Surfaces of this object'));
@@ -1671,16 +1704,68 @@ export class ModelerPanel {
    * saved to the catalog and placeable — while surface paint stays the way to
    * change every copy already standing in the map.
    */
+  /** How many copies of an instanced archetype the live map holds. */
+  _instanceCount(instanceType) {
+    let total = 0;
+    for (const chunk of [...(this.getMap()?._chunks?.values?.() || [])]) {
+      for (const object of chunk.group?.children || []) {
+        if (object.isInstancedMesh && String(object.name).replace(/^chunk\s+\S+\s+/, '') === instanceType) total += object.count;
+      }
+    }
+    return total;
+  }
+
+  /** Points an archetype at a saved object (or back to the generated shape). */
+  _setWorldModel(meta, assetId) {
+    this.store.setWorldModel(meta.instanceType, assetId);
+    this.dirtyChip.textContent = 'Unsaved changes';
+    this.onWorldModelsChanged();
+    this._renderWorldObjectPanel();
+    this._buildWorldPreview();
+    const asset = assetId ? this.store.getAsset(assetId) : null;
+    this.onStatus(asset
+      ? `Every ${meta.label.toLowerCase()} in the map now draws "${asset.label}" · Save world paint to keep it`
+      : `${meta.label} back to its generated shape`);
+  }
+
+  _chooseWorldModel(meta) {
+    const assets = this.store.assets();
+    if (!assets.length) { this.onStatus('No saved objects yet — model one first'); return; }
+    const chooser = element('div', 'modeler-chooser');
+    chooser.dataset.testid = 'modeler-model-chooser';
+    chooser.append(element('b', '', `Object to draw instead of every ${meta.label.toLowerCase()}`));
+    const grid = element('div', 'modeler-chooser-grid');
+    for (const asset of assets.sort((a, b) => (a.label || '').localeCompare(b.label || ''))) {
+      const pick = element('button', 'modeler-chooser-item');
+      pick.type = 'button';
+      pick.append(element('small', '', asset.label || asset.id));
+      pick.addEventListener('click', () => { chooser.remove(); this._setWorldModel(meta, asset.id); });
+      grid.append(pick);
+    }
+    chooser.append(grid);
+    const actions = element('div', 'modeler-chooser-actions');
+    const cancel = button('Cancel', 'tool-button');
+    cancel.addEventListener('click', () => chooser.remove());
+    actions.append(cancel);
+    chooser.append(actions);
+    this.overlay.append(chooser);
+  }
+
   _editWorldObjectAsModel({ exact = true } = {}) {
     const meta = WORLD_OBJECTS[this.worldObject];
     if (!meta) return;
+    // Remember what is being modelled: Save Object puts the result straight
+    // back onto every copy of the archetype it came from.
+    this.modelTargetObject = meta.instanceType ? this.worldObject : null;
     if (exact && meta.assetId && this.assetRegistry?.get?.(meta.assetId)) {
       this._setLibrary('custom');
       this.editCopyOfAsset(meta.assetId);
-      this.onStatus(`${meta.label} opened with its exact world geometry · add parts around it, then Save Object · the copies already in the map keep their surface paint`);
+      this.onStatus(meta.instanceType
+        ? `${meta.label} opened with its exact world geometry · Save Object and every copy in the map takes the new shape`
+        : `${meta.label} opened with its exact world geometry · Save Object adds it to your catalog (its generated copies keep their shape)`);
       return;
     }
-    const parts = worldObjectModelParts(this.worldObject, this.getMaterials());
+    const parts = worldObjectModelParts(this.worldObject, this.getMaterials(), { store: this.store });
     if (!parts.length) { this.onStatus(`${meta.label} has no geometry to model in this scene`); return; }
     this._setLibrary('custom');
     this.definition = {
@@ -1698,7 +1783,9 @@ export class ModelerPanel {
     this._resetHistory();
     this._renderAll();
     this._markDirty({ history: false });
-    this.onStatus(`${meta.label} opened as ${parts.length} editable part${parts.length === 1 ? '' : 's'} · reshape and texture it like any object, then Save Object`);
+    this.onStatus(meta.instanceType
+      ? `${meta.label} opened as ${parts.length} editable part${parts.length === 1 ? '' : 's'} · reshape it, then Save Object and every copy in the map follows`
+      : `${meta.label} opened as ${parts.length} editable part${parts.length === 1 ? '' : 's'} · reshape and texture it like any object, then Save Object`);
   }
 
   /**
@@ -1710,10 +1797,24 @@ export class ModelerPanel {
     this.worldPreviewGroup.clear();
     this.assetGroup.visible = false;
     this._detachGizmo();
-    const meshes = buildWorldObjectPreview(this.worldObject, {
-      materials: this.getMaterials(),
-      assetRegistry: this.assetRegistry,
-    });
+    const meta = WORLD_OBJECTS[this.worldObject];
+    const replacementId = meta?.instanceType ? this.store.worldModel(meta.instanceType) : null;
+    const replacement = replacementId ? this.store.getAsset(replacementId) : null;
+    // A replaced archetype must preview as what the map now draws, not as the
+    // generated shape it no longer has.
+    const meshes = replacement
+      ? (() => {
+        const group = buildCustomAssetGroup(replacement, this.store.texturesById(), { resolveAssetPart: assetPartResolver(this.assetRegistry) });
+        group.updateMatrixWorld(true);
+        const built = [];
+        group.traverse((child) => { if (child.isMesh) built.push(child); });
+        for (const child of built) child.removeFromParent();
+        return built;
+      })()
+      : buildWorldObjectPreview(this.worldObject, {
+        materials: this.getMaterials(),
+        assetRegistry: this.assetRegistry,
+      });
     if (!meshes.length) {
       this.onStatus(`${WORLD_OBJECTS[this.worldObject]?.label || 'This object'} · no live map material in this scene — the paint controls still work and apply on reload`);
       return;
@@ -2266,6 +2367,12 @@ export class ModelerPanel {
     this.definition.label = this.nameInput.value.trim() || this.definition.label || 'Custom object';
     try {
       const saved = this.store.upsertAsset(this.definition);
+      // An object modelled FROM an instanced archetype goes straight back onto
+      // it: that is the round trip — reshape it, save, every copy follows.
+      const target = WORLD_OBJECTS[this.modelTargetObject || '']?.instanceType
+        ? WORLD_OBJECTS[this.modelTargetObject]
+        : null;
+      if (target) this.store.setWorldModel(target.instanceType, saved.id);
       await this.store.save();
       refreshCustomAsset(this.assetRegistry, this.store.document, saved.id);
       this.definition = clone(saved);
@@ -2273,8 +2380,11 @@ export class ModelerPanel {
       if (asCopy) this._resetHistory(); // old entries carry the previous asset id
       this.onAssetsChanged();
       this._renderAssetList();
+      if (target) this.onWorldModelsChanged();
       this.dirtyChip.textContent = '';
-      this.onStatus(`Saved "${saved.label}" · it is now in the Assets menu, ready to place in the world`);
+      this.onStatus(target
+        ? `Saved "${saved.label}" · every ${target.label.toLowerCase()} in the map now draws it — switch to World objects to see them`
+        : `Saved "${saved.label}" · it is now in the Assets menu, ready to place in the world`);
     } catch (error) {
       this.onStatus(`Save failed · ${error.message}`);
     }

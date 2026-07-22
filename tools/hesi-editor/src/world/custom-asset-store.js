@@ -81,6 +81,17 @@ export class CustomAssetStore {
   /** True when the slot carries any saved override at all. */
   hasWorldSurface(slot) { return Object.hasOwn(this.document.worldTextures || {}, slot); }
 
+  /** The custom asset standing in for an instanced archetype's shape, if any. */
+  worldModel(instanceType) { return this.document.worldModels?.[instanceType] || null; }
+
+  /** Points an instanced archetype at a saved object, or `null` to go back to the generated shape. */
+  setWorldModel(instanceType, assetId) {
+    if (!this.document.worldModels) this.document.worldModels = {};
+    if (assetId) this.document.worldModels[instanceType] = assetId;
+    else delete this.document.worldModels[instanceType];
+    this.dirty = true;
+  }
+
   newAssetId() { return nextId('custom', Object.keys(this.document.assets)); }
 
   upsertAsset(definition) {
@@ -93,6 +104,11 @@ export class CustomAssetStore {
   deleteAsset(id) {
     if (!this.document.assets[id]) return false;
     delete this.document.assets[id];
+    // An archetype pointed at this model goes back to its generated shape
+    // rather than referencing an asset that no longer exists.
+    for (const [instanceType, assetId] of Object.entries(this.document.worldModels || {})) {
+      if (assetId === id) delete this.document.worldModels[instanceType];
+    }
     this.dirty = true;
     return true;
   }

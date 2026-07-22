@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { applyObjectFaceStyles, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
+import { applyObjectFaceStyles, applyWorldModelOverrides, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
 import { SkyboxRenderer } from './skybox.js';
 
 // Applies HESI world-editor builds to the running game.
@@ -277,6 +277,12 @@ export async function applyEditorBuilds({ map = null, garageRoot = null, roadSce
     if (customAssets && map.materials) {
       const textures = applyWorldTextureOverrides(map.materials, customAssets);
       if (textures.applied) summary.scenes.push({ scene: 'world-textures', ...textures });
+    }
+    // Saved replacement models for the instanced archetypes (containers, lamps,
+    // barriers, ...) swap the shape every copy of that bucket draws.
+    if (customAssets) {
+      const models = applyWorldModelOverrides(map, customAssets);
+      if (models.applied) summary.scenes.push({ scene: 'world-models', ...models });
     }
     if (applyBuildSkybox(roadScene, highwayBuild, customAssets)) merge('highway-skybox', { applied: 1, skipped: 0 });
     if (highwayBuild) merge('highway', applyHighwayBuild(map, highwayBuild, customAssets));

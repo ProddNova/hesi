@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -133,6 +134,12 @@ export const WORLD_SURFACES = Object.freeze({
  * Surfaces are shared on purpose where the generator shares them (every
  * building roof is one `building` material); worldObjectsUsingSurface reports
  * that so the UI can warn instead of surprising you.
+ *
+ * `instanceType` names the `<geometry>:<material>` bucket the generator draws
+ * the object with, when it draws it as instances — one InstancedMesh whose
+ * geometry every copy shares, which is what makes replacing the SHAPE possible
+ * (see applyWorldModelOverrides). Archetypes without one are merged into chunk
+ * quads with no per-copy record anywhere, so only their surfaces can change.
  */
 export const WORLD_OBJECTS = Object.freeze({
   officeBuilding: {
@@ -156,61 +163,61 @@ export const WORLD_OBJECTS = Object.freeze({
     parts: [{ slot: 'shed', size: [12, 5, 8], position: [0, 2.5, 0] }, { slot: 'building', size: [12.4, 0.4, 8.4], position: [0, 5.2, 0] }],
   },
   landmarkTower: {
-    label: 'Landmark tower', description: 'Tokyo Tower style landmark structure', group: 'Buildings',
+    label: 'Landmark tower', description: 'Tokyo Tower style landmark structure', group: 'Buildings', instanceType: 'box:towerWhite',
     parts: [{ slot: 'towerWhite', size: [3, 26, 3], position: [0, 13, 0] }, { slot: 'redBlink', size: [0.5, 0.5, 0.5], position: [0, 26.3, 0] }],
   },
 
   highwayLamp: {
-    label: 'Highway lamp', description: 'Road-side lamp post and its light head', group: 'Street objects', assetId: 'hesi:lamppost:concrete',
+    label: 'Highway lamp', description: 'Road-side lamp post and its light head', group: 'Street objects', instanceType: 'lamppost:concrete', assetId: 'hesi:lamppost:concrete',
     parts: [{ slot: 'concrete', size: [0.35, 9, 0.35], position: [0, 4.5, 0] }, { slot: 'lampSodium', size: [1.6, 0.35, 0.6], position: [0.7, 9.1, 0] }],
   },
   concretePillar: {
-    label: 'Concrete pillar', description: 'Expressway support columns', group: 'Street objects', assetId: 'hesi:box:concrete',
+    label: 'Concrete pillar', description: 'Expressway support columns', group: 'Street objects', instanceType: 'box:concrete', assetId: 'hesi:box:concrete',
     parts: [{ slot: 'concrete', size: [1.6, 8, 1.6], position: [0, 4, 0] }],
   },
   darkPillar: {
-    label: 'Dark pillar', description: 'Darker support columns and deck undersides', group: 'Street objects', assetId: 'hesi:box:concreteDark',
+    label: 'Dark pillar', description: 'Darker support columns and deck undersides', group: 'Street objects', instanceType: 'box:concreteDark', assetId: 'hesi:box:concreteDark',
     parts: [{ slot: 'concreteDark', size: [1.6, 8, 1.6], position: [0, 4, 0] }],
   },
   shippingContainer: {
-    label: 'Shipping container', description: 'Stacked dock containers', group: 'Street objects',
+    label: 'Shipping container', description: 'Stacked dock containers', group: 'Street objects', instanceType: 'box:container',
     parts: [{ slot: 'container', size: [6, 2.6, 2.4], position: [0, 1.3, 0] }],
   },
   dockCrane: {
-    label: 'Dock crane', description: 'Container gantry cranes at the port', group: 'Street objects',
+    label: 'Dock crane', description: 'Container gantry cranes at the port', group: 'Street objects', instanceType: 'box:crane',
     parts: [{ slot: 'crane', size: [1.2, 14, 1.2], position: [0, 7, 0] }, { slot: 'crane', size: [12, 1, 1], position: [3, 14, 0] }],
   },
   garage: {
-    label: 'Garage', description: 'Garage bays at the service areas', group: 'Street objects', assetId: 'hesi:box:garage',
+    label: 'Garage', description: 'Garage bays at the service areas', group: 'Street objects', instanceType: 'box:garage', assetId: 'hesi:box:garage',
     parts: [{ slot: 'garage', size: [8, 4, 6], position: [0, 2, 0] }, { slot: 'shutter', size: [3.2, 3, 0.2], position: [0, 1.5, 3.05] }],
   },
   konbini: {
-    label: 'Konbini store', description: 'Convenience store at the parking areas', group: 'Street objects', assetId: 'hesi:box:konbini',
+    label: 'Konbini store', description: 'Convenience store at the parking areas', group: 'Street objects', instanceType: 'box:konbini', assetId: 'hesi:box:konbini',
     parts: [{ slot: 'konbini', size: [8, 3.4, 6], position: [0, 1.7, 0] }],
   },
   vendingMachine: {
-    label: 'Vending machine', description: 'Drink machines at the parking areas', group: 'Street objects', assetId: 'hesi:box:vending',
+    label: 'Vending machine', description: 'Drink machines at the parking areas', group: 'Street objects', instanceType: 'box:vending', assetId: 'hesi:box:vending',
     parts: [{ slot: 'vending', size: [1.1, 1.9, 0.7], position: [0, 0.95, 0] }],
   },
   paCanopy: {
-    label: 'PA canopy', description: 'Service-area canopy roofs', group: 'Street objects', assetId: 'hesi:box:canopy',
+    label: 'PA canopy', description: 'Service-area canopy roofs', group: 'Street objects', instanceType: 'box:canopy', assetId: 'hesi:box:canopy',
     parts: [{ slot: 'canopy', size: [8, 0.35, 5], position: [0, 3.4, 0] }],
   },
   parkedCar: {
-    label: 'Parked car', description: 'Cars parked in the service areas', group: 'Street objects',
+    label: 'Parked car', description: 'Cars parked in the service areas', group: 'Street objects', instanceType: 'box:parkedBody',
     parts: [{ slot: 'parkedBody', size: [4.2, 1, 1.8], position: [0, 0.5, 0] }, { slot: 'parkedGlass', size: [2.2, 0.6, 1.7], position: [-0.1, 1.3, 0] }],
   },
 
   concreteBarrier: {
-    label: 'Concrete barrier', description: 'Road-edge concrete barriers', group: 'Barriers & rails', assetId: 'hesi:segment:barrier',
+    label: 'Concrete barrier', description: 'Road-edge concrete barriers', group: 'Barriers & rails', instanceType: 'box:barrier', assetId: 'hesi:segment:barrier',
     parts: [{ slot: 'barrier', size: [6, 1.1, 0.4], position: [0, 0.55, 0] }],
   },
   guardrail: {
-    label: 'Guardrail', description: 'Metal guardrails along roads and parking areas', group: 'Barriers & rails', assetId: 'hesi:segment:railMetal',
+    label: 'Guardrail', description: 'Metal guardrails along roads and parking areas', group: 'Barriers & rails', instanceType: 'box:railMetal', assetId: 'hesi:segment:railMetal',
     parts: [{ slot: 'railMetal', size: [6, 0.7, 0.15], position: [0, 0.75, 0] }],
   },
   safetyFence: {
-    label: 'Safety fence', description: 'Wire safety fencing behind the barrier line', group: 'Barriers & rails',
+    label: 'Safety fence', description: 'Wire safety fencing behind the barrier line', group: 'Barriers & rails', instanceType: 'box:fence',
     parts: [{ slot: 'fence', size: [6, 2, 0.08], position: [0, 1, 0] }],
   },
 
@@ -219,11 +226,11 @@ export const WORLD_OBJECTS = Object.freeze({
     parts: [{ slot: 'signBack', size: [6.4, 2.2, 0.2], position: [0, 5, -0.12] }, { slot: 'signGreen', size: [6, 1.8, 0.1], position: [0, 5, 0.02] }],
   },
   exitSign: {
-    label: 'Exit sign', description: 'Overhead green exit panels', group: 'Signs', assetId: 'hesi:segment:exitGreen',
+    label: 'Exit sign', description: 'Overhead green exit panels', group: 'Signs', instanceType: 'box:exitGreen', assetId: 'hesi:segment:exitGreen',
     parts: [{ slot: 'exitGreen', size: [4, 1.4, 0.12], position: [0, 5, 0] }],
   },
   chevronBoard: {
-    label: 'Chevron board', description: 'Yellow curve-warning chevrons', group: 'Signs',
+    label: 'Chevron board', description: 'Yellow curve-warning chevrons', group: 'Signs', instanceType: 'plane:chevron',
     parts: [{ slot: 'chevron', size: [1.2, 0.9, 0.08], position: [0, 1.2, 0] }],
   },
   matrixSign: {
@@ -232,7 +239,7 @@ export const WORLD_OBJECTS = Object.freeze({
   },
 
   neonSignage: {
-    label: 'Neon signage', description: 'Building neon boxes and rooftop signs', group: 'Lights',
+    label: 'Neon signage', description: 'Building neon boxes and rooftop signs', group: 'Lights', instanceType: 'box:neon',
     parts: [{ slot: 'neon', size: [4, 1.2, 0.2], position: [0, 2, 0] }],
   },
   whiteLamp: {
@@ -250,6 +257,11 @@ export function worldObjectSurfaces(objectId) {
   const entry = WORLD_OBJECTS[objectId];
   if (!entry) return [];
   return [...new Set(entry.parts.map((part) => part.slot))];
+}
+
+/** The world object drawn by an instanced bucket, or null when none is. */
+export function worldObjectForInstanceType(instanceType) {
+  return Object.keys(WORLD_OBJECTS).find((objectId) => WORLD_OBJECTS[objectId].instanceType === instanceType) || null;
 }
 
 /** Ids of every world object that shares a surface — the "this also changes X" warning. */
@@ -386,7 +398,7 @@ export function partFaceNames(part) {
 }
 
 export function blankCustomAssetsDocument() {
-  return { version: CUSTOM_ASSETS_VERSION, assets: {}, textures: {}, worldTextures: {} };
+  return { version: CUSTOM_ASSETS_VERSION, assets: {}, textures: {}, worldTextures: {}, worldModels: {} };
 }
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -422,6 +434,11 @@ export function customAssetsDocumentErrors(document) {
     if (!hasDataUrl && !hasUrl) {
       errors.push(`textures.${id} needs a data:image/... dataUrl or a relative image url`);
     }
+  }
+  if (document.worldModels !== undefined && !isRecord(document.worldModels)) errors.push('worldModels must be an object');
+  for (const [instanceType, assetId] of Object.entries(document.worldModels || {})) {
+    if (!worldObjectForInstanceType(instanceType)) errors.push(`unknown world model target: ${instanceType}`);
+    else if (assetId !== null && !document.assets[assetId]) errors.push(`worldModels.${instanceType} references missing asset ${assetId}`);
   }
   for (const [slot, entry] of Object.entries(document.worldTextures || {})) {
     if (!Object.hasOwn(WORLD_SURFACES, slot)) { errors.push(`unknown world texture slot: ${slot}`); continue; }
@@ -2506,6 +2523,126 @@ export function buildCustomAssetGroup(assetDefinition, texturesById, { resolveAs
  * captured the first time it is touched, and slots without an override are
  * restored to it. That is what lets the editor re-apply live on every edit.
  */
+/**
+ * Merges a built custom-asset group into one geometry with per-material
+ * groups, fitted into the box `target` occupies.
+ *
+ * Instanced archetypes share a single unit geometry that every copy's matrix
+ * scales into place (a `box:*` bucket stretches a 1×1×1 box to each object's
+ * real size). Fitting the replacement into exactly the same box is therefore
+ * what keeps every copy standing where and how big it was.
+ */
+function mergedAssetGeometry(group, targetGeometry) {
+  group.updateMatrixWorld(true);
+  const geometries = [];
+  const materials = [];
+  group.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    const baked = child.geometry.clone().applyMatrix4(child.matrixWorld);
+    // mergeGeometries refuses mismatched attribute sets, and only these three
+    // matter for a PSX-style model.
+    for (const name of Object.keys(baked.attributes)) {
+      if (!['position', 'normal', 'uv'].includes(name)) baked.deleteAttribute(name);
+    }
+    if (!baked.getAttribute('normal')) baked.computeVertexNormals();
+    if (!baked.getAttribute('uv')) {
+      const count = baked.getAttribute('position').count;
+      baked.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+    }
+    const childMaterials = Array.isArray(child.material) ? child.material : [child.material];
+    if (baked.groups.length > 1) {
+      for (const groupRecord of baked.groups) materials.push(childMaterials[groupRecord.materialIndex] || childMaterials[0]);
+      geometries.push(baked);
+    } else {
+      baked.clearGroups();
+      materials.push(childMaterials[0]);
+      geometries.push(baked);
+    }
+  });
+  if (!geometries.length) return null;
+  const merged = mergeGeometries(geometries, true);
+  for (const geometry of geometries) geometry.dispose();
+  if (!merged) return null;
+  targetGeometry.computeBoundingBox();
+  merged.computeBoundingBox();
+  const target = targetGeometry.boundingBox;
+  const source = merged.boundingBox;
+  if (target && source) {
+    const scale = new THREE.Vector3(
+      (target.max.x - target.min.x) / Math.max(1e-6, source.max.x - source.min.x),
+      (target.max.y - target.min.y) / Math.max(1e-6, source.max.y - source.min.y),
+      (target.max.z - target.min.z) / Math.max(1e-6, source.max.z - source.min.z),
+    );
+    merged.translate(-source.min.x, -source.min.y, -source.min.z);
+    merged.scale(scale.x, scale.y, scale.z);
+    merged.translate(target.min.x, target.min.y, target.min.z);
+    merged.computeBoundingBox();
+    merged.computeBoundingSphere();
+  }
+  return { geometry: merged, materials };
+}
+
+/**
+ * Replaces the SHAPE of instanced world archetypes with saved custom models.
+ *
+ * The generator draws each instanced archetype as one InstancedMesh per chunk,
+ * every copy sharing a single geometry — so swapping that geometry changes
+ * every container, lamp or barrier in the map at once, which is exactly what
+ * the editor promises. Merged-quad archetypes (building facades, roofs, route
+ * signs) have no per-copy record and are not replaceable; they are absent from
+ * WORLD_OBJECTS[*].instanceType and never reach this function.
+ *
+ * Reversible like the texture pass: the generated geometry and material are
+ * kept on the mesh, and buckets with no override are restored to them.
+ */
+export function applyWorldModelOverrides(map, document, { resolveAssetPart = () => null } = {}) {
+  const summary = { applied: 0, skipped: 0, cleared: 0 };
+  const chunks = [...(map?._chunks?.values?.() || [])];
+  if (!chunks.length) return summary;
+  const overrides = isRecord(document?.worldModels) ? document.worldModels : {};
+  const built = new Map();
+  const meshesByType = new Map();
+  for (const chunk of chunks) {
+    for (const object of chunk.group?.children || []) {
+      if (!object.isInstancedMesh) continue;
+      const instanceType = String(object.name).replace(/^chunk\s+\S+\s+/, '');
+      if (!meshesByType.has(instanceType)) meshesByType.set(instanceType, []);
+      meshesByType.get(instanceType).push(object);
+    }
+  }
+  for (const [instanceType, meshes] of meshesByType) {
+    const assetId = overrides[instanceType];
+    const definition = assetId ? document?.assets?.[assetId] : null;
+    if (assetId && !definition) { summary.skipped += 1; continue; }
+    for (const mesh of meshes) {
+      if (!mesh.userData.hesiGeneratedModel) {
+        mesh.userData.hesiGeneratedModel = { geometry: mesh.geometry, material: mesh.material };
+      }
+      const original = mesh.userData.hesiGeneratedModel;
+      if (!definition) {
+        if (mesh.geometry !== original.geometry) {
+          mesh.geometry = original.geometry;
+          mesh.material = original.material;
+          mesh.computeBoundingSphere?.();
+          summary.cleared += 1;
+        }
+        continue;
+      }
+      if (!built.has(assetId)) {
+        const group = buildCustomAssetGroup(definition, document.textures, { resolveAssetPart });
+        built.set(assetId, mergedAssetGeometry(group, original.geometry));
+      }
+      const replacement = built.get(assetId);
+      if (!replacement) { summary.skipped += 1; continue; }
+      mesh.geometry = replacement.geometry;
+      mesh.material = replacement.materials.length === 1 ? replacement.materials[0] : replacement.materials;
+      mesh.computeBoundingSphere?.();
+      summary.applied += 1;
+    }
+  }
+  return summary;
+}
+
 export function applyWorldTextureOverrides(materials, document) {
   const summary = { applied: 0, skipped: 0, cleared: 0 };
   if (!materials) return summary;

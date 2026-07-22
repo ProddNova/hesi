@@ -4521,6 +4521,108 @@
         }
       ],
       "updatedAt": "2026-07-22T16:42:27.571Z"
+    },
+    "custom:0032": {
+      "id": "custom:0032",
+      "label": "Office building custom",
+      "description": "Based on the generated office building",
+      "layer": "Props",
+      "createdAt": "2026-07-22T17:45:31.640Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Office building",
+          "position": [
+            0,
+            8,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            9,
+            16,
+            9
+          ],
+          "color": "#ffffff",
+          "faces": {
+            "right": {
+              "texture": "tex:0108"
+            },
+            "left": {
+              "texture": "tex:0108"
+            },
+            "top": {
+              "texture": "tex:0108"
+            },
+            "bottom": {
+              "texture": "tex:0108"
+            },
+            "front": {
+              "texture": "tex:0108"
+            },
+            "back": {
+              "texture": "tex:0108"
+            }
+          }
+        }
+      ],
+      "updatedAt": "2026-07-22T17:45:50.885Z"
+    },
+    "custom:0033": {
+      "id": "custom:0033",
+      "label": "Dark building custom",
+      "description": "Based on the generated dark building",
+      "layer": "Props",
+      "createdAt": "2026-07-22T18:11:57.660Z",
+      "parts": [
+        {
+          "kind": "box",
+          "name": "Dark building",
+          "position": [
+            0,
+            7,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            9,
+            14,
+            9
+          ],
+          "color": "#ffffff",
+          "faces": {}
+        },
+        {
+          "kind": "box",
+          "name": "Building roofs",
+          "position": [
+            0,
+            14.2,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            9.4,
+            0.4,
+            9.4
+          ],
+          "color": "#11141e",
+          "faces": {}
+        }
+      ],
+      "updatedAt": "2026-07-22T18:12:19.727Z"
     }
   },
   "textures": {
@@ -4911,6 +5013,14 @@
     "tex:0107": {
       "name": "barrier_test2.png",
       "url": "textures/barrier-test2-055de6a691.png"
+    },
+    "tex:0108": {
+      "name": "Generated · Office building",
+      "url": "textures/generated-office-building-7c798c31d9.png"
+    },
+    "tex:0109": {
+      "name": "Generated · Dark building",
+      "url": "textures/generated-dark-building-576db06ead.png"
     }
   },
   "worldTextures": {

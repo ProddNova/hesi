@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WORLD_OBJECTS } from '/js/custom-assets.js';
+import { PART_KINDS, WORLD_OBJECTS, WORLD_SURFACES } from '/js/custom-assets.js';
 
 /**
  * Representative geometry for a world surface that has no reusable catalog
@@ -94,25 +94,67 @@ export function previewFocusBounds(group) {
 }
 
 /**
- * Editable parts for "Edit as model": the object's composite boxes converted
- * into modeler primitives, coloured like the surfaces they stand for. Used
- * where the catalog has no real geometry to hand over instead.
+ * The image a surface is currently wearing, as a texture-library id.
+ *
+ * A surface either carries the user's own override image — already a library
+ * entry — or the generator's own texture, which is a 256×256 canvas built at
+ * runtime (the lit window grids of the facades, the chevron board) and belongs
+ * to no library at all. Those are baked into the library on demand, once,
+ * keyed by name, so an object opened in the modeler looks like the thing it
+ * came from instead of a white box — and the picture is then editable like any
+ * other uploaded image.
  */
-export function worldObjectModelParts(objectId, materials = null) {
+function surfaceTextureId(slot, label, material, store) {
+  if (!store) return null;
+  const override = store.worldSurface(slot).texture;
+  if (override && store.getTexture(override)) return override;
+  const image = material?.userData?.hesiGeneratedLook?.map?.image || material?.map?.image;
+  if (!image?.width) return null;
+  const name = `Generated · ${label}`;
+  const existing = store.textures().find((texture) => texture.name === name);
+  if (existing) return existing.id;
+  try {
+    const canvas = image instanceof HTMLCanvasElement ? image : (() => {
+      const copy = document.createElement('canvas');
+      copy.width = image.naturalWidth || image.width;
+      copy.height = image.naturalHeight || image.height;
+      copy.getContext('2d').drawImage(image, 0, 0);
+      return copy;
+    })();
+    return store.addTextureFromDataUrl(name, canvas.toDataURL('image/png'));
+  } catch {
+    return null; // cross-origin image, or a canvas the browser refuses to read
+  }
+}
+
+/**
+ * Editable parts for "Edit as model": the object's composite boxes converted
+ * into modeler primitives, wearing the same textures and colours the surfaces
+ * wear in the world. Used where the catalog has no real geometry to hand over.
+ */
+export function worldObjectModelParts(objectId, materials = null, { store = null } = {}) {
   const entry = WORLD_OBJECTS[objectId];
   if (!entry) return [];
   return entry.parts.map((part, index) => {
     const material = materials?.[part.slot];
+    const surface = WORLD_SURFACES[part.slot];
     const generated = material?.userData?.hesiGeneratedLook?.color;
     const color = generated || (material?.color?.getHexString ? `#${material.color.getHexString()}` : '#9aa7b5');
+    const texture = surfaceTextureId(part.slot, surface?.label || part.slot, material, store);
+    const faces = {};
+    if (texture) {
+      // Every side of the volume wears it, the way the generator wraps a
+      // building box; a white base keeps the picture from being tinted dark.
+      for (const face of PART_KINDS.box.faces) faces[face] = { texture };
+    }
     return {
       kind: 'box',
-      name: `${part.slot}${entry.parts.filter((other) => other.slot === part.slot).length > 1 ? ` ${index + 1}` : ''}`,
+      name: `${surface?.label || part.slot}${entry.parts.filter((other) => other.slot === part.slot).length > 1 ? ` ${index + 1}` : ''}`,
       position: [...part.position],
       rotation: [0, 0, 0],
       scale: [...part.size],
-      color,
-      faces: {},
+      color: texture ? '#ffffff' : color,
+      faces,
     };
   });
 }

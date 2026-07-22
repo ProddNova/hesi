@@ -8,6 +8,7 @@ import {
   WORLD_SURFACE_GROUPS,
   WORLD_TEXTURE_SLOTS,
   compactWorldSurfaceStyle,
+  worldObjectForInstanceType,
   worldObjectSurfaces,
   worldObjectsUsingSurface,
   isDefaultWorldSurfaceStyle,
@@ -15,6 +16,7 @@ import {
   applyObjectFaceStyles,
   applyPartFaceProjections,
   applyVertexOffsets,
+  applyWorldModelOverrides,
   applyWorldTextureOverrides,
   blankCustomAssetsDocument,
   buildCustomAssetGroup,
@@ -386,6 +388,62 @@ test('world surface fit modes drive the texture transform', () => {
 
   assert.equal(normalizeWorldSurfaceStyle({ fit: 'nonsense' }).fit, 'tile');
   assert.deepEqual(compactWorldSurfaceStyle({ fit: 'cover', aspect: 3 }), { fit: 'cover', aspect: 3 });
+});
+
+test('a saved model replaces the shape of every copy in an instanced bucket', () => {
+  // Two chunks of the same bucket: one shared geometry drives every copy.
+  const makeBucket = (name) => {
+    const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial(), 4);
+    mesh.name = name;
+    return mesh;
+  };
+  const buckets = [makeBucket('chunk 0,0 box:container'), makeBucket('chunk 1,0 box:container')];
+  const other = makeBucket('chunk 0,0 box:vending');
+  const map = { _chunks: new Map([['0,0', { group: { children: [buckets[0], other] } }], ['1,0', { group: { children: [buckets[1]] } }]]) };
+  const generated = buckets[0].geometry;
+  const document = {
+    version: 1,
+    textures: {},
+    assets: {
+      'custom:0001': {
+        id: 'custom:0001',
+        label: 'Crate',
+        parts: [
+          { kind: 'box', position: [0, 0.5, 0], scale: [2, 1, 1], color: '#ff0000' },
+          { kind: 'cylinder', position: [0, 1.5, 0], scale: [1, 1, 1], color: '#00ff00' },
+        ],
+      },
+    },
+    worldModels: { 'box:container': 'custom:0001' },
+  };
+  const summary = applyWorldModelOverrides(map, document);
+  assert.equal(summary.applied, 2, 'every chunk of the bucket is swapped');
+  for (const mesh of buckets) {
+    assert.notEqual(mesh.geometry, generated, 'the bucket draws the model now');
+    assert.ok(mesh.geometry.getAttribute('position').count > 24, 'the replacement carries the model geometry');
+    // Instance matrices still scale a unit box, so the model is fitted to it.
+    mesh.geometry.computeBoundingBox();
+    const size = mesh.geometry.boundingBox.getSize(new THREE.Vector3());
+    assert.ok(Math.abs(size.x - 1) < 1e-4 && Math.abs(size.y - 1) < 1e-4 && Math.abs(size.z - 1) < 1e-4,
+      'the model is fitted into the unit box every instance matrix scales');
+  }
+  assert.equal(other.geometry, other.userData.hesiGeneratedModel.geometry, 'other buckets are untouched');
+
+  // Dropping the override restores the generated geometry exactly.
+  delete document.worldModels['box:container'];
+  const cleared = applyWorldModelOverrides(map, document);
+  assert.equal(cleared.cleared, 2);
+  assert.equal(buckets[0].geometry, generated);
+});
+
+test('world model targets and their validation', () => {
+  assert.equal(worldObjectForInstanceType('box:container'), 'shippingContainer');
+  assert.equal(worldObjectForInstanceType('facadeOffice'), null, 'merged-quad archetypes are not replaceable');
+  const document = validDocument();
+  document.worldModels = { 'box:container': 'custom:0404' };
+  assert.match(customAssetsDocumentErrors(document)[0], /missing asset custom:0404/);
+  document.worldModels = { 'facadeOffice': null };
+  assert.match(customAssetsDocumentErrors(document)[0], /unknown world model target/);
 });
 
 test('world objects are composites of real surfaces', () => {

@@ -138,13 +138,22 @@ check('reset restores the lamp head', await page.evaluate(() => window.hesiEdito
 
 // Editing as parts must land in the custom library with real primitive parts:
 // a lamp is a mast plus a head, both reshapeable and texturable.
-await page.click('[data-testid="modeler-world-edit-as-parts"]');
+await page.click('[data-testid="modeler-world-object-officeBuilding"]');
+await page.waitForTimeout(700);
+await page.click('[data-testid="modeler-world-edit-as-model"]');
 await page.waitForTimeout(1000);
 check('edit-as-parts switches to the custom library', await page.locator('[data-testid="modeler-asset-list"]').isVisible());
 const partCount = await page.locator('.modeler-part-row').count();
 check('edit-as-parts produces one editable part per surface', partCount === 2, `${partCount} parts`);
 const faceRows = await page.locator('.modeler-face-row').count();
 check('those parts expose faces to texture', faceRows >= 6, `${faceRows} face rows`);
+// The parts must arrive wearing what the surface wears in the world — a
+// building opened in the modeler shows its windows, not a white box.
+const textured = await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.modeler-face-row')];
+  return rows.filter((row) => row.querySelector('img.modeler-face-thumb')).length;
+});
+check('parts arrive wearing the generated texture', textured >= 6, `${textured} textured faces`);
 await page.screenshot({ path: path.join(OUT, 'modeler-edit-as-model.png') });
 check('switching back restores the modeler', await page.locator('[data-testid="modeler-asset-list"]').isVisible());
 

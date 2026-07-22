@@ -168,10 +168,23 @@ full-screen modeling section that is always available inside the editor:
   changes all of them. Two ways out into normal modelling:
   *Edit exact shape…* hands over the world's real geometry as an assembled
   part, and *Edit as editable parts…* hands over the object's volumes as
-  primitives you can reshape, texture per face and drag vertices on — from
-  there it is an ordinary custom object, saved to the catalog and placeable.
-  (Editing the model makes *your* object; surface paint is what changes the
-  copies already standing in the map.)
+  primitives you can reshape, texture per face and drag vertices on. The parts
+  arrive wearing what the surfaces wear in the world — the generator'''s own
+  facade texture is baked into the texture library on demand as
+  `Generated · <surface>`, so a building opens with its windows rather than as
+  a white box, and that picture is then editable like any uploaded image.
+- **Replacing an archetype'''s shape**: the generator draws its instanced
+  archetypes — lamps, pillars, containers, cranes, garage, konbini, vending,
+  canopies, parked cars, barriers, guardrails, fences, exit signs, chevrons,
+  neon, the landmark tower (17 of the 26) — from **one shared geometry per
+  bucket**. Model one of those and press *Save Object*, and every copy in the
+  map takes the new shape, in the editor and in the playable game; *Use a saved
+  object…* points an archetype at a model you already have, and *Back to
+  generated shape* undoes it. The model is fitted into the box the original
+  occupied, so every copy keeps its position and size. Building facades, roofs,
+  sheds and route signs are merged into chunk quads with no record of each
+  copy, so their shape cannot be replaced — the panel says so, and painting
+  their surfaces is what changes all of them.
 
 - **Map Inspector face textures**: select a rendered wall, floor, placed box,
   or other non-instanced object and assign/upload an image per exposed face
@@ -251,7 +264,9 @@ while the slider is still moving. *Save* persists to
 `data/editor/custom-assets.json`; the playable game applies the same overrides
 on load. Overrides are stored compacted (`{ texture, fit, repeat, aspect,
 offset, rotation, tint, brightness, flipX, flipY }`, only the non-default
-fields), and the older plain-texture-id form still loads unchanged.
+fields), and the older plain-texture-id form still loads unchanged. Archetype
+model replacements live beside them as `worldModels: { "<geometry>:<material>":
+"custom:NNNN" }` and are applied by `applyWorldModelOverrides`.
 
 ## Commits (map versions)
 

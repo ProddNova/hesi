@@ -169,17 +169,66 @@ calling `render()` tore out the input being typed into (and the slider being
 dragged). Linked partners are now updated in place through a handle `_slider`
 returns.
 
+## Follow-up: the model round trip
+
+Two bugs reported against the world-object modeller.
+
+**Parts arrived untextured.** `worldObjectModelParts` copied the material's
+*colour* and nothing else, so a building opened as a white box while the World
+objects view showed it with its lit windows. The generator's facade textures
+are 256×256 canvases built at runtime (`_facadeTexture`) that belong to no
+texture library, so there was no id to reference. They are now baked into the
+library on demand — once, keyed by name (`Generated · Office building`) — and
+attached to every face of the part, which also makes the generated texture
+editable like any uploaded image. A user override on the surface is used
+directly instead, since that is already a library entry.
+
+**Saving a model changed nothing in the world.** This was the design, not a
+slip: the modeller produced a separate custom asset. It is now a real round
+trip *for the archetypes where the renderer allows it*.
+
+`applyWorldModelOverrides` (`js/custom-assets.js`) replaces the geometry of an
+instanced bucket. The generator draws each instanced archetype as one
+InstancedMesh per chunk whose geometry every copy shares, so one swap changes
+every container/lamp/barrier at once. The saved object is built, merged with
+`mergeGeometries(…, true)` so per-part materials survive as geometry groups,
+and fitted into the bounding box the original geometry occupied — instance
+matrices scale a unit box, so fitting to that box is what keeps every copy in
+place and the right size. Reversible like the texture pass: the generated
+geometry and material stay on the mesh in `userData.hesiGeneratedModel` and
+buckets without an override are restored.
+
+`WORLD_OBJECTS[*].instanceType` names the bucket, and only the 17 archetypes
+that have one are replaceable. Storage is `worldModels: { "box:container":
+"custom:0031" }` in the same document as the surface paint, so the editor and
+`js/editor-map-patch.js` both apply it with no build/publish step. `Save
+Object` on an object opened from a replaceable archetype writes the mapping
+itself — that is the "reshape it and every copy follows" the report asked for —
+and `deleteAsset` drops any archetype pointing at a model that no longer
+exists.
+
+**Not fixed, by decision:** building facades, roofs, sheds and route signs are
+merged into chunk quads and the generator keeps no per-copy record
+(`_terrainAnchors` holds only `{x, z, r}` — no type, height or yaw), so nothing
+can place a replacement at each one. Doing it needs a `js/map.js` change to
+record building placements. The panel now states this plainly instead of
+offering a round trip that cannot land.
+
 ## Evidence
 
-- `npm run editor:test` — 125/125 (was 121/121; new assertions in
+- `npm run editor:test` — 127/127 (was 121/121; new assertions in
   `custom-assets.test.mjs` cover style normalize/compact/clamp, tiling + tint
   application, exact restore-to-generated, and composite-object integrity:
   every object part references a real surface, every object sits in exactly one
   group, and a lamp resolves to `['concrete', 'lampSodium']`. A further test
   pins the fit modes: a `[3, 0.5]` rectangular tile survives to the material,
   stretch and cover both collapse the repeat to `[1, 1]`, cover clamps instead
-  of wrapping, and a `worldTiled` slot keeps tiling even when asked to cover).
-- `node .devtests/surfaces-probe.mjs` (new) — 25/25, no console errors:
+  of wrapping, and a `worldTiled` slot keeps tiling even when asked to cover.
+  Two more cover archetype models: a saved object swaps the geometry of every
+  chunk of its bucket, leaves other buckets alone, is fitted into the unit box
+  the instance matrices scale, and restores exactly when the override is
+  dropped; plus validation of unknown targets and missing assets).
+- `node .devtests/surfaces-probe.mjs` (new) — 26/26, no console errors:
   overlay opens, cards render, metres-per-tile retiles the live road material
   (`[1,1] → [3,3]`), a tint repaints every office building at once
   (`ffffff → ff3366`), reset restores the generated colour, the object list is
@@ -190,7 +239,15 @@ returns.
   Unlinking the road tile and setting Z to 24 m gives the live material a
   rectangular `[3, 0.5]` repeat, the fit selector offers exactly
   `Tile,Stretch,Fit & crop`, and choosing Fit & crop reveals the surface-shape
-  control.
+  control. Opening a building as editable parts yields parts already wearing
+  the generated window texture (6 textured faces) rather than a white box.
+- `node .devtests/archetype-model-probe.mjs` (new) — 8/8, no console errors,
+  and it restores `custom-assets.json` from a snapshot afterwards: the
+  container bucket starts at 24 verts across 7 copies, modelling it and
+  pressing Save Object takes all 7 to 76 verts, the status line says so, the
+  World objects view reports the replacement, it survives a full page reload
+  from the saved document alone, and *Back to generated shape* returns all 7 to
+  24 verts.
 - `node .devtests/ui-audit.mjs` — ALL CLEAN (6 viewports × 8 UI states).
 - `node .devtests/e2e.mjs` — 41/41, confirming the shared runtime path
   (`js/editor-map-patch.js` → `applyWorldTextureOverrides`) still boots the
@@ -208,10 +265,21 @@ returns.
   ~7 generated building silhouettes between them (`facadeOffice` alone is used
   by the tower, crown, plain and slab shapes). The slot descriptions say so and
   the surface rows carry a `shared ×N` tag naming every archetype involved.
-- **Modelling a world object produces your own asset, not a replacement for the
-  instances already generated.** Re-meshing thousands of instanced/merged
-  copies in place is a different feature (a global archetype-replacement build
-  op) and is not what this does.
+- **Only instanced archetypes can have their shape replaced** (17 of the 26).
+  Merged-quad archetypes — every building facade, roofs, sheds, route signs —
+  can be repainted but not re-modelled, because the generator keeps no record
+  of where each copy stands. Modelling one still produces your own placeable
+  object.
+- A replacement is **fitted into the original's bounding box**, non-uniformly.
+  That is what keeps every copy where it was, but it also means a model with a
+  different aspect than the archetype gets stretched to match.
+- Replacement is per **bucket**, and buckets are shared the way materials are:
+  `box:concrete` is support pillars *and* lamp masts *and* assorted concrete
+  boxes, so replacing its shape reaches all of them.
+- **Vertex cost multiplies by the copy count.** The container bucket alone is
+  565 instances, so swapping its 24-vertex box for a 5000-vertex model is a
+  5000-vertex draw repeated 565 times. Nothing caps this yet — keep replacement
+  models PSX-cheap, which is the house style anyway.
 - Building facades tile through an atlas window (`_pushBuildingBox` picks
   `windows/cols × floors/rows` per wall), so a photo lands per window-grid
   block rather than per building; the repeat control is the way to bring it to

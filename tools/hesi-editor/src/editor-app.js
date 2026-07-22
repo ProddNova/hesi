@@ -16,11 +16,11 @@ import { ProjectPersistence } from './overrides/project-persistence.js';
 import { createRoutePersistence } from './overrides/route-persistence.js';
 import { getScene, sceneFromSearch } from './scenes/scene-registry.js';
 import { CustomAssetStore } from './world/custom-asset-store.js';
-import { assembleDefinitionFromEntities, registerCustomAssets } from './world/custom-asset-integration.js';
+import { assembleDefinitionFromEntities, assetPartResolver, registerCustomAssets } from './world/custom-asset-integration.js';
 import { ModelerPanel } from './modeler/modeler-panel.js';
 import { SurfacesPanel } from './surfaces/surfaces-panel.js';
 import { FaceTextureController } from './interaction/face-texture-controller.js';
-import { applyWorldTextureOverrides } from '/js/custom-assets.js';
+import { applyWorldModelOverrides, applyWorldTextureOverrides } from '/js/custom-assets.js';
 import { SkyboxController } from './world/skybox-controller.js';
 
 export async function createEditorApp(root) {
@@ -47,6 +47,14 @@ export async function createEditorApp(root) {
   let customAssetStore = null;
   let modeler = null;
   let surfaces = null;
+  // Saved models that stand in for an instanced archetype's generated shape;
+  // one pass swaps the geometry of every copy in the map.
+  const applyWorldModels = () => {
+    if (!adapter?.map || !customAssetStore) return;
+    applyWorldModelOverrides(adapter.map, customAssetStore.document, {
+      resolveAssetPart: assetRegistry ? assetPartResolver(assetRegistry) : undefined,
+    });
+  };
   let faceTextureController = null;
   let skyboxController = null;
   let disposed = false;
@@ -468,6 +476,7 @@ export async function createEditorApp(root) {
       const registered = registerCustomAssets(assetRegistry, customAssetStore.document);
       if (registered) shell.setStatus(`Loaded ${registered} custom modeled asset${registered === 1 ? '' : 's'}`);
       if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
+      applyWorldModels();
       shell.setTextures(customAssetStore.textures());
     } catch (error) {
       shell.setStatus(`Custom assets unavailable · ${error.message}`);
@@ -544,10 +553,13 @@ export async function createEditorApp(root) {
         if (adapter.map?.materials) applyWorldTextureOverrides(adapter.map.materials, customAssetStore.document);
         surfaces?.refresh();
       },
+      onWorldModelsChanged: () => applyWorldModels(),
       isAssetInUse: (assetId) => projectState.toJSON().placedObjects.some((placedRecord) => placedRecord.assetId === assetId),
       onOpenChange: (open) => viewport.setNavigationBlocked(open, 'modeler-overlay'),
       getMaterials: () => adapter.map?.materials || null,
+      getMap: () => adapter.map || null,
       onOpenSurfaces: (slot) => surfaces?.open(slot),
+      onWorldModelsChanged: () => applyWorldModels(),
     });
     // Surfaces: the repeated textures and repeated objects of the generated
     // world, each one material shared by every copy out in the map.
