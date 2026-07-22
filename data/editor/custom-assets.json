@@ -5105,6 +5105,14 @@
     "tex:0133": {
       "name": "building_mag.png",
       "url": "textures/building-mag-8ac4cffdb5.png"
+    },
+    "tex:0134": {
+      "name": "cement.png",
+      "url": "textures/cement-e1e999f8ab.png"
+    },
+    "tex:0135": {
+      "name": "terrain1.png",
+      "url": "textures/terrain1-795be58c89.png"
     }
   },
   "worldTextures": {
@@ -5135,7 +5143,7 @@
       "brightness": 0.65
     },
     "towerWhite": {
-      "texture": "tex:0114"
+      "texture": "tex:0134"
     },
     "facadeApartment": {
       "texture": "tex:0125",
@@ -5179,7 +5187,14 @@
     },
     "facadeColdStore": {
       "texture": "tex:0133",
-      "brightness": 1.0
+      "brightness": 1
+    },
+    "concrete": {
+      "texture": "tex:0134"
+    },
+    "ground": {
+      "texture": "tex:0135",
+      "brightness": 3
     }
   },
   "worldModels": {}

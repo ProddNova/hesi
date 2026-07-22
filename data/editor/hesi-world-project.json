@@ -375,6 +375,18 @@
     "prop:ramp-8:0082": {
       "visible": false
     },
+    "prop:ramp-8:0086": {
+      "visible": false
+    },
+    "prop:ramp-8:0087": {
+      "visible": false
+    },
+    "prop:ramp-8:0088": {
+      "visible": false
+    },
+    "prop:ramp-8:0089": {
+      "visible": false
+    },
     "prop:ramp-9:0045": {
       "visible": false
     },
@@ -397,6 +409,9 @@
       "visible": false
     },
     "prop:ramp-9:0086": {
+      "visible": false
+    },
+    "prop:wangan-0:3120": {
       "visible": false
     },
     "prop:wangan-0:3121": {

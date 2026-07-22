@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-22T21:17:34.839Z",
+  "generatedAt": "2026-07-22T22:19:45.013Z",
   "project": {
-    "draftSignature": "fnv1a32:02df32d7",
+    "draftSignature": "fnv1a32:0fd075c8",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -2415,6 +2415,98 @@
       "op": "instance"
     },
     {
+      "index": 0,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3709.05127,
+        59.62171,
+        -4019.22388,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
+      "index": 1,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3675.98145,
+        59.62171,
+        -4032.50781,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
+      "index": 2,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3661.80859,
+        59.62171,
+        -4038.20093,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
+      "index": 3,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3633.46313,
+        59.62171,
+        -4049.5874,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedGlass",
+      "op": "instance"
+    },
+    {
       "index": 32,
       "matrix": [
         0,
@@ -2596,6 +2688,29 @@
         1
       ],
       "mesh": "chunk 6,-7 box:vending",
+      "op": "instance"
+    },
+    {
+      "index": 6,
+      "matrix": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3711.90234,
+        58.92171,
+        -4020.44067,
+        1
+      ],
+      "mesh": "chunk 6,-7 box:parkedBody",
       "op": "instance"
     },
     {
