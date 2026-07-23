@@ -59,7 +59,7 @@ await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 30000 });
 await page.click('#new-game-button');
 await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeout: 8000 });
-await page.evaluate(() => window.shutoko.setCustomCarEnabled(true));
+await page.evaluate(() => window.shutoko.ensureCustomCarLoaded());
 // Editor build + selected PSXStyle showroom car must both be in before probing hitboxes.
 await page.waitForFunction(() => window.shutoko.customCar.status === 'ready' && window.shutoko.garage.colliders.length > 10, null, { timeout: 20000 });
 await page.waitForTimeout(500);

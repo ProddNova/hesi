@@ -76,7 +76,7 @@ export const PSX_CAR_MODELS=Object.freeze(RAW_MODELS.map(([id,folder,file],index
   color:PAINT_COLORS[index%PAINT_COLORS.length],
   wheel:WHEEL_FILES[index%WHEEL_FILES.length],
 })));
-export const DEFAULT_PSX_CAR_ID='JapanLegendaryDrifter';
+export const DEFAULT_PSX_CAR_ID='JapanSedan';
 const MODEL_BY_ID=new Map(PSX_CAR_MODELS.map(model=>[model.id,model]));
 
 export function getPSXCarModel(id){

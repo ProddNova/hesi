@@ -14,32 +14,24 @@ function garageObject(childIndex, position, { visible = true, quaternion = [0, 0
   };
 }
 
-test('garage builds mirror the editable parked car transform to the runtime PSXStyle anchor', () => {
+test('garage builds move the shared runtime PSXStyle anchor directly', () => {
   const root = new THREE.Group();
-  const editableCar = new THREE.Group();
+  const legacyCarAnchor = new THREE.Group();
   const runtimeCar = new THREE.Group();
-  editableCar.userData.editorBuildMirror = 'garage-showroom-car';
-  runtimeCar.userData.editorBuildMirror = 'garage-showroom-car';
-  runtimeCar.userData.editorBuildQuaternionOffset = [0, -1, 0, 0];
-  root.add(editableCar, runtimeCar);
+  root.add(legacyCarAnchor, runtimeCar);
   const editorHeading = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, 0));
 
   const summary = applyGarageBuild(root, {
-    operations: [garageObject(0, [-0.83, 0.05, 0], {
-      visible: false,
+    operations: [garageObject(1, [1.2, 0.05, -0.4], {
       quaternion: editorHeading.toArray(),
     })],
   });
 
   assert.deepEqual(summary, { applied: 1, skipped: 0 });
-  assert.deepEqual(editableCar.position.toArray(), [-0.83, 0.05, 0]);
-  assert.deepEqual(runtimeCar.position.toArray(), [-0.83, 0.05, 0]);
-  assert.equal(editableCar.visible, false);
-  assert.equal(runtimeCar.visible, false);
-  assert.ok(editableCar.quaternion.angleTo(editorHeading) < 1e-8);
-  assert.ok(runtimeCar.quaternion.angleTo(
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -Math.PI / 2, 0)),
-  ) < 1e-8);
+  assert.deepEqual(legacyCarAnchor.position.toArray(), [0, 0, 0]);
+  assert.deepEqual(runtimeCar.position.toArray(), [1.2, 0.05, -0.4]);
+  assert.equal(runtimeCar.visible, true);
+  assert.ok(runtimeCar.quaternion.angleTo(editorHeading) < 1e-8);
 });
 
 test('garage builds mark edited follower anchors so runtime refreshes preserve them', () => {

@@ -597,6 +597,46 @@ try {
   await garage.goto(`${BASE}/editor?scene=garage&project=${encodeURIComponent('data/editor/garage-project.json')}`, { waitUntil: 'domcontentloaded' });
   await garage.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'garage', null, { timeout: 30000 });
   await garage.waitForSelector('[data-testid="loading-overlay"]', { state: 'hidden' });
+  const showroomState = await garage.evaluate(() => {
+    const app = window.hesiEditor;
+    const car = app.registry.list().find((entity) => entity.type === 'garage-parked-car');
+    if (!car) return null;
+    const model = car.object3D.children.find((child) => child.userData?.psxCarId);
+    const bounds = car.getWorldBounds();
+    const size = bounds.getSize(new car.object3D.position.constructor());
+    app.selection.select(car.id, { source: 'smoke' });
+    const before = {
+      position: car.object3D.position.toArray(),
+      quaternion: car.object3D.quaternion.toArray(),
+      scale: car.object3D.scale.toArray(),
+    };
+    const moved = {
+      ...before,
+      position: [before.position[0] + 0.75, before.position[1], before.position[2]],
+    };
+    const applied = app.transformManager.applyNumeric(moved, 'Move showroom car');
+    const movedX = car.object3D.position.x;
+    const persistedX = app.projectState.getOverride(car.id)?.transform?.position?.[0];
+    app.history.undo();
+    return {
+      id: car.id,
+      selected: app.selection.selected?.id,
+      editable: car.editable,
+      selectable: car.metadata.selectable,
+      model: model?.userData?.psxCarId,
+      visible: car.object3D.visible && model?.visible !== false,
+      size: size.toArray(),
+      gizmo: app.transformManager.state().attached,
+      moved: applied && Math.abs(movedX - moved.position[0]) < 1e-6 && Math.abs(persistedX - moved.position[0]) < 1e-6,
+      restored: Math.abs(car.object3D.position.x - before.position[0]) < 1e-6,
+    };
+  });
+  if (!showroomState || showroomState.model !== 'JapanSedan' || !showroomState.visible
+    || !showroomState.editable || showroomState.selectable === false || !showroomState.gizmo
+    || showroomState.selected !== showroomState.id || !showroomState.moved || !showroomState.restored
+    || showroomState.size.some((value) => !(value > 0))) {
+    throw new Error(`Garage Japan Sedan is not visible/selectable/movable: ${JSON.stringify(showroomState)}`);
+  }
   const floorState = await garage.evaluate(() => {
     const floor = window.hesiEditor.registry.list().find((entity) => entity.type === 'garage-floor');
     if (!floor) return null;
@@ -663,7 +703,7 @@ try {
   });
   if (disposed.entities !== 0 || disposed.canvasPresent) throw new Error('Editor disposal left live registry or canvas state');
   if (errors.length) throw new Error(`Browser console errors: ${errors.join(' | ')}`);
-  console.log(`PASS real map default (${state.entities} semantic entities), photographic skybox UI/persistence, aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, garage floor/face textures/modeler fixed crop+flip, explicit demo, disposal`);
+  console.log(`PASS real map default (${state.entities} semantic entities), photographic skybox UI/persistence, aligned road controls, Tatsumi route right-click/live collision, fly/orbit, transform overrides, undo/redo, declarative duplication, visible/movable Japan Sedan in garage, garage floor/face textures/modeler fixed crop+flip, explicit demo, disposal`);
   console.log(`SKYBOX SCREENSHOT ${path.join(OUT, 'checkpoint-skybox-editor.png')}`);
   console.log(`ROAD SCREENSHOT ${path.join(OUT, 'checkpoint-road-tatsumi-editing.png')}`);
   console.log(`SCREENSHOT ${path.join(OUT, 'checkpoint-3-real-lamp-editing.png')}`);

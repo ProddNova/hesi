@@ -75,22 +75,14 @@ export class GarageSystem {
     const edge=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(6,.03,5)),new THREE.LineBasicMaterial({color:0xe8c14a}));edge.position.set(-7.2,.03,10.3);this.root.add(edge);this.deliveryEdge=edge;
     this.addSign('DELIVERY / 配達',V(-10.68,4,9.8),Math.PI/2,0xe9b947);
     this.addSign('WANGAN WORKS',V(-10.68,5,-2),Math.PI/2,0xe7e9e2);
-    this.parkedGroup=new THREE.Group();this.parkedGroup.position.set(0,.05,0);this.root.add(this.parkedGroup);
+    // Keep the former procedural-car slot as an empty compatibility anchor so
+    // existing garage child indices remain stable. It never renders a car.
+    this.parkedGroup=new THREE.Group();this.parkedGroup.position.set(0,.05,0);this.parkedGroup.visible=false;this.root.add(this.parkedGroup);
     // Children past this point are appended AFTER every editor-addressable
     // child (0-77), so garage-build childIndex operations keep resolving.
-    // carDisplay hosts the selected lazy-loaded PSXStyle pack car in garage
-    // mode; parkedGroup remains the procedural fallback while it is disabled.
+    // carDisplay is the single showroom anchor used by both the playable game
+    // and the world editor. The selected PSXStyle model is attached here.
     this.carDisplay=new THREE.Group();this.carDisplay.position.set(0,.05,0);this.carDisplay.rotation.y=-Math.PI/2;this.root.add(this.carDisplay);
-    // The editor exposes the procedural car because it has selectable geometry,
-    // while the playable game renders the pack car under carDisplay. Treat both
-    // groups as one editor target so an Apply-to-Game transform/visibility
-    // operation also reaches the car the player actually sees.
-    this.parkedGroup.userData.editorBuildMirror='garage-showroom-car';
-    this.carDisplay.userData.editorBuildMirror='garage-showroom-car';
-    // The imported PSX car is rotated PI inside carDisplay, while the procedural
-    // editor car has that orientation baked into parkedGroup. Preserve the
-    // existing visual heading when mirroring the editor's absolute rotation.
-    this.carDisplay.userData.editorBuildQuaternionOffset=[0,-1,0,0];
     // PS2-style waypoint beacons (Enchanted Arms look): a faceted crystal
     // diamond that spins and bobs, ringed by 4 tiny diamonds of the same shape
     // orbiting it. Blue over the garage door, yellow over the market PC.
@@ -155,7 +147,6 @@ export class GarageSystem {
     const placed=this.root.children.find(c=>c.name==='Editor placed objects');
     if(placed&&placed.visible!==false)for(const child of placed.children)consider(child);
     if(this.carDisplay?.children.length&&this.carDisplay.visible!==false)consider(this.carDisplay);
-    else if(this.parkedGroup?.visible!==false)consider(this.parkedGroup);
     this.colliders=boxes;
     // The old desk PC was hidden and sits outside the remodelled room, so the
     // market terminal now lives at the small table with the game boxes.
@@ -241,18 +232,8 @@ export class GarageSystem {
 
   refreshCar(spec={}){
     this.parkedGroup.clear();
-    const color=spec.color??0x8e2635, bodyMat=this.mat(typeof color==='string'?new THREE.Color(color):color);
-    const length=spec.dimensions?.length??4.35,width=spec.dimensions?.width??1.72,height=spec.dimensions?.height??1.28;
-    const body=new THREE.Mesh(new THREE.BoxGeometry(width,.48,length),bodyMat);body.position.y=.55;body.geometry.translate(0,0,0);this.parkedGroup.add(body);
-    const hood=new THREE.Mesh(new THREE.BoxGeometry(width*.91,.18,length*.28),bodyMat);hood.position.set(0,.83,-length*.31);this.parkedGroup.add(hood);
-    const cabin=new THREE.Mesh(new THREE.BoxGeometry(width*.78,height*.52,length*.43),this.mat(0x162231));cabin.position.set(0,1.05,length*.04);this.parkedGroup.add(cabin);
-    const roof=new THREE.Mesh(new THREE.BoxGeometry(width*.73,.13,length*.35),bodyMat);roof.position.set(0,1.38,length*.04);this.parkedGroup.add(roof);
-    const bumper=new THREE.Mesh(new THREE.BoxGeometry(width*.96,.2,.16),this.mat(0x202327));bumper.position.set(0,.38,-length*.51);this.parkedGroup.add(bumper);
-    const wheelGeo=new THREE.CylinderGeometry(.31,.31,.19,8),wheelMat=this.mat(0x0a0b0d);
-    for(const x of [-width*.52,width*.52])for(const z of [-length*.31,length*.31]){const w=new THREE.Mesh(wheelGeo,wheelMat);w.rotation.z=Math.PI/2;w.position.set(x,.38,z);this.parkedGroup.add(w);}
-    for(const x of [-width*.31,width*.31]){const lamp=new THREE.Mesh(new THREE.BoxGeometry(.3,.18,.05),this.mat(0xffdba1,0xffc06a,1));lamp.position.set(x,.65,-length*.505);this.parkedGroup.add(lamp);}
-    const tail=new THREE.Mesh(new THREE.BoxGeometry(width*.55,.13,.05),this.mat(0xff1f31,0xff1028,1));tail.position.set(0,.67,length*.505);this.parkedGroup.add(tail);
-    this.parkedGroup.rotation.y=Math.PI/2;
+    this.parkedGroup.visible=false;
+    this.carSpec=spec;
   }
 
   syncDeliveries(deliveries=[]){

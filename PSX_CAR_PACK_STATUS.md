@@ -1,4 +1,4 @@
-# PSXStyle custom car pack status (2026-07-23)
+# PSXStyle player car pack status (2026-07-23)
 
 ## Scope
 
@@ -17,20 +17,23 @@ not used by the browser and were intentionally not copied.
 
 ## Runtime design
 
-- The pack is not loaded or downloaded at boot.
-- Enabling the option fetches only the selected body and one wheel OBJ.
+- `JapanSedan` is the always-on default and the only playable/unlocked car.
+- Boot fetches only the selected body and one wheel OBJ.
 - Switching cars aborts stale requests and disposes the previous geometries and
   materials after the replacement shaders are precompiled.
-- Disabling the option aborts pending work, removes the car and disposes all of
-  its GPU resources.
+- The developer menu exposes only the model picker; the enable toggle and scale
+  control were removed.
 - Body materials use lightweight Lambert/basic shaders with no texture maps,
   no transparency and no shadows.
 - The four rims share one `InstancedMesh`; the four tires share another. Wheel
   steering updates those two small instance buffers only when the angle changes.
-- The procedural player car remains the zero-download fallback and retains its
-  headlight spotlights.
-- Saves created by the former GLB option migrate to `JapanLegendaryDrifter`
-  with scale `1.0`; enabled/disabled state is preserved.
+- The rectangular procedural car was removed. Its road anchor now contains only
+  the headlight spotlights, and its garage slot is an empty compatibility anchor
+  kept solely to preserve world-editor child indices.
+- Existing saves migrate once to always-on `JapanSedan` at scale `1.0`.
+- The world editor loads the same Japan Sedan model under the shared showroom
+  anchor, so it is visible, selectable, movable and emitted directly into the
+  garage build consumed by the game.
 - Service-worker caching is on demand: a model becomes offline-ready after its
   first selection, but the 7.12 MB catalog is never added to the boot cache.
 
@@ -40,21 +43,13 @@ Run:
 
 `node .devtests/psx-car-pack-probe.mjs`
 
-The probe checks all 50 files, live menu switching, persistence, lazy requests,
-GPU cleanup, console errors and road rendering budgets.
+The probe checks the Japan Sedan default, the single playable-car catalog, the
+picker-only UI, absence of procedural meshes, garage visibility/collision, all
+50 picker models, persistence, GPU cleanup and browser console errors.
 
-Observed in mobile Chromium:
+Japan Sedan costs 14,392 triangles and 6 draw calls. The heaviest model in the
+full picker catalog remains below 17,400 triangles and 10 draw calls.
 
-| Metric | Procedural car | PSX car |
-|---|---:|---:|
-| Full-scene draw calls | 140 | 134-135 |
-| Full-scene triangles | 81,754 | 86,209-87,024 |
-| Added GPU textures | 0 | 0 |
-| Same-run frame p50 | 133.4 ms | 133.4 ms |
-
-Typical cars cost 6-7 draw calls and roughly 4,500-5,500 triangles. The
-heaviest model in the full catalog remains below 17,400 triangles and 10 draw
-calls. The deleted GLB contained 35 primitives, 18 materials and roughly
-21,000 triangles.
-
-`npm run editor:test` also passes all 129 tests.
+`npm run editor:test` passes all 130 tests. A dedicated garage browser probe
+also verifies that `garage-part:0079` shows `JapanSedan`, attaches the transform
+gizmo, records a move override and restores it through undo.

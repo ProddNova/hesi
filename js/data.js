@@ -78,8 +78,8 @@ const car = (spec) => {
 export const CAR_SPECS = deepFreeze([
   car({
     id: 'suzume-e90',
-    name: 'Suzume E90',
-    subtitle: 'GL Touring Sedan',
+    name: 'Japan Sedan',
+    subtitle: 'Starter Touring Sedan',
     year: 1988,
     tier: 0,
     bodyStyle: 'compact-sedan',
@@ -286,8 +286,11 @@ export const CAR_SPECS = deepFreeze([
   }),
 ]);
 
-export const CARS = CAR_SPECS;
-export const CAR_BY_ID = deepFreeze(Object.fromEntries(CAR_SPECS.map((entry) => [entry.id, entry])));
+// Only the starter sedan is playable for now. The remaining specifications
+// stay staged in CAR_SPECS for future unlocks without leaking into gameplay,
+// auctions, or save hydration before they are ready.
+export const CARS = deepFreeze([CAR_SPECS[0]]);
+export const CAR_BY_ID = deepFreeze(Object.fromEntries(CARS.map((entry) => [entry.id, entry])));
 export const STARTER_CAR_ID = 'suzume-e90';
 
 const part = (entry) => {
