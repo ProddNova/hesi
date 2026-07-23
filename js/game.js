@@ -240,6 +240,7 @@ class ShutokoNights {
       if(action==='phone'&&this.started&&!this.ui.pcOpen)this.ui.togglePhone(this.getPhoneContext());
       else if(action==='camera'&&this.mode==='driving')this.cycleCamera();
       else if(action==='recover'&&this.mode==='driving')this.recover();
+      else if(action==='vehicle'&&this.started){if(this.mode==='driving')this.exitVehicle();else if(this.mode==='walk')this.tryEnterVehicle();}
       else if(action==='hud'&&this.started)this.toggleHUD();
       else if(action==='debug')this.toggleDebugMenu();
       else if(action==='dev-map'&&this.started&&!this.ui.phoneOpen&&!this.ui.pcOpen&&!this.debug.menuOpen)this.toggleDevMap();
@@ -252,7 +253,10 @@ class ShutokoNights {
       look?.addEventListener('pointermove',e=>{if(e.pointerId!==pointer||!isActive())return;e.preventDefault();const movementX=e.clientX-lastX,movementY=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;onMove(movementX,movementY);});
       const end=e=>{if(e.pointerId===pointer)pointer=null;};look?.addEventListener('pointerup',end);look?.addEventListener('pointercancel',end);look?.addEventListener('lostpointercapture',end);
     };
-    bindLook(document.getElementById('touch-look'),()=>this.mode==='garage',(x,y)=>this.garage?.onMouse?.({movementX:x*1.35,movementY:y*1.35}));
+    bindLook(document.getElementById('touch-look'),()=>this.mode==='garage'||this.mode==='walk',(x,y)=>{
+      if(this.mode==='garage')this.garage?.onMouse?.({movementX:x*1.35,movementY:y*1.35});
+      else if(this.mode==='walk'&&this.walk.active){this.walk.yaw-=x*.004;this.walk.pitch=clamp(this.walk.pitch-y*.004,-1.35,1.25);}
+    });
     bindLook(document.getElementById('touch-drone-look'),()=>this.debug.noclip&&!this.debug.menuOpen,(x,y)=>{this.debug.yaw-=x*.004;this.debug.pitch=clamp(this.debug.pitch-y*.004,-Math.PI*.49,Math.PI*.49);});
     this.releaseTouchInput=()=>{this.touchPointers?.forEach(({code,button})=>{this.keys[code]=false;button.classList.remove('active');});this.touchPointers?.clear();};
     document.addEventListener('visibilitychange',()=>{if(document.hidden){this.releaseTouchInput();this.persist();}});
@@ -263,7 +267,8 @@ class ShutokoNights {
 
   syncTouchUI(){
     const root=document.getElementById('touch-controls');if(!root)return;const blocked=this.ui?.phoneOpen||this.ui?.pcOpen||this.debug.menuOpen||!document.getElementById('run-over')?.classList.contains('hidden')||!document.getElementById('pause-help')?.classList.contains('hidden');
-    document.body.dataset.gameMode=this.mode;document.body.classList.toggle('noclip-active',!!this.debug.noclip);document.body.classList.toggle('controls-blocked',!!blocked);root.classList.toggle('hidden',!this.started||!['driving','garage'].includes(this.mode));
+    document.body.dataset.gameMode=this.mode;document.body.classList.toggle('noclip-active',!!this.debug.noclip);document.body.classList.toggle('controls-blocked',!!blocked);root.classList.toggle('hidden',!this.started||!['driving','garage','walk'].includes(this.mode));
+    const vehicleButton=root.querySelector('[data-action="vehicle"]');if(vehicleButton){const walking=this.mode==='walk';vehicleButton.textContent=walking?'ENTER CAR':'EXIT CAR';vehicleButton.setAttribute('aria-label',walking?'Enter vehicle':'Exit vehicle');}
     if(blocked)this.releaseTouchInput?.();
   }
 
@@ -366,8 +371,8 @@ class ShutokoNights {
     // Face back toward the car (garage camera convention: fwd = -sin y,-cos y).
     const dx=p.x-stand.x,dz=p.z-stand.z;this.walk.yaw=Math.atan2(-dx,-dz);this.walk.pitch=-0.05;
     this.walk.active=true;this.mode='walk';
-    this.ui.showHUD(false);this.requestDronePointerLock();
-    this.ui.toast('STEPPED OUT // WASD walk · G to get back in','amber');
+    this.ui.showHUD(false);if(!this.isTouchDevice)this.requestDronePointerLock();
+    this.ui.toast(this.isTouchDevice?'STEPPED OUT // TOUCH CONTROLS · ENTER CAR TO RETURN':'STEPPED OUT // WASD walk · G to get back in','amber');
   }
   tryEnterVehicle(){
     if(this.mode!=='walk')return;

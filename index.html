@@ -12,7 +12,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <title>SHUTOKO NIGHTS</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260723b">
   <link rel="stylesheet" href="styles/dev-map.css">
   <link rel="stylesheet" href="styles/debug-stats.css">
   <script type="importmap">
@@ -158,13 +158,13 @@
     <div id="install-progress" class="install hidden"><span id="install-label">INSTALLING</span><div><i></i></div></div>
 
     <section id="touch-controls" class="touch-controls hidden" aria-label="Touch controls">
-      <div class="touch-look garage-only" id="touch-look" aria-label="Drag to look"><span>DRAG TO LOOK</span></div>
+      <div class="touch-look on-foot-only" id="touch-look" aria-label="Drag to look"><span>DRAG TO LOOK</span></div>
       <div class="touch-look touch-drone-look noclip-only" id="touch-drone-look" aria-label="Drag to aim drone"><span>DRAG TO LOOK</span></div>
       <div class="touch-pad touch-steer driving-only">
         <button data-code="KeyA" aria-label="Steer left">◀</button>
         <button data-code="KeyD" aria-label="Steer right">▶</button>
       </div>
-      <div class="touch-pad touch-walk garage-only">
+      <div class="touch-pad touch-walk on-foot-only">
         <button data-code="KeyW" aria-label="Walk forward">▲</button>
         <button data-code="KeyA" aria-label="Walk left">◀</button>
         <button data-code="KeyS" aria-label="Walk backward">▼</button>
@@ -202,6 +202,7 @@
         <button data-action="phone" aria-label="Open phone">PHONE</button>
         <button data-action="dev-map" class="touch-dev-map" aria-label="Open developer map">DEV MAP</button>
         <button data-action="recover" class="driving-only" aria-label="Recover car">RESET</button>
+        <button data-action="vehicle" class="touch-vehicle vehicle-only" aria-label="Exit vehicle">EXIT CAR</button>
       </div>
     </section>
 
@@ -211,7 +212,7 @@
     <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260723a"></script>
+  <script type="module" src="js/game.js?v=20260723b"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
