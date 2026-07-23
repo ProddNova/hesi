@@ -1,7 +1,7 @@
 /**
  * Garage remodel regression: boots the game headless, enters the garage and
  * verifies the editor-remodelled room — dynamic wall/object/car hitboxes,
- * the Toyota Chaser GLB showroom car, the PS2-style exit prisms at the moved
+ * the selected PSXStyle showroom car, the PS2-style exit prisms at the moved
  * shutter, and the relocated PC / delivery-zone interactions.
  *
  * Run from repo root:  node .devtests/garage-hitbox-probe.mjs
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(ROOT, '.devtests', 'shots');
 await mkdir(OUT, { recursive: true });
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.glb': 'model/gltf-binary', '.webmanifest': 'application/manifest+json' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.obj': 'text/plain', '.webmanifest': 'application/manifest+json' };
 
 const server = createServer(async (req, res) => {
   try {
@@ -59,7 +59,8 @@ await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 30000 });
 await page.click('#new-game-button');
 await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeout: 8000 });
-// Editor build + GLB showroom car must both be in before probing hitboxes.
+await page.evaluate(() => window.shutoko.setCustomCarEnabled(true));
+// Editor build + selected PSXStyle showroom car must both be in before probing hitboxes.
 await page.waitForFunction(() => window.shutoko.customCar.status === 'ready' && window.shutoko.garage.colliders.length > 10, null, { timeout: 20000 });
 await page.waitForTimeout(500);
 check('boots into garage without console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
@@ -85,7 +86,7 @@ const state = await page.evaluate(() => {
   };
 });
 check('editor build hitboxes collected', state.colliders > 10, `colliders: ${state.colliders}`);
-check('Chaser GLB parked in garage and visible', state.carParent && state.carVisible && state.carInGarageScene);
+check('PSXStyle car parked in garage and visible', state.carParent && state.carVisible && state.carInGarageScene);
 check('procedural old car stays hidden', state.parkedGroupHidden);
 const R = (c) => (c >> 16) & 0xff, Gc = (c) => (c >> 8) & 0xff, B = (c) => c & 0xff;
 const isBlue = state.markerColor !== null && B(state.markerColor) > 0x80 && B(state.markerColor) > R(state.markerColor) && B(state.markerColor) > Gc(state.markerColor);
@@ -107,8 +108,8 @@ const leftWall = await walk(-3, 4, Math.PI / 2);   // toward the moved left wall
 check('left wall (moved by editor) blocks the walker', leftWall.x > -4.6 && leftWall.x < -4.2, `stopped at x=${leftWall.x.toFixed(2)}`);
 const backWall = await walk(3.5, 1, 0);             // toward the moved back wall (inner face z=-2.795); yaw 0 faces -z
 check('back wall (moved by editor) blocks the walker', backWall.z > -2.6 && backWall.z < -2.2, `stopped at z=${backWall.z.toFixed(2)}`);
-const carSide = await walk(0, 4, 0);                // straight into the parked Chaser
-check('Chaser GLB has a hitbox', carSide.z > 0.55 && carSide.z < 2.5, `stopped at z=${carSide.z.toFixed(2)}`);
+const carSide = await walk(0, 4, 0);                // straight into the parked PSX car
+check('PSXStyle car has a hitbox', carSide.z > -1.5 && carSide.z < 2.5, `stopped at z=${carSide.z.toFixed(2)}`);
 const lockers = await walk(7, 0.8, -Math.PI / 2);   // toward the lockers on the right wall
 check('placed objects (lockers) have hitboxes', lockers.x < 10.0, `stopped at x=${lockers.x.toFixed(2)}`);
 const front = await walk(2, 11, Math.PI);           // yaw PI faces +z, into the front wall

@@ -136,8 +136,10 @@
           <p class="debug-range-note">MIX SPAWN · <span id="debug-traffic-mix-note">auto 72% · furgoni 19% · tir 9%</span></p>
         </details>
         <div class="debug-custom-car">
-          <label class="debug-toggle"><span><b>AUTO CUSTOM</b><small id="debug-custom-car-status">Toyota Chaser GLB · disattivata</small></span><input id="debug-custom-car" type="checkbox"><i></i></label>
-          <label class="debug-number"><span>SCALA MODELLO</span><input id="debug-custom-car-scale" type="number" min="0.25" max="3" step="0.05" inputmode="decimal" value="1.45"></label>
+          <label class="debug-toggle"><span><b>PSXSTYLE CAR PACK</b><small id="debug-custom-car-status">Japan Legendary Drifter · disattivata</small></span><input id="debug-custom-car" type="checkbox"><i></i></label>
+          <label class="debug-select"><span>MODELLO AUTO</span><select id="debug-custom-car-model" aria-label="Modello auto PSXStyle"></select></label>
+          <label class="debug-number"><span>SCALA MODELLO</span><input id="debug-custom-car-scale" type="number" min="0.5" max="1.5" step="0.05" inputmode="decimal" value="1"></label>
+          <p class="debug-car-note">CARICAMENTO ON DEMAND · UNA SOLA AUTO IN GPU</p>
         </div>
         <details class="debug-hitboxes">
           <summary><span><b>HITBOXES</b><small>Choose collision and bounds overlays</small></span><em>EDIT</em></summary>
@@ -209,7 +211,7 @@
     <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260722d"></script>
+  <script type="module" src="js/game.js?v=20260723a"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));

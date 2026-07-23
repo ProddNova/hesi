@@ -78,16 +78,16 @@ export class GarageSystem {
     this.parkedGroup=new THREE.Group();this.parkedGroup.position.set(0,.05,0);this.root.add(this.parkedGroup);
     // Children past this point are appended AFTER every editor-addressable
     // child (0-77), so garage-build childIndex operations keep resolving.
-    // carDisplay hosts the Toyota Chaser GLB the game attaches in garage mode;
-    // it replaces the hidden procedural parkedGroup as the showroom car.
+    // carDisplay hosts the selected lazy-loaded PSXStyle pack car in garage
+    // mode; parkedGroup remains the procedural fallback while it is disabled.
     this.carDisplay=new THREE.Group();this.carDisplay.position.set(0,.05,0);this.carDisplay.rotation.y=-Math.PI/2;this.root.add(this.carDisplay);
     // The editor exposes the procedural car because it has selectable geometry,
-    // while the playable game renders the GLB under carDisplay. Treat both
+    // while the playable game renders the pack car under carDisplay. Treat both
     // groups as one editor target so an Apply-to-Game transform/visibility
     // operation also reaches the car the player actually sees.
     this.parkedGroup.userData.editorBuildMirror='garage-showroom-car';
     this.carDisplay.userData.editorBuildMirror='garage-showroom-car';
-    // The imported GLB is rotated PI inside carDisplay, while the procedural
+    // The imported PSX car is rotated PI inside carDisplay, while the procedural
     // editor car has that orientation baked into parkedGroup. Preserve the
     // existing visual heading when mirroring the editor's absolute rotation.
     this.carDisplay.userData.editorBuildQuaternionOffset=[0,-1,0,0];
@@ -155,6 +155,7 @@ export class GarageSystem {
     const placed=this.root.children.find(c=>c.name==='Editor placed objects');
     if(placed&&placed.visible!==false)for(const child of placed.children)consider(child);
     if(this.carDisplay?.children.length&&this.carDisplay.visible!==false)consider(this.carDisplay);
+    else if(this.parkedGroup?.visible!==false)consider(this.parkedGroup);
     this.colliders=boxes;
     // The old desk PC was hidden and sits outside the remodelled room, so the
     // market terminal now lives at the small table with the game boxes.

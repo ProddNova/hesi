@@ -14,7 +14,7 @@ function garageObject(childIndex, position, { visible = true, quaternion = [0, 0
   };
 }
 
-test('garage builds mirror the editable parked car transform to the runtime GLB anchor', () => {
+test('garage builds mirror the editable parked car transform to the runtime PSXStyle anchor', () => {
   const root = new THREE.Group();
   const editableCar = new THREE.Group();
   const runtimeCar = new THREE.Group();

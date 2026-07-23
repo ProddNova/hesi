@@ -1,16 +1,19 @@
-const CACHE = 'shutoko-nights-v34';
+const CACHE = 'shutoko-nights-v35';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './manifest.webmanifest', './icon.svg',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
   './js/editor-map-patch.js', './js/custom-assets.js', './js/building-types.js', './js/skybox-config.js', './js/skybox.js',
-  './js/physics.js', './js/traffic.js', './js/data.js',
+  './js/physics.js', './js/traffic.js', './js/data.js', './js/psx-car-pack.js',
   './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js', './js/dev-map.js', './js/debug-stats.js', './data/routes-smoothed.js'
 ];
 
 // Editor texture files are content-hashed (textures/<name>-<hash>.<ext>), so a
 // given URL never changes: serve them cache-first and only touch the network
 // once, instead of re-downloading every image on every startup.
-const isImmutableAsset = request => new URL(request.url).pathname.includes('/data/editor/textures/');
+const isImmutableAsset = request => {
+  const path=new URL(request.url).pathname;
+  return path.includes('/data/editor/textures/')||path.includes('/3d/PSXStyleCars-DevEdition/');
+};
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)).then(() => self.skipWaiting()));
