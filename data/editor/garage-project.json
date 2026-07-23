@@ -491,6 +491,25 @@
           1
         ]
       }
+    },
+    "garage-part:0082": {
+      "transform": {
+        "position": [
+          -2.09349,
+          -0.38078,
+          -0.48193
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
     }
   },
   "placedObjects": [
@@ -1458,5 +1477,6 @@
     }
   ],
   "groups": [],
+  "environment": {},
   "editorState": {}
 }
