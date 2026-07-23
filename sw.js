@@ -1,9 +1,9 @@
-const CACHE = 'shutoko-nights-v37';
+const CACHE = 'shutoko-nights-v38';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './manifest.webmanifest', './icon.svg',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
   './js/editor-map-patch.js', './js/custom-assets.js', './js/building-types.js', './js/skybox-config.js', './js/skybox.js',
-  './js/physics.js', './js/traffic.js', './js/data.js', './js/psx-car-pack.js',
+  './js/physics.js', './js/traffic.js', './js/data.js', './js/psx-car-pack.js', './js/car-models.js',
   './js/save.js', './js/audio.js', './js/garage.js', './js/ui.js', './js/dev-map.js', './js/debug-stats.js', './data/routes-smoothed.js'
 ];
 

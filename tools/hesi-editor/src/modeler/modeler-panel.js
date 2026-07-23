@@ -11,9 +11,21 @@ import {
   buildCustomAssetGroup, partGeometry, splitPartFaceByPlanarRegions, textureSourceUrl, translatePartFace,
   weldedVertices,
 } from '/js/custom-assets.js';
+import {
+  CAR_MODEL_GROUPS,
+  TRAFFIC_CAR_BY_ID,
+  TRAFFIC_CAR_SETTING_FIELDS,
+  carModelMeta,
+  carModelTarget,
+  parseCarModelTarget,
+  trafficCarDefinition,
+  trafficCarSettings,
+} from '/js/car-models.js';
+import { disposePSXCar, loadPSXCar } from '/js/psx-car-pack.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 import { SurfaceStyleEditor } from '../world/surface-style-editor.js';
 import { buildWorldObjectPreview, previewFocusBounds, worldObjectModelParts } from '../world/surface-preview-geometry.js';
+import { carDefinitionFromVisual } from './car-model-utils.js';
 
 const clone = (value) => value == null ? value : structuredClone(value);
 
@@ -63,9 +75,14 @@ export class ModelerPanel {
     this.library = 'custom';
     this.worldObject = null;
     this.worldSlot = null;
+    this.carTarget = carModelTarget('traffic', 'car');
+    this.carSearch = '';
+    this.carPreviewRequest = 0;
+    this.carPreviewVisual = null;
     // Set while a world archetype is being modelled, so Save Object can put the
     // finished model straight back onto every copy in the map.
     this.modelTargetObject = null;
+    this.modelTargetCar = null;
     this.definition = null;
     this.editingExisting = false;
     this.mode = 'part';
@@ -111,7 +128,7 @@ export class ModelerPanel {
     this.layerSelect = document.createElement('select');
     this.layerSelect.className = 'modeler-layer';
     this.layerSelect.setAttribute('aria-label', 'Asset layer');
-    for (const layer of ['Props', 'Signs', 'Barriers', 'Guardrails', 'Lamps', 'Pillars', 'Garage']) {
+    for (const layer of ['Props', 'Vehicles', 'Signs', 'Barriers', 'Guardrails', 'Lamps', 'Pillars', 'Garage']) {
       this.layerSelect.add(new Option(layer, layer));
     }
     this.saveButton = button('Save Object', 'tool-button accent', 'Save this object into the asset catalog (and the game document)');
@@ -121,8 +138,17 @@ export class ModelerPanel {
     this.worldSaveButton = button('Save world paint', 'tool-button accent', 'Write the world surface overrides to disk — the editor and the playable game both pick them up');
     this.worldSaveButton.dataset.testid = 'modeler-save-world-paint';
     this.worldSaveButton.hidden = true;
+    this.carSaveButton = button('Save & apply cars', 'tool-button accent', 'Save car settings and hot-reload every active vehicle in an open game');
+    this.carSaveButton.dataset.testid = 'modeler-save-cars';
+    this.carSaveButton.hidden = true;
+    this.openGameButton = button('Open live game', 'tool-button', 'Open the game on this editor server so saved models can update its current traffic');
+    this.openGameButton.hidden = true;
     this.dirtyChip = element('span', 'modeler-dirty', '');
-    header.append(this.nameInput, this.layerSelect, this.saveButton, this.saveCopyButton, this.deleteButton, this.worldSaveButton, this.dirtyChip, element('span', 'toolbar-spacer'), this.closeButton);
+    header.append(
+      this.nameInput, this.layerSelect, this.saveButton, this.saveCopyButton,
+      this.deleteButton, this.worldSaveButton, this.carSaveButton, this.openGameButton,
+      this.dirtyChip, element('span', 'toolbar-spacer'), this.closeButton,
+    );
 
     const body = element('div', 'modeler-body');
 
@@ -139,6 +165,7 @@ export class ModelerPanel {
     this.libraryButtons = {};
     for (const [key, label, title] of [
       ['custom', 'Your objects', 'Objects you modelled and saved into the catalog'],
+      ['cars', 'Cars', 'Every PSX player car plus the current traffic car, van and TIR classes'],
       ['world', 'World objects', 'Objects the map generator repeats everywhere — buildings, lamps, pillars, containers, signs. Repaint one, they all change.'],
     ]) {
       const node = element('button', 'seg-button', label);
@@ -159,6 +186,17 @@ export class ModelerPanel {
     this.worldObjectList.dataset.testid = 'modeler-world-object-list';
     this.worldObjectList.hidden = true;
     left.append(this.worldObjectList);
+    this.carSearchInput = document.createElement('input');
+    this.carSearchInput.type = 'search';
+    this.carSearchInput.className = 'modeler-car-search';
+    this.carSearchInput.placeholder = 'Search cars…';
+    this.carSearchInput.setAttribute('aria-label', 'Search cars');
+    this.carSearchInput.hidden = true;
+    left.append(this.carSearchInput);
+    this.carObjectList = element('div', 'modeler-asset-list modeler-car-list');
+    this.carObjectList.dataset.testid = 'modeler-car-list';
+    this.carObjectList.hidden = true;
+    left.append(this.carObjectList);
     this.partsHeading = element('h3', '', 'Parts');
     left.append(this.partsHeading);
     this.partList = element('div', 'modeler-part-list');
@@ -258,6 +296,12 @@ export class ModelerPanel {
     this.worldStyleHost = element('div', 'modeler-world-style');
     this.worldTextureSection.append(this.worldObjectHeader, this.worldSurfaceList, this.worldStyleHost);
     right.append(this.worldTextureSection);
+    this.carSection = element('section', 'modeler-car-section');
+    this.carSection.dataset.testid = 'modeler-car-section';
+    this.carSection.hidden = true;
+    this.carInspector = element('div', 'modeler-car-inspector');
+    this.carSection.append(this.carInspector);
+    right.append(this.carSection);
     this.textureLibraryHeading = element('h3', '', 'Texture library');
     right.append(this.textureLibraryHeading);
     this.textureList = element('div', 'modeler-texture-list');
@@ -345,6 +389,12 @@ export class ModelerPanel {
     this.newObjectButton.addEventListener('click', () => this._loadDefinition(null));
     for (const [key, node] of Object.entries(this.libraryButtons)) node.addEventListener('click', () => this._setLibrary(key));
     this.worldSaveButton.addEventListener('click', () => this._saveStoreOnly());
+    this.carSaveButton.addEventListener('click', () => this._saveCars());
+    this.openGameButton.addEventListener('click', () => window.open('/index.html?editorCars=1', 'hesi-live-game'));
+    this.carSearchInput.addEventListener('input', () => {
+      this.carSearch = this.carSearchInput.value.trim().toLowerCase();
+      this._renderCarList();
+    });
     this.worldStyleEditor = new SurfaceStyleEditor({
       host: this.worldStyleHost,
       store: this.store,
@@ -397,6 +447,7 @@ export class ModelerPanel {
       }
       if (event.button !== 0 || this.gizmo.dragging) return;
       if (this.library === 'world') { this._pickWorldSurface(event); return; }
+      if (this.library === 'cars') return;
       this._pick(event);
     };
     this.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
@@ -409,13 +460,13 @@ export class ModelerPanel {
       const downAt = this._rightDownAt;
       this._rightDownAt = null;
       if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 5) return; // was a pan
-      if (this.library === 'world') return;
+      if (this.library !== 'custom') return;
       this._rightClick(event);
     };
     this.renderer.domElement.addEventListener('contextmenu', this._onContextMenu);
 
     this._onKeyDown = (event) => {
-      if (!this.openState || this.library === 'world') return;
+      if (!this.openState || this.library !== 'custom') return;
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '')) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.code === 'KeyZ') {
         event.preventDefault();
@@ -466,6 +517,7 @@ export class ModelerPanel {
 
   _loadDefinition(assetId) {
     this.modelTargetObject = null;
+    this.modelTargetCar = null;
     const existing = assetId ? this.store.getAsset(assetId) : null;
     this.definition = existing ? clone(existing) : blankDefinition(this.store.newAssetId());
     this.editingExisting = Boolean(existing);
@@ -530,6 +582,13 @@ export class ModelerPanel {
       // modelled object untouched underneath so switching back is instant.
       this._renderWorldObjectList();
       this._renderWorldObjectPanel();
+      this.dirtyChip.textContent = this.store.dirty ? 'Unsaved changes' : '';
+      return;
+    }
+    if (this.library === 'cars') {
+      this._renderCarList();
+      this._renderCarInspector();
+      this._buildCarPreview();
       this.dirtyChip.textContent = this.store.dirty ? 'Unsaved changes' : '';
       return;
     }
@@ -1498,38 +1557,356 @@ export class ModelerPanel {
    */
   _syncLibraryChrome() {
     const world = this.library === 'world';
+    const cars = this.library === 'cars';
+    const custom = this.library === 'custom';
     for (const [name, node] of Object.entries(this.libraryButtons)) node.setAttribute('aria-checked', String(name === this.library));
-    this.assetList.hidden = world;
+    this.assetList.hidden = !custom;
     this.worldObjectList.hidden = !world;
-    this.newObjectButton.hidden = world;
-    for (const node of [this.partsHeading, this.partList, this.addPartsRow, this.catalogRow, this.scaleRow]) node.hidden = world;
-    this.nameInput.hidden = world;
-    this.layerSelect.hidden = world;
-    for (const node of [this.saveButton, this.saveCopyButton, this.deleteButton]) node.hidden = world;
+    this.carSearchInput.hidden = !cars;
+    this.carObjectList.hidden = !cars;
+    this.newObjectButton.hidden = !custom;
+    for (const node of [this.partsHeading, this.partList, this.addPartsRow, this.catalogRow, this.scaleRow]) node.hidden = !custom;
+    this.nameInput.hidden = !custom;
+    this.layerSelect.hidden = !custom;
+    for (const node of [this.saveButton, this.saveCopyButton, this.deleteButton]) node.hidden = !custom;
     this.worldSaveButton.hidden = !world;
+    this.carSaveButton.hidden = !cars;
+    this.openGameButton.hidden = !cars;
     this.worldTextureSection.hidden = !world;
-    this.inspector.hidden = world;
-    this.textureLibraryHeading.hidden = world;
-    this.textureList.hidden = world;
-    this.uploadTextureButton.hidden = world;
-    this.addVerticesButton.hidden = world || this.mode !== 'vertex';
+    this.carSection.hidden = !cars;
+    this.inspector.hidden = !custom;
+    this.textureLibraryHeading.hidden = !custom;
+    this.textureList.hidden = !custom;
+    this.uploadTextureButton.hidden = !custom;
+    this.addVerticesButton.hidden = !custom || this.mode !== 'vertex';
     // World-object mode has nothing to model: the viewport is a live preview.
-    this.modeBar.hidden = world;
+    this.modeBar.hidden = !custom;
   }
 
   _setLibrary(key) {
-    this.library = key === 'world' ? 'world' : 'custom';
+    const leavingCars = this.library === 'cars' && key !== 'cars';
+    if (leavingCars) this._disposeCarPreview();
+    this.library = key === 'world' || key === 'cars' ? key : 'custom';
     const world = this.library === 'world';
+    const cars = this.library === 'cars';
     this._syncLibraryChrome();
     if (world) {
       this._renderWorldObjectList();
       this._selectWorldObject(this.worldObject || Object.keys(WORLD_OBJECTS)[0], this.worldSlot);
       this.onStatus('World objects · pick a type, give it a texture — every copy of it in the map changes with it');
+    } else if (cars) {
+      this.assetGroup.visible = false;
+      this._detachGizmo();
+      this._renderCarList();
+      this._selectCar(this.carTarget || carModelTarget('traffic', 'car'));
+      this.onStatus('Cars · select any player or traffic vehicle, then edit its complete model or live traffic behavior');
     } else {
       this.assetGroup.visible = true;
       this.worldPreviewGroup.clear();
       this._renderAll();
       this.onStatus('Your objects · build and texture your own models');
+    }
+  }
+
+  // --------------------------------------------------------------- cars --
+  _renderCarList() {
+    this.carObjectList.innerHTML = '';
+    const query = this.carSearch;
+    for (const entry of CAR_MODEL_GROUPS) {
+      const cars = entry.cars.filter((car) => {
+        if (!query) return true;
+        return `${car.label} ${car.id} ${car.description}`.toLowerCase().includes(query);
+      });
+      if (!cars.length) continue;
+      this.carObjectList.append(element('h4', 'modeler-world-group', entry.group));
+      for (const car of cars) {
+        const target = carModelTarget(car.scope, car.id);
+        const saved = this.store.carModel(target);
+        const row = element('button', `modeler-asset-row${target === this.carTarget ? ' selected' : ''}`);
+        row.type = 'button';
+        row.dataset.testid = `modeler-car-${car.scope}-${car.id}`;
+        row.title = car.description;
+        const details = [];
+        if (saved?.assetId) details.push('custom model');
+        if (Object.keys(saved?.settings || {}).length) details.push('custom behavior');
+        row.append(
+          element('b', '', car.label),
+          element('small', '', details.length ? details.join(' · ') : car.description),
+        );
+        if (details.length) row.classList.add('is-custom');
+        row.addEventListener('click', () => this._selectCar(target));
+        this.carObjectList.append(row);
+      }
+    }
+    if (!this.carObjectList.children.length) {
+      this.carObjectList.append(element('p', 'modeler-help', 'No cars match this search.'));
+    }
+  }
+
+  _selectCar(target) {
+    if (!parseCarModelTarget(target)) return;
+    this.carTarget = target;
+    this._renderCarList();
+    this._renderCarInspector();
+    this._buildCarPreview();
+  }
+
+  _renderCarInspector() {
+    this.carInspector.innerHTML = '';
+    const parsed = parseCarModelTarget(this.carTarget);
+    const meta = carModelMeta(this.carTarget);
+    if (!parsed || !meta) return;
+    const saved = this.store.carModel(this.carTarget);
+    const replacement = saved?.assetId ? this.store.getAsset(saved.assetId) : null;
+
+    const head = element('div', 'surface-head');
+    head.append(element('b', '', meta.label));
+    this.carInspector.append(head);
+    this.carInspector.append(element('p', 'modeler-help', parsed.scope === 'traffic'
+      ? `${meta.description}. The model and behavior apply to every pooled ${meta.label.toLowerCase()}, including vehicles already driving.`
+      : `Exact ${meta.label} model from PSXStyleCars. The replacement is used whenever this player-car model is selected.`));
+
+    this.carInspector.append(element('h4', 'surface-group-title', '3D model'));
+    this.carInspector.append(element('p', 'modeler-help', replacement
+      ? `Currently drawing "${replacement.label}". Open it to edit parts, faces, textures and every vertex.`
+      : parsed.scope === 'traffic'
+        ? 'Currently drawing the generated traffic model. Open it as editable parts to change every visible element.'
+        : 'Currently drawing the original PSX pack model. Open it to convert its exact meshes into editable Modeler parts.'));
+
+    const modelActions = element('div', 'surface-button-row');
+    const edit = button(
+      replacement ? 'Edit current model…' : 'Edit complete car…',
+      'tool-button small accent',
+      'Open this car in the full parts/faces/vertices/texture Modeler',
+    );
+    edit.dataset.testid = 'modeler-car-edit';
+    edit.addEventListener('click', () => this._editCarAsModel());
+    const choose = button('Use a saved object…', 'tool-button small', 'Use any object from Your objects as this car model');
+    choose.addEventListener('click', () => this._chooseCarModel(this.carTarget));
+    modelActions.append(edit, choose);
+    if (replacement) {
+      const resetShape = button('Original shape', 'tool-button small danger', 'Remove only the custom 3D model and keep behavior settings');
+      resetShape.addEventListener('click', () => this._setCarModel(this.carTarget, null));
+      modelActions.append(resetShape);
+    }
+    this.carInspector.append(modelActions);
+
+    if (parsed.scope === 'traffic') {
+      this.carInspector.append(element('h4', 'surface-group-title', 'Live traffic behavior'));
+      this.carInspector.append(element('p', 'modeler-help',
+        'Collision box, cruise range, acceleration, braking, spawn share and lane preference. Save & apply updates the current active pool without waiting for respawn.'));
+      const settings = { ...trafficCarSettings(TRAFFIC_CAR_BY_ID[parsed.id]), ...(saved?.settings || {}) };
+      const grid = element('div', 'modeler-car-settings');
+      for (const field of TRAFFIC_CAR_SETTING_FIELDS) {
+        const row = element('label', 'modeler-field modeler-car-field');
+        row.append(element('span', '', field.label));
+        const control = element('div', 'modeler-car-value');
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = String(field.min);
+        input.max = String(field.max);
+        input.step = String(field.step);
+        input.value = String(Number(settings[field.key].toFixed?.(4) ?? settings[field.key]));
+        input.dataset.carSetting = field.key;
+        input.addEventListener('change', () => {
+          const value = Number(input.value);
+          if (!Number.isFinite(value)) return;
+          const bounded = THREE.MathUtils.clamp(value, field.min, field.max);
+          input.value = String(bounded);
+          this.store.setCarModel(this.carTarget, { settings: { [field.key]: bounded } });
+          this.dirtyChip.textContent = 'Unsaved changes';
+          this._renderCarList();
+        });
+        control.append(input);
+        if (field.unit) control.append(element('small', '', field.unit));
+        row.append(control);
+        grid.append(row);
+      }
+      this.carInspector.append(grid);
+    }
+
+    if (saved) {
+      const resetAll = button('Reset car completely', 'tool-button small danger', 'Restore original model and all default traffic settings');
+      resetAll.addEventListener('click', () => {
+        this.store.setCarModel(this.carTarget, null);
+        this.dirtyChip.textContent = 'Unsaved changes';
+        this._renderCarList();
+        this._renderCarInspector();
+        this._buildCarPreview();
+      });
+      this.carInspector.append(resetAll);
+    }
+
+    this.carInspector.append(element('p', 'modeler-car-live-note',
+      'LIVE APPLY · Open the game with the button above. Saving broadcasts the new document and rebuilds cars already on the road.'));
+  }
+
+  async _editCarAsModel() {
+    const target = this.carTarget;
+    const parsed = parseCarModelTarget(target);
+    const meta = carModelMeta(target);
+    if (!parsed || !meta) return;
+    const current = this.store.carModel(target)?.assetId;
+    if (current && this.store.getAsset(current)) {
+      this._setLibrary('custom');
+      this.open(current);
+      this.modelTargetCar = target;
+      this.onStatus(`Editing "${this.definition.label}" · Save Object applies it to ${meta.label}`);
+      return;
+    }
+
+    let definition;
+    if (parsed.scope === 'traffic') {
+      definition = trafficCarDefinition(TRAFFIC_CAR_BY_ID[parsed.id], this.store.newAssetId());
+    } else {
+      this.onStatus(`Loading the exact ${meta.label} mesh for full editing…`);
+      let visual = null;
+      try {
+        visual = await loadPSXCar(parsed.id, { length: 4.25, color: meta.color });
+        definition = carDefinitionFromVisual(visual, {
+          id: this.store.newAssetId(),
+          label: meta.label,
+          description: `Exact editable PSXStyleCars replacement for ${meta.label}`,
+        });
+      } catch (error) {
+        this.onStatus(`Cannot open ${meta.label} · ${error.message}`);
+        return;
+      } finally {
+        if (visual) disposePSXCar(visual);
+      }
+    }
+
+    this._setLibrary('custom');
+    this.definition = definition;
+    this.editingExisting = false;
+    this.modelTargetCar = target;
+    this.selectedPart = definition.parts.length ? 0 : -1;
+    this.selectedFace = null;
+    this.selectedVertex = -1;
+    this._resetHistory();
+    this._renderAll();
+    this._markDirty({ history: false });
+    this.onStatus(`${meta.label} opened with ${definition.parts.length} editable part${definition.parts.length === 1 ? '' : 's'} · Save Object applies it to the car`);
+  }
+
+  _setCarModel(target, assetId) {
+    if (!parseCarModelTarget(target)) return;
+    this.store.setCarModel(target, { assetId });
+    this.dirtyChip.textContent = 'Unsaved changes';
+    this._renderCarList();
+    this._renderCarInspector();
+    this._buildCarPreview();
+    const asset = assetId ? this.store.getAsset(assetId) : null;
+    this.onStatus(asset
+      ? `${carModelMeta(target)?.label || target} now draws "${asset.label}" · Save & apply to update the game`
+      : `${carModelMeta(target)?.label || target} restored to its original shape`);
+  }
+
+  _chooseCarModel(target) {
+    const assets = this.store.assets();
+    if (!assets.length) { this.onStatus('No saved objects yet · model one first'); return; }
+    const chooser = element('div', 'modeler-chooser');
+    chooser.dataset.testid = 'modeler-car-model-chooser';
+    chooser.append(element('b', '', `Model for ${carModelMeta(target)?.label || target}`));
+    const grid = element('div', 'modeler-chooser-grid');
+    for (const asset of assets.sort((a, b) => (a.label || '').localeCompare(b.label || ''))) {
+      const pick = element('button', 'modeler-chooser-item');
+      pick.type = 'button';
+      pick.append(element('small', '', asset.label || asset.id));
+      pick.addEventListener('click', () => { chooser.remove(); this._setCarModel(target, asset.id); });
+      grid.append(pick);
+    }
+    chooser.append(grid);
+    const cancel = button('Cancel', 'tool-button');
+    cancel.addEventListener('click', () => chooser.remove());
+    const actions = element('div', 'modeler-chooser-actions');
+    actions.append(cancel);
+    chooser.append(actions);
+    this.overlay.append(chooser);
+  }
+
+  _disposeCarPreview() {
+    this.carPreviewRequest += 1;
+    if (this.carPreviewVisual?.userData?.psxCarId) disposePSXCar(this.carPreviewVisual);
+    else this.carPreviewVisual?.removeFromParent?.();
+    this.carPreviewVisual = null;
+    this.worldPreviewGroup.clear();
+  }
+
+  _focusPreview(group) {
+    const bounds = previewFocusBounds(group);
+    if (bounds.isEmpty()) return;
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const radius = Math.max(1.2, size.length() * 0.75);
+    this.orbit.target.copy(center);
+    this.camera.position.set(center.x + radius * 1.1, center.y + radius * 0.75, center.z + radius * 1.4);
+    this.camera.near = Math.max(0.02, radius / 500);
+    this.camera.far = radius * 80;
+    this.camera.updateProjectionMatrix();
+    this.orbit.update();
+  }
+
+  async _buildCarPreview() {
+    const target = this.carTarget;
+    const parsed = parseCarModelTarget(target);
+    const meta = carModelMeta(target);
+    if (!parsed || !meta) return;
+    this._disposeCarPreview();
+    const request = ++this.carPreviewRequest;
+    this.assetGroup.visible = false;
+    this._detachGizmo();
+    const replacementId = this.store.carModel(target)?.assetId;
+    const replacement = replacementId ? this.store.getAsset(replacementId) : null;
+
+    try {
+      let visual;
+      if (replacement) {
+        visual = buildCustomAssetGroup(replacement, this.store.texturesById(), {
+          resolveAssetPart: assetPartResolver(this.assetRegistry),
+        });
+      } else if (parsed.scope === 'traffic') {
+        visual = buildCustomAssetGroup(
+          trafficCarDefinition(TRAFFIC_CAR_BY_ID[parsed.id], null),
+          this.store.texturesById(),
+          { resolveAssetPart: assetPartResolver(this.assetRegistry) },
+        );
+      } else {
+        visual = await loadPSXCar(parsed.id, { length: 4.25, color: meta.color });
+      }
+      if (request !== this.carPreviewRequest || this.library !== 'cars' || target !== this.carTarget) {
+        if (visual?.userData?.psxCarId) disposePSXCar(visual);
+        return;
+      }
+      this.carPreviewVisual = visual;
+      this.worldPreviewGroup.add(visual);
+      visual.updateMatrixWorld(true);
+      this._focusPreview(this.worldPreviewGroup);
+    } catch (error) {
+      if (request === this.carPreviewRequest) this.onStatus(`Car preview unavailable · ${error.message}`);
+    }
+  }
+
+  _broadcastCarUpdate() {
+    if (typeof BroadcastChannel === 'undefined') return false;
+    const channel = new BroadcastChannel('hesi-car-models');
+    channel.postMessage({ type: 'reload-car-models', at: Date.now() });
+    channel.close();
+    return true;
+  }
+
+  async _saveCars() {
+    try {
+      await this.store.save();
+      const broadcast = this._broadcastCarUpdate();
+      this.dirtyChip.textContent = '';
+      this._renderCarList();
+      this._renderCarInspector();
+      this.onStatus(broadcast
+        ? 'Cars saved · active traffic hot-reload requested'
+        : 'Cars saved · reload the game to apply them');
+    } catch (error) {
+      this.onStatus(`Save failed · ${error.message}`);
     }
   }
 
@@ -2406,6 +2783,8 @@ export class ModelerPanel {
       const targetKey = worldObjectModelKey(this.modelTargetObject || '');
       const target = targetKey ? WORLD_OBJECTS[this.modelTargetObject] : null;
       if (target) this.store.setWorldModel(targetKey, saved.id);
+      const carTarget = parseCarModelTarget(this.modelTargetCar) ? this.modelTargetCar : null;
+      if (carTarget) this.store.setCarModel(carTarget, { assetId: saved.id });
       await this.store.save();
       refreshCustomAsset(this.assetRegistry, this.store.document, saved.id);
       this.definition = clone(saved);
@@ -2414,8 +2793,10 @@ export class ModelerPanel {
       this.onAssetsChanged();
       this._renderAssetList();
       if (target) this.onWorldModelsChanged();
+      if (carTarget) this._broadcastCarUpdate();
       this.dirtyChip.textContent = '';
-      this.onStatus(target
+      if (carTarget) this.onStatus(`Saved "${saved.label}" · ${carModelMeta(carTarget)?.label || carTarget} updated, including current live traffic`);
+      else this.onStatus(target
         ? `Saved "${saved.label}" · every ${target.label.toLowerCase()} in the map now draws it — switch to World objects to see them`
         : `Saved "${saved.label}" · it is now in the Assets menu, ready to place in the world`);
     } catch (error) {

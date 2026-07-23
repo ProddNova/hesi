@@ -173,6 +173,19 @@ full-screen modeling section that is always available inside the editor:
   facade texture is baked into the texture library on demand as
   `Generated · <surface>`, so a building opens with its windows rather than as
   a white box, and that picture is then editable like any uploaded image.
+- **Cars library**: a third Modeler library beside *Your objects* and *World
+  objects* exposes all 50 PSXStyleCars player models plus the three runtime
+  traffic classes (car, van and TIR). Player cars preview their exact source
+  mesh and convert it into editable mesh parts; traffic entries open as
+  editable body, cabin/glass, wheels and lights. Once opened, cars use the
+  complete normal toolset: parts, face/viewport texture projection, vertex
+  sculpting, primitives, assembly, scale, outlines and undo/redo. A saved model
+  is mapped back to the exact player model or traffic class it came from.
+  Traffic entries also expose collision dimensions, minimum/maximum cruise
+  speed, acceleration, braking, spawn weight, lane bias and lane spread.
+  **Save & apply cars** persists the shared document and broadcasts a hot
+  reload; a game opened through *Open live game* rebuilds every pooled vehicle,
+  including traffic already driving, without changing its route or position.
 - **Replacing an archetype'''s shape**: the generator draws its instanced
   archetypes — lamps, pillars, containers, cranes, garage, konbini, vending,
   canopies, parked cars, barriers, guardrails, fences, exit signs, chevrons,

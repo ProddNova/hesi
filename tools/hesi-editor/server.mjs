@@ -102,6 +102,8 @@ function validateCustomAssetsDocument(document) {
   if (document.version !== 1) throw new Error('Custom assets document version must be 1');
   if (!isRecord(document.assets) || !isRecord(document.textures)) throw new Error('Custom assets document needs assets and textures objects');
   if (document.worldTextures !== undefined && !isRecord(document.worldTextures)) throw new Error('worldTextures must be an object');
+  if (document.worldModels !== undefined && !isRecord(document.worldModels)) throw new Error('worldModels must be an object');
+  if (document.carModels !== undefined && !isRecord(document.carModels)) throw new Error('carModels must be an object');
   const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
   for (const id of Object.keys(document.assets)) {
     if (forbidden.has(id) || !/^custom:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid custom asset id: ${id}`);
@@ -471,7 +473,7 @@ const server = createServer(async (req, res) => {
     if (path === ASSETS_ENDPOINT) {
       if (req.method === 'GET' || req.method === 'HEAD') {
         const file = resolve(ROOT, CUSTOM_ASSETS_PATH);
-        let document = { version: 1, assets: {}, textures: {}, worldTextures: {} };
+        let document = { version: 1, assets: {}, textures: {}, worldTextures: {}, worldModels: {}, carModels: {} };
         try { document = validateCustomAssetsDocument(JSON.parse(await readFile(file, 'utf8'))); }
         catch (error) { if (error.code !== 'ENOENT') throw error; }
         sendJson(res, 200, { ok: true, path: CUSTOM_ASSETS_PATH, document }, req.method);

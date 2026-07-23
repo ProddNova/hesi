@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js';
+import { TRAFFIC_CAR_SETTING_FIELDS, isCarModelTarget } from './car-models.js';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -428,7 +429,14 @@ export function partFaceNames(part) {
 }
 
 export function blankCustomAssetsDocument() {
-  return { version: CUSTOM_ASSETS_VERSION, assets: {}, textures: {}, worldTextures: {}, worldModels: {} };
+  return {
+    version: CUSTOM_ASSETS_VERSION,
+    assets: {},
+    textures: {},
+    worldTextures: {},
+    worldModels: {},
+    carModels: {},
+  };
 }
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -469,6 +477,33 @@ export function customAssetsDocumentErrors(document) {
   for (const [modelKey, assetId] of Object.entries(document.worldModels || {})) {
     if (!worldObjectForModelKey(modelKey)) errors.push(`unknown world model target: ${modelKey}`);
     else if (assetId !== null && !document.assets[assetId]) errors.push(`worldModels.${modelKey} references missing asset ${assetId}`);
+  }
+  if (document.carModels !== undefined && !isRecord(document.carModels)) errors.push('carModels must be an object');
+  const trafficSettingFields = new Map(TRAFFIC_CAR_SETTING_FIELDS.map((field) => [field.key, field]));
+  for (const [target, entry] of Object.entries(document.carModels || {})) {
+    const path = `carModels.${target}`;
+    if (!isCarModelTarget(target)) { errors.push(`unknown car model target: ${target}`); continue; }
+    if (!isRecord(entry)) { errors.push(`${path} must be an object`); continue; }
+    if (entry.assetId !== undefined && entry.assetId !== null && !document.assets[entry.assetId]) {
+      errors.push(`${path}.assetId references missing asset ${entry.assetId}`);
+    }
+    if (entry.settings !== undefined && !isRecord(entry.settings)) {
+      errors.push(`${path}.settings must be an object`);
+      continue;
+    }
+    const trafficTarget = target.startsWith('traffic:');
+    for (const [key, value] of Object.entries(entry.settings || {})) {
+      const field = trafficSettingFields.get(key);
+      if (!trafficTarget || !field) { errors.push(`${path}.settings.${key} is unknown`); continue; }
+      if (!Number.isFinite(value) || value < field.min || value > field.max) {
+        errors.push(`${path}.settings.${key} must be between ${field.min} and ${field.max}`);
+      }
+    }
+    const minSpeed = entry.settings?.minSpeedKmh;
+    const maxSpeed = entry.settings?.maxSpeedKmh;
+    if (Number.isFinite(minSpeed) && Number.isFinite(maxSpeed) && minSpeed > maxSpeed) {
+      errors.push(`${path}.settings.minSpeedKmh cannot exceed maxSpeedKmh`);
+    }
   }
   for (const [slot, entry] of Object.entries(document.worldTextures || {})) {
     if (!Object.hasOwn(WORLD_SURFACES, slot)) { errors.push(`unknown world texture slot: ${slot}`); continue; }

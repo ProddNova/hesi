@@ -1,4 +1,11 @@
 import * as THREE from 'three';
+import { buildCustomAssetGroup } from './custom-assets.js';
+import {
+  TRAFFIC_CAR_TYPES,
+  carModelEntry,
+  carModelTarget,
+  effectiveTrafficCarType,
+} from './car-models.js';
 
 const clamp = THREE.MathUtils.clamp;
 const EPSILON = 1e-6;
@@ -13,12 +20,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 //                (left-hand) lane. Tir hug the outer lane, cars roam.
 //   laneSpread — how tightly the class sticks to laneBias.
 //   topSpeed   — free-flow cruising speed in m/s (highway limit caps it).
-const VEHICLE_TYPES = Object.freeze([
-  { id: 'car',   label: 'auto',    width: 1.84, length: 4.48, height: 1.46, minSpeed: 26, maxSpeed: 37, acceleration: 2.7, braking: 8.0, weight: 0.72, laneBias: 0.36, laneSpread: 1.05 },
-  { id: 'van',   label: 'furgone', width: 2.08, length: 5.85, height: 2.44, minSpeed: 22, maxSpeed: 30, acceleration: 1.75, braking: 6.4, weight: 0.19, laneBias: 0.66, laneSpread: 0.58 },
-  { id: 'truck', label: 'tir',     width: 2.55, length: 15.6, height: 3.95, minSpeed: 19, maxSpeed: 26, acceleration: 1.05, braking: 5.2, weight: 0.09, laneBias: 1.0, laneSpread: 0.32 },
-]);
-const TYPE_BY_ID = Object.freeze(Object.fromEntries(VEHICLE_TYPES.map((type) => [type.id, type])));
+const VEHICLE_TYPES = TRAFFIC_CAR_TYPES;
 
 // Per-class colour palettes. Every traffic vehicle — car, van and tir alike —
 // is painted the same fluorescent "neon" green (verde fluo), so the AI traffic
@@ -294,11 +296,12 @@ export class TrafficSystem {
     };
     this.random = seededRandom(this.options.seed);
     this.density = this.options.density;
+    this.vehicleTypes = Object.fromEntries(VEHICLE_TYPES.map((type) => [type.id, { ...type }]));
     // Live-tunable behaviour knobs (dev panel). typeWeights sets how common each
     // class is, laneChangeRate scales how often cars change lane (0 = never),
     // speedFactor scales free-flow cruising speed across all traffic.
     this.typeWeights = this._normalizeTypeWeights(options.typeWeights ?? {
-      car: TYPE_BY_ID.car.weight, van: TYPE_BY_ID.van.weight, truck: TYPE_BY_ID.truck.weight,
+      car: this.vehicleTypes.car.weight, van: this.vehicleTypes.van.weight, truck: this.vehicleTypes.truck.weight,
     });
     this.laneChangeRate = clamp(finite(options.laneChangeRate, 1), 0, 3);
     this.speedFactor = clamp(finite(options.speedFactor, 1), 0.4, 1.8);
@@ -314,7 +317,10 @@ export class TrafficSystem {
     this._nextRefId = 1;
     this._disposed = false;
     // One shared geometry-set per class, swapped onto a pooled mesh at spawn.
-    this._typeGeometries = Object.fromEntries(VEHICLE_TYPES.map((type) => [type.id, buildVehicleGeometry(type)]));
+    this._typeGeometries = Object.fromEntries(Object.values(this.vehicleTypes).map((type) => [type.id, buildVehicleGeometry(type)]));
+    this._customModelTemplates = {};
+    this._customModelDocument = null;
+    this._customModelResolver = null;
     this._sharedMaterials = {
       headlamp: new THREE.MeshBasicMaterial({ color: 0xfff0be, toneMapped: false }),
       taillamp: new THREE.MeshBasicMaterial({ color: 0x8a1512, toneMapped: false }),
@@ -326,7 +332,7 @@ export class TrafficSystem {
   }
 
   _createPooledVehicle(index) {
-    const type = TYPE_BY_ID.car;
+    const type = this.vehicleTypes.car;
     const mesh = makeTrafficMesh(this._typeGeometries[type.id], this._sharedMaterials);
     mesh.visible = false;
     mesh.matrixAutoUpdate = true;
@@ -410,9 +416,111 @@ export class TrafficSystem {
     return this.typeWeights;
   }
 
+  _removeVehicleCustomModel(vehicle) {
+    const ud = vehicle?.mesh?.userData;
+    if (!ud) return;
+    ud.customModel?.removeFromParent?.();
+    ud.customModel = null;
+    ud.customModelType = null;
+    if (ud.body) ud.body.visible = true;
+  }
+
+  _disposeCustomModelTemplates() {
+    const geometries = new Set();
+    const materials = new Set();
+    for (const template of Object.values(this._customModelTemplates || {})) {
+      template?.traverse?.((object) => {
+        if (object.geometry) geometries.add(object.geometry);
+        for (const material of (Array.isArray(object.material) ? object.material : [object.material])) {
+          if (material) materials.add(material);
+        }
+      });
+    }
+    for (const geometry of geometries) geometry.dispose?.();
+    // Textures are cached by the shared custom-asset module and can also be
+    // used by world objects, so retire materials without disposing their maps.
+    for (const material of materials) material.dispose?.();
+    this._customModelTemplates = {};
+  }
+
+  _syncVehicleCustomModel(vehicle) {
+    const typeId = vehicle?.type?.id || 'car';
+    const template = this._customModelTemplates[typeId] || null;
+    const ud = vehicle?.mesh?.userData;
+    if (!ud) return;
+    if (ud.customModel && ud.customModelType === typeId && ud.customModelTemplate === template) return;
+    this._removeVehicleCustomModel(vehicle);
+    ud.customModelTemplate = template;
+    if (!template) return;
+    const model = template.clone(true);
+    model.name = `traffic-custom-${typeId}`;
+    model.userData.hesiTrafficCarModel = typeId;
+    ud.customModel = model;
+    ud.customModelType = typeId;
+    ud.body.visible = false;
+    vehicle.mesh.add(model);
+  }
+
+  /**
+   * Applies Modeler car replacements and behavior to the complete pool.
+   * Existing active vehicles are rebuilt in place, preserving route, position,
+   * speed and lane state; future spawns use the same updated type records.
+   */
+  applyModelOverrides(document, { resolveAssetPart = () => null } = {}) {
+    if (this._disposed) return { models: 0, settings: 0, active: 0 };
+    for (const vehicle of this.pool) this._removeVehicleCustomModel(vehicle);
+    this._disposeCustomModelTemplates();
+
+    this._customModelDocument = document || null;
+    this._customModelResolver = resolveAssetPart;
+    const nextTypes = {};
+    let modelCount = 0;
+    let settingsCount = 0;
+    for (const base of VEHICLE_TYPES) {
+      const type = effectiveTrafficCarType(base.id, document);
+      nextTypes[type.id] = type;
+      const entry = carModelEntry(document, carModelTarget('traffic', type.id));
+      if (Object.keys(entry?.settings || {}).length) settingsCount += 1;
+      const definition = entry?.assetId ? document?.assets?.[entry.assetId] : null;
+      if (!definition) continue;
+      const template = buildCustomAssetGroup(definition, document?.textures || {}, { resolveAssetPart });
+      if (!template.children.length) continue;
+      template.name = `traffic-template-${type.id}`;
+      template.updateMatrixWorld(true);
+      this._customModelTemplates[type.id] = template;
+      modelCount += 1;
+    }
+
+    const oldGeometries = this._typeGeometries;
+    this.vehicleTypes = nextTypes;
+    this._typeGeometries = Object.fromEntries(
+      Object.values(this.vehicleTypes).map((type) => [type.id, buildVehicleGeometry(type)]),
+    );
+    this.typeWeights = this._normalizeTypeWeights({
+      car: this.vehicleTypes.car.weight,
+      van: this.vehicleTypes.van.weight,
+      truck: this.vehicleTypes.truck.weight,
+    });
+
+    for (const vehicle of this.pool) {
+      const nextType = this.vehicleTypes[vehicle.type?.id] || this.vehicleTypes.car;
+      const color = vehicle.mesh.userData.body.material.color.getHex();
+      this._applyVehicleType(vehicle, nextType, color);
+      vehicle.targetSpeed = clamp(
+        finite(vehicle.targetSpeed, nextType.minSpeed),
+        nextType.minSpeed * 0.72,
+        nextType.maxSpeed * 1.15,
+      );
+    }
+    for (const set of Object.values(oldGeometries || {})) {
+      for (const geometry of Object.values(set)) geometry.dispose?.();
+    }
+    return { models: modelCount, settings: settingsCount, active: this.active.length };
+  }
+
   _normalizeTypeWeights(weights = {}) {
-    const truck = clamp(finite(weights.truck, TYPE_BY_ID.truck.weight), 0, 0.7);
-    const van = clamp(finite(weights.van, TYPE_BY_ID.van.weight), 0, 0.8);
+    const truck = clamp(finite(weights.truck, this.vehicleTypes.truck.weight), 0, 0.7);
+    const van = clamp(finite(weights.van, this.vehicleTypes.van.weight), 0, 0.8);
     // If a car weight is supplied honour it, otherwise cars are the remainder so
     // the three always add up to a full population.
     const car = Number.isFinite(weights.car) ? Math.max(0, weights.car) : Math.max(0.05, 1 - truck - van);
@@ -423,15 +531,15 @@ export class TrafficSystem {
     const w = this.typeWeights;
     const total = Math.max(EPSILON, w.car + w.van + w.truck);
     let roll = this.random() * total;
-    if ((roll -= w.truck) < 0) return TYPE_BY_ID.truck;
-    if ((roll -= w.van) < 0) return TYPE_BY_ID.van;
-    return TYPE_BY_ID.car;
+    if ((roll -= w.truck) < 0) return this.vehicleTypes.truck;
+    if ((roll -= w.van) < 0) return this.vehicleTypes.van;
+    return this.vehicleTypes.car;
   }
 
   _resolveType(type) {
     if (!type) return null;
-    if (typeof type === 'string') return TYPE_BY_ID[type] ?? null;
-    if (type.id && TYPE_BY_ID[type.id]) return TYPE_BY_ID[type.id];
+    if (typeof type === 'string') return this.vehicleTypes[type] ?? null;
+    if (type.id && this.vehicleTypes[type.id]) return this.vehicleTypes[type.id];
     return null;
   }
 
@@ -513,6 +621,7 @@ export class TrafficSystem {
     vehicle.width = type.width;
     vehicle.length = type.length;
     vehicle.height = type.height;
+    this._syncVehicleCustomModel(vehicle);
   }
 
   update(dt, playerState, context = {}) {
@@ -1489,9 +1598,11 @@ export class TrafficSystem {
     // Part geometries are shared per class, so dispose them once (below) rather
     // than per mesh; only the per-vehicle body material is owned individually.
     for (const vehicle of this.pool) {
+      this._removeVehicleCustomModel(vehicle);
       this.scene.remove(vehicle.mesh);
       for (const material of vehicle.mesh.userData.ownedMaterials ?? []) material.dispose();
     }
+    this._disposeCustomModelTemplates();
     for (const set of Object.values(this._typeGeometries)) {
       for (const geometry of Object.values(set)) geometry.dispose();
     }

@@ -84,6 +84,28 @@ export class CustomAssetStore {
   /** The custom asset standing in for an instanced archetype's shape, if any. */
   worldModel(instanceType) { return this.document.worldModels?.[instanceType] || null; }
 
+  /** Saved model/settings for one player or traffic car target. */
+  carModel(target) { return this.document.carModels?.[target] || null; }
+
+  /**
+   * Patches one car target. Passing null removes the complete override; an
+   * `assetId` of null keeps behavior settings while restoring generated shape.
+   */
+  setCarModel(target, patch) {
+    if (!this.document.carModels) this.document.carModels = {};
+    if (patch === null) delete this.document.carModels[target];
+    else {
+      const previous = this.document.carModels[target] || {};
+      const next = { ...previous, ...clone(patch) };
+      if (patch.settings) next.settings = { ...(previous.settings || {}), ...clone(patch.settings) };
+      if (next.assetId === undefined) delete next.assetId;
+      if (!next.assetId && !Object.keys(next.settings || {}).length) delete this.document.carModels[target];
+      else this.document.carModels[target] = next;
+    }
+    this.dirty = true;
+    return this.document.carModels[target] || null;
+  }
+
   /** Points an instanced archetype at a saved object, or `null` to go back to the generated shape. */
   setWorldModel(instanceType, assetId) {
     if (!this.document.worldModels) this.document.worldModels = {};
@@ -108,6 +130,11 @@ export class CustomAssetStore {
     // rather than referencing an asset that no longer exists.
     for (const [instanceType, assetId] of Object.entries(this.document.worldModels || {})) {
       if (assetId === id) delete this.document.worldModels[instanceType];
+    }
+    for (const [target, entry] of Object.entries(this.document.carModels || {})) {
+      if (entry?.assetId !== id) continue;
+      delete entry.assetId;
+      if (!Object.keys(entry.settings || {}).length) delete this.document.carModels[target];
     }
     this.dirty = true;
     return true;

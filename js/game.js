@@ -1,15 +1,16 @@
 import * as THREE from 'three';
 import * as MapModule from './map.js?v=20260722b';
 import * as PhysicsModule from './physics.js?v=20260713a';
-import * as TrafficModule from './traffic.js?v=20260721e';
+import * as TrafficModule from './traffic.js?v=20260723b';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260723b';
-import { applyEditorBuilds } from './editor-map-patch.js?v=20260722b';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=20260723c';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { setTextureSizeBudget } from './custom-assets.js';
+import { buildCustomAssetGroup, fetchCustomAssetsDocument, setTextureSizeBudget } from './custom-assets.js';
+import { carModelEntry, carModelTarget } from './car-models.js';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 import { DebugStats } from './debug-stats.js?v=20260720a';
@@ -45,7 +46,7 @@ class ShutokoNights {
     // step back in when close. The car and world freeze while walking.
     this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
     this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1};
-    this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
+    this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();this.setupCarModelHotReload();
     this.setupDebugMenu();
     this.setupDevMap();
     this.setupDebugStats();
@@ -73,6 +74,7 @@ class ShutokoNights {
     this.state=this.normalizeState(raw||defaults,defaults);
     if(this.catalog.length>1&&!this.state.auctions.length)this.state.auctions=this.generateAuctions(this.state.auctionSeed);
     this.customCar={enabled:true,scale:DEFAULT_CUSTOM_CAR_SCALE,modelId:this.state.settings.customCarModel,object:null,loadPromise:null,loadingModelId:null,status:'idle',requestId:0,abortController:null};
+    this.editorCarAssets=null;this.editorCarResolver=null;this.carModelReloadPromise=null;this.carModelChannel=null;
     this.admin={...this.admin,...this.state.admin};this.cameraMode=this.state.settings.camera||'chase';this.persist();
   }
 
@@ -138,7 +140,7 @@ class ShutokoNights {
     this.garage.root.visible=false;this.roadScene.add(this.camera);
     // World-editor builds (data/editor/*-build.json): replay saved map edits on
     // the freshly generated highway and garage. No build files -> no-op.
-    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root,roadScene:this.roadScene,garageScene:this.garageScene}).then(r=>{if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.prewarmGpuResources();});
+    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root,roadScene:this.roadScene,garageScene:this.garageScene}).then(r=>{if(r.customAssets)this.applyCarModelDocument(r.customAssets,{reloadPlayer:true});if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.prewarmGpuResources();});
     this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
     // The selected PSX car is the only player-car visual. It starts loading
     // beside the lightweight player anchor and moves with that anchor on road.
@@ -655,6 +657,31 @@ class ShutokoNights {
   syncCustomCarControls(){
     if(!this.customCar)return;const select=document.getElementById('debug-custom-car-model'),model=getPSXCarModel(this.customCar.modelId);if(select&&document.activeElement!==select)select.value=model.id;
   }
+  setupCarModelHotReload(){
+    if(typeof BroadcastChannel==='undefined')return;
+    try{
+      this.carModelChannel=new BroadcastChannel('hesi-car-models');
+      this.carModelChannel.addEventListener('message',event=>{if(event.data?.type==='reload-car-models')this.reloadEditorCarModels({announce:true});});
+      window.addEventListener('beforeunload',()=>this.carModelChannel?.close?.(),{once:true});
+    }catch(error){console.warn('Car Modeler live channel unavailable',error);}
+  }
+  applyCarModelDocument(document,{reloadPlayer=false,announce=false}={}){
+    if(!document)return null;
+    this.editorCarAssets=document;
+    this.editorCarResolver=createRuntimeAssetPartResolver(document,this.map);
+    const result=this.traffic?.applyModelOverrides?.(document,{resolveAssetPart:this.editorCarResolver})||{models:0,settings:0,active:0};
+    if(reloadPlayer)this.loadCustomCar(this.customCar.modelId,{force:true}).catch(error=>console.warn('Player car Modeler override',error));
+    if(announce)this.ui?.toast?.(`CARS APPLIED // ${result.active||0} ACTIVE TRAFFIC VEHICLES`,'amber');
+    return result;
+  }
+  async reloadEditorCarModels({announce=false}={}){
+    if(this.carModelReloadPromise)return this.carModelReloadPromise;
+    this.carModelReloadPromise=fetchCustomAssetsDocument()
+      .then(document=>this.applyCarModelDocument(document,{reloadPlayer:true,announce}))
+      .catch(error=>{console.warn('Car Modeler hot reload',error);if(announce)this.ui?.toast?.('CARS APPLY FAILED // CHECK EDITOR','red');return null;})
+      .finally(()=>{this.carModelReloadPromise=null;});
+    return this.carModelReloadPromise;
+  }
   syncPlayerVisuals(){
     // There is no procedural fallback: the player anchor contains lights only,
     // while the selected PSX model is the sole visible vehicle in both scenes.
@@ -666,20 +693,40 @@ class ShutokoNights {
     if(this.customCar.object)this.garage?.refreshColliders?.();
     else this.loadCustomCar().then(()=>this.garage?.refreshColliders?.()).catch(e=>console.warn('PSX garage car load',e));
   }
+  disposeCarVisual(visual){
+    if(!visual)return;
+    if(visual.userData?.hesiCarOverrideAssetId){visual.removeFromParent();return;}
+    disposePSXCar(visual);
+  }
   clearCustomCarObject({abort=false}={}){
     if(abort){this.customCar.requestId++;this.customCar.abortController?.abort();this.customCar.abortController=null;this.customCar.loadPromise=null;this.customCar.loadingModelId=null;}
-    if(this.customCar.object){disposePSXCar(this.customCar.object);this.customCar.object=null;}
+    if(this.customCar.object){this.disposeCarVisual(this.customCar.object);this.customCar.object=null;}
     this.syncPlayerVisuals();
   }
-  async loadCustomCar(modelId=this.customCar.modelId){
-    modelId=getPSXCarModel(modelId).id;if(this.customCar.object?.userData?.psxCarId===modelId)return this.customCar.object;if(this.customCar.loadPromise&&this.customCar.loadingModelId===modelId)return this.customCar.loadPromise;
-    const requestId=++this.customCar.requestId,controller=new AbortController(),spec=this.getEffectiveCar(),length=spec.dimensions?.length||spec.length||4.25,color=spec.color;this.customCar.abortController?.abort();this.customCar.abortController=controller;this.customCar.loadingModelId=modelId;this.customCar.status='loading';this.syncCustomCarControls();
-    const promise=loadPSXCar(modelId,{length,color,signal:controller.signal});this.customCar.loadPromise=promise;
+  async loadCustomCar(modelId=this.customCar.modelId,{force=false}={}){
+    modelId=getPSXCarModel(modelId).id;
+    const target=carModelTarget('player',modelId),entry=carModelEntry(this.editorCarAssets,target),overrideId=entry?.assetId&&this.editorCarAssets?.assets?.[entry.assetId]?entry.assetId:null;
+    const currentOverride=this.customCar.object?.userData?.hesiCarOverrideAssetId||null;
+    if(!force&&this.customCar.object?.userData?.psxCarId===modelId&&currentOverride===overrideId)return this.customCar.object;
+    if(!force&&this.customCar.loadPromise&&this.customCar.loadingModelId===modelId)return this.customCar.loadPromise;
+    const requestId=++this.customCar.requestId,controller=new AbortController(),spec=this.getEffectiveCar(),length=spec.dimensions?.length||spec.length||4.25,color=spec.color;
+    this.customCar.abortController?.abort();this.customCar.abortController=controller;this.customCar.loadingModelId=modelId;this.customCar.status='loading';this.syncCustomCarControls();
+    const promise=overrideId
+      ? Promise.resolve().then(()=>{
+        const definition=this.editorCarAssets.assets[overrideId];
+        const visual=buildCustomAssetGroup(definition,this.editorCarAssets.textures||{},{resolveAssetPart:this.editorCarResolver||(()=>null)});
+        if(!visual.children.length)throw new Error(`Car override ${overrideId} contains no renderable parts`);
+        visual.name=`Modeler car · ${definition.label||modelId}`;
+        visual.userData.psxCarId=modelId;visual.userData.psxCarLabel=getPSXCarModel(modelId).label;visual.userData.hesiCarOverrideAssetId=overrideId;
+        return visual;
+      })
+      : loadPSXCar(modelId,{length,color,signal:controller.signal});
+    this.customCar.loadPromise=promise;
     try{
-      const visual=await promise;if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){disposePSXCar(visual);return null;}
+      const visual=await promise;if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){this.disposeCarVisual(visual);return null;}
       try{await this.renderer.compileAsync?.(visual,this.camera,this.mode==='garage'?this.garageScene:this.roadScene);}catch(e){console.warn('PSX car shader prewarm',e);}
-      if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){disposePSXCar(visual);return null;}
-      const previous=this.customCar.object;this.customCar.object=visual;visual.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);this.customCar.status='ready';this.attachCustomCarVisual();if(previous)disposePSXCar(previous);this.garage?.refreshColliders?.();this.syncCustomCarControls();
+      if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){this.disposeCarVisual(visual);return null;}
+      const previous=this.customCar.object;this.customCar.object=visual;visual.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);this.customCar.status='ready';this.attachCustomCarVisual();if(previous)this.disposeCarVisual(previous);this.garage?.refreshColliders?.();this.syncCustomCarControls();
       this.syncPlayerVisuals();return visual;
     }catch(error){
       if(error?.name==='AbortError'||requestId!==this.customCar.requestId)return null;this.customCar.status='error';this.syncCustomCarControls();throw error;

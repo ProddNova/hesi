@@ -97,6 +97,21 @@ function customAssetPartResolver(customAssets, donorForMaterialKey, depth = 0) {
   };
 }
 
+/**
+ * Resolver used by dynamic car models outside the map-build pass. It indexes
+ * the generated instanced buckets once, then rebuilds nested custom parts and
+ * baked world-asset components with the same materials as placed objects.
+ */
+export function createRuntimeAssetPartResolver(customAssets, map) {
+  const donors = new Map();
+  map?.group?.traverse?.((object) => {
+    if (!object.isInstancedMesh) return;
+    const materialKey = String(object.name || '').replace(/^chunk\s+\S+\s+/, '');
+    if (materialKey && !donors.has(materialKey)) donors.set(materialKey, object);
+  });
+  return customAssetPartResolver(customAssets, (materialKey) => donors.get(materialKey) || null);
+}
+
 function buildPlacedObject(op, donorForMaterialKey, customAssets = null) {
   const root = new THREE.Group();
   root.name = op.name || 'Editor placed object';
@@ -272,6 +287,7 @@ export async function applyEditorBuilds({ map = null, garageRoot = null, roadSce
     map ? fetchBuild('highway') : null,
     garageRoot ? fetchBuild('garage') : null,
   ]);
+  summary.customAssets = customAssets;
   if (map) {
     // World look dials saved on the highway build (wet-asphalt gloss, ...).
     const gloss = highwayBuild?.environment?.surfaceGloss;
