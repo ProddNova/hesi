@@ -313,15 +313,23 @@ export async function createEditorApp(root) {
         const current = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
         const next = normalizeLighting({ ...current, ...(detail?.patch || {}) });
         projectState.replaceLighting(isDefaultLighting(next) ? null : next);
-        shell.setLightingState(next);
+        // render:false — the slider under the pointer keeps its live value.
+        shell.setLightingState(next, { render: false });
         viewport.setGameLighting(next, { switchToGame: true });
         shell.setStatus('Lighting updated · Apply to Game to bake it into the playable game');
       },
       'lights-reset': () => {
         projectState.replaceLighting(null);
-        shell.setLightingState(DEFAULT_LIGHTING);
+        shell.setLightingState(DEFAULT_LIGHTING, { render: true });
         viewport.setGameLighting(DEFAULT_LIGHTING);
         shell.setStatus('Lighting reset to the shipped night look');
+      },
+      'world-surface-gloss': () => {
+        const value = Math.min(3, Math.max(0, Number(detail)));
+        projectState.replaceSurfaceGloss(Math.abs(value - 1) < 1e-3 ? null : value);
+        shell.setSurfaceGlossState(value, { render: false });
+        adapter.map?.setSurfaceGloss?.(value);
+        shell.setStatus('Surface finish updated · Apply to Game to bake it into the playable game');
       },
     };
     if (viewActions[action]) { viewActions[action](); return; }
@@ -608,6 +616,11 @@ export async function createEditorApp(root) {
       ? `data/editor/demo-${scene.id}-project.json`
       : persistence.initialPath();
     await persistence.load(initialProjectPath, { allowMissing: true });
+    // The garage's red sleep prism snaps onto the placed bed ("letto"); the bed
+    // only exists after the project loads, so re-run the snap now (and after
+    // future edits) to show it in the editor exactly where the game will.
+    adapter.garage?.refreshBedMarker?.();
+    projectState.subscribe(() => adapter.garage?.refreshBedMarker?.());
     gameAppliedHistoryIndex = history.state().index;
     projectBuildPending = !(await persistence.gameBuildMatches());
     syncPublishState();
@@ -619,6 +632,11 @@ export async function createEditorApp(root) {
     const initialLighting = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
     shell.setLightingState(initialLighting);
     if (!isDefaultLighting(initialLighting)) viewport.setGameLighting(initialLighting);
+    const initialGloss = projectState.getSurfaceGloss();
+    if (Number.isFinite(initialGloss)) {
+      shell.setSurfaceGlossState(initialGloss, { render: false });
+      adapter.map?.setSurfaceGloss?.(initialGloss);
+    }
     applyPreset(adapter.presets.has('tatsumi-pa') ? 'tatsumi-pa' : 'initial-spawn');
     // Restore the pre-publish selection (Apply to Game reloads with ?select=).
     const reselectId = params.get('select');

@@ -67,8 +67,13 @@ const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 // widest deck is subtracted — enough for pillars, embankments and the
 // roadside clutter, without walling off the bay.
 const TERRAIN_CELL = 64;
-const TERRAIN_ROAD_HALO = 130;
-const TERRAIN_BUILDING_MARGIN = 45;
+// Halo + building margin are deliberately generous so the disc union closes up
+// into continuous land under the city instead of leaving bay showing between
+// the feature patches (the "holes" report). The open bay well away from any
+// road or building has no discs at all, so it still reads through for the
+// skybox reflection — only the populated corridor fills in.
+const TERRAIN_ROAD_HALO = 200;
+const TERRAIN_BUILDING_MARGIN = 110;
 // Bucket size for the stamped-disc index the coastline is contoured against.
 const TERRAIN_DISC_HASH = 256;
 const UP_NORMAL = [0, 1, 0];
@@ -8632,13 +8637,57 @@ export class HighwayMap {
       stampDisc(anchor.x, anchor.z, anchor.r + TERRAIN_BUILDING_MARGIN);
     }
 
+    // Close interior holes: gaps fully enclosed by the built-up area (courtyards
+    // and plots between the feature discs) read as holes in the ground once the
+    // bay water plane is hidden. Flood-fill the cell complement from the map
+    // edge — everything the open bay can reach stays open (so the panorama
+    // still shows through under the bridges), and every non-land cell it cannot
+    // reach is stamped solid. This fills the city without touching the bay.
+    {
+      let gMinI = Infinity, gMaxI = -Infinity, gMinK = Infinity, gMaxK = -Infinity;
+      for (const area of areas) {
+        gMinI = Math.min(gMinI, Math.floor(area.minX / TERRAIN_CELL) - 1);
+        gMaxI = Math.max(gMaxI, Math.ceil(area.maxX / TERRAIN_CELL) + 1);
+        gMinK = Math.min(gMinK, Math.floor(area.minZ / TERRAIN_CELL) - 1);
+        gMaxK = Math.max(gMaxK, Math.ceil(area.maxZ / TERRAIN_CELL) + 1);
+      }
+      const reached = new Set();
+      const stack = [];
+      const seed = (i, k) => {
+        if (i < gMinI || i > gMaxI || k < gMinK || k > gMaxK) return;
+        const kk = `${i},${k}`;
+        if (reached.has(kk) || land.has(kk)) return;
+        reached.add(kk);
+        stack.push(i, k);
+      };
+      for (let i = gMinI; i <= gMaxI; i += 1) { seed(i, gMinK); seed(i, gMaxK); }
+      for (let k = gMinK; k <= gMaxK; k += 1) { seed(gMinI, k); seed(gMaxK, k); }
+      while (stack.length) {
+        const k = stack.pop();
+        const i = stack.pop();
+        seed(i + 1, k); seed(i - 1, k); seed(i, k + 1); seed(i, k - 1);
+      }
+      const fillRadius = TERRAIN_CELL * 0.8;
+      for (let i = gMinI; i <= gMaxI; i += 1) {
+        for (let k = gMinK; k <= gMaxK; k += 1) {
+          const kk = `${i},${k}`;
+          if (land.has(kk) || reached.has(kk) || !areaOver(i, k)) continue;
+          stampDisc(i * TERRAIN_CELL + TERRAIN_CELL * 0.5, k * TERRAIN_CELL + TERRAIN_CELL * 0.5, fillRadius);
+        }
+      }
+    }
+
     // Signed distance to the carved shape: positive inside, and smooth, so
     // marching squares gives the disc union's own rounded coast instead of
     // the staircase the cell grid would draw. Union of discs is a max of
     // their distances; the rectangle mask clips it with a min.
     const reach = Math.ceil(discReach / TERRAIN_DISC_HASH);
+    // A large FINITE floor, never -Infinity: a corner far from every disc still
+    // returns a real distance, so the marching-squares crossing t = near/(near
+    // - far) can never divide two infinities into a NaN vertex.
+    const FIELD_FLOOR = -1e9;
     const field = (x, z) => {
-      let inDiscs = -Infinity;
+      let inDiscs = FIELD_FLOOR;
       const ci = Math.floor(x / TERRAIN_DISC_HASH);
       const ck = Math.floor(z / TERRAIN_DISC_HASH);
       for (let i = ci - reach; i <= ci + reach; i += 1) {
@@ -8649,8 +8698,7 @@ export class HighwayMap {
           }
         }
       }
-      if (inDiscs === -Infinity) return -Infinity;
-      let inRects = -Infinity;
+      let inRects = FIELD_FLOOR;
       for (const area of areas) {
         const dx = Math.max(area.minX - x, x - area.maxX);
         const dz = Math.max(area.minZ - z, z - area.maxZ);

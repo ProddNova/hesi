@@ -16,6 +16,8 @@ function buildEnvironment(environment) {
   const output = {};
   if (environment?.skybox) output.skybox = normalizeSkyboxConfig(environment.skybox);
   if (environment?.lighting && !isDefaultLighting(environment.lighting)) output.lighting = normalizeLighting(environment.lighting);
+  const gloss = environment?.surfaceGloss;
+  if (Number.isFinite(gloss) && Math.abs(gloss - 1) > 1e-3) output.surfaceGloss = Math.min(3, Math.max(0, gloss));
   return output;
 }
 

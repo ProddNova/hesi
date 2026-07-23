@@ -228,6 +228,7 @@ async function makeGarageWorld(onProgress) {
 
   return {
     group: root,
+    garage, // exposed so the app can re-snap the sleep prism onto the placed bed after load
     entities,
     strategy: 'garage',
     label: 'Garage interior',

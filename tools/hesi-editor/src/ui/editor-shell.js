@@ -447,6 +447,7 @@ export function createEditorShell(root) {
   let textureEntries = [];
   let skyboxState = { configured: false, config: normalizeSkyboxConfig({ enabled: false }), texture: null };
   let lightingState = normalizeLighting(DEFAULT_LIGHTING);
+  let surfaceGlossState = 1;
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
   let actionHandler = () => {};
@@ -987,6 +988,29 @@ export function createEditorShell(root) {
       bottomContent.append(reference);
       return;
     }
+    // Surface finish: the wet-asphalt sheen dial (road pools + reflection
+    // streaks). Live, in place — the slider keeps its value under the pointer.
+    const finish = element('section', 'world-finish');
+    finish.append(element('h3', '', 'Surface finish'));
+    finish.append(element('p', 'world-finish-hint', 'How wet / glossy the asphalt and lit surfaces look. 0 = fully matte, 1 = default, higher = wet reflections. Applies to the whole world; Apply to Game bakes it in.'));
+    const glossRow = element('label', 'world-finish-row');
+    glossRow.append(element('span', '', 'Surface gloss'));
+    const glossSlider = document.createElement('input');
+    glossSlider.type = 'range';
+    glossSlider.min = '0'; glossSlider.max = '3'; glossSlider.step = '0.05';
+    glossSlider.value = String(surfaceGlossState);
+    glossSlider.dataset.testid = 'surface-gloss';
+    const glossValue = element('code', '', Number(surfaceGlossState).toFixed(2));
+    glossSlider.addEventListener('input', () => {
+      glossValue.textContent = Number(glossSlider.value).toFixed(2);
+      triggerAction('world-surface-gloss', Number(glossSlider.value));
+    });
+    const glossReset = button('Reset', '', { title: 'Back to the default surface finish' });
+    glossReset.addEventListener('click', () => { glossSlider.value = '1'; glossValue.textContent = '1.00'; triggerAction('world-surface-gloss', 1); });
+    glossRow.append(glossSlider, glossValue, glossReset);
+    finish.append(glossRow);
+    bottomContent.append(finish);
+
     const metadata = adapter?.metadata;
     const grid = element('div', 'world-facts');
     const facts = metadata ? [
@@ -1502,11 +1526,19 @@ export function createEditorShell(root) {
       };
       if (currentTab === 'skybox') renderBottom();
     },
-    setLightingState(state) {
+    // render:false keeps the live value while a slider is being dragged —
+    // re-rendering the panel here would tear out the very input under the
+    // pointer (the same trap the Surfaces editor hit). The slider shows its own
+    // value; only reset / scene-load ask for a rebuild.
+    setLightingState(state, { render = true } = {}) {
       lightingState = normalizeLighting(state || DEFAULT_LIGHTING);
-      if (currentTab === 'lights') renderBottom();
+      if (render && currentTab === 'lights') renderBottom();
     },
     setLightingScene() { if (currentTab === 'lights') renderBottom(); },
+    setSurfaceGlossState(value, { render = true } = {}) {
+      surfaceGlossState = Number.isFinite(+value) ? Math.min(3, Math.max(0, +value)) : 1;
+      if (render && currentTab === 'world') renderBottom();
+    },
     setRoadEdit(state) {
       roadState = state?.active ? state : null;
       renderRoadPanel();

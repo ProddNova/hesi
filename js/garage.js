@@ -104,30 +104,35 @@ export class GarageSystem {
     this.pcMarkers.userData.editorAnchorFollower='garage-market';
     this.beacons.push(this.exitMarkers,this.pcMarkers);
     this.carryAnchor=new THREE.Group();this.carryAnchor.position.set(.45,-.45,-1);this.camera.add(this.carryAnchor);this.scene.add(this.camera);
-    // A cot against the back-left wall, and a red waypoint beacon (a pelo
-    // smaller than the exit/PC ones) over it: sleeping here banks the run and
-    // drops back to the main menu. Everything here is appended AFTER every
-    // editor-addressable child (max garage-build childIndex is 80), so the bed
-    // never shifts an index a saved garage build resolves.
-    this.buildBed();
+    // Red sleep beacon (a pelo smaller than the exit/PC ones). It does NOT come
+    // with a bed of its own — it snaps onto the bed the player placed in the
+    // editor (an object named "letto"/"bed"), so sleeping there banks the run
+    // and drops back to the main menu. Hidden until that bed is found
+    // (refreshBedMarker), and appended AFTER every editor-addressable child.
     this.bedMarkers=this.makeBeacon(0xcc2626,0xff4a3a,0.84);
-    this.bedMarkers.position.set(this.bedPoint.x,0,this.bedPoint.z+1.7);
+    this.bedMarkers.visible=false;
     this.root.add(this.bedMarkers);
     this.beacons.push(this.bedMarkers);
     this.refreshColliders();
   }
 
-  // Simple PS2 cot: frame, mattress, pillow and a blanket band. Its solid mass
-  // is a walk collider so the player stops at the bedside; the interaction
-  // point sits at the open (room-facing) side.
-  buildBed(){
-    const bx=-8.6, bz=-11.4;                 // back-left corner, clear of the workbench at z=-8
-    this.bedPoint=V(bx,0,bz);
-    const frame=this.mesh(new THREE.BoxGeometry(2.2,.5,3.4),this.mat(0x3c2a20),V(bx,.25,bz));this.staticColliders.push(frame);
-    this.mesh(new THREE.BoxGeometry(2.0,.28,3.2),this.mat(0x4a5a68),V(bx,.62,bz));           // mattress
-    this.mesh(new THREE.BoxGeometry(1.8,.2,3.0),this.mat(0x7b3336),V(bx,.82,bz+.2));          // blanket
-    this.mesh(new THREE.BoxGeometry(1.7,.22,.7),this.mat(0xd7d2c4),V(bx,.86,bz-1.25));        // pillow
-    for(const x of [bx-1.0,bx+1.0])for(const z of [bz-1.6,bz+1.6])this.mesh(new THREE.BoxGeometry(.14,.5,.14),this.mat(0x241a14),V(x,.0,z)); // legs
+  // Snap the sleep beacon onto an editor-placed bed (any placed object whose
+  // name contains "letto" or "bed"). Runs whenever colliders refresh, so it
+  // follows the bed wherever the editor build put it; with no such object the
+  // beacon and its interaction stay hidden.
+  refreshBedMarker(){
+    const placed=this.root.children.find(c=>c.name==='Editor placed objects');
+    const bed=placed?.children.find(c=>/letto|\bbed\b/i.test(c.name||''));
+    if(bed&&this.bedMarkers){
+      bed.updateWorldMatrix(true,false);
+      const p=bed.getWorldPosition(new THREE.Vector3());
+      this.bedPoint=V(p.x,0,p.z);
+      this.bedMarkers.position.set(p.x,0,p.z);
+      this.bedMarkers.visible=true;
+    }else if(this.bedMarkers){
+      this.bedPoint=null;
+      this.bedMarkers.visible=false;
+    }
   }
 
   // Rebuilds the walk colliders from whatever is actually in the room right
@@ -150,6 +155,7 @@ export class GarageSystem {
     const table=placed?.children.find(c=>c.name==='table_small');
     this.pcPoint=table?V(table.position.x,0,table.position.z):V(7.5,0,-9.3);
     this.refreshExitMarkers();
+    this.refreshBedMarker();
   }
   // A single crystal-diamond waypoint marker, rendered as a PS2-style hologram
   // instead of a solid painted gem: a translucent additive body that glows on
@@ -302,10 +308,10 @@ export class GarageSystem {
     // prism in the world editor therefore moves both its prompt and trigger.
     const pc=this.markerPoint(this.pcMarkers,this.pcPoint||V(7.5,0,-9.3));
     const exit=this.markerPoint(this.exitMarkers,this.exitPoint||V(0,0,12.6));
-    const bed=this.markerPoint(this.bedMarkers,this.bedPoint||V(-8.6,0,-9.7));
+    const bed=this.bedPoint?this.markerPoint(this.bedMarkers,this.bedPoint):null;
     if(this.distance2D(pc)<2.4)candidates.push({type:'pc',pos:pc,text:'<kbd>E</kbd> USE WANGAN MARKET PC'});
     if(this.distance2D(exit)<2.4)candidates.push({type:'exit',pos:exit,text:'<kbd>E</kbd> EXIT TO EXPRESSWAY'});
-    if(this.distance2D(bed)<2.4)candidates.push({type:'sleep',pos:bed,text:'<kbd>E</kbd> SLEEP · RETURN TO MENU'});
+    if(bed&&this.distance2D(bed)<2.4)candidates.push({type:'sleep',pos:bed,text:'<kbd>E</kbd> SLEEP · RETURN TO MENU'});
     if(this.carried&&this.distance2D(V(0,0,0))<4.0)candidates.push({type:'install',pos:V(0,0,0),text:`<kbd>E</kbd> INSTALL ${this.carried.name||'DELIVERY'}`});
     if(!this.carried)for(const m of this.deliveryMeshes)if(this.distance2D(m.position)<2)candidates.push({type:'delivery',pos:m.position,mesh:m,delivery:m.userData.delivery,text:`<kbd>E</kbd> PICK UP ${m.userData.delivery.name||'DELIVERY BOX'}`});
     return candidates.filter(c=>this.lookScore(c.pos)>-.1).sort((a,b)=>this.distance2D(a.pos)-this.distance2D(b.pos))[0]||null;

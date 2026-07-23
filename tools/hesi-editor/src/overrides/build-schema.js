@@ -151,6 +151,8 @@ export function validateBuildDocument(document) {
           if (lighting.tint !== undefined && !/^#?[0-9a-f]{6}$/i.test(String(lighting.tint))) errors.push('environment.lighting.tint must be a #rrggbb colour');
         }
       }
+      const gloss = document.environment.surfaceGloss;
+      if (gloss !== undefined && gloss !== null && !Number.isFinite(gloss)) errors.push('environment.surfaceGloss must be a number');
     }
   }
   if (errors.length) throw new BuildValidationError(errors);
@@ -183,6 +185,7 @@ function buildEnvironment(environment) {
   const output = {};
   if (environment?.skybox) output.skybox = stableValue(normalizeSkyboxConfig(environment.skybox));
   if (environment?.lighting) output.lighting = stableValue(normalizeLighting(environment.lighting));
+  if (Number.isFinite(environment?.surfaceGloss)) output.surfaceGloss = roundNumber(Math.min(3, Math.max(0, environment.surfaceGloss)));
   return output;
 }
 

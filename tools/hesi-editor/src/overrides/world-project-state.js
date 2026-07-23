@@ -85,6 +85,15 @@ export class WorldProjectState {
     this._emit({ type: 'lighting' });
   }
 
+  getSurfaceGloss() { return Number.isFinite(this.document.environment?.surfaceGloss) ? this.document.environment.surfaceGloss : null; }
+
+  replaceSurfaceGloss(value) {
+    if (!this.document.environment || typeof this.document.environment !== 'object') this.document.environment = {};
+    if (value == null) delete this.document.environment.surfaceGloss;
+    else this.document.environment.surfaceGloss = value;
+    this._emit({ type: 'surface-gloss' });
+  }
+
   toJSON() { return clone(this.document); }
 
   subscribe(listener) {
