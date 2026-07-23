@@ -162,7 +162,7 @@ export function effectiveTrafficCarType(id, document = null) {
   };
 }
 
-const box = (name, scale, position, color) => ({
+const box = (name, scale, position, color, vehicleRole = null) => ({
   kind: 'box',
   name,
   position,
@@ -170,68 +170,47 @@ const box = (name, scale, position, color) => ({
   scale,
   color,
   faces: {},
-});
-
-const wheel = (name, x, y, z, radius, width) => ({
-  kind: 'cylinder',
-  name,
-  position: [x, y, z],
-  rotation: [0, 0, Math.PI / 2],
-  scale: [radius * 2, width, radius * 2],
-  segments: 10,
-  color: '#080a0d',
-  faces: {},
+  ...(vehicleRole ? { vehicleRole } : {}),
 });
 
 /**
- * Editable primitive source for a traffic class.  It mirrors the runtime
- * dimensions and adds explicit body/cab/glass/wheel/light parts so every
- * visible element is immediately reachable by the normal Modeler tools.
+ * Exact visible boxes used by the live traffic generator.
+ *
+ * Both the game and the Modeler consume this function, so a traffic class can
+ * no longer acquire an editor-only cab, wheel or window that does not exist on
+ * the road. Roles let a saved replacement keep brake/indicator behaviour.
+ */
+export function trafficCarPartSpecs(typeOrId) {
+  const type = typeof typeOrId === 'string' ? TRAFFIC_CAR_BY_ID[typeOrId] : typeOrId;
+  if (!type) return [];
+  const { width: w, length: l, height: h } = type;
+  const half = l * 0.5;
+  const headY = type.id === 'truck' ? 1.2 : h * 0.5;
+  const tailY = type.id === 'truck' ? 1.05 : h * 0.52;
+  const frontZ = half - 0.04;
+  const rearZ = -half + 0.04;
+  const lampW = Math.min(0.3, w * 0.17);
+  return [
+    { role: 'body', name: 'Body', scale: [w, h, l], position: [0, h * 0.5, 0], color: '#39ff14' },
+    { role: 'headlamp', name: 'Headlamp L', scale: [lampW, 0.16, 0.06], position: [-w * 0.33, headY, frontZ], color: '#fff0be' },
+    { role: 'headlamp', name: 'Headlamp R', scale: [lampW, 0.16, 0.06], position: [w * 0.33, headY, frontZ], color: '#fff0be' },
+    { role: 'taillamp', name: 'Taillamp L', scale: [lampW, 0.18, 0.06], position: [-w * 0.34, tailY, rearZ], color: '#8a1512' },
+    { role: 'taillamp', name: 'Taillamp R', scale: [lampW, 0.18, 0.06], position: [w * 0.34, tailY, rearZ], color: '#8a1512' },
+    { role: 'indicator-left', name: 'Indicator L', scale: [0.12, 0.16, 0.06], position: [-(w * 0.34 + 0.22), tailY, rearZ], color: '#ffa51f' },
+    { role: 'indicator-right', name: 'Indicator R', scale: [0.12, 0.16, 0.06], position: [w * 0.34 + 0.22, tailY, rearZ], color: '#ffa51f' },
+  ];
+}
+
+/**
+ * Editable primitive source for a traffic class. It is deliberately built
+ * from the exact same box specifications used by live traffic.
  */
 export function trafficCarDefinition(typeOrId, assetId = null) {
   const type = typeof typeOrId === 'string' ? TRAFFIC_CAR_BY_ID[typeOrId] : typeOrId;
   if (!type) return null;
-  const { width: w, length: l, height: h } = type;
-  const bodyColor = '#39ff14';
-  const parts = [];
-
-  if (type.id === 'car') {
-    parts.push(
-      box('Body', [w, h * 0.48, l], [0, h * 0.35, 0], bodyColor),
-      box('Cabin and glass', [w * 0.78, h * 0.45, l * 0.48], [0, h * 0.76, -l * 0.03], '#101820'),
-    );
-  } else if (type.id === 'van') {
-    parts.push(
-      box('Van body', [w, h * 0.82, l], [0, h * 0.45, 0], bodyColor),
-      box('Windscreen', [w * 0.78, h * 0.3, 0.08], [0, h * 0.72, l * 0.5 + 0.02], '#101820'),
-    );
-  } else {
-    const cabLength = Math.min(3.4, l * 0.25);
-    const trailerLength = l - cabLength - 0.45;
-    parts.push(
-      box('TIR cab', [w, h * 0.88, cabLength], [0, h * 0.47, l * 0.5 - cabLength * 0.5], bodyColor),
-      box('TIR trailer', [w * 0.98, h * 0.92, trailerLength], [0, h * 0.49, -l * 0.5 + trailerLength * 0.5], bodyColor),
-      box('Windscreen', [w * 0.76, h * 0.28, 0.08], [0, h * 0.7, l * 0.5 + 0.02], '#101820'),
-    );
-  }
-
-  const radius = Math.min(0.56, Math.max(0.28, h * 0.22));
-  const axleZ = type.id === 'truck'
-    ? [l * 0.37, -l * 0.34, -l * 0.43]
-    : [l * 0.31, -l * 0.31];
-  for (const [axle, z] of axleZ.entries()) {
-    parts.push(
-      wheel(`Wheel L${axle + 1}`, -w * 0.48, radius, z, radius, Math.max(0.16, w * 0.11)),
-      wheel(`Wheel R${axle + 1}`, w * 0.48, radius, z, radius, Math.max(0.16, w * 0.11)),
-    );
-  }
-  const lampW = Math.min(0.32, w * 0.18);
-  for (const side of [-1, 1]) {
-    parts.push(
-      box(`Headlamp ${side < 0 ? 'L' : 'R'}`, [lampW, 0.16, 0.06], [side * w * 0.32, h * 0.5, l * 0.5 + 0.03], '#fff0be'),
-      box(`Taillamp ${side < 0 ? 'L' : 'R'}`, [lampW, 0.18, 0.06], [side * w * 0.32, h * 0.5, -l * 0.5 - 0.03], '#8a1512'),
-    );
-  }
+  const parts = trafficCarPartSpecs(type).map((part) => (
+    box(part.name, [...part.scale], [...part.position], part.color, part.role)
+  ));
 
   return {
     id: assetId,

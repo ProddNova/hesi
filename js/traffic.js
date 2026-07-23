@@ -5,6 +5,7 @@ import {
   carModelEntry,
   carModelTarget,
   effectiveTrafficCarType,
+  trafficCarPartSpecs,
 } from './car-models.js';
 
 const clamp = THREE.MathUtils.clamp;
@@ -139,31 +140,17 @@ function rectangleSupport(direction, right, forward, halfWidth, halfLength) {
  * the two rear turn signals are tiny boxes at the corners.
  */
 function buildVehicleGeometry(type) {
-  const w = type.width;
-  const l = type.length;
-  const h = type.height;
-  const half = l * 0.5;
-  const body = mergedBoxGeometry([[[w, h, l], [0, h * 0.5, 0]]]);
-  const headY = type.id === 'truck' ? 1.2 : h * 0.5;
-  const tailY = type.id === 'truck' ? 1.05 : h * 0.52;
-  const frontZ = half - 0.04;
-  const rearZ = -half + 0.04;
-  const lampW = Math.min(0.3, w * 0.17);
-  const lamps = mergedBoxGeometry([
-    [[lampW, 0.16, 0.06], [-w * 0.33, headY, frontZ]],
-    [[lampW, 0.16, 0.06], [w * 0.33, headY, frontZ]],
-  ]);
-  const brake = mergedBoxGeometry([
-    [[lampW, 0.18, 0.06], [-w * 0.34, tailY, rearZ]],
-    [[lampW, 0.18, 0.06], [w * 0.34, tailY, rearZ]],
-  ]);
-  // Two rear turn signals — a single amber lamp per side sitting just outboard
-  // of the brake lights on the tail, so the blink reads from directly behind
-  // the car instead of from boxes stuck on the flanks. Bounding-box X keeps side.
-  const blinker = (sign) => mergedBoxGeometry([
-    [[0.12, 0.16, 0.06], [sign * (w * 0.34 + 0.22), tailY, rearZ]],
-  ]);
-  return { body, lamps, brake, blinkerL: blinker(-1), blinkerR: blinker(1) };
+  const specs = trafficCarPartSpecs(type);
+  const boxes = (...roles) => specs
+    .filter((part) => roles.includes(part.role))
+    .map((part) => [part.scale, part.position]);
+  return {
+    body: mergedBoxGeometry(boxes('body')),
+    lamps: mergedBoxGeometry(boxes('headlamp')),
+    brake: mergedBoxGeometry(boxes('taillamp')),
+    blinkerL: mergedBoxGeometry(boxes('indicator-left')),
+    blinkerR: mergedBoxGeometry(boxes('indicator-right')),
+  };
 }
 
 /**
@@ -251,6 +238,8 @@ function makeTrafficMesh(geometries, sharedMaterials) {
   // side -1 sits on local -X, side +1 on local +X; the runtime picks the side
   // from the actual lateral movement so the signal always matches the drift.
   group.userData.indicators = [{ side: -1, meshes: [blinkerL] }, { side: 1, meshes: [blinkerR] }];
+  group.userData.generatedTaillamps = [taillamp];
+  group.userData.generatedIndicators = [{ side: -1, meshes: [blinkerL] }, { side: 1, meshes: [blinkerR] }];
   group.userData.ownedMaterials = [body.material];
   return group;
 }
@@ -423,6 +412,13 @@ export class TrafficSystem {
     ud.customModel = null;
     ud.customModelType = null;
     if (ud.body) ud.body.visible = true;
+    if (ud.lamps) ud.lamps.visible = true;
+    for (const lamp of ud.generatedTaillamps || []) lamp.visible = true;
+    for (const indicator of ud.generatedIndicators || []) {
+      for (const mesh of indicator.meshes) mesh.visible = false;
+    }
+    ud.taillamps = ud.generatedTaillamps || ud.taillamps;
+    ud.indicators = ud.generatedIndicators || ud.indicators;
   }
 
   _disposeCustomModelTemplates() {
@@ -455,6 +451,29 @@ export class TrafficSystem {
     const model = template.clone(true);
     model.name = `traffic-custom-${typeId}`;
     model.userData.hesiTrafficCarModel = typeId;
+    const customRoles = new Map();
+    model.traverse((object) => {
+      const role = object.userData?.hesiTrafficPartRole;
+      if (!role) return;
+      if (!customRoles.has(role)) customRoles.set(role, []);
+      customRoles.get(role).push(object);
+    });
+    if (customRoles.has('headlamp')) ud.lamps.visible = false;
+    if (customRoles.has('taillamp')) {
+      for (const lamp of ud.generatedTaillamps || []) lamp.visible = false;
+      ud.taillamps = customRoles.get('taillamp');
+      for (const lamp of ud.taillamps) lamp.userData.hesiTrafficTaillampMaterial = lamp.material;
+    }
+    ud.indicators = [
+      { side: -1, role: 'indicator-left' },
+      { side: 1, role: 'indicator-right' },
+    ].map(({ side, role }, index) => {
+      const meshes = customRoles.get(role);
+      if (!meshes?.length) return (ud.generatedIndicators || ud.indicators)[index];
+      for (const mesh of (ud.generatedIndicators || [])[index]?.meshes || []) mesh.visible = false;
+      for (const mesh of meshes) mesh.visible = false;
+      return { side, meshes };
+    });
     ud.customModel = model;
     ud.customModelType = typeId;
     ud.body.visible = false;
@@ -611,12 +630,14 @@ export class TrafficSystem {
     ud.body.material.color.set(color);
     ud.body.material.emissive.set(color);
     ud.lamps.geometry = geoms.lamps;
-    ud.taillamps[0].geometry = geoms.brake;
-    ud.taillamps[0].material = this._sharedMaterials.taillamp;
-    ud.indicators[0].meshes[0].geometry = geoms.blinkerL;
-    ud.indicators[1].meshes[0].geometry = geoms.blinkerR;
-    ud.indicators[0].meshes[0].visible = false;
-    ud.indicators[1].meshes[0].visible = false;
+    const generatedTaillamps = ud.generatedTaillamps || ud.taillamps;
+    const generatedIndicators = ud.generatedIndicators || ud.indicators;
+    generatedTaillamps[0].geometry = geoms.brake;
+    generatedTaillamps[0].material = this._sharedMaterials.taillamp;
+    generatedIndicators[0].meshes[0].geometry = geoms.blinkerL;
+    generatedIndicators[1].meshes[0].geometry = geoms.blinkerR;
+    generatedIndicators[0].meshes[0].visible = false;
+    generatedIndicators[1].meshes[0].visible = false;
     vehicle.type = type;
     vehicle.width = type.width;
     vehicle.length = type.length;
@@ -1396,7 +1417,9 @@ export class TrafficSystem {
     // ~1.5 Hz blink, like a real indicator, rather than a fast strobe.
     const blink = Math.floor(this.time * 3) % 2 === 0;
     for (const lamp of vehicle.mesh.userData.taillamps) {
-      lamp.material = braking ? this._brakeMaterial() : this._sharedMaterials.taillamp;
+      lamp.material = braking
+        ? this._brakeMaterial()
+        : lamp.userData?.hesiTrafficTaillampMaterial || this._sharedMaterials.taillamp;
     }
     for (const indicator of vehicle.mesh.userData.indicators) {
       const active = vehicle.indicator === indicator.side && blink;

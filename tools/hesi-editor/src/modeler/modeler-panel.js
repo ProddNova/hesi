@@ -17,6 +17,7 @@ import {
   TRAFFIC_CAR_SETTING_FIELDS,
   carModelMeta,
   carModelTarget,
+  effectiveTrafficCarType,
   parseCarModelTarget,
   trafficCarDefinition,
   trafficCarSettings,
@@ -1716,6 +1717,7 @@ export class ModelerPanel {
           this.store.setCarModel(this.carTarget, { settings: { [field.key]: bounded } });
           this.dirtyChip.textContent = 'Unsaved changes';
           this._renderCarList();
+          if (field.key === 'width' || field.key === 'length' || field.key === 'height') this._buildCarPreview();
         });
         control.append(input);
         if (field.unit) control.append(element('small', '', field.unit));
@@ -1757,7 +1759,10 @@ export class ModelerPanel {
 
     let definition;
     if (parsed.scope === 'traffic') {
-      definition = trafficCarDefinition(TRAFFIC_CAR_BY_ID[parsed.id], this.store.newAssetId());
+      definition = trafficCarDefinition(
+        effectiveTrafficCarType(parsed.id, this.store.document),
+        this.store.newAssetId(),
+      );
     } else {
       this.onStatus(`Loading the exact ${meta.label} mesh for full editing…`);
       let visual = null;
@@ -1867,7 +1872,7 @@ export class ModelerPanel {
         });
       } else if (parsed.scope === 'traffic') {
         visual = buildCustomAssetGroup(
-          trafficCarDefinition(TRAFFIC_CAR_BY_ID[parsed.id], null),
+          trafficCarDefinition(effectiveTrafficCarType(parsed.id, this.store.document), null),
           this.store.texturesById(),
           { resolveAssetPart: assetPartResolver(this.assetRegistry) },
         );

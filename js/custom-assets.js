@@ -870,6 +870,7 @@ export function convertPartToMesh(part) {
     triangles,
     faceNames,
     faces,
+    ...(part.vehicleRole ? { vehicleRole: part.vehicleRole } : {}),
   };
 }
 
@@ -2450,6 +2451,9 @@ export function buildPartObject(part, texturesById, { resolveAssetPart = () => n
     node = new THREE.Mesh(shared.geometry, shared.materials.length === 1 ? shared.materials[0] : shared.materials);
   }
   node.name = part.name || PART_KINDS[part.kind].label;
+  if (typeof part.vehicleRole === 'string' && part.vehicleRole) {
+    node.userData.hesiTrafficPartRole = part.vehicleRole;
+  }
   if (finiteVector(part.position, 3)) node.position.fromArray(part.position);
   if (finiteVector(part.rotation, 3)) node.rotation.set(part.rotation[0], part.rotation[1], part.rotation[2]);
   if (finiteVector(part.scale, 3)) node.scale.fromArray(part.scale);

@@ -176,8 +176,9 @@ full-screen modeling section that is always available inside the editor:
 - **Cars library**: a third Modeler library beside *Your objects* and *World
   objects* exposes all 50 PSXStyleCars player models plus the three runtime
   traffic classes (car, van and TIR). Player cars preview their exact source
-  mesh and convert it into editable mesh parts; traffic entries open as
-  editable body, cabin/glass, wheels and lights. Once opened, cars use the
+  mesh and convert it into editable mesh parts; traffic entries open the exact
+  runtime boxes: body, headlights, taillights and dynamic indicators, with no
+  editor-only cabin, glass or wheels. Once opened, cars use the
   complete normal toolset: parts, face/viewport texture projection, vertex
   sculpting, primitives, assembly, scale, outlines and undo/redo. A saved model
   is mapped back to the exact player model or traffic class it came from.
