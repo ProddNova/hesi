@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { applyObjectFaceStyles, applyWorldModelOverrides, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
 import { SkyboxRenderer } from './skybox.js';
+import { applySceneLighting } from './lighting-config.js';
 
 // Applies HESI world-editor builds to the running game.
 //
@@ -272,6 +273,12 @@ export async function applyEditorBuilds({ map = null, garageRoot = null, roadSce
     garageRoot ? fetchBuild('garage') : null,
   ]);
   if (map) {
+    // World look dials saved on the highway build (wet-asphalt gloss, ...).
+    const gloss = highwayBuild?.environment?.surfaceGloss;
+    if (Number.isFinite(gloss) && typeof map.setSurfaceGloss === 'function') {
+      map.setSurfaceGloss(gloss);
+      summary.scenes.push({ scene: 'world-look', applied: 1, skipped: 0 });
+    }
     // Saved world texture overrides (custom road asphalt, walls, ...) apply
     // even when no build file exists yet.
     if (customAssets && map.materials) {
@@ -285,10 +292,16 @@ export async function applyEditorBuilds({ map = null, garageRoot = null, roadSce
       if (models.applied) summary.scenes.push({ scene: 'world-models', ...models });
     }
     if (applyBuildSkybox(roadScene, highwayBuild, customAssets)) merge('highway-skybox', { applied: 1, skipped: 0 });
+    if (roadScene && highwayBuild?.environment?.lighting && applySceneLighting(roadScene, highwayBuild.environment.lighting)) {
+      summary.scenes.push({ scene: 'highway-lighting', applied: 1, skipped: 0 });
+    }
     if (highwayBuild) merge('highway', applyHighwayBuild(map, highwayBuild, customAssets));
   }
   if (garageRoot) {
     if (applyBuildSkybox(garageScene, garageBuild, customAssets)) merge('garage-skybox', { applied: 1, skipped: 0 });
+    if (garageScene && garageBuild?.environment?.lighting && applySceneLighting(garageScene, garageBuild.environment.lighting)) {
+      summary.scenes.push({ scene: 'garage-lighting', applied: 1, skipped: 0 });
+    }
     if (garageBuild) merge('garage', applyGarageBuild(garageRoot, garageBuild, customAssets));
   }
   return summary;

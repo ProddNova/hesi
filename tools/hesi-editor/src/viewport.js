@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FlyCameraController } from './navigation/fly-camera-controller.js';
 import { SkyboxRenderer } from '../../../js/skybox.js';
+import { applySceneLighting, buildRoadLightRig } from '../../../js/lighting-config.js';
 
 const DEFAULT_POSITION = new THREE.Vector3(105, 72, 118);
 const DEFAULT_TARGET = new THREE.Vector3(0, 7, 0);
@@ -116,6 +117,13 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
   inspectionRig.add(hemisphere, keyLight);
   scene.add(inspectionRig);
 
+  // The game's own night lighting rig, shown only in "Game" lighting mode so
+  // the Lights editor app previews live against what the player will see. Its
+  // lights are tagged gameSceneLight; applySceneLighting re-tints them.
+  const gameRig = buildRoadLightRig();
+  gameRig.visible = false;
+  scene.add(gameRig);
+
   const view = {
     lightingMode: 'inspection',
     exposure: LIGHTING_MODES.inspection.exposure,
@@ -124,6 +132,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
   const applyViewState = () => {
     const mode = LIGHTING_MODES[view.lightingMode] || LIGHTING_MODES.inspection;
     inspectionRig.visible = mode.rig;
+    gameRig.visible = view.lightingMode === 'game';
     renderer.toneMappingExposure = view.exposure;
     scene.background.setHex(mode.background);
     scene.fog.color.setHex(mode.background);
@@ -276,6 +285,19 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
       applyViewState();
     },
     setSkybox(config, texturesById = {}) { return skybox.set(config, texturesById); },
+    // Live preview for the Lights app: re-tint the game rig, and jump to Game
+    // lighting so the change is visible. Also reaches any gameSceneLight in the
+    // loaded world (e.g. the garage scene's lamps).
+    setGameLighting(config, { switchToGame = false } = {}) {
+      applySceneLighting(scene, config);
+      if (switchToGame && view.lightingMode !== 'game') {
+        view.lightingMode = 'game';
+        view.exposure = LIGHTING_MODES.game.exposure;
+        view.fogFull = true;
+        applyViewState();
+      }
+      return true;
+    },
     viewState() { return { ...view }; },
     dispose() {
       if (disposed) return;

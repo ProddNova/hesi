@@ -41,6 +41,9 @@ class ShutokoNights {
     this.lastService=null;this.contactCooldown=0;this.ghostTimer=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
     this.mobileFPS={startedAt:performance.now(),frames:0};
     this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
+    // On-foot mode: step out of the car anywhere (G), walk in first person, and
+    // step back in when close. The car and world freeze while walking.
+    this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
     this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();
     this.setupDebugMenu();
@@ -97,8 +100,12 @@ class ShutokoNights {
     // asphalt and distant traffic read their colour instead of falling to flat
     // black between the pools. A cool moon rim keeps some colour contrast.
     this.roadScene.background=new THREE.Color(0x080605);this.roadScene.fog=new THREE.FogExp2(0x16110d,.0017);
-    this.roadScene.add(new THREE.HemisphereLight(0x564a40,0x1e1510,1.58));this.roadScene.add(new THREE.AmbientLight(0x64524a,.66));const moon=new THREE.DirectionalLight(0x9aa6c4,.72);moon.position.set(-200,300,-100);this.roadScene.add(moon);
-    this.garageScene.add(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7));
+    // Tagged gameSceneLight so the Lights editor app (js/lighting-config.js) can
+    // re-tint colour/warmth/intensity and js/editor-map-patch.js re-applies the
+    // saved config at boot.
+    const tag=l=>{l.userData.gameSceneLight=true;return l;};
+    this.roadScene.add(tag(new THREE.HemisphereLight(0x564a40,0x1e1510,1.58)));this.roadScene.add(tag(new THREE.AmbientLight(0x64524a,.66)));const moon=tag(new THREE.DirectionalLight(0x9aa6c4,.72));moon.position.set(-200,300,-100);this.roadScene.add(moon);
+    this.garageScene.add(tag(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7)));
   }
   buildWorld(){
     const mapBuildStarted=performance.now();
@@ -123,7 +130,7 @@ class ShutokoNights {
     this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);if(this.customCar.enabled)this.setCustomCarEnabled(true,{silent:true,persist:false});
     try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?44:56,density:1,maxVehicles:84});this.applyTrafficAdmin();}catch(e){console.error('Traffic init',e);this.traffic=null;}
     this.garage=new GarageSystem(this.garageScene,this.camera,this.canvas,{
-      isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),finishInstall:d=>this.finishInstall(d),
+      isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),sleep:()=>this.returnToMenu(),finishInstall:d=>this.finishInstall(d),
       prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
     });
     this.garage.root.visible=false;this.roadScene.add(this.camera);
@@ -199,10 +206,14 @@ class ShutokoNights {
       if(e.code==='KeyH'&&this.started&&!e.repeat){this.toggleHUD();this.pressed.delete(e.code);}
       if(e.code==='KeyC'&&this.mode==='driving'){this.cycleCamera();this.pressed.delete(e.code);}
       if(e.code==='KeyR'&&this.mode==='driving'){this.recover();this.pressed.delete(e.code);}
+      // Step out of / back into the car anywhere.
+      if(e.code==='KeyG'&&this.started&&!e.repeat&&!this.ui.pcOpen&&!this.ui.phoneOpen&&!this.debug.menuOpen){if(this.mode==='driving')this.exitVehicle();else if(this.mode==='walk')this.tryEnterVehicle();this.pressed.delete(e.code);}
       if(e.code==='F1'){e.preventDefault();this.ui.showHelp();}
     });
     window.addEventListener('keyup',e=>{this.keys[e.code]=false;});window.addEventListener('blur',()=>{this.keys={};this.pressed.clear();this.releaseTouchInput?.();});
     document.addEventListener('mousemove',e=>{if(this.debug?.noclip&&document.pointerLockElement===this.canvas&&!this.debug.menuOpen){this.debug.yaw-=e.movementX*.0022;this.debug.pitch=clamp(this.debug.pitch-e.movementY*.0022,-Math.PI*.49,Math.PI*.49);}});
+    document.addEventListener('mousemove',e=>{if(this.mode==='walk'&&this.walk.active&&document.pointerLockElement===this.canvas){this.walk.yaw-=e.movementX*.0023;this.walk.pitch=clamp(this.walk.pitch-e.movementY*.0021,-1.35,1.25);}});
+    this.canvas.addEventListener('click',()=>{if(this.mode==='walk'&&this.walk.active&&document.pointerLockElement!==this.canvas)this.requestDronePointerLock();});
     document.addEventListener('wheel',e=>{if(!this.debug?.noclip||this.debug.menuOpen)return;e.preventDefault();const factor=e.deltaY<0?1.18:1/1.18;this.debug.moveSpeed=clamp(this.debug.moveSpeed*factor,5,400);this.updateDroneSpeedHUD();},{passive:false});
     this.canvas.addEventListener('click',()=>{if(this.debug?.noclip&&!this.debug.menuOpen&&document.pointerLockElement!==this.canvas)this.requestDronePointerLock();});
     // iOS Safari: block pinch zoom, long-press callout/selection and double-tap zoom on the game surface.
@@ -278,6 +289,22 @@ class ShutokoNights {
   exitGarage(){
     this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.ghostTimer=0;this.garage.leave();this.attachCustomCarVisual();this.garage.root.visible=false;this.releaseGarageTextures();this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
   }
+  // Sleeping in the garage bed banks the run, saves, and drops back to the
+  // main menu (boot screen) where Continue / New Game live. Mirrors the scene
+  // teardown exitGarage does, but stops the game instead of driving.
+  returnToMenu(){
+    this.bankScore?.('SLEEP');this.ui.fade(true);
+    setTimeout(()=>{
+      if(this.mode==='garage')this.garage.leave();
+      this.garage.root.visible=false;this.playerMesh.visible=false;
+      this.roadScene.add(this.camera);
+      this.ui.closePhone?.();this.ui.closePC?.();
+      this.ui.showHUD(false);this.ui.prompt('',false);
+      this.mode='boot';this.started=false;this.persist();
+      this.ui.showBoot(true);
+      this.ui.fade(false);
+    },480);
+  }
   // The garage scene is never rendered while driving, but its textures (the
   // editor's furniture/wall/poster images) stay uploaded after the first
   // garage frame — the game boots into the garage, so they otherwise occupy
@@ -310,7 +337,7 @@ class ShutokoNights {
     // Developer map freezes gameplay (vehicle + drone stay put) while it is open.
     // Freezing is preferable to letting the car/camera drift on stuck input.
     if(this.devMap?.isOpen()){this.render();this.finishFrameProf(frameStart);this.pressed.clear();return;}
-    if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='boot')this.updateBoot();
+    if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='walk')this.updateWalk(dt);else if(this.mode==='boot')this.updateBoot();
     this.updateDebugHitboxes(dt);
     this.render();this.finishFrameProf(frameStart);this.pressed.clear();
   }
@@ -320,6 +347,57 @@ class ShutokoNights {
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
     this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
+  }
+
+  // ---- On-foot mode (step out of the car anywhere) -------------------------
+  // Reuses the garage's first-person feel (WASD + pointer-lock mouselook) but
+  // on the open highway. The car and world freeze while you are out; walk back
+  // within a few metres and press G to get in.
+  exitVehicle(){
+    if(this.mode!=='driving'||this.crash.active)return;
+    if((this.getTelemetry().speedKmh||0)>12){this.ui.toast('SLOW DOWN TO STEP OUT','amber');return;}
+    const s=this.getVehicleState(),p=vec(s.position||s),h=s.heading??s.yaw??0;
+    this.walk.carPos.copy(p);this.walk.carHeading=h;
+    // Stand one lane-width to the side of the car, on the road surface.
+    const side=new THREE.Vector3(Math.cos(h),0,-Math.sin(h));
+    const stand=p.clone().addScaledVector(side,2.2);
+    const gy=this.map?.getRoadInfo?.(stand)?.point?.y;
+    this.walk.groundY=Number.isFinite(gy)?gy:p.y;
+    this.walk.position.set(stand.x,this.walk.groundY+this.walk.height,stand.z);
+    this.walk.velocity.set(0,0,0);
+    // Face back toward the car (garage camera convention: fwd = -sin y,-cos y).
+    const dx=p.x-stand.x,dz=p.z-stand.z;this.walk.yaw=Math.atan2(-dx,-dz);this.walk.pitch=-0.05;
+    this.walk.active=true;this.mode='walk';
+    this.ui.showHUD(false);this.requestDronePointerLock();
+    this.ui.toast('STEPPED OUT // WASD walk · G to get back in','amber');
+  }
+  tryEnterVehicle(){
+    if(this.mode!=='walk')return;
+    const d=Math.hypot(this.walk.position.x-this.walk.carPos.x,this.walk.position.z-this.walk.carPos.z);
+    if(d>4.5){this.ui.toast('GET CLOSER TO YOUR CAR','amber');return;}
+    this.walk.active=false;this.mode='driving';document.exitPointerLock?.();
+    this.contactCooldown=1.0;this.snapDrivingCamera();this.ui.showHUD(true);this.ui.prompt('',false);
+    this.ui.toast('BACK IN THE CAR','amber');
+  }
+  updateWalk(dt){
+    if(!this.walk.active)return;
+    const w=this.walk,cosP=Math.cos(w.pitch);
+    if(!this.ui.pcOpen&&!this.ui.phoneOpen&&!this.debug.menuOpen){
+      const forward=new THREE.Vector3(-Math.sin(w.yaw),0,-Math.cos(w.yaw)),right=new THREE.Vector3(Math.cos(w.yaw),0,-Math.sin(w.yaw));
+      const input=this.getWalkInput();let wish=new THREE.Vector3();
+      if(input.forward)wish.add(forward);if(input.backward)wish.sub(forward);if(input.right)wish.add(right);if(input.left)wish.sub(right);
+      if(wish.lengthSq())wish.normalize();
+      const speed=input.sprint?5.6:3.2;w.velocity.lerp(wish.multiplyScalar(speed),1-Math.exp(-dt*12));
+      w.position.addScaledVector(w.velocity,dt);
+      const gy=this.map?.getRoadInfo?.(w.position)?.point?.y;
+      if(Number.isFinite(gy))w.groundY+=(gy-w.groundY)*Math.min(1,dt*8);
+      w.position.y=w.groundY+w.height;
+    }
+    this.camera.position.copy(w.position);this.camera.up.set(0,1,0);
+    this.camera.lookAt(w.position.x-Math.sin(w.yaw)*cosP,w.position.y+Math.sin(w.pitch),w.position.z-Math.cos(w.yaw)*cosP);
+    this.map?.update?.(w.position,performance.now()/1000);
+    const near=Math.hypot(w.position.x-w.carPos.x,w.position.z-w.carPos.z)<4.5;
+    this.ui.prompt(near?'<kbd>G</kbd> GET IN CAR':'WASD walk · look with mouse · <kbd>G</kbd> return to car',true);
   }
 
   updateDriving(dt){

@@ -2,6 +2,7 @@ import { sceneList } from '../scenes/scene-registry.js';
 import { GRID_SNAP_STEPS } from '../interaction/grid-snap.js';
 import { objectFaceSlots, textureSourceUrl } from '/js/custom-assets.js';
 import { normalizeSkyboxConfig } from '/js/skybox-config.js';
+import { normalizeLighting, DEFAULT_LIGHTING } from '/js/lighting-config.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -134,8 +135,13 @@ export function createEditorShell(root) {
     toolGroup('Create',
       button('+ Add Object', 'add-object', { title: 'Place a new asset into the world' }),
       button('Modeler', 'open-modeler', { title: 'Open the Object Modeler: create and texture PSX-style objects' }),
+    ),
+    element('span', 'toolbar-divider'),
+    // World look: the per-world apps that repaint or relight everything at once.
+    toolGroup('World look',
       button('Surfaces', 'open-world-textures', { title: 'Repaint the repeated surfaces and repeated objects of the world: asphalt, tunnels, barriers, buildings, containers, lamps — one material, every copy' }),
       button('Skybox', 'open-skybox', { title: 'Add and manage an unreachable photographic sky around the scene' }),
+      button('Lights', 'open-lights', { title: 'Tune the in-game night lighting: colour, warmth and intensity for the road and the garage' }),
     ),
     element('span', 'toolbar-divider'),
     toolGroup('Transform',
@@ -384,16 +390,18 @@ export function createEditorShell(root) {
   const editTab = element('button', 'tab-button', 'Edit');
   const projectTab = element('button', 'tab-button', 'Project');
   const skyboxTab = element('button', 'tab-button', 'Skybox');
+  const lightsTab = element('button', 'tab-button', 'Lights');
   const worldTab = element('button', 'tab-button', 'World');
   const helpTab = element('button', 'tab-button', 'Help');
-  assetsTab.type = editTab.type = projectTab.type = skyboxTab.type = worldTab.type = helpTab.type = 'button';
+  assetsTab.type = editTab.type = projectTab.type = skyboxTab.type = lightsTab.type = worldTab.type = helpTab.type = 'button';
   assetsTab.dataset.tab = 'assets';
   editTab.dataset.tab = 'edit';
   projectTab.dataset.tab = 'project';
   skyboxTab.dataset.tab = 'skybox';
+  lightsTab.dataset.tab = 'lights';
   worldTab.dataset.tab = 'world';
   helpTab.dataset.tab = 'help';
-  tabs.append(assetsTab, editTab, skyboxTab, projectTab, worldTab, helpTab);
+  tabs.append(assetsTab, editTab, skyboxTab, lightsTab, projectTab, worldTab, helpTab);
   const bottomCaption = element('small', '', 'Loading metadata');
   bottomHeader.append(tabs, bottomCaption);
   const bottomContent = element('div', 'panel-content');
@@ -438,6 +446,7 @@ export function createEditorShell(root) {
   let assetEntries = [];
   let textureEntries = [];
   let skyboxState = { configured: false, config: normalizeSkyboxConfig({ enabled: false }), texture: null };
+  let lightingState = normalizeLighting(DEFAULT_LIGHTING);
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
   let actionHandler = () => {};
@@ -714,11 +723,59 @@ export function createEditorShell(root) {
     return panel;
   };
 
+  const renderLights = () => {
+    const panel = element('div', 'lights-panel');
+    const cfg = normalizeLighting(lightingState);
+    const intro = element('section', 'skybox-card skybox-intro');
+    const introCopy = element('div');
+    introCopy.append(
+      element('h3', '', 'In-game lighting'),
+      element('p', '', `Colour, warmth and intensity of the night lighting for ${currentScene?.label || 'this scene'} — road lamps and the garage follow too. Switch the viewport to Game lighting (press L) to preview; Apply to Game bakes it into the playable game.`),
+    );
+    intro.append(introCopy);
+    const controls = element('section', 'skybox-card skybox-placement');
+    controls.append(element('h3', '', 'Colour · warmth · intensity'));
+    const fields = element('div', 'skybox-fields');
+    const slider = (label, value, { min, max, step }, testid, onInput) => {
+      const field = element('label', 'skybox-field');
+      const row = element('div', 'lights-slider-row');
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(value);
+      input.dataset.testid = testid;
+      const out = element('code', '', Number(value).toFixed(2));
+      input.addEventListener('input', () => { out.textContent = Number(input.value).toFixed(2); onInput(Number(input.value)); });
+      row.append(input, out);
+      field.append(element('span', '', label), row);
+      fields.append(field);
+    };
+    slider('Intensity', cfg.intensity, { min: 0, max: 3, step: 0.05 }, 'lights-intensity', (v) => triggerAction('lights-update', { patch: { intensity: v } }));
+    slider('Warmth (← warm · cool →)', cfg.temperature, { min: -1, max: 1, step: 0.05 }, 'lights-temperature', (v) => triggerAction('lights-update', { patch: { temperature: v } }));
+    const tintField = element('label', 'skybox-field');
+    const tint = document.createElement('input');
+    tint.type = 'color';
+    tint.value = cfg.tint;
+    tint.dataset.testid = 'lights-tint';
+    tint.addEventListener('input', () => triggerAction('lights-update', { patch: { tint: tint.value } }));
+    tintField.append(element('span', '', 'Colour tint'), tint);
+    fields.append(tintField);
+    controls.append(fields);
+    const actions = element('div', 'skybox-actions');
+    const reset = button('Reset to shipped lighting', '', { title: 'Restore the original night lighting for this scene' });
+    reset.dataset.testid = 'lights-reset';
+    reset.addEventListener('click', () => triggerAction('lights-reset'));
+    actions.append(reset);
+    controls.append(actions);
+    panel.append(intro, controls);
+    return panel;
+  };
+
   const renderBottom = () => {
     assetsTab.classList.toggle('active', currentTab === 'assets');
     editTab.classList.toggle('active', currentTab === 'edit');
     projectTab.classList.toggle('active', currentTab === 'project');
     skyboxTab.classList.toggle('active', currentTab === 'skybox');
+    lightsTab.classList.toggle('active', currentTab === 'lights');
     worldTab.classList.toggle('active', currentTab === 'world');
     helpTab.classList.toggle('active', currentTab === 'help');
     bottomContent.innerHTML = '';
@@ -728,6 +785,10 @@ export function createEditorShell(root) {
     }
     if (currentTab === 'skybox') {
       bottomContent.append(renderSkybox());
+      return;
+    }
+    if (currentTab === 'lights') {
+      bottomContent.append(renderLights());
       return;
     }
     if (currentTab === 'project') {
@@ -1441,6 +1502,11 @@ export function createEditorShell(root) {
       };
       if (currentTab === 'skybox') renderBottom();
     },
+    setLightingState(state) {
+      lightingState = normalizeLighting(state || DEFAULT_LIGHTING);
+      if (currentTab === 'lights') renderBottom();
+    },
+    setLightingScene() { if (currentTab === 'lights') renderBottom(); },
     setRoadEdit(state) {
       roadState = state?.active ? state : null;
       renderRoadPanel();

@@ -1011,3 +1011,8 @@ input, select { accent-color: var(--accent); }
 .modeler-chooser-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .asset-kind.custom { color: #7ee2a8; }
 .asset-card-footer .asset-edit { margin-left: 4px; }
+
+/* Lights app: slider + live value row */
+.lights-slider-row{display:flex;align-items:center;gap:8px}
+.lights-slider-row input[type=range]{flex:1 1 auto;min-width:0}
+.lights-slider-row code{min-width:44px;text-align:right;opacity:.8}

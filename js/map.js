@@ -76,6 +76,11 @@ const UP_NORMAL = [0, 1, 0];
 // land still spans -1.12 m to -0.12 m in world space, just above the bay.
 const TERRAIN_TOP_Y = 0.5;
 const TERRAIN_BOTTOM_Y = -0.5;
+// Base opacity of the additive wet-asphalt sheen (sodium pools + reflection
+// streaks) at gloss intensity 1. setSurfaceGloss scales both against these, so
+// the World editor's dial goes from matte (0) through the shipped look (1) to
+// wet (up to 3). Toned down from the pre-dial 0.34 / 0.2.
+const SURFACE_GLOSS_BASE = Object.freeze({ lightPool: 0.28, lightStreak: 0.12 });
 // Metres of bay per swell tile, and how fast the tile drifts across it (m/s,
 // two axes at different rates so the sea never reads as one sliding image).
 const WATER_TILE = 220;
@@ -766,13 +771,17 @@ export class HighwayMap {
       // blending stacks the overlaps back up into a continuous warm wash
       // without blowing out. Per-lamp tint is applied through instance colour
       // (see the lamppost loop), which is why the base colour here is white.
+      // Sodium pools under lamps and the wet-asphalt reflection streaks are the
+      // road's "wet plastic" sheen. Their opacity is toned down from the old
+      // 0.34 / 0.2 so the asphalt reads matte by default, and both are driven
+      // by one runtime dial (setSurfaceGloss) the World editor exposes.
       lightPool: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xffffff, transparent: true, opacity: 0.34,
+        map: this._glowTexture(), color: 0xffffff, transparent: true, opacity: SURFACE_GLOSS_BASE.lightPool,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
       }),
       lightStreak: new THREE.MeshBasicMaterial({
-        map: this._glowTexture(), color: 0xffa858, transparent: true, opacity: 0.2,
+        map: this._glowTexture(), color: 0xffa858, transparent: true, opacity: SURFACE_GLOSS_BASE.lightStreak,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }),
@@ -8566,58 +8575,61 @@ export class HighwayMap {
       }
     };
 
-    // The corridor, plus a coarse hash of the same points so a set-back
-    // building can be walked back to the nearest carriageway.
-    const ROAD_HASH = 512;
-    const roadHash = new Map();
+    // Land under a building is land, whether or not it fell inside one of the
+    // shipped rectangles. A silhouette standing over open bay reads as
+    // floating — the backdrop skyline clusters and any block set back past the
+    // eight slabs did exactly that. Every anchor whose disc is not already
+    // wholly inside a shipped slab seeds land of its own: anchors are bucketed
+    // on a coarse grid and each occupied bucket contributes one padded
+    // rectangle. Their union covers every disc with no seam and stays clamped
+    // to where props actually stand, so the open bay under the bridges — the
+    // reason the slabs were demoted to a mask in the first place — is untouched.
+    const shippedAreas = areas.slice();
+    const insideShipped = (anchor, R) => shippedAreas.some((area) =>
+      anchor.x - R >= area.minX && anchor.x + R <= area.maxX
+      && anchor.z - R >= area.minZ && anchor.z + R <= area.maxZ);
+    const SYNTH_BUCKET = 600;
+    const synthBuckets = new Map();
+    for (const anchor of this._terrainAnchors) {
+      const R = anchor.r + TERRAIN_BUILDING_MARGIN;
+      if (insideShipped(anchor, R)) continue;
+      const key = `${Math.floor(anchor.x / SYNTH_BUCKET)},${Math.floor(anchor.z / SYNTH_BUCKET)}`;
+      let bucket = synthBuckets.get(key);
+      if (!bucket) {
+        bucket = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, pad: 0 };
+        synthBuckets.set(key, bucket);
+      }
+      bucket.minX = Math.min(bucket.minX, anchor.x);
+      bucket.maxX = Math.max(bucket.maxX, anchor.x);
+      bucket.minZ = Math.min(bucket.minZ, anchor.z);
+      bucket.maxZ = Math.max(bucket.maxZ, anchor.z);
+      bucket.pad = Math.max(bucket.pad, R);
+    }
+    let synthIndex = 0;
+    for (const bucket of synthBuckets.values()) {
+      const pad = bucket.pad + TERRAIN_CELL;
+      const minX = bucket.minX - pad;
+      const maxX = bucket.maxX + pad;
+      const minZ = bucket.minZ - pad;
+      const maxZ = bucket.maxZ + pad;
+      areas.push({
+        def: { name: `backdrop land ${synthIndex++}`, x: (minX + maxX) * 0.5, z: (minZ + maxZ) * 0.5, w: maxX - minX, d: maxZ - minZ },
+        minX, maxX, minZ, maxZ, rows: new Map(), cells: 0,
+      });
+    }
+
+    // The carriageway corridor.
     for (const route of this.routes.values()) {
       for (const sample of route.samples) {
-        const point = sample.point;
-        stampDisc(point.x, point.z, TERRAIN_ROAD_HALO);
-        const key = `${Math.floor(point.x / ROAD_HASH)},${Math.floor(point.z / ROAD_HASH)}`;
-        if (!roadHash.has(key)) roadHash.set(key, []);
-        roadHash.get(key).push(point);
+        stampDisc(sample.point.x, sample.point.z, TERRAIN_ROAD_HALO);
       }
     }
-    const nearestRoadPoint = (x, z) => {
-      const ci = Math.floor(x / ROAD_HASH);
-      const ck = Math.floor(z / ROAD_HASH);
-      let best = null;
-      let bestSq = Infinity;
-      let foundRing = Infinity;
-      // One ring past the first hit: the true nearest point can sit just over
-      // a cell border from the one that answered first.
-      for (let ring = 0; ring <= Math.min(4, foundRing + 1); ring += 1) {
-        for (let i = ci - ring; i <= ci + ring; i += 1) {
-          for (let k = ck - ring; k <= ck + ring; k += 1) {
-            if (ring > 0 && Math.abs(i - ci) !== ring && Math.abs(k - ck) !== ring) continue;
-            for (const point of roadHash.get(`${i},${k}`) || []) {
-              const dx = point.x - x;
-              const dz = point.z - z;
-              const distSq = dx * dx + dz * dz;
-              if (distSq < bestSq) { bestSq = distSq; best = point; }
-            }
-          }
-        }
-        if (best && foundRing === Infinity) foundRing = ring;
-      }
-      return best ? { point: best, distance: Math.sqrt(bestSq) } : null;
-    };
-
+    // Ground under every recorded prop. No thin isthmus is walked back to the
+    // nearest road any more: a set-back block sits on its own rounded patch
+    // (its disc merged with its neighbours') instead of a tongue of land
+    // reaching across the water, which read as an ugly stretch.
     for (const anchor of this._terrainAnchors) {
-      const radius = anchor.r + TERRAIN_BUILDING_MARGIN;
-      stampDisc(anchor.x, anchor.z, radius);
-      const nearest = nearestRoadPoint(anchor.x, anchor.z);
-      if (!nearest || nearest.distance <= TERRAIN_ROAD_HALO) continue;
-      const steps = Math.ceil(nearest.distance / (TERRAIN_CELL * 0.5));
-      for (let step = 1; step < steps; step += 1) {
-        const t = step / steps;
-        stampDisc(
-          anchor.x + (nearest.point.x - anchor.x) * t,
-          anchor.z + (nearest.point.z - anchor.z) * t,
-          radius,
-        );
-      }
+      stampDisc(anchor.x, anchor.z, anchor.r + TERRAIN_BUILDING_MARGIN);
     }
 
     // Signed distance to the carved shape: positive inside, and smooth, so
@@ -8654,6 +8666,25 @@ export class HighwayMap {
       mesh.position.set(area.def.x, -0.62, area.def.z);
       mesh.name = area.def.name;
       this.group.add(mesh);
+    }
+  }
+
+  /**
+   * Wet-asphalt sheen dial. 0 = fully matte (no reflection decals), 1 = the
+   * shipped look, up to 3 = glossy/wet. Scales the additive sodium pools and
+   * reflection streaks against their base opacity; the World editor drives this
+   * live and js/editor-map-patch.js re-applies the saved value at boot.
+   */
+  setSurfaceGloss(intensity = 1) {
+    const gloss = Math.max(0, Math.min(3, Number.isFinite(+intensity) ? +intensity : 1));
+    this.surfaceGloss = gloss;
+    for (const [name, base] of Object.entries(SURFACE_GLOSS_BASE)) {
+      const material = this.materials?.[name];
+      if (!material) continue;
+      // Additive blend with SrcAlpha means opacity 0 contributes nothing, so a
+      // gloss of 0 reads as fully matte without hiding the meshes.
+      material.opacity = base * gloss;
+      material.needsUpdate = true;
     }
   }
 

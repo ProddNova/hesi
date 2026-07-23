@@ -1,4 +1,5 @@
 import { normalizeSkyboxConfig, skyboxConfigErrors } from '../../../../js/skybox-config.js';
+import { normalizeLighting } from '../../../../js/lighting-config.js';
 
 /**
  * Built-map document schema.
@@ -137,8 +138,19 @@ export function validateBuildDocument(document) {
   }
   if (document.environment !== undefined) {
     if (!isRecord(document.environment)) errors.push('environment must be an object');
-    else if (document.environment.skybox !== undefined && document.environment.skybox !== null) {
-      errors.push(...skyboxConfigErrors(document.environment.skybox, { path: 'environment.skybox' }));
+    else {
+      if (document.environment.skybox !== undefined && document.environment.skybox !== null) {
+        errors.push(...skyboxConfigErrors(document.environment.skybox, { path: 'environment.skybox' }));
+      }
+      const lighting = document.environment.lighting;
+      if (lighting !== undefined && lighting !== null) {
+        if (!isRecord(lighting)) errors.push('environment.lighting must be an object');
+        else {
+          if (lighting.intensity !== undefined && !Number.isFinite(lighting.intensity)) errors.push('environment.lighting.intensity must be a number');
+          if (lighting.temperature !== undefined && !Number.isFinite(lighting.temperature)) errors.push('environment.lighting.temperature must be a number');
+          if (lighting.tint !== undefined && !/^#?[0-9a-f]{6}$/i.test(String(lighting.tint))) errors.push('environment.lighting.tint must be a #rrggbb colour');
+        }
+      }
     }
   }
   if (errors.length) throw new BuildValidationError(errors);
@@ -167,6 +179,13 @@ export function buildDraftSignature(document) {
   return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+function buildEnvironment(environment) {
+  const output = {};
+  if (environment?.skybox) output.skybox = stableValue(normalizeSkyboxConfig(environment.skybox));
+  if (environment?.lighting) output.lighting = stableValue(normalizeLighting(environment.lighting));
+  return output;
+}
+
 export function serializeBuildDocument(document) {
   validateBuildDocument(document);
   const canonical = {
@@ -174,9 +193,7 @@ export function serializeBuildDocument(document) {
     scene: document.scene,
     generatedAt: document.generatedAt,
     project: stableValue(document.project),
-    environment: document.environment?.skybox
-      ? { skybox: stableValue(normalizeSkyboxConfig(document.environment.skybox)) }
-      : {},
+    environment: buildEnvironment(document.environment),
     operations: document.operations.map(stableValue),
   };
   return `${JSON.stringify(canonical, null, 2)}\n`;

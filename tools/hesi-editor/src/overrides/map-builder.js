@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BUILD_SCHEMA_VERSION, buildDraftSignature, validateBuildDocument } from './build-schema.js';
 import { normalizeSkyboxConfig } from '../../../../js/skybox-config.js';
+import { normalizeLighting, isDefaultLighting } from '../../../../js/lighting-config.js';
 
 /**
  * Resolves a saved project document against the live world into a flat build
@@ -8,6 +9,15 @@ import { normalizeSkyboxConfig } from '../../../../js/skybox-config.js';
  */
 
 const materialKeyFromMeshName = (name) => String(name || '').replace(/^chunk\s+\S+\s+/, '');
+
+// Only the non-default parts of the environment travel with the build: an
+// untouched skybox/lighting leaves the game's shipped look exactly as generated.
+function buildEnvironment(environment) {
+  const output = {};
+  if (environment?.skybox) output.skybox = normalizeSkyboxConfig(environment.skybox);
+  if (environment?.lighting && !isDefaultLighting(environment.lighting)) output.lighting = normalizeLighting(environment.lighting);
+  return output;
+}
 
 // Deterministic occurrence index of `target` among identically named objects in
 // a depth-first walk of the generated world. The game repeats the same walk on
@@ -153,9 +163,7 @@ export function buildSceneDocument({ sceneId, adapter, registry, assetRegistry, 
       path: projectPath,
       draftSignature: buildDraftSignature(projectDocument),
     },
-    environment: projectDocument.environment?.skybox
-      ? { skybox: normalizeSkyboxConfig(projectDocument.environment.skybox) }
-      : {},
+    environment: buildEnvironment(projectDocument.environment),
     operations,
   };
   validateBuildDocument(document);

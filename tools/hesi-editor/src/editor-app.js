@@ -22,6 +22,7 @@ import { SurfacesPanel } from './surfaces/surfaces-panel.js';
 import { FaceTextureController } from './interaction/face-texture-controller.js';
 import { applyWorldModelOverrides, applyWorldTextureOverrides } from '/js/custom-assets.js';
 import { SkyboxController } from './world/skybox-controller.js';
+import { normalizeLighting, DEFAULT_LIGHTING, isDefaultLighting } from '/js/lighting-config.js';
 
 export async function createEditorApp(root) {
   if (!root) throw new Error('Editor root element is missing');
@@ -226,6 +227,10 @@ export async function createEditorApp(root) {
     shell.showTab('skybox');
     shell.setStatus('Skybox · upload a 2:1 panorama, then rotate, move, zoom, and tune it below');
   });
+  shell.onToolbar('open-lights', () => {
+    shell.showTab('lights');
+    shell.setStatus('Lights · tune colour, warmth and intensity below · press L in the viewport to preview Game lighting');
+  });
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));
@@ -304,6 +309,20 @@ export async function createEditorApp(root) {
       'skybox-update': () => skyboxController?.update(detail?.patch || {}, detail?.label || 'Edit skybox'),
       'skybox-reset': () => skyboxController?.resetPlacement(),
       'skybox-remove': () => skyboxController?.remove(),
+      'lights-update': () => {
+        const current = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
+        const next = normalizeLighting({ ...current, ...(detail?.patch || {}) });
+        projectState.replaceLighting(isDefaultLighting(next) ? null : next);
+        shell.setLightingState(next);
+        viewport.setGameLighting(next, { switchToGame: true });
+        shell.setStatus('Lighting updated · Apply to Game to bake it into the playable game');
+      },
+      'lights-reset': () => {
+        projectState.replaceLighting(null);
+        shell.setLightingState(DEFAULT_LIGHTING);
+        viewport.setGameLighting(DEFAULT_LIGHTING);
+        shell.setStatus('Lighting reset to the shipped night look');
+      },
     };
     if (viewActions[action]) { viewActions[action](); return; }
     if (!editActions || !transformManager) return;
@@ -595,6 +614,11 @@ export async function createEditorApp(root) {
     persistence.startAutosave();
     refreshCommits().catch((error) => shell.setStatus(`Commit list unavailable · ${error.message}`));
     shell.showWorldWarning(adapter.warning);
+    // Restore the saved in-game lighting for the Lights app and apply it to the
+    // viewport's game rig so the preview matches what Apply to Game will bake.
+    const initialLighting = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
+    shell.setLightingState(initialLighting);
+    if (!isDefaultLighting(initialLighting)) viewport.setGameLighting(initialLighting);
     applyPreset(adapter.presets.has('tatsumi-pa') ? 'tatsumi-pa' : 'initial-spawn');
     // Restore the pre-publish selection (Apply to Game reloads with ?select=).
     const reselectId = params.get('select');

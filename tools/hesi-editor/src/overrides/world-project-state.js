@@ -76,6 +76,15 @@ export class WorldProjectState {
     this._emit({ type: 'skybox' });
   }
 
+  getLighting() { return clone(this.document.environment?.lighting ?? null); }
+
+  replaceLighting(value) {
+    if (!this.document.environment || typeof this.document.environment !== 'object') this.document.environment = {};
+    if (value == null) delete this.document.environment.lighting;
+    else this.document.environment.lighting = clone(value);
+    this._emit({ type: 'lighting' });
+  }
+
   toJSON() { return clone(this.document); }
 
   subscribe(listener) {
