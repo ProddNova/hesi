@@ -619,8 +619,19 @@ export async function createEditorApp(root) {
     // The garage's red sleep prism snaps onto the placed bed ("letto"); the bed
     // only exists after the project loads, so re-run the snap now (and after
     // future edits) to show it in the editor exactly where the game will.
-    adapter.garage?.refreshBedMarker?.();
-    projectState.subscribe(() => adapter.garage?.refreshBedMarker?.());
+    // But an explicit editor move of the prism must win over the bed-follow —
+    // otherwise re-snapping on every project change drags it back like a magnet.
+    // Mirror the flag the game's build replay sets (editorBuildTransformApplied)
+    // by driving it from whether the prism carries a transform override.
+    const syncSleepPrism = () => {
+      const bedMarkers = adapter.garage?.bedMarkers;
+      if (!bedMarkers) return;
+      const prism = registry.list().find((entity) => entity.object3D === bedMarkers);
+      bedMarkers.userData.editorBuildTransformApplied = Boolean(prism && projectState.getOverride(prism.id)?.transform);
+      adapter.garage.refreshBedMarker();
+    };
+    syncSleepPrism();
+    projectState.subscribe(syncSleepPrism);
     gameAppliedHistoryIndex = history.state().index;
     projectBuildPending = !(await persistence.gameBuildMatches());
     syncPublishState();

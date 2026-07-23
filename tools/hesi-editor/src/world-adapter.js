@@ -140,6 +140,9 @@ function classifyGarageChild(garage, object) {
   // instead of collapsing into the anonymous "Garage block" default.
   if (object === garage.exitMarkers) return { layer: 'Props', type: 'garage-prop', label: 'Exit prism (blue)', editable: true };
   if (object === garage.pcMarkers) return { layer: 'Props', type: 'garage-prop', label: 'Market prism (yellow)', editable: true };
+  // The red sleep prism follows the placed bed by default, but is editable:
+  // moving it repositions where the player sleeps (see garage.refreshBedMarker).
+  if (object === garage.bedMarkers) return { layer: 'Props', type: 'garage-prop', label: 'Sleep prism (red)', editable: true };
   if (object === garage.shutter) return { layer: 'Garage', type: 'garage-structure', label: 'Entrance shutter', editable: true };
   if (object === garage.pcScreen) return { layer: 'Props', type: 'garage-prop', label: 'Wangan Market PC screen', editable: true };
   if (object === garage.exitGlow) return { layer: 'Props', type: 'garage-prop', label: 'Exit glow', editable: true };

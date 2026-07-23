@@ -109,8 +109,11 @@ export class GarageSystem {
     // editor (an object named "letto"/"bed"), so sleeping there banks the run
     // and drops back to the main menu. Hidden until that bed is found
     // (refreshBedMarker), and appended AFTER every editor-addressable child.
+    // Tagged as an anchor-follower so an explicit editor move wins over the
+    // bed-follow (editorBuildTransformApplied), exactly like the exit/PC prisms.
     this.bedMarkers=this.makeBeacon(0xcc2626,0xff4a3a,0.84);
     this.bedMarkers.visible=false;
+    this.bedMarkers.userData.editorAnchorFollower='garage-bed';
     this.root.add(this.bedMarkers);
     this.beacons.push(this.bedMarkers);
     this.refreshColliders();
@@ -127,7 +130,10 @@ export class GarageSystem {
       bed.updateWorldMatrix(true,false);
       const p=bed.getWorldPosition(new THREE.Vector3());
       this.bedPoint=V(p.x,0,p.z);
-      this.bedMarkers.position.set(p.x,0,p.z);
+      // Follow the bed only until the user positions the prism themselves; an
+      // explicit editor move is preserved (like refreshExitMarkers). markerPoint
+      // reads the prism's actual position, so the sleep trigger follows the move.
+      if(!this.bedMarkers.userData.editorBuildTransformApplied)this.bedMarkers.position.set(p.x,0,p.z);
       this.bedMarkers.visible=true;
     }else if(this.bedMarkers){
       this.bedPoint=null;
