@@ -36,17 +36,22 @@ export const RUNTIME_ROAD_LIGHT_COUNT = 6;
 // lamp is unchanged from the shipped look (decay 1.8, ~180) — only the tail is
 // longer and softer. Shader cost is per-light and independent of range, so the
 // wider reach is free; only the light count costs anything.
-export const RUNTIME_ROAD_LIGHT_RANGE = 52;
+export const RUNTIME_ROAD_LIGHT_RANGE = 56;
 export const RUNTIME_ROAD_LIGHT_DECAY = 1.8;
 export const RUNTIME_ROAD_LIGHT_INTENSITY = 180;
 // Player-anchored proximity fade: a fixture at/inside FADE_FULL burns at its
-// full computed intensity, fading to zero by FADE_ZERO. This is what kills the
-// reported "the light switches on 10-20 m ahead" pop — a slot re-pointed at a
-// newly nearest fixture (which always happens near the selection edge) enters
-// at ~zero and ramps up smoothly as the player closes on it, instead of
-// snapping to full brightness the instant it is chosen.
-const RUNTIME_ROAD_LIGHT_FADE_FULL = 18;
-const RUNTIME_ROAD_LIGHT_FADE_ZERO = 50;
+// full computed intensity (i.e. a normal streetlight, CONSTANT — its only
+// falloff is the natural inverse-power decay), fading to zero only across the
+// far FADE_FULL..FADE_ZERO band near the selection edge, where a slot re-points
+// at a newly nearest fixture. Keeping FADE_FULL large is what stops sparse
+// stretches (ramps, the Tatsumi exit) from looking like motion-sensor lights
+// that visibly brighten as you approach: previously (FADE_FULL 18) a lamp only
+// reached full brightness within 18 m, so at the typical 25-45 m it sat dim and
+// swelling the whole way in. Now it is full by 36 m and only the dim far tail
+// past 36 m fades — enough to hide the re-selection swap, which happens out
+// there, without animating the near field.
+const RUNTIME_ROAD_LIGHT_FADE_FULL = 36;
+const RUNTIME_ROAD_LIGHT_FADE_ZERO = 54;
 export const DEFAULT_LOCAL_LIGHT = Object.freeze({
   color: '#ffd3a1',
   temperature: -0.28,
@@ -179,10 +184,16 @@ function applyRuntimeRoadLightConfig(light, config) {
     Math.min(1, colour.b * tb),
   );
   light.color.copy(colour);
-  light.intensity = light.userData.runtimeRoadLightBaseIntensity
+  // Split the intensity: the "applied" part (base × per-source × lamp dial)
+  // only changes when the config or the followed fixture changes, so it is
+  // computed here (on re-selection / editor retint, not every frame). The
+  // per-frame update then just scales this by the proximity fade — no colour
+  // rebuild or temperature maths per frame for every light.
+  light.userData.runtimeRoadLightAppliedIntensity = light.userData.runtimeRoadLightBaseIntensity
     * (light.userData.runtimeRoadLightSourceIntensity ?? 1)
-    * c.streetLampIntensity
-    // Proximity fade (1 when unset, so the editor's static preview is unaffected).
+    * c.streetLampIntensity;
+  // Proximity fade (1 when unset, so the editor's static preview is unaffected).
+  light.intensity = light.userData.runtimeRoadLightAppliedIntensity
     * (light.userData.runtimeRoadLightProximity ?? 1);
   light.userData.runtimeRoadLightConfig = c;
 }
@@ -266,19 +277,24 @@ export function updateRuntimeRoadLightRig(rig, sources, anchor, {
         light.userData.runtimeRoadLightSourceIntensity = 1;
         light.userData.runtimeRoadLightActive = false;
       }
+      // Rebuild colour + the pre-proximity intensity for the (possibly new)
+      // fixture. Only on re-selection, so the per-frame loop stays scalar-only.
+      applyRuntimeRoadLightConfig(light, light.userData.runtimeRoadLightConfig || DEFAULT_LIGHTING);
     }
   }
 
-  // Per-frame proximity fade + intensity apply (cheap — a handful of lights).
-  // A slot only ever re-points at a fixture near the selection edge, where this
-  // fade is ~0, so the swap is invisible; the light then ramps up as the player
-  // approaches. This is the fix for lamps appearing to "switch on" just ahead.
+  // Per-frame: only the proximity fade changes as the player moves, so scale the
+  // stored intensity — no colour rebuild or temperature maths per light per
+  // frame. Lamps within FADE_FULL stay at full (constant streetlight); only the
+  // dim far tail past FADE_FULL fades, which is where a slot re-points, so the
+  // swap is hidden without animating the near field ("motion-sensor" look).
   for (const light of lights) {
     const dist = light.userData.runtimeRoadLightActive
       ? Math.hypot(light.position.x - anchor.x, light.position.y - anchor.y, light.position.z - anchor.z)
       : Infinity;
-    light.userData.runtimeRoadLightProximity = 1 - smoothstep(RUNTIME_ROAD_LIGHT_FADE_FULL, RUNTIME_ROAD_LIGHT_FADE_ZERO, dist);
-    applyRuntimeRoadLightConfig(light, light.userData.runtimeRoadLightConfig || DEFAULT_LIGHTING);
+    const proximity = 1 - smoothstep(RUNTIME_ROAD_LIGHT_FADE_FULL, RUNTIME_ROAD_LIGHT_FADE_ZERO, dist);
+    light.userData.runtimeRoadLightProximity = proximity;
+    light.intensity = (light.userData.runtimeRoadLightAppliedIntensity ?? light.userData.runtimeRoadLightBaseIntensity ?? 0) * proximity;
   }
   return reselect;
 }

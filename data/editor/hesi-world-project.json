@@ -489,8 +489,8 @@
     "lighting": {
       "ambientIntensity": 0,
       "directIntensity": 0,
-      "exposure": 0.9,
-      "intensity": 1.1,
+      "exposure": 1.2,
+      "intensity": 0.8,
       "streetLampColor": "#fed795",
       "streetLampIntensity": 2.45,
       "streetLampTemperature": -0.75,

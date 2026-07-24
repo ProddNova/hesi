@@ -90,6 +90,16 @@ await page.evaluate(() => { window.shutoko.ui.closePC(); window.shutoko.ui.showR
 await page.waitForTimeout(300);
 await page.screenshot({ path: join(OUT, 'hud-06-crash.png') });
 
+// 6 — driver manual (pause/help) modal
+await page.evaluate(() => { document.getElementById('run-over').classList.add('hidden'); window.shutoko.ui.showHelp(); });
+await page.waitForTimeout(300);
+await page.screenshot({ path: join(OUT, 'hud-07-help.png') });
+
+// 7 — loading screen (boot is too fast headless: force it back on to inspect the look)
+await page.evaluate(() => { document.getElementById('pause-help').classList.add('hidden'); document.getElementById('loading').classList.remove('out'); });
+await page.waitForTimeout(200);
+await page.screenshot({ path: join(OUT, 'hud-08-loading.png') });
+
 console.log(JSON.stringify({ errors }, null, 1));
 await browser.close();
 server.close();

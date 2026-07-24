@@ -255,3 +255,34 @@ Two follow-ups.
   prewarmed programs valid. State (`headlightsOn`) is re-applied in `createCarMesh`
   so it survives a vehicle refresh; base intensity is captured per light.
   Verified: 900 → 0 → 900 round-trip, headlight cone gone in-shot, no page errors.
+
+### Round 4c — kill the "motion-sensor" fade + brighter fleet + rig micro-opt (2026-07-24)
+
+Follow-up to 4/4b feedback: the Tatsumi exit ramp still had lamps that visibly
+*brightened as you approached* ("sensore di movimento"), and traffic still read
+dark far / lit near ("looks like it just spawned").
+
+- **The ramp breathing was my own proximity fade.** `maxLitGap` along both PA
+  ramps is only 8 m, so it was never a coverage hole — with `FADE_FULL 18` a lamp
+  only reached full brightness within 18 m, so on the sparse ramp (lamps ~70 m
+  apart, so usually 25-45 m away) it sat dim and swelling the whole approach.
+  Widened to `FADE_FULL 36`, `FADE_ZERO 54`, range `52 → 56`: lamps are now
+  CONSTANT (full) within 36 m — real streetlight behaviour, its only falloff the
+  natural decay — and only the dim far tail past 36 m fades, which still hides the
+  re-selection swap (that happens out near the selection edge). Verified: a
+  fixture at 30 m now computes proximity 1.00 (was ~0.68).
+- **Traffic: emissive floor `0.6 → 0.85`, kept the pure neon.** The whole fleet
+  is one fluorescent green (`0x39ff14`, deliberate high-visibility fleet), so the
+  fix is just a stronger self-lit floor: a far car is already clearly visible, so
+  closing on it adds little and it no longer "switches on". A warm-tint blend was
+  prototyped and **rejected** — it only muddied the signature neon and helped
+  nothing, since there are no dark bodies in the fleet. One dial
+  (`makeTrafficMesh emissiveIntensity`) if it glows too hot up close.
+- **Rig micro-optimisation** (per the perf ask): the per-frame rig update no
+  longer rebuilds each light's colour / temperature every frame — that now
+  happens only on re-selection (throttled). The per-frame pass is scalar-only
+  (`intensity = storedIntensity × proximityFade`). Light count unchanged
+  (quality 4/6/8); real forward lights remain the main rig cost lever.
+
+  Verified: boots clean (no page errors), headlight toggle still 900→0→900 after
+  the refactor, fade numbers as above.

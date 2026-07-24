@@ -50,7 +50,7 @@ export class GameUI {
   hideBoot() { this.$('boot-screen').classList.remove('active'); }
   showBoot(hasSave = true) {
     this.$('boot-screen').classList.add('active');
-    this.$('continue-button').textContent = hasSave ? 'CONTINUE' : 'START NIGHT';
+    const cb=this.$('continue-button'),t=hasSave?['CONTINUE','RESUME DRIVER FILE']:['START NIGHT','BEGIN THE FIRST RUN'];if(cb.querySelector('span')){cb.querySelector('span').textContent=t[0];cb.querySelector('em').textContent=t[1];}else cb.textContent=t[0];
   }
   showHUD(show = true) { this.$('hud').classList.toggle('hidden', !show || this.hudHidden); }
   toggleHUD() {
@@ -93,6 +93,9 @@ export class GameUI {
     const tach = this.$('gauge-tach'), speedo = this.$('gauge-speed');
     if (tach) this.gauges.tach = { canvas: tach, ctx: tach.getContext('2d'), face: null, faceKey: '', disp: 0 };
     if (speedo) this.gauges.speedo = { canvas: speedo, ctx: speedo.getContext('2d'), face: null, faceKey: '', disp: 0 };
+    // Webfonts load after the first faces are prerendered: drop the cache so
+    // they are re-baked with the real dot/terminal glyphs.
+    document.fonts?.ready?.then(() => { for (const g of Object.values(this.gauges || {})) g.faceKey = ''; });
   }
 
   drawGauges(speed, rpm, redline) {
@@ -149,14 +152,14 @@ export class GameUI {
       x.shadowBlur = 0;
       if (major && v % cfg.labelEvery === 0) {
         const lr = px * .275;
-        x.fillStyle = '#b6ffcc'; x.font = `${Math.round(px * .078)}px "MS Gothic","Courier New",monospace`;
+        x.fillStyle = '#b6ffcc'; x.font = `${Math.round(px * .082)}px "RoundedTit","Rounded",sans-serif`;
         x.textAlign = 'center'; x.textBaseline = 'middle';
         x.shadowColor = '#5cff8a'; x.shadowBlur = px * .022;
         x.fillText(cfg.fmt(v), c + ca * lr, c + sa * lr);
         x.shadowBlur = 0;
       }
     }
-    x.fillStyle = 'rgba(140,255,171,.5)'; x.font = `${Math.round(px * .052)}px "MS Gothic",monospace`;
+    x.fillStyle = 'rgba(140,255,171,.5)'; x.font = `${Math.round(px * .05)}px "Rounded",sans-serif`;
     x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText(cfg.sub, c, c - px * .155);
     return f;

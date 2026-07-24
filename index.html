@@ -12,7 +12,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <title>SHUTOKO NIGHTS</title>
-  <link rel="stylesheet" href="styles.css?v=20260724b">
+  <link rel="stylesheet" href="styles.css?v=20260724f">
   <link rel="stylesheet" href="styles/dev-map.css">
   <link rel="stylesheet" href="styles/debug-stats.css">
   <script type="importmap">
@@ -23,26 +23,28 @@
   <div id="game-shell">
     <canvas id="game-canvas" aria-label="Shutoko Nights game"></canvas>
     <div id="fade"></div>
-    <div id="crt" aria-hidden="true"></div>
 
     <section id="boot-screen" class="screen active">
       <div class="boot-grid" aria-hidden="true"></div>
       <div class="boot-city" aria-hidden="true"></div>
+      <header class="boot-top">
+        <span class="boot-sys"><i>◆</i> SHUTOKO SYSTEM MENU</span>
+        <span class="boot-ver">Ver.2.02</span>
+        <span class="boot-clock">TOKYO 02:17 <b class="blink">● REC</b></span>
+      </header>
       <div class="boot-kanji" aria-hidden="true">首都高速</div>
-      <div class="title-lockup">
-        <p class="eyebrow">首都高速 // TOKYO · MIDNIGHT 02:17</p>
-        <h1>SHUTOKO<br><span>NIGHTS</span></h1>
-        <p class="tagline">NO FINISH LINE. JUST ONE MORE EXIT.</p>
-        <div class="boot-menu">
-          <button id="continue-button" class="primary">CONTINUE</button>
-          <button id="new-game-button">NEW GAME</button>
-        </div>
-        <p class="micro">HEADPHONES ON · KEYBOARD &amp; TOUCH · © 2002 WANGAN WORKS</p>
+      <div class="boot-main">
+        <h1 class="boot-logo">SHUTOKO<br><span>NIGHTS</span></h1>
+        <nav class="boot-menu" aria-label="Main menu">
+          <button id="continue-button"><i>01</i><span>CONTINUE</span><em>RESUME DRIVER FILE</em></button>
+          <button id="new-game-button"><i>02</i><span>NEW GAME</span><em>START A FRESH RUN</em></button>
+        </nav>
       </div>
-      <div class="boot-footer" aria-hidden="true">
-        <span>SYSTEM SOFTWARE Ver.2.02</span>
-        <span class="blink">● REC</span>
-        <span>NO MEMORY CARD REQUIRED</span>
+      <div class="boot-ticker" aria-hidden="true">
+        <div class="boot-ticker-track">
+          <span>NO FINISH LINE · JUST ONE MORE EXIT · NO MEMORY CARD REQUIRED · HEADPHONES ON · KEYBOARD &amp; TOUCH · © 2002 WANGAN WORKS ·&nbsp;</span>
+          <span>NO FINISH LINE · JUST ONE MORE EXIT · NO MEMORY CARD REQUIRED · HEADPHONES ON · KEYBOARD &amp; TOUCH · © 2002 WANGAN WORKS ·&nbsp;</span>
+        </div>
       </div>
     </section>
 
@@ -120,18 +122,19 @@
 
     <section id="run-over" class="modal hidden">
       <div class="modal-card crash-card">
-        <p class="eyebrow">RUN TERMINATED · 事故</p>
-        <h2>NO HESI.<br><span>NO MERCY.</span></h2>
-        <div><small>SCORE LOST</small><b id="lost-score">0</b></div>
-        <button id="return-garage" class="primary">RETURN TO GARAGE</button>
+        <aside class="modal-strip" aria-hidden="true">事故</aside>
+        <div class="modal-body">
+          <p class="eyebrow">RUN TERMINATED · 事故発生</p>
+          <h2>NO HESI.<br><span>NO MERCY.</span></h2>
+          <div class="crash-stat"><small>SCORE LOST · 喪失</small><b id="lost-score">0</b></div>
+          <button id="return-garage" class="menu-item"><i>▶</i><span>RETURN TO GARAGE</span><em>UNBANKED SCORE IS GONE</em></button>
+        </div>
       </div>
     </section>
 
     <section id="pause-help" class="modal hidden">
       <div class="modal-card help-card">
-        <button id="help-close" class="modal-x">×</button>
-        <p class="eyebrow">DRIVER MANUAL · 取扱説明書</p>
-        <h2>CONTROLS</h2>
+        <header class="term-title"><span><i>▮</i> DRIVER_MANUAL.TXT — 取扱説明書</span><button id="help-close" class="modal-x">×</button></header>
         <div class="controls-grid">
           <dl><dt>W / ↑</dt><dd>Throttle</dd><dt>S / ↓</dt><dd>Brake / reverse</dd><dt>A D / ← →</dt><dd>Steer</dd><dt>SPACE</dt><dd>Handbrake</dd></dl>
           <dl><dt>SHIFT / E</dt><dd>Shift up</dd><dt>CTRL / Q</dt><dd>Shift down</dd><dt>C</dt><dd>Camera</dd><dt>F</dt><dd>Phone</dd><dt>H</dt><dd>Toggle HUD</dd></dl>
@@ -156,6 +159,10 @@
         </details>
         <div class="debug-custom-car">
           <label class="debug-select"><span>MODELLO AUTO PSXSTYLE</span><select id="debug-custom-car-model" aria-label="Modello auto PSXStyle"></select></label>
+        </div>
+        <div class="debug-diagnostics">
+          <span><b>DIAGNOSTIC RECORDER</b><small>JSON completo per analisi e ottimizzazione</small></span>
+          <div><button id="debug-rec-toggle" type="button">START / STOP</button><button id="debug-rec-mark" type="button">MARK MOMENT</button></div>
         </div>
         <details class="debug-hitboxes">
           <summary><span><b>HITBOXES</b><small>Choose collision and bounds overlays</small></span><em>EDIT</em></summary>
@@ -226,13 +233,14 @@
       <span>↻</span><b>ROTATE FOR THE BEST DRIVE</b><small>Portrait still works</small>
     </div>
     <div id="loading" class="loading">
+      <div class="load-ring" aria-hidden="true"></div>
       <b>SHUTOKO NIGHTS</b>
       <div class="load-bar" aria-hidden="true"><i></i></div>
       <span>NOW LOADING // 首都高速</span>
     </div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260724b"></script>
+  <script type="module" src="js/game.js?v=20260724c"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
