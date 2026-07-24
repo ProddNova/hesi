@@ -12,6 +12,7 @@ export class GameUI {
     this.lastContext = null;
     this.hudHidden = false;
     this.minimapCtx = this.$('minimap').getContext('2d');
+    this.initGauges();
     this.bind();
   }
 
@@ -49,7 +50,7 @@ export class GameUI {
   hideBoot() { this.$('boot-screen').classList.remove('active'); }
   showBoot(hasSave = true) {
     this.$('boot-screen').classList.add('active');
-    this.$('continue-button').textContent = hasSave ? 'CONTINUE' : 'START NIGHT';
+    const cb=this.$('continue-button'),t=hasSave?['CONTINUE','RESUME DRIVER FILE']:['START NIGHT','BEGIN THE FIRST RUN'];if(cb.querySelector('span')){cb.querySelector('span').textContent=t[0];cb.querySelector('em').textContent=t[1];}else cb.textContent=t[0];
   }
   showHUD(show = true) { this.$('hud').classList.toggle('hidden', !show || this.hudHidden); }
   toggleHUD() {
@@ -69,10 +70,10 @@ export class GameUI {
     this.$('speed-readout').textContent = speed;
     this.$('rpm-readout').textContent = String(rpm).padStart(4, '0');
     this.$('gear-readout').textContent = t.gearLabel ?? (t.gear === 0 ? 'N' : t.gear ?? 'N');
-    this.$('tach-fill').style.height = `${Math.min(100, (rpm / Math.max(1, t.redline ?? 7000)) * 100)}%`;
+    this.drawGauges(speed, rpm, Math.max(1000, t.redline ?? 7000));
     const fuelPct = Math.max(0, Math.min(100, (t.fuelFraction ?? 1) * 100));
     this.$('fuel-fill').style.width = `${fuelPct}%`;
-    this.$('fuel-fill').style.background = fuelPct < 15 ? 'var(--red)' : 'var(--cyan)';
+    this.$('fuel-fill').style.background = fuelPct < 15 ? 'var(--red)' : 'var(--green)';
     this.$('fuel-readout').textContent = `${Math.round(fuelPct)}%`;
     this.$('hud-score').textContent = Math.floor(run.score ?? 0).toString().padStart(6, '0');
     this.$('hud-combo').textContent = `×${(run.combo ?? 1).toFixed(1)}`;
@@ -85,13 +86,92 @@ export class GameUI {
     [...this.$('lives').querySelectorAll('i')].forEach((el, i) => el.classList.toggle('lost', i >= (run.lives ?? 3)));
   }
 
+  /* Analog dial cluster. Faces are prerendered once per (pixel size, scale,
+     redline); only the needle is redrawn per frame on top of the face. */
+  initGauges() {
+    this.gauges = {};
+    const tach = this.$('gauge-tach'), speedo = this.$('gauge-speed');
+    if (tach) this.gauges.tach = { canvas: tach, ctx: tach.getContext('2d'), face: null, faceKey: '', disp: 0 };
+    if (speedo) this.gauges.speedo = { canvas: speedo, ctx: speedo.getContext('2d'), face: null, faceKey: '', disp: 0 };
+    // Webfonts load after the first faces are prerendered: drop the cache so
+    // they are re-baked with the real dot/terminal glyphs.
+    document.fonts?.ready?.then(() => { for (const g of Object.values(this.gauges || {})) g.faceKey = ''; });
+  }
+
+  drawGauges(speed, rpm, redline) {
+    if (!this.gauges) this.initGauges();
+    const tachMax = Math.max(5, Math.ceil(redline / 1000)) * 1000;
+    if (this.gauges.tach) this.drawDial(this.gauges.tach, { value: rpm, max: tachMax, redlineAt: redline, majorEvery: 1000, minorEvery: 250, labelEvery: 1000, fmt: v => String(v / 1000), sub: '×1000 RPM' });
+    if (this.gauges.speedo) this.drawDial(this.gauges.speedo, { value: speed, max: 280, majorEvery: 20, minorEvery: 10, labelEvery: 40, fmt: v => String(v), sub: 'km/h' });
+  }
+
+  drawDial(g, cfg) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const host = g.canvas.parentElement;
+    const css = Math.max(48, Math.round(Math.min(host.clientWidth || 120, host.clientHeight || 120)));
+    const px = Math.round(css * dpr);
+    if (g.canvas.width !== px) { g.canvas.width = px; g.canvas.height = px; }
+    const key = `${px}|${cfg.max}|${cfg.redlineAt || 0}`;
+    if (g.faceKey !== key) { g.face = this.renderDialFace(px, cfg); g.faceKey = key; }
+    const x = g.ctx;
+    x.clearRect(0, 0, px, px);
+    if (g.face) x.drawImage(g.face, 0, 0);
+    g.disp = (g.disp ?? cfg.value) + (cfg.value - (g.disp ?? cfg.value)) * .38;
+    const a0 = Math.PI * .75, a1 = Math.PI * 2.25;
+    const a = a0 + Math.max(0, Math.min(cfg.max, g.disp)) / cfg.max * (a1 - a0);
+    x.save(); x.translate(px / 2, px / 2); x.rotate(a);
+    x.strokeStyle = '#ff2e4d'; x.lineWidth = px * .021; x.lineCap = 'round';
+    x.shadowColor = '#ff2e4d'; x.shadowBlur = px * .04;
+    x.beginPath(); x.moveTo(-px * .12, 0); x.lineTo(px * .395, 0); x.stroke();
+    x.shadowBlur = 0;
+    x.fillStyle = '#0a0f15'; x.beginPath(); x.arc(0, 0, px * .052, 0, 7); x.fill();
+    x.strokeStyle = '#5cff8a'; x.lineWidth = px * .012; x.stroke();
+    x.restore();
+  }
+
+  renderDialFace(px, cfg) {
+    const f = document.createElement('canvas'); f.width = px; f.height = px;
+    const x = f.getContext('2d'), c = px / 2;
+    const a0 = Math.PI * .75, a1 = Math.PI * 2.25;
+    const ang = v => a0 + Math.max(0, Math.min(cfg.max, v)) / cfg.max * (a1 - a0);
+    x.fillStyle = '#0a0f15'; x.beginPath(); x.arc(c, c, px * .485, 0, 7); x.fill();
+    x.strokeStyle = 'rgba(92,255,138,.16)'; x.lineWidth = px * .008;
+    x.beginPath(); x.arc(c, c, px * .44, 0, 7); x.stroke();
+    if (cfg.redlineAt) {
+      x.strokeStyle = '#ff2e4d'; x.lineWidth = px * .026; x.shadowColor = '#ff2e4d'; x.shadowBlur = px * .025;
+      x.beginPath(); x.arc(c, c, px * .415, ang(cfg.redlineAt), a1); x.stroke(); x.shadowBlur = 0;
+    }
+    for (let v = 0; v <= cfg.max + 1e-6; v += cfg.minorEvery) {
+      const major = Math.abs(v / cfg.majorEvery - Math.round(v / cfg.majorEvery)) < 1e-6;
+      const a = ang(v), ca = Math.cos(a), sa = Math.sin(a);
+      const r1 = px * .425, r2 = major ? px * .355 : px * .385;
+      x.strokeStyle = major ? '#8cffab' : 'rgba(140,255,171,.4)';
+      x.lineWidth = major ? px * .013 : px * .007;
+      if (major) { x.shadowColor = '#5cff8a'; x.shadowBlur = px * .018; }
+      x.beginPath(); x.moveTo(c + ca * r2, c + sa * r2); x.lineTo(c + ca * r1, c + sa * r1); x.stroke();
+      x.shadowBlur = 0;
+      if (major && v % cfg.labelEvery === 0) {
+        const lr = px * .275;
+        x.fillStyle = '#b6ffcc'; x.font = `${Math.round(px * .082)}px "RoundedTit","Rounded",sans-serif`;
+        x.textAlign = 'center'; x.textBaseline = 'middle';
+        x.shadowColor = '#5cff8a'; x.shadowBlur = px * .022;
+        x.fillText(cfg.fmt(v), c + ca * lr, c + sa * lr);
+        x.shadowBlur = 0;
+      }
+    }
+    x.fillStyle = 'rgba(140,255,171,.5)'; x.font = `${Math.round(px * .05)}px "Rounded",sans-serif`;
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(cfg.sub, c, c - px * .155);
+    return f;
+  }
+
   drawMinimap(data, player, services = [], largeCanvas = null) {
     if (!data?.routes?.length && !Array.isArray(data)) return;
     this.lastMinimap = { data, player, services };
     const canvas = largeCanvas || this.$('minimap');
     const c = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
-    c.fillStyle = '#050910'; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#020a06'; c.fillRect(0, 0, w, h);
     const routes = data.routes || data;
     const all = routes.flatMap(r => r.points || r);
     if (!all.length) return;
@@ -106,13 +186,13 @@ export class GameUI {
       c.beginPath();
       pts.forEach((p,i) => i ? c.lineTo(tx(p.x),ty(p.z??p.y)) : c.moveTo(tx(p.x),ty(p.z??p.y)));
       if (r.closed) c.closePath();
-      c.strokeStyle = r.color || (idx === 0 ? '#ff8e2d':'#324458');
+      c.strokeStyle = r.color || (idx === 0 ? '#35ff85':'#1d3f2c');
       c.lineWidth = largeCanvas ? 4 : 2; c.stroke();
     });
     services.forEach(s => {
-      c.fillStyle = s.garage ? '#ff4156':'#39d7f2';
+      c.fillStyle = s.garage ? '#ff4d6d':'#3affd2';
       c.fillRect(tx(s.position?.x ?? s.x)-3,ty(s.position?.z ?? s.z)-3,6,6);
-      if (largeCanvas) { c.fillStyle='#ccd4df'; c.font='10px monospace'; c.fillText(s.name || 'PA',tx(s.position?.x ?? s.x)+6,ty(s.position?.z ?? s.z)-5); }
+      if (largeCanvas) { c.fillStyle='#9fdcb4'; c.font='10px monospace'; c.fillText(s.name || 'PA',tx(s.position?.x ?? s.x)+6,ty(s.position?.z ?? s.z)-5); }
     });
     if (player) {
       const x=tx(player.x), y=ty(player.z);
@@ -135,7 +215,7 @@ export class GameUI {
     const el=this.$('near-miss'); el.innerHTML=`${close?'THREAD THE NEEDLE':'NEAR MISS'} <b>+${Math.floor(points)}</b>`;
     el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
   }
-  showRunOver(score) { this.$('lost-score').textContent=Math.floor(score).toLocaleString(); this.$('run-over').classList.remove('hidden'); }
+  showRunOver(score) { this.$('lost-score').textContent=Math.floor(score).toLocaleString('en-US'); this.$('run-over').classList.remove('hidden'); }
   showHelp() { this.$('pause-help').classList.remove('hidden'); }
   installProgress(label, progress) {
     const el=this.$('install-progress'); el.classList.toggle('hidden', progress == null);
@@ -242,14 +322,14 @@ export class GameUI {
       const pts=r.points||[];if(!pts.length)continue;
       c.beginPath();pts.forEach((p,i)=>i?c.lineTo(tx(p.x),ty(p.z)):c.moveTo(tx(p.x),ty(p.z)));
       if(r.closed)c.closePath();
-      c.strokeStyle=r.color||'#42546b';c.lineWidth=Math.max(1.5,(r.width||2)*Math.min(2.4,view.zoom*.5));c.lineJoin='round';c.stroke();
+      c.strokeStyle=r.color||'#2f5c40';c.lineWidth=Math.max(1.5,(r.width||2)*Math.min(2.4,view.zoom*.5));c.lineJoin='round';c.stroke();
     }
     const fontPx=Math.max(9,Math.round(10*(w/280)));
     for(const s of services){
       const x=tx(s.position?.x??s.x),y=ty(s.position?.z??s.z);
       if(x<-30||y<-30||x>w+30||y>h+30)continue;
-      c.fillStyle=s.garage||s.hasGarage?'#ff4156':'#39d7f2';c.fillRect(x-4,y-4,8,8);
-      c.fillStyle='#ccd4df';c.font=`${fontPx}px monospace`;c.textAlign='left';c.fillText(s.name||'PA',x+8,y-6);
+      c.fillStyle=s.garage||s.hasGarage?'#ff4d6d':'#3affd2';c.fillRect(x-4,y-4,8,8);
+      c.fillStyle='#d8ccf5';c.font=`${fontPx}px monospace`;c.textAlign='left';c.fillText(s.name||'PA',x+8,y-6);
     }
     if(data.garage){const x=tx(data.garage.x),y=ty(data.garage.z);c.strokeStyle='#ff9a2e';c.lineWidth=2;c.strokeRect(x-6,y-6,12,12);c.fillStyle='#ff9a2e';c.font=`${fontPx}px monospace`;c.fillText('GARAGE',x+9,y+4);}
     if(player){
@@ -284,8 +364,8 @@ export class GameUI {
     let renderer=this.previewRenderer;
     try{
       if(!renderer){const canvas=document.createElement('canvas');renderer=new THREE.WebGLRenderer({canvas,antialias:false,alpha:false,preserveDrawingBuffer:true});renderer.setSize(320,150,false);renderer.outputColorSpace=THREE.SRGBColorSpace;this.previewRenderer=renderer;}
-      const scene=new THREE.Scene();scene.background=new THREE.Color(0x252d38);scene.add(new THREE.HemisphereLight(0xbcc8d3,0x22242a,2.1));const key=new THREE.DirectionalLight(0xffd7a1,2.4);key.position.set(-4,6,-5);scene.add(key);
-      const floor=new THREE.Mesh(new THREE.PlaneGeometry(20,20),new THREE.MeshLambertMaterial({color:0x4b5158,flatShading:true}));floor.rotation.x=-Math.PI/2;scene.add(floor);
+      const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0f16);scene.add(new THREE.HemisphereLight(0xbcc8d3,0x161a20,2.1));const key=new THREE.DirectionalLight(0xffd7a1,2.4);key.position.set(-4,6,-5);scene.add(key);
+      const floor=new THREE.Mesh(new THREE.PlaneGeometry(20,20),new THREE.MeshLambertMaterial({color:0x22282f,flatShading:true}));floor.rotation.x=-Math.PI/2;scene.add(floor);
       const camera=new THREE.PerspectiveCamera(32,320/150,.1,50);camera.position.set(6.2,3.3,7.1);camera.lookAt(0,.65,0);
       auctions.forEach((a,i)=>{const car=a.car||a,group=this.makePreviewCar(car);scene.add(group);group.rotation.y=-.62;renderer.render(scene,camera);const el=root.querySelector(`[data-preview="${i}"]`);if(el){el.style.backgroundImage=`url(${renderer.domElement.toDataURL('image/png')})`;el.style.backgroundSize='cover';el.style.backgroundPosition='center';el.classList.add('rendered');}scene.remove(group);group.traverse(o=>{o.geometry?.dispose?.();o.material?.dispose?.();});});
       floor.geometry.dispose();floor.material.dispose();
@@ -313,7 +393,7 @@ export class GameUI {
   statBar(label,val,max,unit,invert=false){const pct=Math.min(100,(val/max)*100);return `<div class="stat"><span>${label}</span><div><i style="width:${invert?100-pct/2:pct}%"></i></div><b>${typeof val==='number'?val.toFixed(val<10?2:0):val} ${unit}</b></div>`;}
   deltaText(d){const map={powerMultiplier:'POWER',power:'POWER',torque:'TORQUE',tireGrip:'GRIP',grip:'GRIP',gripMultiplier:'GRIP',brakeMultiplier:'BRAKE',braking:'BRAKE',brakeForce:'BRAKE',massDelta:'MASS',mass:'MASS',suspensionStiffness:'STIFFNESS',stiffness:'STIFFNESS',gearRatioMultiplier:'GEARING',acceleration:'ACCEL',topSpeed:'TOP SPEED',shift:'SHIFT',redline:'REDLINE',turbo:'BOOST',drag:'DRAG',fade:'FADE',response:'RESPONSE'};return Object.entries(d).map(([k,v])=>{const label=map[k]||k.replace(/([A-Z])/g,' $1').toUpperCase();if(typeof v!=='number')return `${label} ${v}`;if(k.toLowerCase().includes('multiplier')){const pct=Math.round((v-1)*100);return `${label} ${pct>=0?'+':''}${pct}%`;}return `${label} ${v>0?'+':''}${v}`;}).join(' · ')||'FITMENT UPGRADE';}
   partIcon(cat=''){return ({engine:'⚙',turbo:'◉',intake:'≋',exhaust:'≋',tires:'◎',suspension:'⌁',brakes:'⊘',weight:'▱',gearbox:'⇅'}[cat.toLowerCase()]||'◇');}
-  money(n){return `¥${Math.max(0,Math.round(n)).toLocaleString('en-US')}`;}
+  money(n){return `¥${Math.max(0,Math.round(n)).toLocaleString('en-US').replace(/,/g,"'")}`;}
 }
 
 export default GameUI;

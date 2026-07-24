@@ -176,3 +176,113 @@ pool-topdown-probe.mjs`, which scans `_bankAt` for the steepest lamp): `+bank`
 compresses the pool to one side and darkens the other; `-bank` spreads it evenly
 across the full carriageway with no hard edge, confirmed again at a driver's-eye
 angle. Straights (bank ≈ 0) are unaffected either way.
+
+## Round 4 — runtime-rig pop-in, under-deck Tatsumi, matte asphalt (2026-07-24)
+
+Three reports: (1) lamps appear to "switch on" 10-20 m ahead of the car while
+driving; (2) badly-distributed lighting with dark "shadow cuts" at merges,
+Tatsumi PA and its ramps pitch-black; (3) the asphalt looks like glossy plastic.
+
+Root causes found with headless probes (density sweep across wangan/C1/K1 +
+same-spot before/after shots):
+
+- **Pop-in** is the *runtime road-light rig* (`js/lighting-config.js`), a separate
+  system from the additive pools — 4 real PointLights that snap to the nearest
+  authored fixtures. Fixture density within a light's 36 m range is p50=3 but
+  **p95=8, max=9** on the C1/K1 loops and ramp merges, so with only 4 slots the
+  5th-9th in-range lamps had no light and popped on/off as slots reshuffled; on
+  sparse straights the steep range-36/decay-1.8 cutoff still read as a hard
+  switch-on right in front of the car.
+- **Plastic asphalt** is mostly the user's own saved lighting: `hesi-world-build`
+  sets `streetLampIntensity 2.45`, and `applySceneLighting` scaled the additive
+  ground-pool opacity **1:1** with it → 0.28 × 2.45 = 0.69 additive opacity, a
+  glossy orange wash on flat untextured Lambert.
+- **Tatsumi dark** is structural: the deck sits ~8.9 m over the wangan and a
+  standard 9.26 m lamppost can't fit under it, so the clearing suppresses every
+  lamp/pool/light-source in its footprint — including the mainline passing below.
+
+Changes (all index-safe — no `_instance` calls added/removed/reordered, verified
+`editor-build-ops-probe` byte-identical: 118/123 on target, same 5 pre-existing
+`chunk 6,-7` drifts as before):
+
+`js/lighting-config.js`
+- Runtime rig range `36 → 52`, keeping decay 1.8 / intensity 180 so the
+  brightness *directly under* a lamp is unchanged — only the tail is longer.
+- **Player-anchored proximity fade** (`FADE_FULL 18 m … FADE_ZERO 50 m`), applied
+  every frame (the fixture *re-selection* stays distance-throttled, the fade does
+  not). A slot only ever re-points near the selection edge where the fade is ~0,
+  so the swap is invisible and the lamp then ramps up smoothly on approach.
+- `applySceneLighting` pool/streak opacity now **compresses** above 1× lamp
+  intensity (`1 + (I-1)·0.32`): 2.45 → 1.46, so 0.28 → 0.41 not 0.69. Lamp heads
+  and the real road lights still take the full intensity, so lamps stay bright
+  while the asphalt reads matte again.
+
+`js/game.js`
+- Rig light **count scales with quality** (low 4 / medium 6 / high 8) so dense
+  stacks stay covered on capable hardware; fixed for the session (shader census).
+
+`js/map.js`
+- `_lightTatsumiUnderdeck()` (called from `_buildWorld` after service-area
+  dressing): drops under-deck light **sources only** (~26 m spacing, hung below
+  the deck soffit) along the wangan where it runs beneath the Tatsumi footprint.
+  The runtime rig lights them like a PA's underside luminaires — road + deck
+  soffit now read clearly instead of black. No geometry, so no instance indices
+  move. Spacing keeps local fixture count (r36 ≈ 6) within the rig's slot budget.
+
+Merge "shadow cuts" are only *partially* addressed: the wider-reach rig now
+carries real light across route boundaries, but the additive pools still end per
+route. A dedicated cross-route pool/gore fill is a possible follow-up.
+
+Verified: game boots with no page errors; before/after driver + aerial shots on
+the wangan straight (matte vs glossy), under Tatsumi (soffit + road lit vs black),
+and density within the rig budget.
+
+### Round 4b — traffic reads as lit + headlight toggle (2026-07-24)
+
+Two follow-ups.
+
+- **Traffic looked lit only by the player's headlights** (dark until you close on
+  a car). The runtime rig follows the *player*, so distant traffic can't be lit
+  by real lamps; the stand-in is the body's self-lit emissive floor. It was too
+  low — raised `js/traffic.js makeTrafficMesh` `emissiveIntensity 0.34 → 0.6`
+  (still emissive = the car's own colour, so the fleet keeps its identity; a
+  material uniform, no light/program added). Cars now read at distance instead of
+  switching on when the headlights arrive. Tunable if it glows too much.
+- **Headlight toggle on `L`** (`game.js`). `KeyL` in driving → `toggleHeadlights()`
+  drives the two player head SpotLights' **intensity to 0** (not `visible`): a
+  light going invisible drops the scene's spot-light census and forces a full
+  program re-link (stutter), whereas intensity is a uniform and keeps the
+  prewarmed programs valid. State (`headlightsOn`) is re-applied in `createCarMesh`
+  so it survives a vehicle refresh; base intensity is captured per light.
+  Verified: 900 → 0 → 900 round-trip, headlight cone gone in-shot, no page errors.
+
+### Round 4c — kill the "motion-sensor" fade + brighter fleet + rig micro-opt (2026-07-24)
+
+Follow-up to 4/4b feedback: the Tatsumi exit ramp still had lamps that visibly
+*brightened as you approached* ("sensore di movimento"), and traffic still read
+dark far / lit near ("looks like it just spawned").
+
+- **The ramp breathing was my own proximity fade.** `maxLitGap` along both PA
+  ramps is only 8 m, so it was never a coverage hole — with `FADE_FULL 18` a lamp
+  only reached full brightness within 18 m, so on the sparse ramp (lamps ~70 m
+  apart, so usually 25-45 m away) it sat dim and swelling the whole approach.
+  Widened to `FADE_FULL 36`, `FADE_ZERO 54`, range `52 → 56`: lamps are now
+  CONSTANT (full) within 36 m — real streetlight behaviour, its only falloff the
+  natural decay — and only the dim far tail past 36 m fades, which still hides the
+  re-selection swap (that happens out near the selection edge). Verified: a
+  fixture at 30 m now computes proximity 1.00 (was ~0.68).
+- **Traffic: emissive floor `0.6 → 0.85`, kept the pure neon.** The whole fleet
+  is one fluorescent green (`0x39ff14`, deliberate high-visibility fleet), so the
+  fix is just a stronger self-lit floor: a far car is already clearly visible, so
+  closing on it adds little and it no longer "switches on". A warm-tint blend was
+  prototyped and **rejected** — it only muddied the signature neon and helped
+  nothing, since there are no dark bodies in the fleet. One dial
+  (`makeTrafficMesh emissiveIntensity`) if it glows too hot up close.
+- **Rig micro-optimisation** (per the perf ask): the per-frame rig update no
+  longer rebuilds each light's colour / temperature every frame — that now
+  happens only on re-selection (throttled). The per-frame pass is scalar-only
+  (`intensity = storedIntensity × proximityFade`). Light count unchanged
+  (quality 4/6/8); real forward lights remain the main rig cost lever.
+
+  Verified: boots clean (no page errors), headlight toggle still 900→0→900 after
+  the refactor, fade numbers as above.
