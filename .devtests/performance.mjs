@@ -16,6 +16,7 @@ const HARNESS_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const rootArg = process.argv.find((arg) => arg.startsWith('--root='))?.slice('--root='.length);
 const ROOT = rootArg ? (isAbsolute(rootArg) ? rootArg : resolve(rootArg)) : HARNESS_ROOT;
 const desktopTarget = process.argv.includes('--desktop');
+const quickTarget = process.argv.includes('--quick');
 const THREE_MODULE = join(HARNESS_ROOT, 'node_modules', 'three', 'build', 'three.module.js');
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -26,7 +27,7 @@ const mapModuleUrl = `${pathToFileURL(join(ROOT, 'js', 'map.js')).href}?performa
 const { HighwayMap } = await import(mapModuleUrl);
 const buildTimes = [];
 let scene = null;
-for (let run = 0; run < 3; run += 1) {
+for (let run = 0; run < (quickTarget ? 1 : 3); run += 1) {
   const started = performance.now();
   const map = new HighwayMap(null, {});
   buildTimes.push(performance.now() - started);
@@ -58,6 +59,7 @@ for (let run = 0; run < 3; run += 1) {
   map.dispose();
 }
 const sortedBuilds = [...buildTimes].sort((a, b) => a - b);
+const medianBuild = sortedBuilds[Math.floor(sortedBuilds.length / 2)];
 
 const server = createServer(async (request, response) => {
   try {
@@ -137,36 +139,57 @@ await page.evaluate((isDesktop) => {
 }, desktopTarget);
 await page.waitForTimeout(1500);
 
-const frameTiming = await page.evaluate(() => new Promise((resolveFrames) => {
+const frameTiming = await page.evaluate((quick) => new Promise((resolveFrames) => {
   const deltas = [];
   let previous = null;
   const sample = (now) => {
     if (previous !== null) deltas.push(now - previous);
     previous = now;
-    if (deltas.length >= 90) resolveFrames(deltas);
+    if (deltas.length >= (quick ? 12 : 90)) resolveFrames(deltas);
     else requestAnimationFrame(sample);
   };
   requestAnimationFrame(sample);
-}));
+}), quickTarget);
 frameTiming.sort((a, b) => a - b);
 const percentile = (fraction) => frameTiming[Math.min(frameTiming.length - 1, Math.floor(frameTiming.length * fraction))];
-const workloadTiming = await page.evaluate((targetFps) => {
+const workload = await page.evaluate(({ targetFps, samples: sampleCount }) => {
   const game = window.shutoko;
   // Stop the game's own loop after its already-queued callback, then measure
   // complete update+render work without display-vsync hiding CPU/GPU submission
   // cost. This is the budget that must fit inside 6.94 ms / 33.33 ms.
   game.animate = () => {};
   const samples = [];
-  for (let i = 0; i < 120; i += 1) {
+  const subsystems = [];
+  for (let i = 0; i < sampleCount; i += 1) {
+    const before = { ...game.frameProf };
     const started = performance.now();
     game.updateDriving(1 / targetFps);
     game.render();
-    samples.push(performance.now() - started);
+    const total = performance.now() - started;
+    samples.push(total);
+    const phys = game.frameProf.phys - before.phys;
+    const traffic = game.frameProf.traffic - before.traffic;
+    const map = game.frameProf.map - before.map;
+    const render = game.frameProf.render - before.render;
+    const persist = game.frameProf.persist - before.persist;
+    subsystems.push({
+      phys, traffic, map, render, persist,
+      other: Math.max(0, total - phys - traffic - map - render - persist),
+    });
   }
-  return samples;
-}, desktopTarget ? 144 : 30);
+  return { samples, subsystems };
+}, { targetFps: desktopTarget ? 144 : 30, samples: quickTarget ? 60 : 120 });
+const workloadTiming = workload.samples;
 workloadTiming.sort((a, b) => a - b);
 const workloadPercentile = (fraction) => workloadTiming[Math.min(workloadTiming.length - 1, Math.floor(workloadTiming.length * fraction))];
+const workloadSubsystems = Object.fromEntries(
+  ['phys', 'traffic', 'map', 'render', 'persist', 'other'].map((name) => {
+    const values = workload.subsystems.map((entry) => entry[name]).sort((a, b) => a - b);
+    const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+    const p95 = values[Math.min(values.length - 1, Math.floor(values.length * 0.95))] || 0;
+    return [name, { mean: Number(mean.toFixed(2)), p95: Number(p95.toFixed(2)) }];
+  }),
+);
 const browserMetrics = await page.evaluate(() => {
   const game = window.shutoko;
   const info = game.renderer.info;
@@ -214,7 +237,7 @@ const result = {
   viewport,
   nodeMapBuildMs: {
     runs: buildTimes.map((value) => Number(value.toFixed(1))),
-    median: Number(sortedBuilds[1].toFixed(1)),
+    median: Number(medianBuild.toFixed(1)),
   },
   browserMapBuildMs: browserMapBuildMs === null ? null : Number(browserMapBuildMs.toFixed(1)),
   bootToMapMs: Number(bootToMapMs.toFixed(1)),
@@ -232,6 +255,7 @@ const result = {
     p50: Number(workloadPercentile(0.5).toFixed(2)),
     p95: Number(workloadPercentile(0.95).toFixed(2)),
     budget: Number((1000 / (desktopTarget ? 144 : 30)).toFixed(2)),
+    subsystems: workloadSubsystems,
   },
   errors,
 };

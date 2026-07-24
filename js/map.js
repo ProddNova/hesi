@@ -566,6 +566,8 @@ export class HighwayMap {
     this.routeOrder = [];
     this.routeAliases = new Map();
     this.edges = [];              // directed junction edges
+    this._edgeRouteDirectionIndex = new Map();
+    this._edgeRouteDirectionIndexSize = -1;
     this.connections = new Map(); // legacy per-route view of edges
     this.junctions = [];
     this.serviceAreas = [];
@@ -4505,15 +4507,32 @@ export class HighwayMap {
     return this.getRouteConnections(routeId, distance, threshold);
   }
 
+  _edgesForRouteDirection(routeId, direction) {
+    if (this._edgeRouteDirectionIndexSize !== this.edges.length) {
+      this._edgeRouteDirectionIndex.clear();
+      for (const edge of this.edges) {
+        const key = `${edge.from.routeId}:${edge.from.direction >= 0 ? '+' : '-'}`;
+        let list = this._edgeRouteDirectionIndex.get(key);
+        if (!list) {
+          list = [];
+          this._edgeRouteDirectionIndex.set(key, list);
+        }
+        list.push(edge);
+      }
+      this._edgeRouteDirectionIndexSize = this.edges.length;
+    }
+    return this._edgeRouteDirectionIndex.get(`${routeId}:${direction >= 0 ? '+' : '-'}`) || [];
+  }
+
   _edgesFrom(routeId, direction, atDistance, tolerance = 60, kinds = null) {
-    return this.edges.filter((edge) => edge.from.routeId === routeId
-      && edge.from.direction === direction
+    return this._edgesForRouteDirection(routeId, direction).filter((edge) =>
+      edge.from.direction === direction
       && Math.abs(edge.from.distance - atDistance) <= tolerance
       && (!kinds || kinds.includes(edge.kind)));
   }
 
   /** Follow the network from a lane state by deltaDistance metres of travel. */
-  advanceAlongRoute(stateOrRouteId, deltaDistance, lane = 0, direction = 1, branchIndex = 0) {
+  advanceAlongRoute(stateOrRouteId, deltaDistance, lane = 0, direction = 1, branchIndex = 0, fastSample = false) {
     const state = typeof stateOrRouteId === 'object'
       ? stateOrRouteId
       : { routeId: stateOrRouteId, distance: 0, lane, direction };
@@ -4564,7 +4583,9 @@ export class HighwayMap {
       if (remaining <= EPSILON) break;
     }
 
-    const sample = this.sampleLane(route.id, distance, laneIndex, travelDirection);
+    const sample = fastSample
+      ? this.sampleTrafficLane(this._laneRefFor(route, laneIndex, travelDirection), distance)
+      : this.sampleLane(route.id, distance, laneIndex, travelDirection);
     sample.transferred = transferred;
     return sample;
   }
@@ -4644,12 +4665,45 @@ export class HighwayMap {
     if (!laneRef) return null;
     const routeId = laneRef.routeId ?? laneRef.route?.id ?? laneRef.id;
     if (routeId == null) return null;
-    const laneIndex = laneRef.laneIndex ?? laneRef.lane ?? laneRef.index ?? 0;
-    const direction = laneRef.direction ?? 1;
-    const route = this.routes.get(typeof routeId === 'string' ? routeId : String(routeId));
+    const { route } = this._resolveRoute(routeId);
+    const laneIndex = clamp(Math.floor(laneRef.laneIndex ?? laneRef.lane ?? laneRef.index ?? 0), 0, route.lanes - 1);
+    const direction = route.oneWay ? route.oneWayDirection : ((laneRef.direction ?? 1) >= 0 ? 1 : -1);
     if (route && !route.closed && (distance < -1 || distance > route.length + 1)) return null;
-    const sample = this.sampleLane(routeId, distance, laneIndex, direction);
-    return { ...sample, laneRef: { ...sample.laneRef, ...laneRef, routeId: sample.routeId, laneIndex: sample.laneIndex } };
+    // Traffic needs only position/orientation and lane metadata. The full
+    // sampleLane path also samples twice for curvature and constructs camera /
+    // editor fields; doing that for 60-84 cars every frame dominated traffic
+    // CPU time at high density.
+    const normalizedDistance = this._normalizeDistance(route, distance);
+    const u = route.length > 0 ? normalizedDistance / route.length : 0;
+    const centerPosition = route.curve.getPointAt(u);
+    const tangent = route.curve.getTangentAt(u).normalize().multiplyScalar(direction);
+    const normal = horizontalNormal(tangent);
+    const baseOffset = this._laneOffset(route, laneIndex, direction);
+    const position = centerPosition.addScaledVector(normal, baseOffset * direction);
+    const normalizedLaneRef = laneRef.routeId === route.id
+      && (laneRef.laneIndex ?? laneRef.lane ?? 0) === laneIndex
+      && (laneRef.direction ?? direction) === direction
+      ? laneRef
+      : this._laneRefFor(route, laneIndex, direction);
+    return {
+      routeId: route.id,
+      distance: normalizedDistance,
+      s: normalizedDistance,
+      length: route.length,
+      closed: !!route.closed,
+      lane: laneIndex,
+      laneIndex,
+      direction,
+      position,
+      point: position,
+      tangent,
+      forward: tangent,
+      normal,
+      right: normal.clone(),
+      laneWidth: route.laneWidth,
+      speedLimit: route.speedLimit,
+      laneRef: normalizedLaneRef,
+    };
   }
 
   getLaneSample(routeId, laneIndex, distance, direction = 1) {
@@ -4765,7 +4819,7 @@ export class HighwayMap {
     const s0 = Number.isFinite(request.s) ? request.s : (request.distanceAlongRoute ?? 0);
     const travel = Math.max(0, request.distance ?? request.delta ?? request.advance ?? 0);
     const vehicle = request.vehicle || null;
-    const beforePosition = this.sampleLane(route.id, s0, laneIndex, direction).position;
+    const beforePosition = vehicle?.position ?? null;
 
     // Mid-route diverge: only from the outermost lane ON THE EXIT'S SIDE
     // (a left exit takes left-lane vehicles — the old outermost-right gate
@@ -4773,9 +4827,8 @@ export class HighwayMap {
     // seeded per vehicle+edge. They land in the branch's matching lane.
     if (route.traffic && travel > 0) {
       const s1 = s0 + travel * direction;
-      for (const edge of this.edges) {
+      for (const edge of this._edgesForRouteDirection(route.id, direction)) {
         if (edge.kind !== 'diverge' || edge.probability <= 0) continue;
-        if (edge.from.routeId !== route.id || edge.from.direction !== direction) continue;
         const exitLane = (edge.side ?? -1) > 0 ? 0 : route.lanes - 1;
         if (laneIndex !== exitLane) continue;
         const d = edge.from.distance;
@@ -4787,14 +4840,17 @@ export class HighwayMap {
         if ((hash % 1000) / 1000 >= edge.probability) continue;
         const overrun = Math.abs(s1 - d);
         const landingLane = (edge.side ?? -1) > 0 ? 0 : targetRoute.lanes - 1;
-        const sample = this.sampleLane(targetRoute.id, edge.to.distance + overrun, landingLane, edge.to.direction);
+        const sample = this.sampleTrafficLane(
+          this._laneRefFor(targetRoute, landingLane, edge.to.direction),
+          edge.to.distance + overrun,
+        );
         return this._trafficResult(sample, beforePosition, true);
       }
     }
 
     const result = this.advanceAlongRoute(
       { routeId: route.id, distance: s0, lane: laneIndex, direction },
-      travel, laneIndex, direction, vehicle?.poolIndex ?? 0,
+      travel, laneIndex, direction, vehicle?.poolIndex ?? 0, true,
     );
 
     // Funnel down ahead of a narrower continuation so cars never ride a lane
@@ -4808,7 +4864,10 @@ export class HighwayMap {
         if (nexts.length) {
           const minLanes = Math.min(...nexts.map((edge) => this.routes.get(edge.to.routeId).lanes));
           if (result.laneIndex >= minLanes) {
-            const blended = this.sampleLane(outRoute.id, result.distance, minLanes - 1, result.direction);
+            const blended = this.sampleTrafficLane(
+              this._laneRefFor(outRoute, minLanes - 1, result.direction),
+              result.distance,
+            );
             const t = 1 - clamp(distToEnd / 460, 0, 1);
             result.position.lerp(blended.position, t * t);
           }
@@ -4819,14 +4878,10 @@ export class HighwayMap {
   }
 
   _trafficResult(sample, beforePosition, transferred) {
-    return {
-      ...sample,
-      s: sample.distance,
-      laneRef: sample.laneRef,
-      transferred,
-      lateralJump: transferred ? beforePosition.distanceTo(sample.position) : 0,
-      mapState: { routeId: sample.routeId, direction: sample.direction },
-    };
+    sample.s = sample.distance;
+    sample.transferred = transferred;
+    sample.lateralJump = transferred && beforePosition ? beforePosition.distanceTo(sample.position) : 0;
+    return sample;
   }
 
   // ------------------------------------------------------------------

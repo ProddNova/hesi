@@ -274,6 +274,7 @@ export class TrafficSystem {
       density: clamp(finite(options.density, 1), 0, 3),
       spawnRadius: Math.max(80, finite(options.spawnRadius, 850)),
       despawnRadius: Math.max(120, finite(options.despawnRadius, 1100)),
+      renderRadius: Math.max(180, finite(options.renderRadius, options.spawnRadius ?? 850)),
       minSpawnDistance: Math.max(20, finite(options.minSpawnDistance, 130)),
       // Anything spawning IN FRONT of the player must be at least this far away,
       // so cars never blink into existence in view. Pushed out past the fog
@@ -312,6 +313,8 @@ export class TrafficSystem {
     this._hasPreviousPlayer = false;
     this._laneCache = [];
     this._laneCacheTime = -Infinity;
+    this._laneBuckets = new Map();
+    this._laneBucketPool = [];
     this._objectRefIds = new WeakMap();
     this._nextRefId = 1;
     this._disposed = false;
@@ -579,7 +582,7 @@ export class TrafficSystem {
     if (ud.customModel) ud.customModel.visible = false;
   }
 
-  _syncRenderBatches() {
+  _syncRenderBatches(player = null) {
     const batches = Object.values(this._renderBatchByType || {});
     for (const batch of batches) {
       for (const descriptor of batch.descriptors) {
@@ -589,6 +592,7 @@ export class TrafficSystem {
     }
 
     const blink = Math.floor(this.time * 3) % 2 === 0;
+    const renderRadiusSq = this.options.renderRadius * this.options.renderRadius;
     for (const vehicle of this.active) {
       const batch = this._renderBatchByType[vehicle.type?.id];
       if (!batch) {
@@ -596,6 +600,13 @@ export class TrafficSystem {
         continue;
       }
       this._hideBatchedVehicleVisual(vehicle);
+      if (player) {
+        const dx = vehicle.position.x - player.position.x;
+        const dz = vehicle.position.z - player.position.z;
+        const distanceSq = dx * dx + dz * dz;
+        const ahead = dx * player.forward.x + dz * player.forward.z;
+        if (distanceSq > renderRadiusSq || (distanceSq > 220 * 220 && ahead < -120)) continue;
+      }
       vehicle.mesh.updateMatrix();
       for (const descriptor of batch.descriptors) {
         if (descriptor.role === 'indicator-left' && (!blink || vehicle.indicator !== -1)) continue;
@@ -935,6 +946,7 @@ export class TrafficSystem {
       spawnBudget -= 1;
     }
 
+    this._rebuildLaneBuckets();
     for (let i = this.active.length - 1; i >= 0; i -= 1) {
       const vehicle = this.active[i];
       vehicle.previousPosition.copy(vehicle.position);
@@ -975,8 +987,30 @@ export class TrafficSystem {
 
     this._previousPlayerPosition.copy(player.position);
     for (const event of this._events) this._eventQueue.push(event);
-    this._syncRenderBatches();
+    this._syncRenderBatches(player);
     return this._events.slice();
+  }
+
+  _rebuildLaneBuckets() {
+    this._laneBuckets.clear();
+    for (const bucket of this._laneBucketPool) bucket.length = 0;
+    let bucketCount = 0;
+    for (const vehicle of this.active) {
+      if (!vehicle.active) continue;
+      const key = vehicle.laneKey;
+      let bucket = this._laneBuckets.get(key);
+      if (!bucket) {
+        bucket = this._laneBucketPool[bucketCount] || [];
+        this._laneBucketPool[bucketCount] = bucket;
+        bucketCount += 1;
+        this._laneBuckets.set(key, bucket);
+      }
+      bucket.push(vehicle);
+    }
+  }
+
+  _vehiclesInLane(laneRef, sample = null) {
+    return this._laneBuckets.get(this._laneKey(laneRef, sample)) || [];
   }
 
   _normalizePlayer(source) {
@@ -1303,6 +1337,14 @@ export class TrafficSystem {
 
   _normalizeLaneSample(sample, laneRef, requestedS) {
     if (!sample) return null;
+    if (sample.position?.isVector3 && sample.tangent?.isVector3 && sample.right?.isVector3 && sample.laneRef) {
+      sample.s = finite(sample.s ?? sample.distance ?? sample.offset, requestedS);
+      sample.length = finite(sample.length ?? sample.laneLength, this._laneLength(sample.laneRef));
+      sample.laneWidth = finite(sample.laneWidth ?? sample.width, finite(sample.laneRef.laneWidth ?? sample.laneRef.width, 3.45));
+      sample.speedLimit ??= sample.laneRef.speedLimit;
+      sample.closed ??= this._laneClosed(sample.laneRef);
+      return sample;
+    }
     const positionSource = sample.position ?? sample.point ?? sample.center ?? (sample.isVector3 ? sample : null);
     if (!positionSource) return null;
     const position = asVector3(positionSource);
@@ -1584,7 +1626,7 @@ export class TrafficSystem {
       const gap = ahead - (vehicle.length + length) * 0.5;
       if (!best || gap < best.gap) best = { gap, speed, source };
     };
-    for (const other of this.active) {
+    for (const other of (vehicle.laneChange ? this.active : (this._laneBuckets.get(vehicle.laneKey) || []))) {
       if (other === vehicle || !other.active) continue;
       if (vehicle.laneKey !== other.laneKey && !vehicle.laneChange) continue;
       consider(other.position, other.speed, other.length, vehicle.tangent.dot(other.tangent) > 0.72, other);
@@ -1675,7 +1717,7 @@ export class TrafficSystem {
   _laneChangeSafe(vehicle, targetLane) {
     const sample = this._sampleLane(targetLane, vehicle.s);
     if (!sample) return false;
-    for (const other of this.active) {
+    for (const other of this._vehiclesInLane(targetLane, sample)) {
       if (other === vehicle || !other.active) continue;
       const dx = other.position.x - sample.position.x;
       const dy = other.position.y - sample.position.y;

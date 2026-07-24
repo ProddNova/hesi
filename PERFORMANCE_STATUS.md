@@ -2,47 +2,50 @@
 
 ## Targeted PC/iPad pass (2026-07-24)
 
-Input diagnostic: `hesi-diagnostic-2026-07-24_16-52-38-267.json`.
-The recorded desktop session averaged 96.1 fps (94.7 while driving), with
-5.05 ms render, 1.19 ms traffic and 8.02 ms total CPU time on average.
-Traffic at the changed setting was recorded as 1.4x by the diagnostic.
+The first optimization pass was validated with the newer real gameplay capture
+`hesi-diagnostic-2026-07-24_17-58-43-371.json`, recorded at 1.4x traffic.
+It averaged 99.3 fps overall and 96.1 fps while driving: the 144 fps objective
+was not reached. Driving frame time was 10.0 ms p50, 14 ms p95 and 17 ms p99.
+Profiled CPU averaged 8.57 ms: 5.56 ms render, 1.86 ms traffic, 0.40 ms physics,
+0.01 ms map and 0.74 ms other.
 
-The runtime now selects two explicit performance profiles:
+The batching work did reduce sustained draw calls from roughly 369-515 in the
+older capture to 143-192, but this translated to only about +1.4 fps while
+driving. The earlier headless workload prediction was therefore not a valid
+proxy for the real laptop and is superseded by the figures above.
 
-- `desktop-144`: 144 fps presentation cap, High at native resolution, 56 base
-  / 84 maximum traffic vehicles.
-- `ipad-30`: 30 fps presentation cap, Medium at a 1.25 MP maximum,
-  40 base / 60 maximum traffic vehicles, shorter chunk and traffic ranges.
+The second pass keeps the exact original player `SpotLight` and targets the
+measured costs instead:
 
-Traffic vehicles are rendered through per-model instanced batches, equivalent
-material groups are compacted, and the 26-part player model is merged into one
-static mesh with six material groups. The player spotlight was replaced with
-an additive road wash, the duplicate wall sweep was removed, and HUD/minimap
-work is throttled independently from driving physics.
+- desktop starts at 0.82 internal render scale and iPad at 0.72, with a
+  frame-time governor that can lower or recover scale while driving;
+- WebGL MSAA is disabled on both profiles;
+- traffic simulation uses lightweight single-sample lane queries, indexed
+  junction edges and lane buckets rather than repeated all-vehicle scans;
+- distant/behind traffic stays simulated but is omitted from render batches;
+- the generated road world has static world matrices after boot, while the
+  camera, player/headlight and animated markers are updated explicitly;
+- desktop retains the 144 fps presentation target and iPad the 30 fps target.
 
-Repeatable browser results at 1.5x traffic:
+The synthetic Chromium/SwiftShader performance probe becomes pathological when
+the restored dynamic spotlight is present, so it remains useful only for
+structural regression checks. It must not be quoted as proof of either target.
+Final FPS confirmation requires a new diagnostic from the laptop and a separate
+one from the physical iPad.
 
-| Profile | Draw calls | Traffic | World | Essentials | Workload p50 | Workload p95 | Budget |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Desktop High, 1920x911 | 134 | 24 | 101 | 9 | 5.0 ms | 9.7 ms | 6.94 ms |
-| iPad Medium, 844x390 @2x | 112 | 23 | 80 | 9 | 4.8 ms | 12.2 ms | 33.33 ms |
+Current verification:
 
-`workload` is synchronous full `updateDriving + render` time, avoiding
-headless Chromium's artificial `requestAnimationFrame` throttling. It is a
-regression budget, not a substitute for final thermal testing on the physical
-iPad. Both profiles pass their performance limits with no browser errors.
+- 84-vehicle direct traffic benchmark: 0.243 ms mean, 0.287 ms p95;
+- traffic behavior and indicator-direction probes: PASS;
+- browser traffic/visual probe: 13/14; the only failure is its obsolete
+  immortality assertion (the current game intentionally has three lives);
+- real-world deterministic build test: PASS;
+- JavaScript syntax checks: PASS;
+- complete editor/runtime unit suite: 150/150.
 
-Verification:
-
-- `node .devtests/performance.mjs --desktop`: PASS.
-- `node .devtests/performance.mjs`: PASS.
-- `node .devtests/traffic-visual-probe.mjs`: 13/14; the only failure is its
-  obsolete immortality assertion (the current game intentionally has 3 lives).
-- `npm run editor:test`: 150/150.
-
-The supplied diagnostic identifies the adapter as an RTX 5050 Laptop GPU,
-despite the device description saying RTX 5060. A fresh on-device diagnostic
-is required to confirm which GPU/browser is actually used.
+The laptop diagnostic reports `RTX 5050 Laptop GPU`, despite the device
+description saying RTX 5060. Windows/NVIDIA GPU selection should be checked if
+the machine is expected to expose a 5060.
 
 ## Historical foundation (2026-07-14)
 
