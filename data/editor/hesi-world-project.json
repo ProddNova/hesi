@@ -487,12 +487,12 @@
       "zoom": 0.25
     },
     "lighting": {
-      "intensity": 0.75,
-      "streetLampColor": "#c2fbff",
-      "streetLampIntensity": 1.6,
-      "streetLampTemperature": 0,
+      "intensity": 0,
+      "streetLampColor": "#feeca9",
+      "streetLampIntensity": 2,
+      "streetLampTemperature": -1,
       "temperature": -1,
-      "tint": "#ffea00"
+      "tint": "#000000"
     }
   },
   "editorState": {}
