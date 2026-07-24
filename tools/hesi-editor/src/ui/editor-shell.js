@@ -201,8 +201,8 @@ export function createEditorShell(root) {
   viewMenu.append(lightingWrap);
   const exposure = document.createElement('input');
   exposure.type = 'range';
-  exposure.min = '0.5';
-  exposure.max = '2.2';
+  exposure.min = '0.2';
+  exposure.max = '4';
   exposure.step = '0.05';
   exposure.dataset.testid = 'exposure-slider';
   viewRow('Exposure', exposure);
@@ -707,7 +707,26 @@ export function createEditorShell(root) {
     numeric('Move horizontal', config.offset[0], { min: -1, max: 1, step: 0.01 }, offsetChange(0, 'Move skybox horizontally'));
     numeric('Move vertical', config.offset[1], { min: -1, max: 1, step: 0.01 }, offsetChange(1, 'Move skybox vertically'));
     numeric('Zoom', config.zoom, { min: 0.25, max: 4, step: 0.05 }, (value) => triggerAction('skybox-update', { patch: { zoom: value }, label: 'Zoom skybox' }));
-    numeric('Brightness', config.intensity, { min: 0.1, max: 2.5, step: 0.05 }, (value) => triggerAction('skybox-update', { patch: { intensity: value }, label: 'Adjust skybox brightness' }));
+    const luminosityField = element('label', 'skybox-field skybox-luminosity');
+    const luminosityRow = element('div', 'lights-slider-row');
+    const luminosity = document.createElement('input');
+    luminosity.type = 'range';
+    luminosity.min = '0';
+    luminosity.max = '4';
+    luminosity.step = '0.05';
+    luminosity.value = String(config.intensity);
+    luminosity.dataset.testid = 'skybox-luminosity';
+    const luminosityValue = element('code', '', Number(config.intensity).toFixed(2));
+    luminosity.addEventListener('input', () => {
+      luminosityValue.textContent = Number(luminosity.value).toFixed(2);
+    });
+    luminosity.addEventListener('change', () => triggerAction('skybox-update', {
+      patch: { intensity: Number(luminosity.value) },
+      label: 'Adjust skybox luminosity',
+    }));
+    luminosityRow.append(luminosity, luminosityValue);
+    luminosityField.append(element('span', '', 'Skybox luminosity'), luminosityRow);
+    fields.append(luminosityField);
     const flipLabel = element('label', 'skybox-toggle skybox-flip');
     const flip = document.createElement('input');
     flip.type = 'checkbox';
@@ -784,11 +803,32 @@ export function createEditorShell(root) {
 
     const controls = element('section', 'skybox-card skybox-placement');
     controls.append(element('h3', '', `${scopeLabel} global light`));
-    controls.append(element('p', 'lights-help', `Controls the ambient/global light for the ${scopeLabel.toLowerCase()} scene. It does not change the other scene${isStreetScene ? ' or the street-lamp colour' : ''}.`));
+    controls.append(element('p', 'lights-help', `Controls exposure, ambient fill and direct/key light for the ${scopeLabel.toLowerCase()} scene. It does not change the other scene${isStreetScene ? ' or the street-lamp colour' : ''}.`));
     const fields = element('div', 'skybox-fields lights-global-fields');
+    slider(fields, 'Exposure', cfg.exposure, { min: 0.2, max: 4, step: 0.05 }, 'lights-exposure', {
+      onInput: (v) => triggerAction('lights-preview', { patch: { exposure: v } }),
+      onChange: (v) => triggerAction('lights-update', {
+        patch: { exposure: v },
+        label: `Change ${scopeLabel.toLowerCase()} exposure`,
+      }),
+    });
     slider(fields, 'Intensity', cfg.intensity, { min: 0, max: 3, step: 0.05 }, 'lights-intensity', {
       onInput: (v) => triggerAction('lights-preview', { patch: { intensity: v } }),
       onChange: (v) => triggerAction('lights-update', { patch: { intensity: v } }),
+    });
+    slider(fields, 'Ambient fill', cfg.ambientIntensity, { min: 0, max: 3, step: 0.05 }, 'lights-ambient-intensity', {
+      onInput: (v) => triggerAction('lights-preview', { patch: { ambientIntensity: v } }),
+      onChange: (v) => triggerAction('lights-update', {
+        patch: { ambientIntensity: v },
+        label: `Change ${scopeLabel.toLowerCase()} ambient fill`,
+      }),
+    });
+    slider(fields, 'Direct / key light', cfg.directIntensity, { min: 0, max: 3, step: 0.05 }, 'lights-direct-intensity', {
+      onInput: (v) => triggerAction('lights-preview', { patch: { directIntensity: v } }),
+      onChange: (v) => triggerAction('lights-update', {
+        patch: { directIntensity: v },
+        label: `Change ${scopeLabel.toLowerCase()} direct light`,
+      }),
     });
     slider(fields, 'Warmth (warm ← → cool)', cfg.temperature, { min: -1, max: 1, step: 0.05 }, 'lights-temperature', {
       onInput: (v) => triggerAction('lights-preview', { patch: { temperature: v } }),
@@ -804,6 +844,21 @@ export function createEditorShell(root) {
     tintField.append(element('span', '', 'Global colour tint'), tint);
     fields.append(tintField);
     controls.append(fields);
+    const scenePresets = element('div', 'lights-presets');
+    scenePresets.append(element('span', '', 'Quick scene looks'));
+    for (const [label, patch] of [
+      ['High contrast', { exposure: 0.82, ambientIntensity: 0.55, directIntensity: 1.4 }],
+      ['Soft fill', { exposure: 1.18, ambientIntensity: 1.45, directIntensity: 0.8 }],
+      ['Bright night', { exposure: 1.65, ambientIntensity: 1.25, directIntensity: 1.15 }],
+    ]) {
+      const preset = button(label, '', { title: `Apply ${label.toLowerCase()} to the ${scopeLabel.toLowerCase()} only` });
+      preset.addEventListener('click', () => triggerAction('lights-update', {
+        patch,
+        label: `Apply ${label.toLowerCase()} ${scopeLabel.toLowerCase()} lighting`,
+      }));
+      scenePresets.append(preset);
+    }
+    controls.append(scenePresets);
     const actions = element('div', 'skybox-actions');
     const reset = button('Reset to shipped lighting', '', { title: 'Restore the original night lighting for this scene' });
     reset.dataset.testid = 'lights-reset';

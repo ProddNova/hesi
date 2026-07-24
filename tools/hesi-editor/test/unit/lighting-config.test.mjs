@@ -46,6 +46,30 @@ test('master world lighting multiplies an authored local-light baseline reversib
   assert.equal(light.color.getHex(), baseColor);
 });
 
+test('scene exposure, ambient fill and direct light are independent controls', () => {
+  const scene = new THREE.Scene();
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x222222, 2);
+  const direct = new THREE.DirectionalLight(0xffffff, 3);
+  ambient.userData.gameSceneLight = true;
+  direct.userData.gameSceneLight = true;
+  scene.add(ambient, direct);
+
+  applySceneLighting(scene, {
+    exposure: 1.7,
+    intensity: 2,
+    ambientIntensity: 0.5,
+    directIntensity: 1.5,
+  });
+
+  assert.equal(scene.userData.hesiLightingConfig.exposure, 1.7);
+  assert.equal(ambient.intensity, 2);
+  assert.equal(direct.intensity, 9);
+
+  applySceneLighting(scene, {});
+  assert.equal(ambient.intensity, 2);
+  assert.equal(direct.intensity, 3);
+});
+
 test('street-lamp colour independently retints generated heads and road pools', () => {
   const scene = new THREE.Scene();
   const headMaterial = new THREE.MeshBasicMaterial({ color: 0xff8a2e });

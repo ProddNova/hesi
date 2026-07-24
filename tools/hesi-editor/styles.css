@@ -520,6 +520,7 @@ input, select { accent-color: var(--accent); }
 .skybox-field input, .skybox-field select { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--line); border-radius: 2px; background: var(--surface-input); color: var(--text); font-variant-numeric: tabular-nums; }
 .skybox-toggle { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; }
 .skybox-fields { display: grid; grid-template-columns: repeat(4, minmax(105px, 1fr)); gap: 7px; }
+.skybox-luminosity { grid-column: span 2; padding: 7px 8px; border: 1px solid var(--accent-muted); border-radius: 3px; background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 .skybox-flip { align-self: end; min-height: 26px; }
 .skybox-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 9px; }
 @media (max-width: 1000px) {

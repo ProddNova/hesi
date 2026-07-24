@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FlyCameraController } from './navigation/fly-camera-controller.js';
 import { SkyboxRenderer } from '../../../js/skybox.js';
-import { applySceneLighting, buildRoadLightRig } from '../../../js/lighting-config.js';
+import { applySceneLighting, buildRoadLightRig, DEFAULT_LIGHTING } from '../../../js/lighting-config.js';
 
 const DEFAULT_POSITION = new THREE.Vector3(105, 72, 118);
 const DEFAULT_TARGET = new THREE.Vector3(0, 7, 0);
@@ -129,6 +129,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     exposure: LIGHTING_MODES.inspection.exposure,
     fogFull: false,
   };
+  let gameExposure = DEFAULT_LIGHTING.exposure;
   const applyViewState = () => {
     const mode = LIGHTING_MODES[view.lightingMode] || LIGHTING_MODES.inspection;
     inspectionRig.visible = mode.rig;
@@ -268,7 +269,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     setLightingMode(mode) {
       if (!LIGHTING_MODES[mode]) return false;
       view.lightingMode = mode;
-      view.exposure = LIGHTING_MODES[mode].exposure;
+      view.exposure = mode === 'game' ? gameExposure : LIGHTING_MODES[mode].exposure;
       view.fogFull = mode === 'game';
       applyViewState();
       return true;
@@ -276,7 +277,7 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     setExposure(value) {
       const exposure = Number(value);
       if (!Number.isFinite(exposure)) return false;
-      view.exposure = THREE.MathUtils.clamp(exposure, 0.3, 2.5);
+      view.exposure = THREE.MathUtils.clamp(exposure, 0.2, 4);
       applyViewState();
       return true;
     },
@@ -290,12 +291,13 @@ export function createViewport(host, { onStats = () => {}, onNavigation = () => 
     // loaded world (e.g. the garage scene's lamps).
     setGameLighting(config, { switchToGame = false } = {}) {
       applySceneLighting(scene, config);
+      gameExposure = scene.userData.hesiLightingConfig?.exposure ?? DEFAULT_LIGHTING.exposure;
       if (switchToGame && view.lightingMode !== 'game') {
         view.lightingMode = 'game';
-        view.exposure = LIGHTING_MODES.game.exposure;
         view.fogFull = true;
-        applyViewState();
       }
+      if (view.lightingMode === 'game') view.exposure = gameExposure;
+      applyViewState();
       return true;
     },
     viewState() { return { ...view }; },

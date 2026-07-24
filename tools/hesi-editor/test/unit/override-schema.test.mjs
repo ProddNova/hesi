@@ -88,7 +88,10 @@ test('project schema persists a photographic skybox and validates its image refe
 test('project serialization keeps master lighting and world finish settings', () => {
   const document = blankProjectDocument('Lighting persistence');
   document.environment.lighting = {
+    exposure: 1.32,
     intensity: 1.65,
+    ambientIntensity: 0.75,
+    directIntensity: 1.8,
     temperature: -0.4,
     tint: '#ffd2aa',
     streetLampColor: '#80bfff',
@@ -98,6 +101,9 @@ test('project serialization keeps master lighting and world finish settings', ()
   document.environment.surfaceGloss = 1.75;
   const parsed = parseProjectDocument(serializeProjectDocument(document));
   assert.deepEqual(parsed.environment.lighting, {
+    ambientIntensity: 0.75,
+    directIntensity: 1.8,
+    exposure: 1.32,
     intensity: 1.65,
     streetLampColor: '#80bfff',
     streetLampIntensity: 1.4,

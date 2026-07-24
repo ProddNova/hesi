@@ -11,6 +11,7 @@ import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-
 // (and one texture cache/budget); a ?v= query here would fork the module.
 import { buildCustomAssetGroup, fetchCustomAssetsDocument, setTextureSizeBudget } from './custom-assets.js';
 import { carModelEntry, carModelTarget } from './car-models.js';
+import { DEFAULT_LIGHTING } from './lighting-config.js';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 import { DebugStats } from './debug-stats.js?v=20260720a';
@@ -29,7 +30,7 @@ class ShutokoNights {
     // MSAA is close to free on Apple tile-based GPUs and the PS2 target needs
     // clean edges at near-native resolution.
     this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:true,powerPreference:'high-performance',alpha:false});
-    this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.shadowMap.enabled=false;
+    this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=DEFAULT_LIGHTING.exposure;this.renderer.shadowMap.enabled=false;
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
     this.camera=new THREE.PerspectiveCamera(64,16/9,.3,1250);
@@ -178,7 +179,7 @@ class ShutokoNights {
       // re-link them all mid-drive. The map upholds that invariant by never
       // chunk-streaming lights (HighwayMap._addChunkMesh), and the garage
       // transitions swap scene and headlights in the same tick.
-      this.renderer.render(this.roadScene,this.camera);
+      this.renderer.toneMappingExposure=this.roadScene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;this.renderer.render(this.roadScene,this.camera);
       this.performanceMetrics={...(this.performanceMetrics||{}),prewarmMs:performance.now()-t0,prewarmed:{geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures,programs:this.renderer.info.programs.length}};
     }catch(e){console.warn('GPU prewarm',e);}
     finally{for(const [object,key,value] of restore)object[key]=value;}
@@ -883,7 +884,7 @@ class ShutokoNights {
     const mm=this.map?.getMinimapData?.()||this.map?.minimapData||null,services=this.map?.getServiceAreas?.()||this.map?.serviceAreas||this.map?.services||[];if(mm)this.ui.drawMinimap(mm,{x:vec(s.position||s).x,z:vec(s.position||s).z,heading:s.heading||0},services);
   }
   updateAudio(t,dt){try{this.audio?.update?.({rpm:t.rpm,redlineRpm:t.redline,speedKmh:t.speedKmh,throttle:t.throttle,slip:t.slip,turbo:this.getEffectiveCar().turbo||0,running:t.fuel>0,fuel:t.fuelFraction});}catch(e){} }
-  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;const t0=performance.now();this.renderer.render(scene,this.camera);this.frameProf.render+=performance.now()-t0;}
+  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;this.renderer.toneMappingExposure=scene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;const t0=performance.now();this.renderer.render(scene,this.camera);this.frameProf.render+=performance.now()-t0;}
   renderQuality(){
     const q=this.state?.settings?.quality;if(['low','medium','high'].includes(q))return q;
     const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';

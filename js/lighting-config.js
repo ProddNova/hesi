@@ -15,7 +15,10 @@ import * as THREE from 'three';
 // is exactly the shipped night look and every apply is reversible.
 
 export const DEFAULT_LIGHTING = Object.freeze({
+  exposure: 1.08,
   intensity: 1,
+  ambientIntensity: 1,
+  directIntensity: 1,
   temperature: 0,
   tint: '#ffffff',
   streetLampColor: '#ff8a2e',
@@ -47,7 +50,10 @@ const normalizedHex = (value, fallback) => {
 export function normalizeLighting(config) {
   const source = config && typeof config === 'object' ? config : {};
   return {
+    exposure: clamp(source.exposure ?? DEFAULT_LIGHTING.exposure, 0.2, 4),
     intensity: clamp(source.intensity ?? DEFAULT_LIGHTING.intensity, 0, 3),
+    ambientIntensity: clamp(source.ambientIntensity ?? DEFAULT_LIGHTING.ambientIntensity, 0, 3),
+    directIntensity: clamp(source.directIntensity ?? DEFAULT_LIGHTING.directIntensity, 0, 3),
     temperature: clamp(source.temperature ?? DEFAULT_LIGHTING.temperature, -1, 1),
     tint: normalizedHex(source.tint, DEFAULT_LIGHTING.tint),
     streetLampColor: normalizedHex(source.streetLampColor, DEFAULT_LIGHTING.streetLampColor),
@@ -100,7 +106,10 @@ export function localLightConfigErrors(config, { path = 'light' } = {}) {
 /** True when the config leaves every light exactly as shipped. */
 export function isDefaultLighting(config) {
   const c = normalizeLighting(config);
-  return c.intensity === DEFAULT_LIGHTING.intensity
+  return c.exposure === DEFAULT_LIGHTING.exposure
+    && c.intensity === DEFAULT_LIGHTING.intensity
+    && c.ambientIntensity === DEFAULT_LIGHTING.ambientIntensity
+    && c.directIntensity === DEFAULT_LIGHTING.directIntensity
     && c.temperature === DEFAULT_LIGHTING.temperature
     && c.tint === DEFAULT_LIGHTING.tint
     && c.streetLampColor === DEFAULT_LIGHTING.streetLampColor
@@ -314,6 +323,7 @@ export function localLightConfigFromObject(root) {
 export function applySceneLighting(scene, config) {
   if (!scene) return 0;
   const c = normalizeLighting(config);
+  scene.userData.hesiLightingConfig = c;
   const [tr, tg, tb] = temperatureRGB(c.temperature);
   const [nr, ng, nb] = hexRGB(c.tint);
   const mr = tr * nr, mg = tg * ng, mb = tb * nb;
@@ -337,7 +347,10 @@ export function applySceneLighting(scene, config) {
       }
       tintColour(object.color, base.color, mr, mg, mb);
       if (object.groundColor && base.ground != null) tintColour(object.groundColor, base.ground, mr, mg, mb);
-      object.intensity = base.intensity * c.intensity;
+      const categoryIntensity = object.isAmbientLight || object.isHemisphereLight
+        ? c.ambientIntensity
+        : c.directIntensity;
+      object.intensity = base.intensity * c.intensity * categoryIntensity;
       touched += 1;
     }
 

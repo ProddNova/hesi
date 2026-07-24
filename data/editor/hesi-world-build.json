@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-24T09:16:55.951Z",
+  "generatedAt": "2026-07-24T10:30:17.667Z",
   "project": {
-    "draftSignature": "fnv1a32:c3c7dbd5",
+    "draftSignature": "fnv1a32:ef2ddd55",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -11,7 +11,7 @@
     "skybox": {
       "enabled": true,
       "flipX": false,
-      "intensity": 1.2,
+      "intensity": 0.4,
       "offset": [
         0.2,
         -0.1
@@ -25,11 +25,14 @@
       "zoom": 0.25
     },
     "lighting": {
-      "intensity": 0,
-      "streetLampColor": "#feeca9",
-      "streetLampIntensity": 2,
-      "streetLampTemperature": -1,
-      "temperature": -1,
+      "ambientIntensity": 0,
+      "directIntensity": 0,
+      "exposure": 0.45,
+      "intensity": 1.1,
+      "streetLampColor": "#fed795",
+      "streetLampIntensity": 2.45,
+      "streetLampTemperature": -0.75,
+      "temperature": 1,
       "tint": "#000000"
     }
   },

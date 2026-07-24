@@ -129,7 +129,10 @@ export function validateProjectDocument(document, { entityIds = null, assetIds =
       if (lighting !== undefined && lighting !== null) {
         if (!isRecord(lighting)) errors.push('environment.lighting must be an object');
         else {
+          if (lighting.exposure !== undefined && !Number.isFinite(lighting.exposure)) errors.push('environment.lighting.exposure must be a number');
           if (lighting.intensity !== undefined && !Number.isFinite(lighting.intensity)) errors.push('environment.lighting.intensity must be a number');
+          if (lighting.ambientIntensity !== undefined && !Number.isFinite(lighting.ambientIntensity)) errors.push('environment.lighting.ambientIntensity must be a number');
+          if (lighting.directIntensity !== undefined && !Number.isFinite(lighting.directIntensity)) errors.push('environment.lighting.directIntensity must be a number');
           if (lighting.temperature !== undefined && !Number.isFinite(lighting.temperature)) errors.push('environment.lighting.temperature must be a number');
           if (lighting.tint !== undefined && !/^#?[0-9a-f]{6}$/i.test(String(lighting.tint))) errors.push('environment.lighting.tint must be a #rrggbb colour');
           if (lighting.streetLampColor !== undefined && !/^#?[0-9a-f]{6}$/i.test(String(lighting.streetLampColor))) errors.push('environment.lighting.streetLampColor must be a #rrggbb colour');

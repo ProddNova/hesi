@@ -15,7 +15,7 @@ export const SKYBOX_DEFAULTS = Object.freeze({
 export const SKYBOX_LIMITS = Object.freeze({
   offset: Object.freeze([-1, 1]),
   zoom: Object.freeze([0.25, 4]),
-  intensity: Object.freeze([0.1, 2.5]),
+  intensity: Object.freeze([0, 4]),
 });
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -61,4 +61,3 @@ export function normalizeSkyboxConfig(value = {}) {
     flipX: Boolean(source.flipX),
   };
 }
-

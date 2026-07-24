@@ -326,6 +326,7 @@ export async function createEditorApp(root) {
         const next = normalizeLighting({ ...current, ...(detail?.patch || {}) });
         shell.setLightingState(next, { render: false });
         viewport.setGameLighting(next, { switchToGame: true });
+        syncViewState();
       },
       'lights-update': () => {
         const before = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
@@ -334,6 +335,7 @@ export async function createEditorApp(root) {
           projectState.replaceLighting(isDefaultLighting(config) ? null : config);
           shell.setLightingState(config, { render: true });
           viewport.setGameLighting(config, { switchToGame: true });
+          syncViewState();
         };
         if (JSON.stringify(before) === JSON.stringify(after)) {
           apply(before);
@@ -353,6 +355,7 @@ export async function createEditorApp(root) {
           projectState.replaceLighting(isDefaultLighting(config) ? null : config);
           shell.setLightingState(config, { render: true });
           viewport.setGameLighting(config, { switchToGame: true });
+          syncViewState();
         };
         history.execute({
           label: 'Reset master world light',

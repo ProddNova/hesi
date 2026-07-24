@@ -17,7 +17,7 @@ test('skybox config normalizes editable values and validates texture references'
   });
   assert.deepEqual(config.offset, [1, -1]);
   assert.equal(config.zoom, 4);
-  assert.equal(config.intensity, 0.1);
+  assert.equal(config.intensity, 0);
   assert.deepEqual(skyboxConfigErrors(config, { textureIds: new Set(['tex:0042']) }), []);
   assert.match(skyboxConfigErrors(config, { textureIds: new Set() }).join('\n'), /missing texture tex:0042/);
 });
@@ -49,4 +49,3 @@ test('skybox controller previews project state and makes edits undoable', () => 
   assert.deepEqual(projectState.getSkybox().rotation, [0, 0, 0]);
   controller.dispose();
 });
-

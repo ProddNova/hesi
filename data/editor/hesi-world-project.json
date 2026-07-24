@@ -473,7 +473,7 @@
     "skybox": {
       "enabled": true,
       "flipX": false,
-      "intensity": 1.2,
+      "intensity": 0.4,
       "offset": [
         0.2,
         -0.1
@@ -487,11 +487,14 @@
       "zoom": 0.25
     },
     "lighting": {
-      "intensity": 0,
-      "streetLampColor": "#feeca9",
-      "streetLampIntensity": 2,
-      "streetLampTemperature": -1,
-      "temperature": -1,
+      "ambientIntensity": 0,
+      "directIntensity": 0,
+      "exposure": 0.45,
+      "intensity": 1.1,
+      "streetLampColor": "#fed795",
+      "streetLampIntensity": 2.45,
+      "streetLampTemperature": -0.75,
+      "temperature": 1,
       "tint": "#000000"
     }
   },
