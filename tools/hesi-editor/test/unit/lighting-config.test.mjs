@@ -45,3 +45,57 @@ test('master world lighting multiplies an authored local-light baseline reversib
   assert.equal(light.intensity, 600);
   assert.equal(light.color.getHex(), baseColor);
 });
+
+test('street-lamp colour independently retints generated heads and road pools', () => {
+  const scene = new THREE.Scene();
+  const headMaterial = new THREE.MeshBasicMaterial({ color: 0xff8a2e });
+  headMaterial.userData.streetLampLight = 'head';
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), headMaterial));
+
+  const poolMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  poolMaterial.userData.streetLampLight = 'pool';
+  const pool = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), poolMaterial, 1);
+  pool.setColorAt(0, new THREE.Color(0xff8a2e));
+  const shippedPoolColour = Array.from(pool.instanceColor.array);
+  scene.add(pool);
+
+  applySceneLighting(scene, { streetLampColor: '#55aaff' });
+  assert.equal(headMaterial.color.getHexString(), '55aaff');
+  assert.equal(poolMaterial.color.getHexString(), '55aaff');
+  assert.equal(pool.instanceColor.getX(0), pool.instanceColor.getY(0));
+  assert.equal(pool.instanceColor.getY(0), pool.instanceColor.getZ(0));
+
+  applySceneLighting(scene, {});
+  assert.equal(headMaterial.color.getHexString(), 'ff8a2e');
+  assert.equal(poolMaterial.color.getHexString(), 'ffffff');
+  assert.deepEqual(Array.from(pool.instanceColor.array), shippedPoolColour);
+});
+
+test('street-lamp intensity and warmth stay independent from the global light', () => {
+  const scene = new THREE.Scene();
+  const headMaterial = new THREE.MeshBasicMaterial({ color: 0xff8a2e });
+  headMaterial.userData.streetLampLight = 'head';
+  const poolMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.24 });
+  poolMaterial.userData.streetLampLight = 'pool';
+  const pool = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), poolMaterial, 1);
+  pool.setColorAt(0, new THREE.Color(0xff8a2e));
+  const shippedPoolColour = Array.from(pool.instanceColor.array);
+  scene.add(
+    new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), headMaterial),
+    pool,
+  );
+
+  applySceneLighting(scene, {
+    intensity: 2.5,
+    temperature: -1,
+    streetLampIntensity: 0.5,
+    streetLampTemperature: 0.6,
+  });
+  assert.notEqual(headMaterial.color.getHexString(), 'ff8a2e');
+  assert.equal(poolMaterial.opacity, 0.12);
+  assert.deepEqual(Array.from(pool.instanceColor.array), shippedPoolColour);
+
+  applySceneLighting(scene, {});
+  assert.equal(headMaterial.color.getHexString(), 'ff8a2e');
+  assert.equal(poolMaterial.opacity, 0.24);
+});

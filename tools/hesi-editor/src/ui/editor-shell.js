@@ -735,13 +735,30 @@ export function createEditorShell(root) {
   const renderLights = () => {
     const panel = element('div', 'lights-panel');
     const cfg = normalizeLighting(lightingState);
+    const isStreetScene = currentScene?.id === 'highway';
+    const scopeLabel = isStreetScene ? 'Street' : 'Garage';
     const intro = element('section', 'skybox-card skybox-intro');
     const introCopy = element('div');
     introCopy.append(
-      element('h3', '', 'Lighting studio'),
-      element('p', '', `Shape the master night look for ${currentScene?.label || 'this scene'}, then place focused lights by hand. Local lights use a feathered procedural cloud mask, so their pool breaks up naturally instead of ending in a perfect circle.`),
+      element('h3', '', `${scopeLabel} lighting settings`),
+      element('p', '', `You are editing the ${scopeLabel.toLowerCase()} only. Street and Garage lighting are two separate settings, saved and applied independently.`),
     );
-    intro.append(introCopy);
+    const scopeSwitch = element('div', 'lights-scope-switch');
+    scopeSwitch.setAttribute('role', 'radiogroup');
+    scopeSwitch.setAttribute('aria-label', 'Lighting scene');
+    for (const entry of sceneList()) {
+      const label = entry.id === 'highway' ? 'Street lights' : 'Garage lights';
+      const choice = element('button', `lights-scope-choice${entry.id === currentScene?.id ? ' active' : ''}`, label);
+      choice.type = 'button';
+      choice.setAttribute('role', 'radio');
+      choice.setAttribute('aria-checked', String(entry.id === currentScene?.id));
+      choice.dataset.testid = `lights-scene-${entry.id}`;
+      choice.addEventListener('click', () => {
+        if (entry.id !== currentScene?.id) triggerAction('scene-switch', entry.id);
+      });
+      scopeSwitch.append(choice);
+    }
+    intro.append(introCopy, scopeSwitch);
 
     const slider = (host, label, value, { min, max, step, digits = 2 }, testid, { onInput, onChange = onInput }) => {
       const field = element('label', 'skybox-field');
@@ -766,8 +783,8 @@ export function createEditorShell(root) {
     };
 
     const controls = element('section', 'skybox-card skybox-placement');
-    controls.append(element('h3', '', 'Master world light'));
-    controls.append(element('p', 'lights-help', 'Multiplies the shipped scene rig and every light you place. Preview is automatic in Game mode; Apply to Game writes the same result into the playable build.'));
+    controls.append(element('h3', '', `${scopeLabel} global light`));
+    controls.append(element('p', 'lights-help', `Controls the ambient/global light for the ${scopeLabel.toLowerCase()} scene. It does not change the other scene${isStreetScene ? ' or the street-lamp colour' : ''}.`));
     const fields = element('div', 'skybox-fields lights-global-fields');
     slider(fields, 'Intensity', cfg.intensity, { min: 0, max: 3, step: 0.05 }, 'lights-intensity', {
       onInput: (v) => triggerAction('lights-preview', { patch: { intensity: v } }),
@@ -784,7 +801,7 @@ export function createEditorShell(root) {
     tint.dataset.testid = 'lights-tint';
     tint.addEventListener('input', () => triggerAction('lights-preview', { patch: { tint: tint.value } }));
     tint.addEventListener('change', () => triggerAction('lights-update', { patch: { tint: tint.value } }));
-    tintField.append(element('span', '', 'Colour tint'), tint);
+    tintField.append(element('span', '', 'Global colour tint'), tint);
     fields.append(tintField);
     controls.append(fields);
     const actions = element('div', 'skybox-actions');
@@ -793,6 +810,43 @@ export function createEditorShell(root) {
     reset.addEventListener('click', () => triggerAction('lights-reset'));
     actions.append(reset);
     controls.append(actions);
+
+    let streetLamps = null;
+    if (isStreetScene) {
+      streetLamps = element('section', 'skybox-card lights-street-lamps');
+      streetLamps.append(
+        element('h3', '', 'Street-lamp light'),
+        element('p', 'lights-help', 'Separate colour, intensity and warmth for the generated roadside lamps, their road pools and wet-asphalt light streaks.'),
+      );
+      const lampFields = element('div', 'skybox-fields lights-street-fields');
+      slider(lampFields, 'Lamp intensity', cfg.streetLampIntensity, { min: 0, max: 3, step: 0.05 }, 'lights-street-lamp-intensity', {
+        onInput: (v) => triggerAction('lights-preview', { patch: { streetLampIntensity: v } }),
+        onChange: (v) => triggerAction('lights-update', {
+          patch: { streetLampIntensity: v },
+          label: 'Change street-lamp intensity',
+        }),
+      });
+      slider(lampFields, 'Lamp warmth (warm ← → cool)', cfg.streetLampTemperature, { min: -1, max: 1, step: 0.05 }, 'lights-street-lamp-temperature', {
+        onInput: (v) => triggerAction('lights-preview', { patch: { streetLampTemperature: v } }),
+        onChange: (v) => triggerAction('lights-update', {
+          patch: { streetLampTemperature: v },
+          label: 'Change street-lamp warmth',
+        }),
+      });
+      const lampColorField = element('label', 'skybox-field lights-street-lamp-color');
+      const lampColor = document.createElement('input');
+      lampColor.type = 'color';
+      lampColor.value = cfg.streetLampColor;
+      lampColor.dataset.testid = 'lights-street-lamp-color';
+      lampColor.addEventListener('input', () => triggerAction('lights-preview', { patch: { streetLampColor: lampColor.value } }));
+      lampColor.addEventListener('change', () => triggerAction('lights-update', {
+        patch: { streetLampColor: lampColor.value },
+        label: 'Change street-lamp colour',
+      }));
+      lampColorField.append(element('span', '', 'Lamp and road-pool colour'), lampColor);
+      lampFields.append(lampColorField);
+      streetLamps.append(lampFields);
+    }
 
     const local = element('section', 'skybox-card lights-local');
     const localHeader = element('div', 'lights-local-header');
@@ -895,7 +949,9 @@ export function createEditorShell(root) {
       local.append(editor);
     }
 
-    panel.append(intro, controls, local);
+    panel.append(intro, controls);
+    if (streetLamps) panel.append(streetLamps);
+    panel.append(local);
     return panel;
   };
 

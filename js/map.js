@@ -702,6 +702,10 @@ export class HighwayMap {
     const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({
       color, fog: true, toneMapped: false, ...extra,
     });
+    const streetLamp = (material, role) => {
+      material.userData.streetLampLight = role;
+      return material;
+    };
     // One facade material per building type (js/building-types.js). The
     // material IS the type: repainting it in the editor repaints every copy of
     // that type, and nothing else.
@@ -729,7 +733,7 @@ export class HighwayMap {
       marking: basic(0xd8d6bf),
       amber: basic(0xe8a844),
       reflector: basic(0xffc36a),
-      lampSodium: basic(0xff8a2e),
+      lampSodium: streetLamp(basic(0xff8a2e), 'head'),
       lampWhite: basic(0xffe9c4),
       tunnelLampOrange: basic(0xffb15e),
       tunnelLampWhite: basic(0xf3f7e8),
@@ -780,16 +784,16 @@ export class HighwayMap {
       // road's "wet plastic" sheen. Their opacity is toned down from the old
       // 0.34 / 0.2 so the asphalt reads matte by default, and both are driven
       // by one runtime dial (setSurfaceGloss) the World editor exposes.
-      lightPool: new THREE.MeshBasicMaterial({
+      lightPool: streetLamp(new THREE.MeshBasicMaterial({
         map: this._glowTexture(), color: 0xffffff, transparent: true, opacity: SURFACE_GLOSS_BASE.lightPool,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-      }),
-      lightStreak: new THREE.MeshBasicMaterial({
+      }), 'pool'),
+      lightStreak: streetLamp(new THREE.MeshBasicMaterial({
         map: this._glowTexture(), color: 0xffa858, transparent: true, opacity: SURFACE_GLOSS_BASE.lightStreak,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: true, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
-      }),
+      }), 'streak'),
     };
   }
 
@@ -4985,16 +4989,36 @@ export class HighwayMap {
     for (const [a, b, c, d] of faces) this._pushQuad(bucket, corners[a], corners[b], corners[c], corners[d]);
   }
 
+  _insideTatsumiClearing(position, padding = 0) {
+    if (this._tatsumiClearingArea === undefined) {
+      this._tatsumiClearingArea = this.serviceAreas?.find((area) => area.id === 'tatsumi_pa') || null;
+    }
+    const area = this._tatsumiClearingArea;
+    if (!area || !position) return false;
+    const dx = position.x - area.center.x;
+    const dz = position.z - area.center.z;
+    const along = dx * area.tangent.x + dz * area.tangent.z;
+    const across = dx * area.normal.x + dz * area.normal.z;
+    return Math.abs(along) <= area.length * 0.5 + padding
+      && Math.abs(across) <= area.width * 0.5 + padding;
+  }
+
   _instance(position, scale, quaternion = null, color = null, type = 'box:concrete') {
     const key = this._chunkKey(position.x, position.z);
     if (!this._chunkInstances.has(key)) this._chunkInstances.set(key, new Map());
     const types = this._chunkInstances.get(key);
     if (!types.has(type)) types.set(type, []);
+    const footprintPadding = Math.max(Math.abs(scale.x), Math.abs(scale.z)) * 0.5;
+    const suppressed = this._suppressServiceAreaObjects || this._insideTatsumiClearing(position, footprintPadding);
     types.get(type).push({
       position: position.clone(),
-      scale: scale.clone(),
+      // Tatsumi is deliberately an entirely empty paved deck. Keep zero-scale
+      // tombstones while building it so deterministic instance indices (and
+      // existing editor saves that address them) remain stable.
+      scale: suppressed ? vec(0, 0, 0) : scale.clone(),
       quaternion: quaternion ? quaternion.clone() : null,
       color,
+      suppressed,
     });
   }
 
@@ -5006,6 +5030,13 @@ export class HighwayMap {
   }
 
   _addChunkMesh(mesh, positionForChunk = null, alwaysVisible = false) {
+    const p = positionForChunk || mesh.position;
+    const suppressed = this._suppressServiceAreaObjects
+      || (!mesh.userData?.tatsumiClearingSurface && this._insideTatsumiClearing(p));
+    if (suppressed) {
+      mesh.visible = false;
+      mesh.userData.tatsumiClearingSuppressed = true;
+    }
     // Lights NEVER stream, even when handed a chunk position: the scene's
     // light census is global renderer state baked into every shader
     // program's cache key, so a light popping in/out with chunk visibility
@@ -5018,7 +5049,6 @@ export class HighwayMap {
       this.group.add(mesh);
       return mesh;
     }
-    const p = positionForChunk || mesh.position;
     const chunk = this._chunkFor(this._chunkKey(p.x, p.z));
     chunk.group.add(mesh);
     return mesh;
@@ -5077,11 +5107,14 @@ export class HighwayMap {
         }
         const mesh = new THREE.InstancedMesh(this._unitGeometries[geoName] || unitBox, instanceMaterial, records.length);
         mesh.name = `chunk ${key} ${type}`;
+        const suppressedIndices = [];
         records.forEach((record, index) => {
           TMP_MAT.compose(record.position, record.quaternion || identityQuat, record.scale);
           mesh.setMatrixAt(index, TMP_MAT);
           if (hasColors) mesh.setColorAt(index, new THREE.Color(record.color ?? material.color));
+          if (record.suppressed) suppressedIndices.push(index);
         });
+        if (suppressedIndices.length) mesh.userData.tatsumiClearingSuppressedIndices = suppressedIndices;
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.frustumCulled = true;
@@ -7518,7 +7551,14 @@ export class HighwayMap {
       // origin, so the local matrix IS the world matrix).
       slab.updateMatrix();
       applyWorldSurfaceUVs(slab.geometry, slab.matrix);
+      slab.userData.tatsumiClearingSurface = area.dressing === 'tatsumi';
       this._addChunkMesh(slab, slabCenter);
+
+      // Keep Tatsumi as a completely empty paved clearing. Everything after
+      // the slab is still generated as an invisible/zero-scale tombstone so
+      // semantic IDs, instance indices and the shared deterministic RNG stream
+      // remain compatible with existing editor projects.
+      this._suppressServiceAreaObjects = area.dressing === 'tatsumi';
 
       // support pillars when elevated; a lot straddling live carriageways
       // (the Tatsumi deck) supplies its own offsets so no column stands in
@@ -7647,6 +7687,7 @@ export class HighwayMap {
       if (area.dressing === 'tatsumi') {
         this._buildTatsumiPaDressing(area, random, carColors);
         if (area.hasGarage) this._buildGarageExterior(area);
+        this._suppressServiceAreaObjects = false;
         continue;
       }
 

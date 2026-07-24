@@ -9,12 +9,19 @@ import * as THREE from 'three';
 // saves one config per scene into the build document's `environment.lighting`;
 // js/editor-map-patch.js re-applies it to the real game at boot.
 //
-// One config is three master dials — colour tint, warmth (temperature) and
-// intensity — applied on top of each light's shipped colour/intensity, so a
-// default config is exactly the shipped night look and every apply is
-// reversible (the shipped values are captured once in `userData.baseLighting`).
+// Each scene owns three master dials — colour tint, warmth (temperature) and
+// intensity — applied on top of each light's shipped colour/intensity. The
+// highway scene also owns the generated street-lamp colour. A default config
+// is exactly the shipped night look and every apply is reversible.
 
-export const DEFAULT_LIGHTING = Object.freeze({ intensity: 1, temperature: 0, tint: '#ffffff' });
+export const DEFAULT_LIGHTING = Object.freeze({
+  intensity: 1,
+  temperature: 0,
+  tint: '#ffffff',
+  streetLampColor: '#ff8a2e',
+  streetLampIntensity: 1,
+  streetLampTemperature: 0,
+});
 export const LOCAL_LIGHT_ASSET_ID = 'editor:light:soft-spot';
 export const DEFAULT_LOCAL_LIGHT = Object.freeze({
   color: '#ffd3a1',
@@ -43,6 +50,9 @@ export function normalizeLighting(config) {
     intensity: clamp(source.intensity ?? DEFAULT_LIGHTING.intensity, 0, 3),
     temperature: clamp(source.temperature ?? DEFAULT_LIGHTING.temperature, -1, 1),
     tint: normalizedHex(source.tint, DEFAULT_LIGHTING.tint),
+    streetLampColor: normalizedHex(source.streetLampColor, DEFAULT_LIGHTING.streetLampColor),
+    streetLampIntensity: clamp(source.streetLampIntensity ?? DEFAULT_LIGHTING.streetLampIntensity, 0, 3),
+    streetLampTemperature: clamp(source.streetLampTemperature ?? DEFAULT_LIGHTING.streetLampTemperature, -1, 1),
   };
 }
 
@@ -90,7 +100,12 @@ export function localLightConfigErrors(config, { path = 'light' } = {}) {
 /** True when the config leaves every light exactly as shipped. */
 export function isDefaultLighting(config) {
   const c = normalizeLighting(config);
-  return c.intensity === 1 && c.temperature === 0 && c.tint === '#ffffff';
+  return c.intensity === DEFAULT_LIGHTING.intensity
+    && c.temperature === DEFAULT_LIGHTING.temperature
+    && c.tint === DEFAULT_LIGHTING.tint
+    && c.streetLampColor === DEFAULT_LIGHTING.streetLampColor
+    && c.streetLampIntensity === DEFAULT_LIGHTING.streetLampIntensity
+    && c.streetLampTemperature === DEFAULT_LIGHTING.streetLampTemperature;
 }
 
 // Warm/cool multiplier per channel. -1 = warm sodium, +1 = cool moonlight.
@@ -302,22 +317,80 @@ export function applySceneLighting(scene, config) {
   const [tr, tg, tb] = temperatureRGB(c.temperature);
   const [nr, ng, nb] = hexRGB(c.tint);
   const mr = tr * nr, mg = tg * ng, mb = tb * nb;
+  const [lampTr, lampTg, lampTb] = temperatureRGB(c.streetLampTemperature);
+  const streetLampHasCustomColour = c.streetLampColor !== DEFAULT_LIGHTING.streetLampColor;
+  const streetLampIsDefault = c.streetLampColor === DEFAULT_LIGHTING.streetLampColor
+    && c.streetLampIntensity === DEFAULT_LIGHTING.streetLampIntensity
+    && c.streetLampTemperature === DEFAULT_LIGHTING.streetLampTemperature;
+  const visitedStreetLampMaterials = new Set();
   let touched = 0;
   scene.traverse((object) => {
-    if (!object.isLight || !object.userData?.gameSceneLight) return;
-    let base = object.userData.baseLighting;
-    if (!base) {
-      base = {
-        color: object.color.getHex(),
-        ground: object.groundColor ? object.groundColor.getHex() : null,
-        intensity: object.intensity,
-      };
-      object.userData.baseLighting = base;
+    if (object.isLight && object.userData?.gameSceneLight) {
+      let base = object.userData.baseLighting;
+      if (!base) {
+        base = {
+          color: object.color.getHex(),
+          ground: object.groundColor ? object.groundColor.getHex() : null,
+          intensity: object.intensity,
+        };
+        object.userData.baseLighting = base;
+      }
+      tintColour(object.color, base.color, mr, mg, mb);
+      if (object.groundColor && base.ground != null) tintColour(object.groundColor, base.ground, mr, mg, mb);
+      object.intensity = base.intensity * c.intensity;
+      touched += 1;
     }
-    tintColour(object.color, base.color, mr, mg, mb);
-    if (object.groundColor && base.ground != null) tintColour(object.groundColor, base.ground, mr, mg, mb);
-    object.intensity = base.intensity * c.intensity;
-    touched += 1;
+
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      const role = material?.userData?.streetLampLight;
+      if (!role) continue;
+      if (material.userData.baseStreetLampColor == null) {
+        material.userData.baseStreetLampColor = material.color.getHex();
+        material.userData.baseStreetLampOpacity = material.opacity;
+      }
+      if (!visitedStreetLampMaterials.has(material)) {
+        if (streetLampIsDefault) {
+          material.color.set(material.userData.baseStreetLampColor);
+          material.opacity = material.userData.baseStreetLampOpacity;
+        } else {
+          material.color.set(streetLampHasCustomColour ? c.streetLampColor : material.userData.baseStreetLampColor);
+          material.color.setRGB(
+            material.color.r * lampTr,
+            material.color.g * lampTg,
+            material.color.b * lampTb,
+          );
+          if (role === 'head') material.color.multiplyScalar(c.streetLampIntensity);
+          material.opacity = role === 'pool' || role === 'streak'
+            ? material.userData.baseStreetLampOpacity * c.streetLampIntensity
+            : material.userData.baseStreetLampOpacity;
+        }
+        material.needsUpdate = true;
+        visitedStreetLampMaterials.add(material);
+        touched += 1;
+      }
+
+      // Main-road pools carry per-lamp brightness jitter in instanceColor.
+      // Preserve the authored values for an exact reset; with a custom hue,
+      // turn those colours into neutral brightness multipliers so the material
+      // colour becomes the one authoritative lamp hue.
+      if (!object.isInstancedMesh || !object.instanceColor || role !== 'pool') continue;
+      const attribute = object.instanceColor;
+      if (!object.userData.baseStreetLampInstanceColors) {
+        object.userData.baseStreetLampInstanceColors = Float32Array.from(attribute.array);
+      }
+      const baseColours = object.userData.baseStreetLampInstanceColors;
+      if (!streetLampHasCustomColour) {
+        attribute.array.set(baseColours);
+      } else {
+        for (let index = 0; index < attribute.count; index += 1) {
+          const offset = index * attribute.itemSize;
+          const brightness = Math.max(baseColours[offset], baseColours[offset + 1], baseColours[offset + 2]);
+          attribute.setXYZ(index, brightness, brightness, brightness);
+        }
+      }
+      attribute.needsUpdate = true;
+    }
   });
   return touched;
 }

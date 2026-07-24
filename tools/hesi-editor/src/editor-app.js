@@ -237,7 +237,7 @@ export async function createEditorApp(root) {
   });
   shell.onToolbar('open-lights', () => {
     shell.showTab('lights');
-    shell.setStatus('Lights · tune colour, warmth and intensity below · press L in the viewport to preview Game lighting');
+    shell.setStatus(`Lights · editing ${scene.id === 'highway' ? 'Street' : 'Garage'} only · press L in the viewport to preview Game lighting`);
   });
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
@@ -340,7 +340,7 @@ export async function createEditorApp(root) {
           return;
         }
         history.execute({
-          label: 'Tune master world light',
+          label: detail?.label || `Tune ${scene.id === 'highway' ? 'street' : 'garage'} global light`,
           redo: () => apply(after),
           undo: () => apply(before),
         });

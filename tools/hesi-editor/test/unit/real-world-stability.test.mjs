@@ -24,6 +24,36 @@ function crashCushionSnapshot(map) {
   return snapshot;
 }
 
+function tatsumiClearingSnapshot(map) {
+  const area = map.serviceAreas.find((entry) => entry.id === 'tatsumi_pa');
+  const snapshot = { deckVisible: false, visibleInstances: 0, suppressedObjects: 0, suppressedObjectsVisible: 0 };
+  if (!area) return snapshot;
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  map.group.traverse((object) => {
+    if (object.name === 'Tatsumi PA deck') snapshot.deckVisible = object.visible;
+    if (object.userData?.tatsumiClearingSuppressed) {
+      snapshot.suppressedObjects += 1;
+      if (object.visible) snapshot.suppressedObjectsVisible += 1;
+    }
+    if (!object.isInstancedMesh) return;
+    for (let index = 0; index < object.count; index += 1) {
+      object.getMatrixAt(index, matrix);
+      matrix.decompose(position, quaternion, scale);
+      const dx = position.x - area.center.x;
+      const dz = position.z - area.center.z;
+      const along = dx * area.tangent.x + dz * area.tangent.z;
+      const across = dx * area.normal.x + dz * area.normal.z;
+      if (Math.abs(along) <= area.length * 0.5
+        && Math.abs(across) <= area.width * 0.5
+        && scale.lengthSq() > 1e-12) snapshot.visibleInstances += 1;
+    }
+  });
+  return snapshot;
+}
+
 function buildIdentitySnapshot() {
   const map = new HighwayMap({ quality: 'low', applyFog: false });
   try {
@@ -50,6 +80,7 @@ function buildIdentitySnapshot() {
       gameplayStarted: Boolean(globalThis.shutoko),
       roadNetworkYOffset: map.roadNetworkYOffset,
       crashCushions: crashCushionSnapshot(map),
+      tatsumiClearing: tatsumiClearingSnapshot(map),
       productionYOffset: productionMatch
         ? productionRuntime.points[0].y - productionMatch.points.at(-1)[1]
         : null,
@@ -80,6 +111,10 @@ test('two independent real-world builds produce identical stable entity IDs and 
   assert.equal(first.roadNetworkYOffset, 25, 'editor exposes the production road elevation offset');
   assert.ok(first.crashCushions.total > 0, 'removed crash cushions keep ID-preserving tombstones');
   assert.equal(first.crashCushions.visible, 0, 'yellow crash cushions stay removed from the rendered road');
+  assert.equal(first.tatsumiClearing.deckVisible, true, 'the Tatsumi paved deck stays visible');
+  assert.equal(first.tatsumiClearing.visibleInstances, 0, 'no generated instance remains visible inside Tatsumi');
+  assert.ok(first.tatsumiClearing.suppressedObjects > 0, 'direct Tatsumi props keep ID-preserving tombstones');
+  assert.equal(first.tatsumiClearing.suppressedObjectsVisible, 0, 'direct Tatsumi dressing stays hidden');
   assert.ok(Math.abs(first.productionYOffset - first.roadNetworkYOffset) < 1e-6,
     'production route controls can be placed at the runtime road/collision elevation');
   assert.deepEqual(first.tatsumiExit, {

@@ -485,6 +485,14 @@
       ],
       "texture": "tex:0105",
       "zoom": 0.25
+    },
+    "lighting": {
+      "intensity": 0.75,
+      "streetLampColor": "#c2fbff",
+      "streetLampIntensity": 1.6,
+      "streetLampTemperature": 0,
+      "temperature": -1,
+      "tint": "#ffea00"
     }
   },
   "editorState": {}

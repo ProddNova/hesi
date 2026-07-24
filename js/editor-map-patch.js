@@ -182,6 +182,10 @@ export function applyHighwayBuild(map, build, customAssets = null) {
     if (op.op === 'instance') {
       const mesh = instancedByName.get(op.mesh);
       if (!mesh || !Number.isInteger(op.index) || op.index >= mesh.count) { summary.skipped += 1; continue; }
+      if (mesh.userData?.tatsumiClearingSuppressedIndices?.includes(op.index)) {
+        summary.skipped += 1;
+        continue;
+      }
       mesh.setMatrixAt(op.index, new THREE.Matrix4().fromArray(op.matrix));
       touchedInstanced.add(mesh);
       summary.applied += 1;
@@ -190,6 +194,10 @@ export function applyHighwayBuild(map, build, customAssets = null) {
     if (op.op === 'object') {
       const target = objectsByName.get(op.name || '')?.[op.nameIndex];
       if (!target) { summary.skipped += 1; continue; }
+      if (target.userData?.tatsumiClearingSuppressed) {
+        summary.skipped += 1;
+        continue;
+      }
       applyTransformOp(target, op);
       applyObjectFaceStyles(target, op.faceTextures || {}, customAssets?.textures || {});
       summary.applied += 1;

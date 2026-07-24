@@ -91,11 +91,17 @@ test('project serialization keeps master lighting and world finish settings', ()
     intensity: 1.65,
     temperature: -0.4,
     tint: '#ffd2aa',
+    streetLampColor: '#80bfff',
+    streetLampIntensity: 1.4,
+    streetLampTemperature: 0.25,
   };
   document.environment.surfaceGloss = 1.75;
   const parsed = parseProjectDocument(serializeProjectDocument(document));
   assert.deepEqual(parsed.environment.lighting, {
     intensity: 1.65,
+    streetLampColor: '#80bfff',
+    streetLampIntensity: 1.4,
+    streetLampTemperature: 0.25,
     temperature: -0.4,
     tint: '#ffd2aa',
   });

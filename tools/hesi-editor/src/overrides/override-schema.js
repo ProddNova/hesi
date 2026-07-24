@@ -132,6 +132,9 @@ export function validateProjectDocument(document, { entityIds = null, assetIds =
           if (lighting.intensity !== undefined && !Number.isFinite(lighting.intensity)) errors.push('environment.lighting.intensity must be a number');
           if (lighting.temperature !== undefined && !Number.isFinite(lighting.temperature)) errors.push('environment.lighting.temperature must be a number');
           if (lighting.tint !== undefined && !/^#?[0-9a-f]{6}$/i.test(String(lighting.tint))) errors.push('environment.lighting.tint must be a #rrggbb colour');
+          if (lighting.streetLampColor !== undefined && !/^#?[0-9a-f]{6}$/i.test(String(lighting.streetLampColor))) errors.push('environment.lighting.streetLampColor must be a #rrggbb colour');
+          if (lighting.streetLampIntensity !== undefined && !Number.isFinite(lighting.streetLampIntensity)) errors.push('environment.lighting.streetLampIntensity must be a number');
+          if (lighting.streetLampTemperature !== undefined && !Number.isFinite(lighting.streetLampTemperature)) errors.push('environment.lighting.streetLampTemperature must be a number');
         }
       }
       const gloss = document.environment.surfaceGloss;

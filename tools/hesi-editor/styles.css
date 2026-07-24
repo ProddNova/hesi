@@ -1060,11 +1060,18 @@ input, select { accent-color: var(--accent); }
 .lights-slider-row{display:flex;align-items:center;gap:8px}
 .lights-slider-row input[type=range]{flex:1 1 auto;min-width:0}
 .lights-slider-row code{min-width:44px;text-align:right;opacity:.8}
-.lights-panel{display:grid;grid-template-columns:minmax(190px,.72fr) minmax(260px,1fr) minmax(440px,1.8fr);gap:8px;align-items:start}
+.lights-panel{display:grid;grid-template-columns:minmax(220px,.8fr) repeat(2,minmax(270px,1fr));gap:8px;align-items:start}
 .lights-panel .skybox-card{height:100%;box-sizing:border-box}
 .lights-help{margin:0 0 9px;color:var(--text-muted);font-size:11px;line-height:1.45}
+.lights-scope-switch{display:grid;grid-template-columns:1fr;gap:5px;width:100%;margin-top:10px}
+.lights-scope-choice{min-height:34px;padding:7px 10px;border:1px solid var(--line-soft);border-radius:4px;background:var(--surface);color:var(--text-muted);font:600 11px var(--font);text-align:left;cursor:pointer}
+.lights-scope-choice:hover{border-color:var(--accent-muted);color:var(--text)}
+.lights-scope-choice.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--text);box-shadow:inset 3px 0 0 var(--accent)}
 .lights-global-fields{grid-template-columns:repeat(2,minmax(115px,1fr))}
-.lights-local{display:flex;flex-direction:column;gap:9px}
+.lights-street-fields{grid-template-columns:repeat(2,minmax(115px,1fr))}
+.lights-street-lamp-color{grid-column:1 / -1}
+.lights-street-lamp-color input[type=color]{width:100%;height:42px;padding:3px;border:1px solid var(--line-soft);border-radius:3px;background:var(--surface)}
+.lights-local{display:flex;grid-column:1 / -1;flex-direction:column;gap:9px}
 .lights-local-header,.lights-local-editor-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .lights-local-header h3,.lights-local-editor-heading h3{margin-bottom:3px}
 .lights-local-header .tool-button{flex:0 0 auto}
@@ -1090,6 +1097,6 @@ input, select { accent-color: var(--accent); }
 }
 @media(max-width:760px){
   .lights-panel{grid-template-columns:1fr}
-  .lights-local{grid-column:auto}
+  .lights-local{grid-column:1}
   .lights-local-fields{grid-template-columns:repeat(2,minmax(105px,1fr))}
 }
