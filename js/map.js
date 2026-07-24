@@ -730,8 +730,11 @@ export class HighwayMap {
       tunnelWall: lambert(0x2c2f36, { side: THREE.DoubleSide }),
       tunnelDark: lambert(0x191c22, { side: THREE.DoubleSide }),
       portal: lambert(0x3a3d44),
-      marking: basic(0xd8d6bf),
-      amber: basic(0xe8a844),
+      // Road paint must participate in the same lighting model as the deck.
+      // A Basic material stays self-lit even with ambient/direct light at zero,
+      // making lane lines glow white in the ultra-dark lighting preset.
+      marking: lambert(0xd8d6bf),
+      amber: lambert(0xe8a844),
       reflector: basic(0xffc36a),
       lampSodium: streetLamp(basic(0xff8a2e), 'head'),
       lampWhite: basic(0xffe9c4),
