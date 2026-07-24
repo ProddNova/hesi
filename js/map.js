@@ -571,10 +571,6 @@ export class HighwayMap {
     this.progressiveTransitionById = new Map();
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
-    // Authored lamp/tunnel fixture positions. The game maps a small fixed
-    // number of real lights onto the nearest entries so vehicles receive
-    // spatial lighting without one PointLight per fixture.
-    this.roadLightSources = [];
     // options.markingDebug: per-piece paint/suppression records (see
     // _paintStrip / _dressGores). Besides orientation, the A-B junction
     // probe needs to explain which system attempted every boundary and why
@@ -5029,28 +5025,21 @@ export class HighwayMap {
     });
   }
 
-  _recordRoadLight(position, color = 0xff8a2e, intensity = 1) {
-    if (this._suppressServiceAreaObjects || this._insideTatsumiClearing(position)) return;
-    this.roadLightSources.push({ position: position.clone(), color, intensity });
-  }
-
   /**
    * The Tatsumi PA deck sits ~8.9 m above the wangan mainline, and a standard
    * 9.26 m lamppost cannot fit beneath it — which is why the clearing suppresses
-   * every lamp, pool and light source in its footprint, leaving the carriageway
-   * pitch-black as you pass under the deck (reported: "Tatsumi PA is dark").
-   * Restore it with under-deck light SOURCES only: no geometry and no instances,
-   * so none of the index-sensitive Tatsumi deck edits shift. The runtime road
-   * rig picks these up like the underside luminaires of a real PA and lights the
-   * road and cars through the dark stretch. Sources hang below the deck soffit so
-   * nothing pokes through the slab. Placed after the normal lamp pass so it only
-   * ever adds inside the footprint the lamp pass had to skip.
+   * every normal lamp and pool in its footprint. Restore the missing illumination
+   * with one tiny InstancedMesh of additive road decals. It is built only after
+   * the normal chunk instances are finalized, so saved editor indices do not
+   * move; unlike PointLights it also adds no per-fragment lighting loop.
    */
-  _lightTatsumiUnderdeck() {
+  _buildTatsumiUnderdeckPools() {
     const area = this.serviceAreas?.find((a) => a.id === 'tatsumi_pa');
     if (!area) return;
     const deckY = area.elevation ?? area.center?.y ?? 0;
     const routeIds = new Set([area.routeId, 'wangan_0', 'wangan_1'].filter(Boolean));
+    const records = [];
+    const occupied = new Set();
     for (const rid of routeIds) {
       const route = this.routes.get(rid);
       if (!route) continue;
@@ -5066,17 +5055,43 @@ export class HighwayMap {
       // Walk a window around it and drop soffit lights where the centreline is
       // both inside the footprint AND genuinely below the deck (skip a ramp that
       // has already climbed up to deck level).
-      // ~26 m spacing keeps the local fixture count near the deck within the
-      // runtime rig's slot budget, so the pop-in fix is not undone right here.
-      for (let d = bestD - 130; d <= bestD + 130; d += 26) {
-        const c = this._sampleCenter(route, this._normalizeDistance(route, d), 1);
+      for (let d = bestD - 130; d <= bestD + 130; d += 24) {
+        const distance = this._normalizeDistance(route, d);
+        const c = this._sampleCenter(route, distance, 1);
         if (!this._insideTatsumiClearing(c.position)) continue;
         if (c.position.y > deckY - 3) continue;
-        const src = c.position.clone();
-        src.y = Math.min(deckY - 3.2, c.position.y + 5.2);
-        this.roadLightSources.push({ position: src, color: 0xff8a2e, intensity: 0.85 });
+        const key = `${Math.round(c.position.x * 0.5)},${Math.round(c.position.z * 0.5)}`;
+        if (occupied.has(key)) continue;
+        occupied.add(key);
+        const position = c.position.clone();
+        position.y += 0.16;
+        const tangent = c.baseTangent.clone().normalize();
+        const bankQuat = new THREE.Quaternion().setFromAxisAngle(tangent, -this._bankAt(route, distance));
+        const quaternion = yawQuaternion(tangent).premultiply(bankQuat);
+        const width = clamp(this._halfWidthAt(route, distance) * 1.75, 13, 19);
+        records.push({ position, quaternion, scale: vec(width, 1, 29) });
       }
     }
+    if (!records.length) return;
+
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    geometry.rotateX(-Math.PI * 0.5);
+    const pools = new THREE.InstancedMesh(geometry, this.materials.lightPool, records.length);
+    pools.name = 'Tatsumi underdeck baked light pools';
+    pools.userData.bakedRoadLighting = true;
+    const matrix = new THREE.Matrix4();
+    const color = new THREE.Color(0xffb066);
+    records.forEach((record, index) => {
+      matrix.compose(record.position, record.quaternion, record.scale);
+      pools.setMatrixAt(index, matrix);
+      pools.setColorAt(index, color);
+    });
+    pools.instanceMatrix.needsUpdate = true;
+    if (pools.instanceColor) pools.instanceColor.needsUpdate = true;
+    pools.computeBoundingBox();
+    pools.computeBoundingSphere();
+    this.group.add(pools);
+    this._tatsumiUnderdeckPools = pools;
   }
 
   /** True when `object` is or contains a light anywhere in its subtree. */
@@ -5203,9 +5218,6 @@ export class HighwayMap {
     this._buildBridge();
     this._buildSignage();
     this._buildServiceAreaDressing();
-    // Under-deck luminaires for the wangan where it runs beneath the Tatsumi
-    // deck (light sources only; adds nothing to any instance bucket).
-    this._lightTatsumiUnderdeck();
     this._buildCity();
     this._buildBackdrop();
     // Last of the three, deliberately: the infill only ever ADDS boxes to the
@@ -5214,6 +5226,8 @@ export class HighwayMap {
     this._buildInfill();
     this._buildTerrain();
     this._finalizeChunks();
+    // Built last and outside the index-sensitive chunk buckets.
+    this._buildTatsumiUnderdeckPools();
   }
 
   _buildEnvironment() {
@@ -6985,7 +6999,6 @@ export class HighwayMap {
       const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
       lens.y = base.y + 9.26;
       this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
-      this._recordRoadLight(lens);
 
       const jL = lampNoise(distance);
       const jW = lampNoise(distance * 1.7 + 41);
@@ -7071,7 +7084,6 @@ export class HighwayMap {
           const position = center.position.clone().addScaledVector(horizontalNormal(center.baseTangent), side);
           position.y += 5.7;
           this._instance(position, vec(0.55, 0.1, 2.6), quaternion, null, `box:${style}`);
-          this._recordRoadLight(position, style === 'tunnelLampOrange' ? 0xffb15e : 0xf3f7e8, 0.86);
         }
         // wall panels
         for (const side of [1, -1]) {
@@ -7842,7 +7854,6 @@ export class HighwayMap {
         const lens = position.clone().addScaledVector(armDirection, 2.28);
         lens.y = area.elevation + 9.26;
         this._instance(lens, vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
-        this._recordRoadLight(lens);
         const pool = position.clone().addScaledVector(armDirection, 3.4);
         pool.y = area.elevation + 0.07;
         this._instance(pool, vec(11, 1, 14), orientation, null, 'pool:lightPool');
@@ -8015,7 +8026,6 @@ export class HighwayMap {
       this._instance(at(u, v, 0), vec(1, 1, 1), orientation, null, 'lamppost:concrete');
       const lens = at(u, v + armVSign * 2.28, 9.26);
       this._instance(lens, vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
-      this._recordRoadLight(lens);
       this._instance(at(u, v + armVSign * 3.4, 0.07), vec(11, 1, 14), orientation, null, 'pool:lightPool');
     };
     for (const i of [6, 13]) lampAt(truckU0 + i * TRUCK_PITCH, R * (halfW - 1.0), -R);
@@ -8112,12 +8122,9 @@ export class HighwayMap {
     this._addChunkMesh(ring, ring.position);
     this.animatedMarkers.push(ring);
 
-    // alwaysVisible: lights never stream with their chunk (see _addChunkMesh).
-    // Distance attenuation already zeroes the beacon beyond ~46 m, so keeping
-    // it always on renders identically to streaming it.
-    const beacon = new THREE.PointLight(0x55ccff, 1.4, 46, 1.8);
-    beacon.position.copy(area.garageEntrance).add(vec(0, 5, 0));
-    this._addChunkMesh(beacon, beacon.position, true);
+    // The emissive marker is the beacon. A real always-present PointLight here
+    // would enter every road material's shader even when Tatsumi is kilometres
+    // away, for negligible visual benefit.
   }
 
   // ------------------------------------------------------------------
@@ -9801,7 +9808,6 @@ export class HighwayMap {
     materials.forEach((material) => material.dispose());
     this._ownedTextures.forEach((texture) => texture.dispose());
     this.buildingBoxes.length = 0;
-    this.roadLightSources.length = 0;
     this.group.clear();
   }
 }

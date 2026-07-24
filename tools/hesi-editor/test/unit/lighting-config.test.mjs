@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import {
   applySceneLighting,
-  createRuntimeRoadLightRig,
   createSoftSpotLight,
   localLightConfigFromObject,
   normalizeLocalLight,
-  updateRuntimeRoadLightRig,
 } from '../../../../js/lighting-config.js';
 
 test('soft local light turns reach and pool radius into an aimable cloudy spot', () => {
@@ -126,26 +125,14 @@ test('street-lamp intensity and warmth stay independent from the global light', 
   assert.equal(poolMaterial.opacity, 0.24);
 });
 
-test('fixed runtime road lights follow nearby fixtures and survive an ultra-dark world', () => {
-  const scene = new THREE.Scene();
-  const rig = createRuntimeRoadLightRig({ count: 2 });
-  scene.add(rig);
-  const sources = [
-    { position: new THREE.Vector3(80, 9, 0), color: 0xff8a2e },
-    { position: new THREE.Vector3(3, 9, 0), color: 0xff8a2e },
-    { position: new THREE.Vector3(-5, 6, 0), color: 0xf3f7e8, intensity: 0.8 },
-  ];
-  assert.equal(updateRuntimeRoadLightRig(rig, sources, new THREE.Vector3(), { force: true }), true);
-  const lights = rig.userData.runtimeRoadLights;
-  assert.deepEqual(lights.map((light) => light.position.x).sort((a, b) => a - b), [-5, 3]);
-
-  applySceneLighting(scene, {
-    intensity: 1.1,
-    ambientIntensity: 0,
-    directIntensity: 0,
-    tint: '#000000',
-    streetLampIntensity: 2,
-  });
-  assert.deepEqual(lights.map((light) => light.intensity).sort((a, b) => a - b), [288, 360]);
-  assert.ok(lights.every((light) => light.isPointLight && light.userData.runtimeRoadLight));
+test('the shipped highway look keeps a nonzero static visibility floor', () => {
+  const project = JSON.parse(readFileSync(
+    new URL('../../../../data/editor/hesi-world-project.json', import.meta.url),
+    'utf8',
+  ));
+  const lighting = project.environment.lighting;
+  assert.ok(lighting.intensity > 0);
+  assert.ok(lighting.ambientIntensity > 0);
+  assert.ok(lighting.directIntensity > 0);
+  assert.notEqual(lighting.tint.toLowerCase(), '#000000');
 });

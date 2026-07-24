@@ -286,3 +286,43 @@ dark far / lit near ("looks like it just spawned").
 
   Verified: boots clean (no page errors), headlight toggle still 900→0→900 after
   the refactor, fade numbers as above.
+
+## Round 5 — static road lighting, unlimited traffic coverage (2026-07-24)
+
+The moving runtime-light rig has been removed from the playable highway. It
+could not satisfy coverage and performance at the same time: 4/6/8 PointLight
+slots visibly changed fixture as the player moved, distant traffic necessarily
+sat outside the player-centred pool, and every extra forward light ran inside
+every affected material's fragment shader.
+
+The replacement has a fixed cost:
+
+- Lamp heads stay emissive and every authored lamp keeps its static additive
+  asphalt pool. There is no player-distance fade and no light slot to reassign,
+  so a lamp can no longer switch on while the car approaches.
+- The saved highway look now keeps a nonzero hemisphere/ambient/directional
+  fill (`ambient 0.72`, `direct 0.82`, master `0.9`) instead of tinting the
+  global lights black. This reaches the full scene and all traffic at any
+  distance without adding local lights.
+- Procedural and Modeler traffic bodies share a small neon-green emissive
+  visibility floor (`0.28`). It prevents black silhouettes through the night
+  fog without turning photographic Modeler bodies into white glowing boxes.
+- Tatsumi under-deck coverage is 16 warm decals in one late-built
+  `InstancedMesh`; it does not alter editor instance indices and adds one draw
+  call only when visible.
+- The always-present Tatsumi PointLight beacon is gone; its MeshBasic marker
+  already supplies the visual cue.
+- The player's two almost-overlapping SpotLights are represented by one wider
+  cone. The visible pair of headlamp meshes remains unchanged, as does the `L`
+  toggle.
+- The game opts out of HighwayMap's duplicate fallback hemisphere/directional
+  rig, leaving one authoritative global rig.
+
+Verified in the real browser build at a mobile viewport:
+
+- highway light census: `point 0`, `spot 1`, `directional 1`, `hemisphere 1`,
+  `ambient 1`;
+- 16 Tatsumi baked pools, no page errors;
+- mobile probe: frame p50 `14.0 ms`, p95 `34.7 ms`, 43 active traffic vehicles;
+- editor entity stability and lighting/model tests pass; editor build indices
+  retain only the same five pre-existing Tatsumi marking drifts.

@@ -26,32 +26,6 @@ export const DEFAULT_LIGHTING = Object.freeze({
   streetLampTemperature: 0,
 });
 export const LOCAL_LIGHT_ASSET_ID = 'editor:light:soft-spot';
-// Fixed default; game.js sizes the real count by render quality (4/6/8) so the
-// nearest-fixture slots can cover dense stacks (C1/K1 loops, ramp merges) where
-// up to ~8-9 lamp fixtures fall inside a single light's reach at once.
-export const RUNTIME_ROAD_LIGHT_COUNT = 6;
-// The runtime road lights reach farther than before so they ease in over a long
-// approach and fall to zero via the proximity fade below rather than at a hard
-// radius. Range/decay/intensity are chosen so the brightness DIRECTLY under a
-// lamp is unchanged from the shipped look (decay 1.8, ~180) — only the tail is
-// longer and softer. Shader cost is per-light and independent of range, so the
-// wider reach is free; only the light count costs anything.
-export const RUNTIME_ROAD_LIGHT_RANGE = 56;
-export const RUNTIME_ROAD_LIGHT_DECAY = 1.8;
-export const RUNTIME_ROAD_LIGHT_INTENSITY = 180;
-// Player-anchored proximity fade: a fixture at/inside FADE_FULL burns at its
-// full computed intensity (i.e. a normal streetlight, CONSTANT — its only
-// falloff is the natural inverse-power decay), fading to zero only across the
-// far FADE_FULL..FADE_ZERO band near the selection edge, where a slot re-points
-// at a newly nearest fixture. Keeping FADE_FULL large is what stops sparse
-// stretches (ramps, the Tatsumi exit) from looking like motion-sensor lights
-// that visibly brighten as you approach: previously (FADE_FULL 18) a lamp only
-// reached full brightness within 18 m, so at the typical 25-45 m it sat dim and
-// swelling the whole way in. Now it is full by 36 m and only the dim far tail
-// past 36 m fades — enough to hide the re-selection swap, which happens out
-// there, without animating the near field.
-const RUNTIME_ROAD_LIGHT_FADE_FULL = 36;
-const RUNTIME_ROAD_LIGHT_FADE_ZERO = 54;
 export const DEFAULT_LOCAL_LIGHT = Object.freeze({
   color: '#ffd3a1',
   temperature: -0.28,
@@ -170,133 +144,6 @@ function localLightColour(config) {
     Math.min(1, colour.b * tb),
   );
   return colour;
-}
-
-function applyRuntimeRoadLightConfig(light, config) {
-  const c = normalizeLighting(config);
-  const sourceColour = light.userData.runtimeRoadLightSourceColor ?? DEFAULT_LIGHTING.streetLampColor;
-  const customColour = c.streetLampColor !== DEFAULT_LIGHTING.streetLampColor;
-  const colour = new THREE.Color(customColour ? c.streetLampColor : sourceColour);
-  const [tr, tg, tb] = temperatureRGB(c.streetLampTemperature);
-  colour.setRGB(
-    Math.min(1, colour.r * tr),
-    Math.min(1, colour.g * tg),
-    Math.min(1, colour.b * tb),
-  );
-  light.color.copy(colour);
-  // Split the intensity: the "applied" part (base × per-source × lamp dial)
-  // only changes when the config or the followed fixture changes, so it is
-  // computed here (on re-selection / editor retint, not every frame). The
-  // per-frame update then just scales this by the proximity fade — no colour
-  // rebuild or temperature maths per frame for every light.
-  light.userData.runtimeRoadLightAppliedIntensity = light.userData.runtimeRoadLightBaseIntensity
-    * (light.userData.runtimeRoadLightSourceIntensity ?? 1)
-    * c.streetLampIntensity;
-  // Proximity fade (1 when unset, so the editor's static preview is unaffected).
-  light.intensity = light.userData.runtimeRoadLightAppliedIntensity
-    * (light.userData.runtimeRoadLightProximity ?? 1);
-  light.userData.runtimeRoadLightConfig = c;
-}
-
-/**
- * Four real, permanently registered point lights follow the nearest authored
- * road fixtures. Keeping the count fixed avoids shader recompiles while still
- * letting vehicles and other lit materials react to lamps and tunnel lights.
- */
-export function createRuntimeRoadLightRig({
-  count = RUNTIME_ROAD_LIGHT_COUNT,
-  intensity = RUNTIME_ROAD_LIGHT_INTENSITY,
-  range = RUNTIME_ROAD_LIGHT_RANGE,
-  decay = RUNTIME_ROAD_LIGHT_DECAY,
-} = {}) {
-  const rig = new THREE.Group();
-  rig.name = 'Runtime road fixture lights';
-  rig.userData.runtimeRoadLights = [];
-  rig.userData.runtimeRoadLightAnchor = new THREE.Vector3(Infinity, Infinity, Infinity);
-  for (let index = 0; index < Math.max(1, Math.floor(count)); index += 1) {
-    const light = new THREE.PointLight(DEFAULT_LIGHTING.streetLampColor, intensity, range, decay);
-    light.name = `Runtime road fixture ${index + 1}`;
-    light.position.set(0, -10000, 0);
-    light.userData.runtimeRoadLight = true;
-    light.userData.runtimeRoadLightBaseIntensity = intensity;
-    light.userData.runtimeRoadLightSourceColor = DEFAULT_LIGHTING.streetLampColor;
-    light.userData.runtimeRoadLightSourceIntensity = 1;
-    applyRuntimeRoadLightConfig(light, DEFAULT_LIGHTING);
-    rig.add(light);
-    rig.userData.runtimeRoadLights.push(light);
-  }
-  return rig;
-}
-
-/**
- * Moves the fixed light slots to the nearest fixture records. Re-selection is
- * distance-throttled; the fixtures themselves are static.
- */
-export function updateRuntimeRoadLightRig(rig, sources, anchor, {
-  force = false,
-  updateDistance = 4,
-  maxDistance = 110,
-} = {}) {
-  const lights = rig?.userData?.runtimeRoadLights;
-  if (!lights?.length || !anchor || !Array.isArray(sources)) return false;
-  const previous = rig.userData.runtimeRoadLightAnchor;
-  // Re-selecting which fixtures the slots follow is distance-throttled (the
-  // fixtures are static). The per-frame proximity fade further down is NOT
-  // throttled, so a lamp still brightens smoothly as the player closes the gap
-  // in between re-selections instead of stepping every `updateDistance` metres.
-  const reselect = force || !(previous?.distanceToSquared(anchor) < updateDistance * updateDistance);
-  if (reselect) {
-    previous.copy(anchor);
-    const nearest = [];
-    const maximumDistanceSq = maxDistance * maxDistance;
-    for (const source of sources) {
-      const position = source?.position?.isVector3 ? source.position : (source?.isVector3 ? source : null);
-      if (!position) continue;
-      const distanceSq = position.distanceToSquared(anchor);
-      if (distanceSq > maximumDistanceSq) continue;
-      let insertAt = nearest.findIndex((entry) => distanceSq < entry.distanceSq);
-      if (insertAt < 0) insertAt = nearest.length;
-      if (insertAt >= lights.length && nearest.length >= lights.length) continue;
-      nearest.splice(insertAt, 0, { source, position, distanceSq });
-      if (nearest.length > lights.length) nearest.length = lights.length;
-    }
-
-    for (let index = 0; index < lights.length; index += 1) {
-      const light = lights[index];
-      const entry = nearest[index];
-      if (entry) {
-        light.position.copy(entry.position);
-        light.userData.runtimeRoadLightSourceColor = entry.source.color ?? DEFAULT_LIGHTING.streetLampColor;
-        light.userData.runtimeRoadLightSourceIntensity = entry.source.intensity ?? 1;
-        light.userData.runtimeRoadLightActive = true;
-      } else {
-        // Stay registered and keep the shader light count stable, but move the
-        // unused slot well outside its finite range.
-        light.position.set(anchor.x, anchor.y - 10000, anchor.z);
-        light.userData.runtimeRoadLightSourceColor = DEFAULT_LIGHTING.streetLampColor;
-        light.userData.runtimeRoadLightSourceIntensity = 1;
-        light.userData.runtimeRoadLightActive = false;
-      }
-      // Rebuild colour + the pre-proximity intensity for the (possibly new)
-      // fixture. Only on re-selection, so the per-frame loop stays scalar-only.
-      applyRuntimeRoadLightConfig(light, light.userData.runtimeRoadLightConfig || DEFAULT_LIGHTING);
-    }
-  }
-
-  // Per-frame: only the proximity fade changes as the player moves, so scale the
-  // stored intensity — no colour rebuild or temperature maths per light per
-  // frame. Lamps within FADE_FULL stay at full (constant streetlight); only the
-  // dim far tail past FADE_FULL fades, which is where a slot re-points, so the
-  // swap is hidden without animating the near field ("motion-sensor" look).
-  for (const light of lights) {
-    const dist = light.userData.runtimeRoadLightActive
-      ? Math.hypot(light.position.x - anchor.x, light.position.y - anchor.y, light.position.z - anchor.z)
-      : Infinity;
-    const proximity = 1 - smoothstep(RUNTIME_ROAD_LIGHT_FADE_FULL, RUNTIME_ROAD_LIGHT_FADE_ZERO, dist);
-    light.userData.runtimeRoadLightProximity = proximity;
-    light.intensity = (light.userData.runtimeRoadLightAppliedIntensity ?? light.userData.runtimeRoadLightBaseIntensity ?? 0) * proximity;
-  }
-  return reselect;
 }
 
 const cookieCache = new Map();
@@ -488,10 +335,7 @@ export function applySceneLighting(scene, config) {
   const visitedStreetLampMaterials = new Set();
   let touched = 0;
   scene.traverse((object) => {
-    if (object.isLight && object.userData?.runtimeRoadLight) {
-      applyRuntimeRoadLightConfig(object, c);
-      touched += 1;
-    } else if (object.isLight && object.userData?.gameSceneLight) {
+    if (object.isLight && object.userData?.gameSceneLight) {
       let base = object.userData.baseLighting;
       if (!base) {
         base = {

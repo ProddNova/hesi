@@ -26,7 +26,13 @@ function crashCushionSnapshot(map) {
 
 function tatsumiClearingSnapshot(map) {
   const area = map.serviceAreas.find((entry) => entry.id === 'tatsumi_pa');
-  const snapshot = { deckVisible: false, visibleInstances: 0, suppressedObjects: 0, suppressedObjectsVisible: 0 };
+  const snapshot = {
+    deckVisible: false,
+    visibleInstances: 0,
+    bakedLightPools: 0,
+    suppressedObjects: 0,
+    suppressedObjectsVisible: 0,
+  };
   if (!area) return snapshot;
   const matrix = new THREE.Matrix4();
   const position = new THREE.Vector3();
@@ -39,6 +45,10 @@ function tatsumiClearingSnapshot(map) {
       if (object.visible) snapshot.suppressedObjectsVisible += 1;
     }
     if (!object.isInstancedMesh) return;
+    if (object.userData?.bakedRoadLighting) {
+      snapshot.bakedLightPools += object.count;
+      return;
+    }
     for (let index = 0; index < object.count; index += 1) {
       object.getMatrixAt(index, matrix);
       matrix.decompose(position, quaternion, scale);
@@ -113,6 +123,7 @@ test('two independent real-world builds produce identical stable entity IDs and 
   assert.equal(first.crashCushions.visible, 0, 'yellow crash cushions stay removed from the rendered road');
   assert.equal(first.tatsumiClearing.deckVisible, true, 'the Tatsumi paved deck stays visible');
   assert.equal(first.tatsumiClearing.visibleInstances, 0, 'no generated instance remains visible inside Tatsumi');
+  assert.ok(first.tatsumiClearing.bakedLightPools > 0, 'cheap underdeck light decals remain beneath Tatsumi');
   assert.ok(first.tatsumiClearing.suppressedObjects > 0, 'direct Tatsumi props keep ID-preserving tombstones');
   assert.equal(first.tatsumiClearing.suppressedObjectsVisible, 0, 'direct Tatsumi dressing stays hidden');
   assert.ok(Math.abs(first.productionYOffset - first.roadNetworkYOffset) < 1e-6,

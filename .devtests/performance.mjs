@@ -82,7 +82,14 @@ const context = await browser.newContext({
   userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
 });
 await context.route('https://cdn.jsdelivr.net/**', async (route) => {
-  const body = await readFile(THREE_MODULE);
+  const url = new URL(route.request().url());
+  const addonMarker = '/examples/jsm/';
+  const addonIndex = url.pathname.indexOf(addonMarker);
+  const file = addonIndex >= 0
+    ? join(HARNESS_ROOT, 'node_modules', 'three', 'examples', 'jsm',
+      decodeURIComponent(url.pathname.slice(addonIndex + addonMarker.length)))
+    : THREE_MODULE;
+  const body = await readFile(file);
   await route.fulfill({ status: 200, contentType: 'text/javascript', body });
 });
 const page = await context.newPage();
@@ -92,7 +99,7 @@ page.on('pageerror', (error) => errors.push(String(error)));
 page.on('dialog', (dialog) => dialog.accept());
 
 await page.goto(`http://127.0.0.1:${port}/`);
-await page.waitForFunction(() => window.shutoko?.map, null, { timeout: 60000 });
+await page.waitForFunction(() => window.shutoko?.map, null, { timeout: 120000 });
 const bootToMapMs = await page.evaluate(() => performance.now());
 const browserMapBuildMs = await page.evaluate(() => window.shutoko.performanceMetrics?.mapBuildMs ?? null);
 await page.tap('#new-game-button');

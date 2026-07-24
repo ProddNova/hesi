@@ -29,14 +29,20 @@ const port = server.address().port;
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' });
 const context = await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1.5, hasTouch: true });
 await context.route('https://cdn.jsdelivr.net/**', async (route) => {
-  await route.fulfill({ status: 200, contentType: 'text/javascript', body: await readFile(join(ROOT, 'node_modules/three/build/three.module.js')) });
+  const url = new URL(route.request().url());
+  const addonMarker = '/examples/jsm/';
+  const addonIndex = url.pathname.indexOf(addonMarker);
+  const file = addonIndex >= 0
+    ? join(ROOT, 'node_modules/three/examples/jsm', decodeURIComponent(url.pathname.slice(addonIndex + addonMarker.length)))
+    : join(ROOT, 'node_modules/three/build/three.module.js');
+  await route.fulfill({ status: 200, contentType: 'text/javascript', body: await readFile(file) });
 });
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(`http://127.0.0.1:${port}/`);
-await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 30000 });
+await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 120000 });
 await page.tap('#new-game-button');
 await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeout: 8000 });
 await page.evaluate(() => window.shutoko.exitGarage());

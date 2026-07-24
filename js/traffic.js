@@ -28,6 +28,11 @@ const VEHICLE_TYPES = TRAFFIC_CAR_TYPES;
 // reads as a single uniform, high-visibility fleet. Each palette holds only
 // this one colour, which the random picker below then trivially selects.
 const NEON_GREEN = 0x39ff14;
+// A small self-lit floor keeps traffic readable through the night fog at any
+// distance. Static scene fill does the real shading; this only prevents the
+// body from collapsing to black, so approaching headlights no longer look like
+// they switched the vehicle on.
+const TRAFFIC_VISIBILITY_FLOOR = 0.28;
 const CAR_COLORS = [NEON_GREEN];
 const VAN_COLORS = [NEON_GREEN];
 const TRUCK_COLORS = [NEON_GREEN];
@@ -217,16 +222,12 @@ function mergedBoxGeometry(parts) {
 function makeTrafficMesh(geometries, sharedMaterials) {
   const group = new THREE.Group();
   group.name = 'traffic-vehicle';
-  // The body carries a self-lit floor (emissive = its own colour) so the
-  // fluorescent fleet reads at any distance instead of falling dark until the
-  // player's headlights reach it — which read as cars "switching on" / spawning
-  // as you close in. The runtime road-light rig only follows the player, so
-  // distant traffic can't be lit by real lamps; this floor stands in for it and
-  // must be strong enough that a far car is already clearly visible, so closing
-  // on it adds little. Raised 0.34 → 0.85 for exactly that. A material property,
-  // not a light, so it costs nothing per frame and adds no shader program.
-  // (If the fleet glows too hot up close, this single value is the dial.)
-  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true, emissiveIntensity: 0.85 }));
+  // Emissive is a Lambert uniform already present in the shader: no light,
+  // texture, draw call or extra program is added.
+  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({
+    flatShading: true,
+    emissiveIntensity: TRAFFIC_VISIBILITY_FLOOR,
+  }));
   const lamps = new THREE.Mesh(geometries.lamps, sharedMaterials.headlamp);
   const taillamp = new THREE.Mesh(geometries.brake, sharedMaterials.taillamp);
   const blinkerL = new THREE.Mesh(geometries.blinkerL, sharedMaterials.indicator);
@@ -462,6 +463,22 @@ export class TrafficSystem {
       if (!customRoles.has(role)) customRoles.set(role, []);
       customRoles.get(role).push(object);
     });
+    // Modeler replacements hide the generated body, so give their body
+    // materials the same distance-visibility floor. Cloned traffic models
+    // share these materials, making this a one-time uniform setup per class.
+    for (const bodyPart of customRoles.get('body') || []) {
+      for (const material of (Array.isArray(bodyPart.material) ? bodyPart.material : [bodyPart.material])) {
+        if (!material?.emissive || !material.color) continue;
+        // Modeler bodies use white as the neutral multiplier for photographic
+        // textures. Emitting that white made distant cars read as blown-out
+        // rectangles, so retain the fleet's authored neon identity here.
+        material.emissive.setHex(NEON_GREEN);
+        material.emissiveIntensity = Math.max(
+          finite(material.emissiveIntensity, 0),
+          TRAFFIC_VISIBILITY_FLOOR,
+        );
+      }
+    }
     if (customRoles.has('headlamp')) ud.lamps.visible = false;
     if (customRoles.has('taillamp')) {
       for (const lamp of ud.generatedTaillamps || []) lamp.visible = false;
@@ -632,9 +649,8 @@ export class TrafficSystem {
     const ud = vehicle.mesh.userData;
     ud.body.geometry = geoms.body;
     ud.body.material.color.set(color);
-    // Self-lit floor = the body's own (neon) colour. The whole fleet is one
-    // high-visibility colour, so this is what makes a car read at distance; the
-    // brightness is set once on the material (emissiveIntensity in makeTrafficMesh).
+    // Self-lit floor = the body's own (neon) colour. Static scene lights still
+    // provide shape; this low floor guarantees distance visibility.
     ud.body.material.emissive.set(color);
     ud.lamps.geometry = geoms.lamps;
     const generatedTaillamps = ud.generatedTaillamps || ud.taillamps;

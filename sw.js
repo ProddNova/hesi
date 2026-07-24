@@ -1,4 +1,4 @@
-const CACHE = 'shutoko-nights-v45';
+const CACHE = 'shutoko-nights-v46';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './manifest.webmanifest', './icon.svg', './fonts/shutoko-signal-regular.woff2', './fonts/shutoko-signal-bold.woff2', './fonts/shutoko-signal-display.woff2',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',

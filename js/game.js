@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260722b';
+import * as MapModule from './map.js?v=20260724d';
 import * as PhysicsModule from './physics.js?v=20260713a';
-import * as TrafficModule from './traffic.js?v=20260723b';
+import * as TrafficModule from './traffic.js?v=20260724d';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
@@ -11,11 +11,7 @@ import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-
 // (and one texture cache/budget); a ?v= query here would fork the module.
 import { buildCustomAssetGroup, fetchCustomAssetsDocument, setTextureSizeBudget } from './custom-assets.js';
 import { carModelEntry, carModelTarget } from './car-models.js';
-import {
-  createRuntimeRoadLightRig,
-  DEFAULT_LIGHTING,
-  updateRuntimeRoadLightRig,
-} from './lighting-config.js';
+import { DEFAULT_LIGHTING } from './lighting-config.js';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 import { DebugStats } from './debug-stats.js?v=20260724b';
@@ -114,15 +110,11 @@ class ShutokoNights {
     // saved config at boot.
     const tag=l=>{l.userData.gameSceneLight=true;return l;};
     this.roadScene.add(tag(new THREE.HemisphereLight(0x564a40,0x1e1510,1.58)));this.roadScene.add(tag(new THREE.AmbientLight(0x64524a,.66)));const moon=tag(new THREE.DirectionalLight(0x9aa6c4,.72));moon.position.set(-200,300,-100);this.roadScene.add(moon);
-    // A fixed light count follows the nearest generated fixtures. Unlike the
-    // additive asphalt pools, these real lights reach player and traffic cars.
-    // Count scales with quality so dense fixture stacks (C1/K1 loops, ramp
-    // merges — up to ~8-9 lamps within one light's reach) stay covered on
-    // capable hardware without lamps popping on/off, while low stays cheap.
-    // The count is baked into the shader light census, so it is fixed for the
-    // session (a quality change takes effect at next boot, like the render scale).
-    const roadLightCount={low:4,medium:6,high:8}[this.renderQuality?.()]??6;
-    this.runtimeRoadLightRig=createRuntimeRoadLightRig({count:roadLightCount});this.roadScene.add(this.runtimeRoadLightRig);
+    // Road lamps use static emissive heads plus additive pools baked into the
+    // map. Do not add player-following PointLights here: forward-rendered point
+    // lights tax every lit fragment, and moving a small slot pool between
+    // fixtures made lamps visibly switch on while still leaving distant traffic
+    // outside the pool. The fixed fill above lights every vehicle at any range.
     this.garageScene.add(tag(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7)));
   }
   buildWorld(){
@@ -130,8 +122,7 @@ class ShutokoNights {
     // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?legacyProgressiveMerges=1
     // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
-    try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';const p2HandoffDebug=params.get('p2HandoffDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(p2HandoffDebug?{progressiveMergeHandoffDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
-    if(this.map?.initialSpawn?.position)updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map.roadLightSources,this.map.initialSpawn.position,{force:true});
+    try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';const p2HandoffDebug=params.get('p2HandoffDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',addLighting:false,...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(p2HandoffDebug?{progressiveMergeHandoffDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
@@ -187,12 +178,9 @@ class ShutokoNights {
       // with distant chunks also visible, behind the boot overlay.
       // Traffic's lazily created brake-lamp material shares its program with
       // the always-present tail-lamp material, so it needs no special case.
-      // One frame covers exactly ONE lighting state — the light count is
-      // part of every program's cache key, so a light that later joined or
-      // left the render list would obsolete every program compiled here and
-      // re-link them all mid-drive. The map upholds that invariant by never
-      // chunk-streaming lights (HighwayMap._addChunkMesh), and the garage
-      // transitions swap scene and headlights in the same tick.
+      // One frame covers the road's single, stable lighting state. Static lamp
+      // pools are ordinary instanced meshes, so chunk streaming never changes
+      // the renderer's light census or forces shader programs to re-link.
       this.renderer.toneMappingExposure=this.roadScene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;this.renderer.render(this.roadScene,this.camera);
       this.performanceMetrics={...(this.performanceMetrics||{}),prewarmMs:performance.now()-t0,prewarmed:{geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures,programs:this.renderer.info.programs.length}};
     }catch(e){console.warn('GPU prewarm',e);}
@@ -368,7 +356,7 @@ class ShutokoNights {
   }
   finishFrameProf(frameStart){const pf=this.frameProf;pf.total=performance.now()-frameStart;pf.other=Math.max(0,pf.total-pf.phys-pf.traffic-pf.map-pf.render-pf.persist);this.debugStats?.frame(pf);}
   updateMobileFPS(now){if(!this.isTouchDevice)return;const meter=this.mobileFPS;meter.frames++;const elapsed=now-meter.startedAt;if(elapsed<500)return;this.ui.updateFPS(meter.frames*1000/elapsed);meter.frames=0;meter.startedAt=now;}
-  updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map?.roadLightSources,center);}
+  updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
     this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
@@ -421,7 +409,6 @@ class ShutokoNights {
     this.camera.position.copy(w.position);this.camera.up.set(0,1,0);
     this.camera.lookAt(w.position.x-Math.sin(w.yaw)*cosP,w.position.y+Math.sin(w.pitch),w.position.z-Math.cos(w.yaw)*cosP);
     this.map?.update?.(w.position,performance.now()/1000);
-    updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map?.roadLightSources,w.position);
     const near=Math.hypot(w.position.x-w.carPos.x,w.position.z-w.carPos.z)<4.5;
     this.ui.prompt(near?'<kbd>G</kbd> GET IN CAR':'WASD walk · look with mouse · <kbd>G</kbd> return to car',true);
   }
@@ -446,8 +433,6 @@ class ShutokoNights {
     this.syncFuelFromPhysics();this.resolveMapCollision();
     t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo,playerGhost:this.ghostTimer>0});pf.traffic+=performance.now()-t0;
     this.handleTrafficEvents();this.updatePlayerMesh();
-    const litState=this.getVehicleState(),litPosition=vec(litState.position||litState);
-    updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map?.roadLightSources,litPosition);
     t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
     const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
@@ -565,7 +550,7 @@ class ShutokoNights {
       world:{
         routes:this.map?.routes?.size??null,chunks:this.map?._chunks?.size??null,
         services:this.map?.serviceAreas?.length??null,wall_segments:this.map?.wallSegments?.length??null,
-        road_light_sources:this.map?.roadLightSources?.length??null,
+        road_lighting:'baked-pools',road_dynamic_lights:0,
       },
       boot_performance:{...(this.performanceMetrics||{})},
     };
@@ -993,15 +978,18 @@ class ShutokoNights {
   createCarMesh(spec,player=false){
     // Physics/camera anchor only. The box-built fallback car was removed; the
     // PSX model loaded by loadCustomCar is the only vehicle geometry.
-    const g=new THREE.Group(),d=spec.dimensions||{},L=d.length||4.25,W=d.width||1.7;
-    if(player){const left=new THREE.SpotLight(0xffe4bd,900,58,.48,.72,1.35),right=left.clone();left.position.set(-W*.28,.72,-L*.49);right.position.set(W*.28,.72,-L*.49);left.target.position.set(-W*.28,.1,-28);right.target.position.set(W*.28,.1,-28);g.add(left,right,left.target,right.target);left.userData.baseIntensity=left.intensity;right.userData.baseIntensity=right.intensity;this.playerHeadlights=[left,right];this._applyHeadlightState();}
+    const g=new THREE.Group(),d=spec.dimensions||{},L=d.length||4.25;
+    // One broad cone represents the overlapping pair of physical headlamps.
+    // The two visible lamp meshes remain on the car model, but a second
+    // SpotLight would duplicate almost the same per-fragment work.
+    if(player){const headlight=new THREE.SpotLight(0xffe4bd,1450,62,.5,.74,1.35);headlight.position.set(0,.72,-L*.49);headlight.target.position.set(0,.1,-30);g.add(headlight,headlight.target);headlight.userData.baseIntensity=headlight.intensity;this.playerHeadlights=[headlight];this._applyHeadlightState();}
     g.userData.frontWheels=[];g.userData.visualMeshes=[];return g;
   }
   // Toggle the player's headlights (L). We drive intensity to 0 rather than
   // hiding the lights: a SpotLight going invisible changes the scene's light
   // census and forces a full shader-program re-link (stutter). Intensity is a
   // plain uniform, so the census — and the prewarmed programs — stay valid.
-  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??900):0;}
+  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??1450):0;}
   toggleHeadlights(){this.headlightsOn=this.headlightsOn===false;this.debugStats?.event('headlights_changed',{enabled:this.headlightsOn});this._applyHeadlightState();this.ui?.toast?.(this.headlightsOn?'HEADLIGHTS ON':'HEADLIGHTS OFF');this.audioClick?.();}
 
   getOwnedBase(){const saved=this.state.ownedCar||{},id=this.state.ownedCarId||saved.carId||saved.id,base=this.catalog.find(c=>c.id===id)||saved||this.fallbackCar();return{...base,...saved,id:base.id||id,carId:id,color:saved.color||base.colors?.[0]||base.color,engine:{...(base.engine||{}),...(saved.engine||{})}};}
