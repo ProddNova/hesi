@@ -5034,6 +5034,51 @@ export class HighwayMap {
     this.roadLightSources.push({ position: position.clone(), color, intensity });
   }
 
+  /**
+   * The Tatsumi PA deck sits ~8.9 m above the wangan mainline, and a standard
+   * 9.26 m lamppost cannot fit beneath it — which is why the clearing suppresses
+   * every lamp, pool and light source in its footprint, leaving the carriageway
+   * pitch-black as you pass under the deck (reported: "Tatsumi PA is dark").
+   * Restore it with under-deck light SOURCES only: no geometry and no instances,
+   * so none of the index-sensitive Tatsumi deck edits shift. The runtime road
+   * rig picks these up like the underside luminaires of a real PA and lights the
+   * road and cars through the dark stretch. Sources hang below the deck soffit so
+   * nothing pokes through the slab. Placed after the normal lamp pass so it only
+   * ever adds inside the footprint the lamp pass had to skip.
+   */
+  _lightTatsumiUnderdeck() {
+    const area = this.serviceAreas?.find((a) => a.id === 'tatsumi_pa');
+    if (!area) return;
+    const deckY = area.elevation ?? area.center?.y ?? 0;
+    const routeIds = new Set([area.routeId, 'wangan_0', 'wangan_1'].filter(Boolean));
+    for (const rid of routeIds) {
+      const route = this.routes.get(rid);
+      if (!route) continue;
+      // Coarse scan for the mainline distance passing nearest the deck centre.
+      let bestD = 0, bestDist2 = Infinity;
+      for (let d = 0; d < route.length; d += 24) {
+        const c = this._sampleCenter(route, d, 1);
+        const dx = c.position.x - area.center.x, dz = c.position.z - area.center.z;
+        const dd = dx * dx + dz * dz;
+        if (dd < bestDist2) { bestDist2 = dd; bestD = d; }
+      }
+      if (bestDist2 > (area.length * 0.5 + 160) ** 2) continue; // route does not reach the deck
+      // Walk a window around it and drop soffit lights where the centreline is
+      // both inside the footprint AND genuinely below the deck (skip a ramp that
+      // has already climbed up to deck level).
+      // ~26 m spacing keeps the local fixture count near the deck within the
+      // runtime rig's slot budget, so the pop-in fix is not undone right here.
+      for (let d = bestD - 130; d <= bestD + 130; d += 26) {
+        const c = this._sampleCenter(route, this._normalizeDistance(route, d), 1);
+        if (!this._insideTatsumiClearing(c.position)) continue;
+        if (c.position.y > deckY - 3) continue;
+        const src = c.position.clone();
+        src.y = Math.min(deckY - 3.2, c.position.y + 5.2);
+        this.roadLightSources.push({ position: src, color: 0xff8a2e, intensity: 0.85 });
+      }
+    }
+  }
+
   /** True when `object` is or contains a light anywhere in its subtree. */
   _containsLight(object) {
     let found = false;
@@ -5158,6 +5203,9 @@ export class HighwayMap {
     this._buildBridge();
     this._buildSignage();
     this._buildServiceAreaDressing();
+    // Under-deck luminaires for the wangan where it runs beneath the Tatsumi
+    // deck (light sources only; adds nothing to any instance bucket).
+    this._lightTatsumiUnderdeck();
     this._buildCity();
     this._buildBackdrop();
     // Last of the three, deliberately: the infill only ever ADDS boxes to the

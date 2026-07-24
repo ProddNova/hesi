@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#060a12">
+  <meta name="theme-color" content="#05070c">
   <meta name="description" content="A PS2-era night highway driving game on the Shuto Expressway.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,7 +12,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <title>SHUTOKO NIGHTS</title>
-  <link rel="stylesheet" href="styles.css?v=20260723c">
+  <link rel="stylesheet" href="styles.css?v=20260724b">
   <link rel="stylesheet" href="styles/dev-map.css">
   <link rel="stylesheet" href="styles/debug-stats.css">
   <script type="importmap">
@@ -23,42 +23,58 @@
   <div id="game-shell">
     <canvas id="game-canvas" aria-label="Shutoko Nights game"></canvas>
     <div id="fade"></div>
+    <div id="crt" aria-hidden="true"></div>
 
     <section id="boot-screen" class="screen active">
-      <div class="boot-city"></div>
+      <div class="boot-grid" aria-hidden="true"></div>
+      <div class="boot-city" aria-hidden="true"></div>
+      <div class="boot-kanji" aria-hidden="true">首都高速</div>
       <div class="title-lockup">
-        <p class="eyebrow">首都高速 // TOKYO 02:17</p>
+        <p class="eyebrow">首都高速 // TOKYO · MIDNIGHT 02:17</p>
         <h1>SHUTOKO<br><span>NIGHTS</span></h1>
         <p class="tagline">NO FINISH LINE. JUST ONE MORE EXIT.</p>
-        <button id="continue-button" class="primary">CONTINUE</button>
-        <button id="new-game-button">NEW GAME</button>
-        <p class="micro">Best with headphones · Keyboard &amp; touch controls</p>
+        <div class="boot-menu">
+          <button id="continue-button" class="primary">CONTINUE</button>
+          <button id="new-game-button">NEW GAME</button>
+        </div>
+        <p class="micro">HEADPHONES ON · KEYBOARD &amp; TOUCH · © 2002 WANGAN WORKS</p>
+      </div>
+      <div class="boot-footer" aria-hidden="true">
+        <span>SYSTEM SOFTWARE Ver.2.02</span>
+        <span class="blink">● REC</span>
+        <span>NO MEMORY CARD REQUIRED</span>
       </div>
     </section>
 
     <section id="hud" class="hidden" aria-live="polite">
-      <div class="hud-top">
-        <div class="route-chip"><span id="route-name">C1 INNER</span><small id="area-name">KANDABASHI</small></div>
-        <div id="lives" class="lives"><i></i><i></i><i></i><span>RUN LIVES</span></div>
-        <div class="bank"><small>BANK</small><b id="hud-money">¥0</b></div>
+      <div class="hud-tl">
+        <div class="score-block">
+          <small>UNBANKED · 未精算</small>
+          <strong id="hud-score">000000</strong>
+          <div class="combo-row"><b id="hud-combo">×1.0</b><span id="combo-label">BUILD THE RUN</span></div>
+          <div id="combo-bar"><i></i></div>
+          <div id="lives" class="lives"><i></i><i></i><i></i><span>RUN LIVES</span></div>
+        </div>
+      </div>
+      <div class="hud-tr">
+        <div class="bank"><small>BANK · 残高</small><b id="hud-money">¥0</b></div>
       </div>
       <div id="mobile-fps" class="mobile-fps">-- FPS</div>
-      <div class="hud-bottom">
+      <div class="hud-bl">
         <div id="minimap-wrap">
           <canvas id="minimap" width="220" height="150"></canvas>
-          <span>N</span>
+          <span>GPS</span>
         </div>
-        <div class="score-stack">
-          <small>UNBANKED</small>
-          <strong id="hud-score">000000</strong>
-          <div><b id="hud-combo">×1.0</b><span id="combo-label">BUILD THE RUN</span></div>
-          <div id="combo-bar"><i></i></div>
-        </div>
+        <div class="area-chip"><b id="area-name">KANDABASHI</b><small id="route-name">C1 INNER</small></div>
+      </div>
+      <div class="hud-br">
         <div class="cluster">
-          <div class="tach"><i id="tach-fill"></i><em id="rpm-readout">0900</em><small>RPM</small></div>
-          <div class="speed"><strong id="speed-readout">0</strong><small>KM/H</small></div>
-          <div class="gear" id="gear-readout">N</div>
-          <div class="fuel"><span>FUEL</span><div><i id="fuel-fill"></i></div><b id="fuel-readout">100%</b></div>
+          <div class="dial dial-tach"><canvas id="gauge-tach"></canvas><em id="rpm-readout">0000</em></div>
+          <div class="dial dial-speed"><canvas id="gauge-speed"></canvas><strong id="speed-readout">0</strong><small>KM/H</small></div>
+          <div class="cluster-side">
+            <div class="gear" id="gear-readout">N</div>
+            <div class="fuel"><span>FUEL</span><div class="fuel-track"><i id="fuel-fill"></i></div><b id="fuel-readout">100%</b></div>
+          </div>
         </div>
       </div>
       <div id="interaction-prompt" class="prompt hidden"></div>
@@ -68,26 +84,29 @@
 
     <section id="phone" class="phone hidden" aria-label="Phone">
       <div class="phone-bezel">
-        <header><span>02:17</span><b>夜間</b><i>▮▮▮</i></header>
-        <div id="phone-home" class="phone-page active">
-          <div class="phone-wallpaper"><h2>湾岸<br>NAVI</h2><p id="phone-location">C1 INNER</p></div>
-          <div class="app-grid">
-            <button data-app="map"><i>路</i><span>Map</span></button>
-            <button data-app="tow"><i>牽</i><span>Tow</span></button>
-            <button data-app="stats"><i>記</i><span>Stats</span></button>
-            <button data-app="settings"><i>設</i><span>Settings</span></button>
-            <button data-app="admin"><i>管</i><span>Admin</span></button>
-            <button data-app="help"><i>?</i><span>Controls</span></button>
+        <div class="phone-earpiece" aria-hidden="true"></div>
+        <div class="phone-lcd">
+          <header><span>02:17</span><b>夜間</b><i>▮▮▮</i></header>
+          <div id="phone-home" class="phone-page active">
+            <div class="phone-wallpaper"><h2>湾岸<br>NAVI</h2><p id="phone-location">C1 INNER</p></div>
+            <div class="app-grid">
+              <button data-app="map"><i>路</i><span>Map</span></button>
+              <button data-app="tow"><i>牽</i><span>Tow</span></button>
+              <button data-app="stats"><i>記</i><span>Stats</span></button>
+              <button data-app="settings"><i>設</i><span>Settings</span></button>
+              <button data-app="admin"><i>管</i><span>Admin</span></button>
+              <button data-app="help"><i>?</i><span>Controls</span></button>
+            </div>
           </div>
+          <div id="phone-app" class="phone-page"></div>
         </div>
-        <div id="phone-app" class="phone-page"></div>
-        <footer><button id="phone-back">‹</button><button id="phone-home-key">●</button><button id="phone-close">×</button></footer>
+        <footer><button id="phone-back">‹ BACK</button><button id="phone-home-key">● MENU</button><button id="phone-close">END ×</button></footer>
       </div>
     </section>
 
     <section id="pc-overlay" class="pc hidden">
       <header>
-        <div class="pc-brand"><span>首都</span><b>WANGAN MARKET</b><small>VERIFIED NIGHT AUCTIONS</small></div>
+        <div class="pc-brand"><span>湾岸</span><b>WANGAN MARKET</b><small>NIGHT AUCTION TERMINAL</small></div>
         <nav>
           <button data-tab="auction" class="active">CAR AUCTION</button>
           <button data-tab="parts">PARTS SHOP</button>
@@ -101,7 +120,7 @@
 
     <section id="run-over" class="modal hidden">
       <div class="modal-card crash-card">
-        <p class="eyebrow">RUN TERMINATED</p>
+        <p class="eyebrow">RUN TERMINATED · 事故</p>
         <h2>NO HESI.<br><span>NO MERCY.</span></h2>
         <div><small>SCORE LOST</small><b id="lost-score">0</b></div>
         <button id="return-garage" class="primary">RETURN TO GARAGE</button>
@@ -111,7 +130,7 @@
     <section id="pause-help" class="modal hidden">
       <div class="modal-card help-card">
         <button id="help-close" class="modal-x">×</button>
-        <p class="eyebrow">DRIVER MANUAL</p>
+        <p class="eyebrow">DRIVER MANUAL · 取扱説明書</p>
         <h2>CONTROLS</h2>
         <div class="controls-grid">
           <dl><dt>W / ↑</dt><dd>Throttle</dd><dt>S / ↓</dt><dd>Brake / reverse</dd><dt>A D / ← →</dt><dd>Steer</dd><dt>SPACE</dt><dd>Handbrake</dd></dl>
@@ -206,10 +225,14 @@
     <div id="rotate-hint" class="rotate-hint" aria-hidden="true">
       <span>↻</span><b>ROTATE FOR THE BEST DRIVE</b><small>Portrait still works</small>
     </div>
-    <div id="loading" class="loading"><b>SHUTOKO NIGHTS</b><span>LOADING EXPRESSWAY...</span></div>
+    <div id="loading" class="loading">
+      <b>SHUTOKO NIGHTS</b>
+      <div class="load-bar" aria-hidden="true"><i></i></div>
+      <span>NOW LOADING // 首都高速</span>
+    </div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260724a"></script>
+  <script type="module" src="js/game.js?v=20260724b"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));

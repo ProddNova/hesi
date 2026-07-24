@@ -219,10 +219,13 @@ function makeTrafficMesh(geometries, sharedMaterials) {
   group.name = 'traffic-vehicle';
   // The body carries a self-lit floor (emissive = its own colour) so the
   // fluorescent fleet reads at any distance instead of falling to a black
-  // silhouette once it is outside the player's headlight cone — the reveal as
-  // you close on a car should be subtle, not "it just switched on". This is a
-  // material property, not a light, so it costs nothing per frame.
-  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true, emissiveIntensity: 0.34 }));
+  // silhouette once it is outside the player's headlight cone — cars should look
+  // as if they are already sitting under the sodium streetlights, not switch on
+  // only when the player's headlights reach them. The runtime road-light rig
+  // only follows the player, so distant traffic can't be lit by real lamps;
+  // this floor stands in for that. A material property, not a light, so it costs
+  // nothing per frame and adds no shader program.
+  const body = new THREE.Mesh(geometries.body, new THREE.MeshLambertMaterial({ flatShading: true, emissiveIntensity: 0.6 }));
   const lamps = new THREE.Mesh(geometries.lamps, sharedMaterials.headlamp);
   const taillamp = new THREE.Mesh(geometries.brake, sharedMaterials.taillamp);
   const blinkerL = new THREE.Mesh(geometries.blinkerL, sharedMaterials.indicator);

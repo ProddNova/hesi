@@ -116,7 +116,13 @@ class ShutokoNights {
     this.roadScene.add(tag(new THREE.HemisphereLight(0x564a40,0x1e1510,1.58)));this.roadScene.add(tag(new THREE.AmbientLight(0x64524a,.66)));const moon=tag(new THREE.DirectionalLight(0x9aa6c4,.72));moon.position.set(-200,300,-100);this.roadScene.add(moon);
     // A fixed light count follows the nearest generated fixtures. Unlike the
     // additive asphalt pools, these real lights reach player and traffic cars.
-    this.runtimeRoadLightRig=createRuntimeRoadLightRig();this.roadScene.add(this.runtimeRoadLightRig);
+    // Count scales with quality so dense fixture stacks (C1/K1 loops, ramp
+    // merges — up to ~8-9 lamps within one light's reach) stay covered on
+    // capable hardware without lamps popping on/off, while low stays cheap.
+    // The count is baked into the shader light census, so it is fixed for the
+    // session (a quality change takes effect at next boot, like the render scale).
+    const roadLightCount={low:4,medium:6,high:8}[this.renderQuality?.()]??6;
+    this.runtimeRoadLightRig=createRuntimeRoadLightRig({count:roadLightCount});this.roadScene.add(this.runtimeRoadLightRig);
     this.garageScene.add(tag(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7)));
   }
   buildWorld(){
@@ -216,6 +222,7 @@ class ShutokoNights {
       if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
       if(e.code==='KeyH'&&this.started&&!e.repeat){this.toggleHUD();this.pressed.delete(e.code);}
       if(e.code==='KeyC'&&this.mode==='driving'){this.cycleCamera();this.pressed.delete(e.code);}
+      if(e.code==='KeyL'&&this.mode==='driving'&&!e.repeat){this.toggleHeadlights();this.pressed.delete(e.code);}
       if(e.code==='KeyR'&&this.mode==='driving'){this.recover();this.pressed.delete(e.code);}
       // Step out of / back into the car anywhere.
       if(e.code==='KeyG'&&this.started&&!e.repeat&&!this.ui.pcOpen&&!this.ui.phoneOpen&&!this.debug.menuOpen){if(this.mode==='driving')this.exitVehicle();else if(this.mode==='walk')this.tryEnterVehicle();this.pressed.delete(e.code);}
@@ -927,9 +934,15 @@ class ShutokoNights {
     // Physics/camera anchor only. The box-built fallback car was removed; the
     // PSX model loaded by loadCustomCar is the only vehicle geometry.
     const g=new THREE.Group(),d=spec.dimensions||{},L=d.length||4.25,W=d.width||1.7;
-    if(player){const left=new THREE.SpotLight(0xffe4bd,900,58,.48,.72,1.35),right=left.clone();left.position.set(-W*.28,.72,-L*.49);right.position.set(W*.28,.72,-L*.49);left.target.position.set(-W*.28,.1,-28);right.target.position.set(W*.28,.1,-28);g.add(left,right,left.target,right.target);}
+    if(player){const left=new THREE.SpotLight(0xffe4bd,900,58,.48,.72,1.35),right=left.clone();left.position.set(-W*.28,.72,-L*.49);right.position.set(W*.28,.72,-L*.49);left.target.position.set(-W*.28,.1,-28);right.target.position.set(W*.28,.1,-28);g.add(left,right,left.target,right.target);left.userData.baseIntensity=left.intensity;right.userData.baseIntensity=right.intensity;this.playerHeadlights=[left,right];this._applyHeadlightState();}
     g.userData.frontWheels=[];g.userData.visualMeshes=[];return g;
   }
+  // Toggle the player's headlights (L). We drive intensity to 0 rather than
+  // hiding the lights: a SpotLight going invisible changes the scene's light
+  // census and forces a full shader-program re-link (stutter). Intensity is a
+  // plain uniform, so the census — and the prewarmed programs — stay valid.
+  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??900):0;}
+  toggleHeadlights(){this.headlightsOn=this.headlightsOn===false;this._applyHeadlightState();this.ui?.toast?.(this.headlightsOn?'HEADLIGHTS ON':'HEADLIGHTS OFF');this.audioClick?.();}
 
   getOwnedBase(){const saved=this.state.ownedCar||{},id=this.state.ownedCarId||saved.carId||saved.id,base=this.catalog.find(c=>c.id===id)||saved||this.fallbackCar();return{...base,...saved,id:base.id||id,carId:id,color:saved.color||base.colors?.[0]||base.color,engine:{...(base.engine||{}),...(saved.engine||{})}};}
   getPartsForOwned(){const id=this.state.ownedCarId;const list=typeof Data.getPartsForCar==='function'?Data.getPartsForCar(id):this.partCatalog;return(list||[]).filter(p=>!p.carIds||p.carIds.includes(id)||p.universal);}
