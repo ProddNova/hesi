@@ -304,9 +304,10 @@ The replacement has a fixed cost:
   fill (`ambient 0.72`, `direct 0.82`, master `0.9`) instead of tinting the
   global lights black. This reaches the full scene and all traffic at any
   distance without adding local lights.
-- Procedural and Modeler traffic bodies share a small neon-green emissive
-  visibility floor (`0.28`). It prevents black silhouettes through the night
-  fog without turning photographic Modeler bodies into white glowing boxes.
+- Procedural fallback traffic bodies use a small emissive floor in their own
+  realistic paint colour (`0.18`). Modeler traffic keeps its authored,
+  photographic materials untouched and relies on the static scene fill, so
+  distant vehicles remain readable without a green cast or extra lights.
 - Tatsumi under-deck coverage is 16 warm decals in one late-built
   `InstancedMesh`; it does not alter editor instance indices and adds one draw
   call only when visible.

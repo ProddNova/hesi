@@ -190,8 +190,13 @@ export function trafficCarPartSpecs(typeOrId) {
   const frontZ = half - 0.04;
   const rearZ = -half + 0.04;
   const lampW = Math.min(0.3, w * 0.17);
+  const bodyColor = {
+    car: '#b9c0c9',
+    van: '#e6e8ea',
+    truck: '#4a6274',
+  }[type.id] || '#b9c0c9';
   return [
-    { role: 'body', name: 'Body', scale: [w, h, l], position: [0, h * 0.5, 0], color: '#39ff14' },
+    { role: 'body', name: 'Body', scale: [w, h, l], position: [0, h * 0.5, 0], color: bodyColor },
     { role: 'headlamp', name: 'Headlamp L', scale: [lampW, 0.16, 0.06], position: [-w * 0.33, headY, frontZ], color: '#fff0be' },
     { role: 'headlamp', name: 'Headlamp R', scale: [lampW, 0.16, 0.06], position: [w * 0.33, headY, frontZ], color: '#fff0be' },
     { role: 'taillamp', name: 'Taillamp L', scale: [lampW, 0.18, 0.06], position: [-w * 0.34, tailY, rearZ], color: '#8a1512' },

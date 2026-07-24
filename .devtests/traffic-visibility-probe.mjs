@@ -60,15 +60,37 @@ const spots = [
   { name: 'k1', route: 'k1', frac: 0.5 },
 ];
 for (const spot of spots) {
-  await page.evaluate((s) => {
+  const trafficSample = await page.evaluate((s) => {
     const g = window.shutoko;
     const route = g.map.getRoute(s.route);
-    const lane = g.map.sampleLane(s.route, route.length * s.frac, 0, 1);
+    const baseS = route.length * s.frac;
+    const lane = g.map.sampleLane(s.route, baseS, 0, 1);
     g.physics.setPosition(lane.position.x, lane.position.y + 0.6, lane.position.z, lane.heading);
     g.physics.setSpeed(0);
     g.snapDrivingCamera();
+    for (const vehicle of [...g.traffic.active]) g.traffic.despawnVehicle(vehicle);
+    g.traffic.options.minSpawnDistance = 20;
+    for (const [offset, laneIndex] of [[55, 0], [85, 1], [115, 2]]) {
+      const sample = g.map.sampleLane(s.route, baseS + offset, laneIndex, 1);
+      g.traffic.spawnVehicle({ ...sample, playerDistance: offset }, { initialSpeed: 0 });
+    }
+    return g.traffic.active.map((vehicle) => {
+      const model = vehicle.mesh.userData.customModel;
+      const materials = [];
+      model?.traverse((part) => {
+        if (part.userData?.hesiTrafficPartRole !== 'body') return;
+        for (const material of (Array.isArray(part.material) ? part.material : [part.material])) {
+          if (material) materials.push({
+            color: material.color?.getHexString?.(),
+            emissive: material.emissive?.getHexString?.(),
+          });
+        }
+      });
+      return { type: vehicle.type.id, custom: Boolean(model), materials };
+    });
   }, spot);
-  await page.waitForTimeout(4000);
+  console.log(`${spot.name} traffic:`, trafficSample);
+  await page.waitForTimeout(2000);
   await page.screenshot({ path: join(OUT, `traffic-${TAG}-${spot.name}.png`) });
 }
 console.log('page errors:', errors.length ? errors.slice(0, 3) : 'none');

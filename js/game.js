@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as MapModule from './map.js?v=20260724d';
 import * as PhysicsModule from './physics.js?v=20260713a';
-import * as TrafficModule from './traffic.js?v=20260724d';
+import * as TrafficModule from './traffic.js?v=20260724e';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';

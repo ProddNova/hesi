@@ -59,6 +59,7 @@ test('car model document entries validate shape references and traffic behavior'
 });
 
 test('traffic Modeler definitions are the exact boxes used by live traffic', () => {
+  const expectedBodyColors = { car: '#b9c0c9', van: '#e6e8ea', truck: '#4a6274' };
   for (const type of TRAFFIC_CAR_TYPES) {
     const specs = trafficCarPartSpecs(type);
     const definition = trafficCarDefinition(type, `custom:${type.id}`);
@@ -71,6 +72,7 @@ test('traffic Modeler definitions are the exact boxes used by live traffic', () 
     );
     assert.deepEqual(specs[0].scale, [type.width, type.height, type.length]);
     assert.deepEqual(specs[0].position, [0, type.height * 0.5, 0]);
+    assert.equal(specs[0].color, expectedBodyColors[type.id]);
     assert.equal(specs.some((part) => part.name.includes('Wheel')), false);
     assert.equal(specs.some((part) => part.name.includes('Windscreen')), false);
   }
@@ -97,6 +99,7 @@ test('traffic Modeler overrides rebuild vehicles that are already active', () =>
       scale: [2.1, 1.6, 5],
       color: '#ff3366',
       faces: {},
+      vehicleRole: 'body',
     }],
   };
   document.carModels['traffic:car'] = {
@@ -111,6 +114,15 @@ test('traffic Modeler overrides rebuild vehicles that are already active', () =>
   assert.equal(vehicle.mesh.userData.body.visible, false);
   assert.equal(vehicle.mesh.userData.customModelType, 'car');
   assert.ok(vehicle.mesh.userData.customModel?.children.length);
+  let customBody = null;
+  vehicle.mesh.userData.customModel.traverse((part) => {
+    if (!customBody && part.userData?.hesiTrafficPartRole === 'body') customBody = part;
+  });
+  const customBodyMaterials = Array.isArray(customBody?.material)
+    ? customBody.material
+    : [customBody?.material];
+  assert.ok(customBodyMaterials.every((material) => material?.emissive));
+  assert.ok(customBodyMaterials.every((material) => material.emissive.getHex() === 0x000000));
 
   traffic.applyModelOverrides(blankCustomAssetsDocument());
   assert.equal(vehicle.width, TRAFFIC_CAR_TYPES[0].width);

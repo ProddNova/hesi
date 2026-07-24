@@ -23,19 +23,24 @@ const UP = new THREE.Vector3(0, 1, 0);
 //   topSpeed   — free-flow cruising speed in m/s (highway limit caps it).
 const VEHICLE_TYPES = TRAFFIC_CAR_TYPES;
 
-// Per-class colour palettes. Every traffic vehicle — car, van and tir alike —
-// is painted the same fluorescent "neon" green (verde fluo), so the AI traffic
-// reads as a single uniform, high-visibility fleet. Each palette holds only
-// this one colour, which the random picker below then trivially selects.
-const NEON_GREEN = 0x39ff14;
-// A small self-lit floor keeps traffic readable through the night fog at any
-// distance. Static scene fill does the real shading; this only prevents the
-// body from collapsing to black, so approaching headlights no longer look like
-// they switched the vehicle on.
-const TRAFFIC_VISIBILITY_FLOOR = 0.28;
-const CAR_COLORS = [NEON_GREEN];
-const VAN_COLORS = [NEON_GREEN];
-const TRUCK_COLORS = [NEON_GREEN];
+// Muted, realistic paint palettes keep traffic varied without introducing
+// saturated colour casts into the night scene.
+const CAR_COLORS = [
+  0xb9c0c9, 0xf0f1f3, 0x14161b, 0x33445c, 0x6d7683, 0x8a2531,
+  0x24506b, 0x2f6146, 0xbfae87, 0x71324a, 0x2b2d33, 0x9a9ea6,
+  0x7a2f22, 0x455a74, 0xd8c9a4, 0x394a3d,
+];
+const VAN_COLORS = [
+  0xf1f2f0, 0xe6e8ea, 0xcfd2ce, 0xdfe3e6, 0x8fa0ad,
+  0x9c6b3f, 0x2f4f6b, 0xb0453a, 0xe4e5e0,
+];
+const TRUCK_COLORS = [
+  0xe9eaec, 0xd6dade, 0x4a6274, 0x8a2f2a,
+  0x2c3440, 0xb7bcc2, 0x35617a, 0x7c8894,
+];
+// Procedural fallback boxes retain only a very small floor in their own paint
+// colour. Authored Modeler materials are left untouched and use the scene fill.
+const TRAFFIC_VISIBILITY_FLOOR = 0.18;
 const COLORS_BY_ID = { car: CAR_COLORS, van: VAN_COLORS, truck: TRUCK_COLORS };
 
 // Neutral fallback so a hand-built vehicle (tests) still behaves sanely.
@@ -463,22 +468,9 @@ export class TrafficSystem {
       if (!customRoles.has(role)) customRoles.set(role, []);
       customRoles.get(role).push(object);
     });
-    // Modeler replacements hide the generated body, so give their body
-    // materials the same distance-visibility floor. Cloned traffic models
-    // share these materials, making this a one-time uniform setup per class.
-    for (const bodyPart of customRoles.get('body') || []) {
-      for (const material of (Array.isArray(bodyPart.material) ? bodyPart.material : [bodyPart.material])) {
-        if (!material?.emissive || !material.color) continue;
-        // Modeler bodies use white as the neutral multiplier for photographic
-        // textures. Emitting that white made distant cars read as blown-out
-        // rectangles, so retain the fleet's authored neon identity here.
-        material.emissive.setHex(NEON_GREEN);
-        material.emissiveIntensity = Math.max(
-          finite(material.emissiveIntensity, 0),
-          TRAFFIC_VISIBILITY_FLOOR,
-        );
-      }
-    }
+    // Keep authored Modeler body materials unchanged. Their white base colour
+    // is a neutral multiplier for photographic textures; forcing emissive on
+    // it creates flat, fluorescent rectangles at distance.
     if (customRoles.has('headlamp')) ud.lamps.visible = false;
     if (customRoles.has('taillamp')) {
       for (const lamp of ud.generatedTaillamps || []) lamp.visible = false;
@@ -649,8 +641,8 @@ export class TrafficSystem {
     const ud = vehicle.mesh.userData;
     ud.body.geometry = geoms.body;
     ud.body.material.color.set(color);
-    // Self-lit floor = the body's own (neon) colour. Static scene lights still
-    // provide shape; this low floor guarantees distance visibility.
+    // A subtle floor in the body's own paint colour prevents procedural
+    // fallbacks from becoming black silhouettes without making them glow.
     ud.body.material.emissive.set(color);
     ud.lamps.geometry = geoms.lamps;
     const generatedTaillamps = ud.generatedTaillamps || ud.taillamps;
