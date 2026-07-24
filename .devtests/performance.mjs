@@ -156,7 +156,7 @@ const workload = await page.evaluate(({ targetFps, samples: sampleCount }) => {
   const game = window.shutoko;
   // Stop the game's own loop after its already-queued callback, then measure
   // complete update+render work without display-vsync hiding CPU/GPU submission
-  // cost. This is the budget that must fit inside 6.94 ms / 33.33 ms.
+  // cost. This is the budget that must fit inside 6.94 ms / 16.67 ms.
   game.animate = () => {};
   const samples = [];
   const subsystems = [];
@@ -178,7 +178,7 @@ const workload = await page.evaluate(({ targetFps, samples: sampleCount }) => {
     });
   }
   return { samples, subsystems };
-}, { targetFps: desktopTarget ? 144 : 30, samples: quickTarget ? 60 : 120 });
+}, { targetFps: desktopTarget ? 144 : 60, samples: quickTarget ? 60 : 120 });
 const workloadTiming = workload.samples;
 workloadTiming.sort((a, b) => a - b);
 const workloadPercentile = (fraction) => workloadTiming[Math.min(workloadTiming.length - 1, Math.floor(workloadTiming.length * fraction))];
@@ -233,7 +233,7 @@ server.close();
 
 const result = {
   targetRoot: ROOT,
-  target: desktopTarget ? 'desktop-144' : 'ipad-30',
+  target: desktopTarget ? 'desktop-144' : 'ipad-unlocked',
   viewport,
   nodeMapBuildMs: {
     runs: buildTimes.map((value) => Number(value.toFixed(1))),
@@ -254,7 +254,7 @@ const result = {
     mean: Number((workloadTiming.reduce((sum, value) => sum + value, 0) / workloadTiming.length).toFixed(2)),
     p50: Number(workloadPercentile(0.5).toFixed(2)),
     p95: Number(workloadPercentile(0.95).toFixed(2)),
-    budget: Number((1000 / (desktopTarget ? 144 : 30)).toFixed(2)),
+    budget: Number((1000 / (desktopTarget ? 144 : 60)).toFixed(2)),
     subsystems: workloadSubsystems,
   },
   errors,

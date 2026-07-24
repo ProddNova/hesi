@@ -25,7 +25,9 @@ measured costs instead:
 - distant/behind traffic stays simulated but is omitted from render batches;
 - the generated road world has static world matrices after boot, while the
   camera, player/headlight and animated markers are updated explicitly;
-- desktop retains the 144 fps presentation target and iPad the 30 fps target.
+- desktop retains the 144 fps presentation target; mobile presentation is
+  uncapped and follows the display's native `requestAnimationFrame` cadence,
+  while its adaptive-resolution governor targets a 60 fps workload budget.
 
 The synthetic Chromium/SwiftShader performance probe becomes pathological when
 the restored dynamic spotlight is present, so it remains useful only for

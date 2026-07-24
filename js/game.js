@@ -68,7 +68,10 @@ class ShutokoNights {
   createPerformanceProfile(){
     if(this.isTouchDevice){
       const apple=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-      return{name:apple?'ipad-30':'touch-30',targetFps:30,frameIntervalMs:1000/30,hudIntervalMs:100,trafficCount:40,maxTraffic:60,spawnRadius:720,despawnRadius:920,trafficRenderRadius:650,viewDistanceScale:.78,maxPixels:1250000,initialRenderScale:.72,minRenderScale:.5};
+      // Let requestAnimationFrame follow the display's native refresh rate on
+      // mobile. targetFps remains the performance governor's quality budget;
+      // frameIntervalMs=0 means there is no artificial presentation cap.
+      return{name:apple?'ipad-unlocked':'touch-unlocked',targetFps:60,frameIntervalMs:0,hudIntervalMs:100,trafficCount:40,maxTraffic:60,spawnRadius:720,despawnRadius:920,trafficRenderRadius:650,viewDistanceScale:.78,maxPixels:1250000,initialRenderScale:.72,minRenderScale:.5};
     }
     return{name:'desktop-144',targetFps:144,frameIntervalMs:1000/144,hudIntervalMs:1000/30,trafficCount:56,maxTraffic:84,spawnRadius:850,despawnRadius:1100,trafficRenderRadius:900,viewDistanceScale:1,maxPixels:3200000,initialRenderScale:.82,minRenderScale:.68};
   }
@@ -364,15 +367,19 @@ class ShutokoNights {
 
   animate(now=performance.now()){requestAnimationFrame(next=>this.animate(next));
     const frameInterval=this.performanceProfile.frameIntervalMs;
-    // Cap presentation at the profile target. A small tolerance absorbs Safari
-    // timestamp jitter; carrying the remainder keeps 144 fps as an average on
-    // 165/240 Hz panels instead of falling to a simple integer divisor.
-    if(this._lastPresentedAt){
-      const elapsed=now-this._lastPresentedAt;
-      const tolerance=this.isTouchDevice?.8:.9;
-      if(elapsed<frameInterval*tolerance)return;
-      this._lastPresentedAt=elapsed>=frameInterval?now-(elapsed%frameInterval):now;
-    }else this._lastPresentedAt=now;
+    // A positive interval caps presentation for profiles that request it.
+    // Mobile uses zero so every display-vsync callback reaches the game loop.
+    if(frameInterval>0){
+      // A small tolerance absorbs timestamp jitter; carrying the remainder
+      // keeps 144 fps as an average on 165/240 Hz panels instead of falling to
+      // a simple integer divisor.
+      if(this._lastPresentedAt){
+        const elapsed=now-this._lastPresentedAt;
+        const tolerance=this.isTouchDevice?.8:.9;
+        if(elapsed<frameInterval*tolerance)return;
+        this._lastPresentedAt=elapsed>=frameInterval?now-(elapsed%frameInterval):now;
+      }else this._lastPresentedAt=now;
+    }
     // Clamp at 50 ms so a 20 fps phone still simulates at full speed (the
     // physics integrates fixed 120 Hz substeps internally, so a large dt
     // stays stable); anything slower degrades to slow motion rather than
