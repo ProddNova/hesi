@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260724d';
+import * as MapModule from './map.js?v=20260724e';
 import * as PhysicsModule from './physics.js?v=20260713a';
-import * as TrafficModule from './traffic.js?v=20260724e';
+import * as TrafficModule from './traffic.js?v=20260724f';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
@@ -9,7 +9,7 @@ import { GarageSystem } from './garage.js?v=20260723b';
 import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=20260724a';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { buildCustomAssetGroup, fetchCustomAssetsDocument, setTextureSizeBudget } from './custom-assets.js';
+import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js';
 import { carModelEntry, carModelTarget } from './car-models.js';
 import { DEFAULT_LIGHTING } from './lighting-config.js';
 import { GameUI } from './ui.js?v=20260713a';
@@ -27,15 +27,19 @@ const DEFAULT_CUSTOM_CAR_SCALE=1;
 class ShutokoNights {
   constructor(){
     this.canvas=document.getElementById('game-canvas');
+    this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
+    this.performanceProfile=this.createPerformanceProfile();
     // MSAA is close to free on Apple tile-based GPUs and the PS2 target needs
-    // clean edges at near-native resolution.
-    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:true,powerPreference:'high-performance',alpha:false});
+    // clean edges at near-native resolution. Mobile instead spends that budget
+    // on a stable 30 fps and uses its lower internal resolution as antialiasing.
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isTouchDevice,powerPreference:'high-performance',alpha:false,precision:this.isTouchDevice?'mediump':'highp'});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=DEFAULT_LIGHTING.exposure;this.renderer.shadowMap.enabled=false;
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
     this.camera=new THREE.PerspectiveCamera(64,16/9,.3,1250);
     this.roadScene=new THREE.Scene();this.garageScene=new THREE.Scene();
-    this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
+    this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;
+    this._lastPresentedAt=0;this._nextHudUpdate=0;this._dynamicRenderScale=1;
     // Per-frame subsystem timings (ms). Filled by animate()/updateDriving()
     // and consumed by DebugStats so long frames name their cause in the log.
     this.frameProf={phys:0,traffic:0,map:0,render:0,persist:0,other:0,total:0};
@@ -57,6 +61,20 @@ class ShutokoNights {
     window.addEventListener('orientationchange',()=>{this.resize();setTimeout(()=>this.resize(),350);});
     window.visualViewport?.addEventListener('resize',()=>this.resize());
     this.ui.showBoot(this.hadSave);this.ui.finishLoading();this.animate();
+  }
+
+  createPerformanceProfile(){
+    if(this.isTouchDevice){
+      const apple=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+      return{name:apple?'ipad-30':'touch-30',targetFps:30,frameIntervalMs:1000/30,hudIntervalMs:100,trafficCount:40,maxTraffic:60,spawnRadius:720,despawnRadius:920,viewDistanceScale:.78,maxPixels:1250000};
+    }
+    return{name:'desktop-144',targetFps:144,frameIntervalMs:1000/144,hudIntervalMs:1000/30,trafficCount:56,maxTraffic:84,spawnRadius:850,despawnRadius:1100,viewDistanceScale:1,maxPixels:3200000};
+  }
+
+  shouldUpdateHUD(now=performance.now()){
+    if(now<this._nextHudUpdate)return false;
+    this._nextHudUpdate=now+this.performanceProfile.hudIntervalMs;
+    return true;
   }
 
   setupPersistence(){
@@ -122,7 +140,7 @@ class ShutokoNights {
     // ?legacyMouths=1 draws the pre-junction-rebuild full ribbons; ?legacyProgressiveMerges=1
     // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
-    try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';const p2HandoffDebug=params.get('p2HandoffDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',addLighting:false,...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(p2HandoffDebug?{progressiveMergeHandoffDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';const p2HandoffDebug=params.get('p2HandoffDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',viewDistanceScale:this.performanceProfile.viewDistanceScale,addLighting:false,...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(p2HandoffDebug?{progressiveMergeHandoffDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
@@ -138,7 +156,7 @@ class ShutokoNights {
     const effective=this.getEffectiveCar();this.audio?.setVehicle?.(effective);
     this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
     this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);this.ensureCustomCarLoaded({silent:true,persist:false});
-    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.isTouchDevice?44:56,density:1,maxVehicles:84});this.applyTrafficAdmin();}catch(e){console.error('Traffic init',e);this.traffic=null;}
+    try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.performanceProfile.trafficCount,density:1,maxVehicles:this.performanceProfile.maxTraffic,spawnRadius:this.performanceProfile.spawnRadius,despawnRadius:this.performanceProfile.despawnRadius});this.applyTrafficAdmin();}catch(e){console.error('Traffic init',e);this.traffic=null;}
     this.garage=new GarageSystem(this.garageScene,this.camera,this.canvas,{
       isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,openPC:()=>this.ui.openPC(this.getPCContext()),exitGarage:()=>this.exitGarage(),sleep:()=>this.returnToMenu(),finishInstall:d=>this.finishInstall(d),
       prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
@@ -340,7 +358,17 @@ class ShutokoNights {
   getWalkInput(){return{forward:!!(this.keys.KeyW||this.keys.ArrowUp),backward:!!(this.keys.KeyS||this.keys.ArrowDown),left:!!this.keys.KeyA,right:!!this.keys.KeyD,sprint:!!this.keys.ShiftLeft,interactPressed:this.take('KeyE')};}
   take(...codes){for(const c of codes)if(this.pressed.has(c)){this.pressed.delete(c);return true;}return false;}
 
-  animate(){requestAnimationFrame(()=>this.animate());
+  animate(now=performance.now()){requestAnimationFrame(next=>this.animate(next));
+    const frameInterval=this.performanceProfile.frameIntervalMs;
+    // Cap presentation at the profile target. A small tolerance absorbs Safari
+    // timestamp jitter; carrying the remainder keeps 144 fps as an average on
+    // 165/240 Hz panels instead of falling to a simple integer divisor.
+    if(this._lastPresentedAt){
+      const elapsed=now-this._lastPresentedAt;
+      const tolerance=this.isTouchDevice?.8:.9;
+      if(elapsed<frameInterval*tolerance)return;
+      this._lastPresentedAt=elapsed>=frameInterval?now-(elapsed%frameInterval):now;
+    }else this._lastPresentedAt=now;
     // Clamp at 50 ms so a 20 fps phone still simulates at full speed (the
     // physics integrates fixed 120 Hz substeps internally, so a large dt
     // stays stable); anything slower degrades to slow motion rather than
@@ -359,7 +387,7 @@ class ShutokoNights {
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
-    this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
+    if(this.shouldUpdateHUD())this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
   }
 
   // ---- On-foot mode (step out of the car anywhere) -------------------------
@@ -430,11 +458,14 @@ class ShutokoNights {
     // pull the events out for scoring so scrapes/hits still cost combo/lives.
     for(const ev of this.physics.consumeEvents?.()||[]){if(ev.type==='collision'&&(ev.kind==='wall'||ev.kind==='impact'))this.registerContact('wall',{severity:ev.severity,normal:ev.normal});}
     if(this.admin.infiniteFuel)this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);
-    this.syncFuelFromPhysics();this.resolveMapCollision();
+    // VehiclePhysics already performs continuous wall sweeps inside every
+    // 120 Hz substep. A second full-frame sweep here duplicated the most
+    // expensive road query and caused the large "other" spikes in diagnostics.
+    this.syncFuelFromPhysics();
     t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo,playerGhost:this.ghostTimer>0});pf.traffic+=performance.now()-t0;
     this.handleTrafficEvents();this.updatePlayerMesh();
     t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
-    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
+    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);if(this.shouldUpdateHUD())this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
   }
 
@@ -540,7 +571,7 @@ class ShutokoNights {
         torque_nm:car.peakTorque??car.torque??null,mass_kg:car.mass??car.massKg??null,
         drivetrain:car.drivetrain??null,gearbox:this.state?.settings?.gearbox??null,
       },
-      settings:{...this.state?.settings,camera:this.cameraMode},
+      settings:{...this.state?.settings,camera:this.cameraMode,performanceProfile:this.performanceProfile?.name,targetFps:this.performanceProfile?.targetFps,dynamicRenderScale:this._dynamicRenderScale},
       runtime_tuning:{
         time_scale:this.admin?.timeScale??1,traffic_density:this.admin?.trafficDensity??1,
         traffic_truck_ratio:this.admin?.trafficTruckRatio??null,traffic_van_ratio:this.admin?.trafficVanRatio??null,
@@ -758,7 +789,7 @@ class ShutokoNights {
   }
   disposeCarVisual(visual){
     if(!visual)return;
-    if(visual.userData?.hesiCarOverrideAssetId){visual.removeFromParent();return;}
+    if(visual.userData?.hesiCarOverrideAssetId){visual.traverse(object=>{if(!object.userData?.hesiRuntimeMerged)return;object.geometry?.dispose?.();for(const material of(Array.isArray(object.material)?object.material:[object.material]))material?.dispose?.();});visual.removeFromParent();return;}
     disposePSXCar(visual);
   }
   clearCustomCarObject({abort=false}={}){
@@ -777,7 +808,7 @@ class ShutokoNights {
     const promise=overrideId
       ? Promise.resolve().then(()=>{
         const definition=this.editorCarAssets.assets[overrideId];
-        const visual=buildCustomAssetGroup(definition,this.editorCarAssets.textures||{},{resolveAssetPart:this.editorCarResolver||(()=>null)});
+        const visual=optimizeStaticCustomAssetGroup(buildCustomAssetGroup(definition,this.editorCarAssets.textures||{},{resolveAssetPart:this.editorCarResolver||(()=>null)}));
         if(!visual.children.length)throw new Error(`Car override ${overrideId} contains no renderable parts`);
         visual.name=`Modeler car · ${definition.label||modelId}`;
         visual.userData.psxCarId=modelId;visual.userData.psxCarLabel=getPSXCarModel(modelId).label;visual.userData.hesiCarOverrideAssetId=overrideId;
@@ -955,11 +986,13 @@ class ShutokoNights {
   resize(){
     // PS2-era target: near-native internal resolution. Low keeps weaker
     // devices playable, High is true device pixels.
-    const q=this.renderQuality(),scale={low:.55,medium:.75,high:1}[q]||.75;
+    const q=this.renderQuality(),qualityScale=this.isTouchDevice?{low:.4,medium:.5,high:.62}:{low:.55,medium:.75,high:1};
+    const scale=(qualityScale[q]||qualityScale.medium)*this._dynamicRenderScale;
     const dpr=Math.min(window.devicePixelRatio||1,3);
     let w=Math.round(innerWidth*dpr*scale),h=Math.round(innerHeight*dpr*scale);
-    // ~3.2 MP cap keeps 3x-DPR phones inside the fill-rate budget.
-    const maxPixels=3200000;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    // iPads have laptop-sized physical resolutions but a much smaller sustained
+    // GPU/thermal budget. Cap them near 1.25 MP; desktop High remains native.
+    const maxPixels=this.performanceProfile.maxPixels;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     this.renderer.setSize(w,h,false);
     this.camera.aspect=innerWidth/Math.max(1,innerHeight);this.camera.updateProjectionMatrix();
@@ -978,23 +1011,25 @@ class ShutokoNights {
   createCarMesh(spec,player=false){
     // Physics/camera anchor only. The box-built fallback car was removed; the
     // PSX model loaded by loadCustomCar is the only vehicle geometry.
-    const g=new THREE.Group(),d=spec.dimensions||{},L=d.length||4.25;
-    // One broad cone represents the overlapping pair of physical headlamps.
-    // The two visible lamp meshes remain on the car model, but a second
-    // SpotLight would duplicate almost the same per-fragment work.
-    if(player){const headlight=new THREE.SpotLight(0xffe4bd,1450,62,.5,.74,1.35);headlight.position.set(0,.72,-L*.49);headlight.target.position.set(0,.1,-30);g.add(headlight,headlight.target);headlight.userData.baseIntensity=headlight.intensity;this.playerHeadlights=[headlight];this._applyHeadlightState();}
+    const g=new THREE.Group();
+    // A translucent additive wash gives the PS2 headlight pool without adding a
+    // dynamic SpotLight to every material shader. The former spotlight taxed
+    // every fragment in 300-500 draw calls, especially hard on iPad tile GPUs.
+    if(player){const geometry=new THREE.CircleGeometry(1,24);geometry.rotateX(-Math.PI*.5);const material=new THREE.MeshBasicMaterial({color:0xffd9a8,transparent:true,opacity:.085,depthWrite:false,toneMapped:false,blending:THREE.AdditiveBlending});const wash=new THREE.Mesh(geometry,material);wash.name='player-headlight-wash';wash.position.set(0,.035,-19);wash.scale.set(8.5,1,24);wash.renderOrder=1;g.add(wash);this.playerHeadlightWash=wash;this.playerHeadlights=[];this._applyHeadlightState();}
     g.userData.frontWheels=[];g.userData.visualMeshes=[];return g;
   }
-  // Toggle the player's headlights (L). We drive intensity to 0 rather than
-  // hiding the lights: a SpotLight going invisible changes the scene's light
-  // census and forces a full shader-program re-link (stutter). Intensity is a
-  // plain uniform, so the census — and the prewarmed programs — stay valid.
-  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??1450):0;}
+  // Toggle the player's headlights (L). The additive road wash does not alter
+  // the scene's dynamic-light census or trigger shader-program relinks.
+  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??1450):0;if(this.playerHeadlightWash)this.playerHeadlightWash.visible=on;}
   toggleHeadlights(){this.headlightsOn=this.headlightsOn===false;this.debugStats?.event('headlights_changed',{enabled:this.headlightsOn});this._applyHeadlightState();this.ui?.toast?.(this.headlightsOn?'HEADLIGHTS ON':'HEADLIGHTS OFF');this.audioClick?.();}
 
   getOwnedBase(){const saved=this.state.ownedCar||{},id=this.state.ownedCarId||saved.carId||saved.id,base=this.catalog.find(c=>c.id===id)||saved||this.fallbackCar();return{...base,...saved,id:base.id||id,carId:id,color:saved.color||base.colors?.[0]||base.color,engine:{...(base.engine||{}),...(saved.engine||{})}};}
   getPartsForOwned(){const id=this.state.ownedCarId;const list=typeof Data.getPartsForCar==='function'?Data.getPartsForCar(id):this.partCatalog;return(list||[]).filter(p=>!p.carIds||p.carIds.includes(id)||p.universal);}
   getEffectiveCar(){
+    if(this._effectiveCarCache)return this._effectiveCarCache;
+    return(this._effectiveCarCache=this._buildEffectiveCar());
+  }
+  _buildEffectiveCar(){
     const base=this.getOwnedBase(),parts=this.getPartsForOwned().filter(p=>this.state.installedParts.includes(p.id));
     if(typeof Data.buildVehicleStats==='function'){try{const v=Data.buildVehicleStats({...base,carId:this.state.ownedCarId,installedParts:this.state.installedParts},this.state.installedParts);return{...v,power:v.engine?.powerHp,horsepower:v.engine?.powerHp,peakTorque:v.engine?.peakTorqueNm,mass:v.massKg,fuelCapacity:v.fuelTankL,redline:v.engine?.redlineRpm,engineLayout:v.engine?.layout,gearRatios:v.transmission?.gears,finalDrive:v.transmission?.finalDrive,dimensions:{length:v.silhouette?.length,width:v.silhouette?.width,height:v.silhouette?.height},wheelbase:v.silhouette?.wheelbase,wheelRadius:v.silhouette?.wheelRadius,width:v.silhouette?.width,length:v.silhouette?.length};}catch(e){console.warn(e);}}
     if(typeof Data.applyParts==='function'){try{return Data.applyParts(base,parts);}catch(e){}}
@@ -1003,7 +1038,7 @@ class ShutokoNights {
     for(const p of parts){const m=p.modifiers||p.delta||{};if(m.powerMultiplier)s.power*=m.powerMultiplier;if(m.power)s.power+=m.power;if(m.horsepower)s.power+=m.horsepower;if(m.massDelta)s.mass+=m.massDelta;if(m.mass&&m.mass<0)s.mass+=m.mass;if(m.gripMultiplier)s.tireGrip*=m.gripMultiplier;if(m.tireGrip)s.tireGrip+=m.tireGrip;if(m.brakeMultiplier)s.brakeForce*=m.brakeMultiplier;if(m.brakeForce&&m.brakeForce<100)s.brakeForce*=m.brakeForce;if(m.suspensionStiffness)s.suspensionStiffness*=m.suspensionStiffness;if(m.gearRatioMultiplier)s.gearRatioMultiplier=(s.gearRatioMultiplier||1)*m.gearRatioMultiplier;if(m.turbo||m.turboStage)s.turbo=Math.max(s.turbo||0,m.turbo||m.turboStage);}
     s.horsepower=s.power;return s;
   }
-  refreshVehicle(){const spec=this.getEffectiveCar();this.physics?.changeSpec?.(spec);this.physics?.setCarSpec?.(spec);this.audio?.setVehicle?.(spec);if(this.playerMesh){this.roadScene.remove(this.playerMesh);this.playerMesh=this.createCarMesh(spec,true);this.roadScene.add(this.playerMesh);this.applyRetroMaterials(this.playerMesh);}this.setPhysicsFuel(Math.min(this.state.fuel,spec.fuelCapacity||45));this.garage?.refreshCar(spec);this.attachCustomCarVisual();}
+  refreshVehicle(){this._effectiveCarCache=null;const spec=this.getEffectiveCar();this.physics?.changeSpec?.(spec);this.physics?.setCarSpec?.(spec);this.audio?.setVehicle?.(spec);if(this.playerMesh){this.roadScene.remove(this.playerMesh);this.playerMesh=this.createCarMesh(spec,true);this.roadScene.add(this.playerMesh);this.applyRetroMaterials(this.playerMesh);}this.setPhysicsFuel(Math.min(this.state.fuel,spec.fuelCapacity||45));this.garage?.refreshCar(spec);this.attachCustomCarVisual();}
 
   getPhoneContext(){return{runScore:this.run.score,combo:this.run.combo,bestCombo:this.state.records.bestCombo,bestScore:this.state.records.bestScore,money:this.displayMoney(),towCost:Data.ECONOMY?.towCost||2500,settings:this.state.settings,adminUnlocked:this.admin.unlocked,admin:this.admin};}
   getPCContext(){const owned=this.getOwnedBase(),parts=this.getPartsForOwned(),fuelCan=Data.CONSUMABLES?.[0];return{money:this.displayMoney(),owned,stats:this.getEffectiveCar(),fuel:this.state.fuel,installed:this.state.installedParts,installedNames:parts.filter(p=>this.state.installedParts.includes(p.id)).map(p=>p.name),parts,deliveries:this.state.deliveries,auctions:this.state.auctions.map(a=>({...a,mileage:a.mileage??a.mileageKm,grade:a.grade??a.conditionGrade,effectivePower:a.effectivePower??a.engine?.powerHp,car:{...(a.car||this.catalog.find(c=>c.id===a.carId)||a),color:a.color||(a.car?.color)}})),tradeValue:this.tradeValue(),fuelCan,fuelCanPrice:fuelCan?.price||1200};}

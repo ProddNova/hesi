@@ -2580,6 +2580,133 @@ export function buildCustomAssetGroup(assetDefinition, texturesById, { resolveAs
   return root;
 }
 
+function sameRuntimeMaterial(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.type !== b.type) return false;
+  return a.map === b.map
+    && a.alphaMap === b.alphaMap
+    && a.normalMap === b.normalMap
+    && a.emissiveMap === b.emissiveMap
+    && a.color?.getHex?.() === b.color?.getHex?.()
+    && a.emissive?.getHex?.() === b.emissive?.getHex?.()
+    && a.emissiveIntensity === b.emissiveIntensity
+    && a.opacity === b.opacity
+    && a.transparent === b.transparent
+    && a.alphaTest === b.alphaTest
+    && a.side === b.side
+    && a.blending === b.blending
+    && a.depthTest === b.depthTest
+    && a.depthWrite === b.depthWrite
+    && a.flatShading === b.flatShading
+    && a.vertexColors === b.vertexColors
+    && a.toneMapped === b.toneMapped
+    && a.fog === b.fog;
+}
+
+function geometryRange(source, start, count) {
+  const geometry = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const attribute = source.getAttribute(name);
+    if (!attribute || attribute.isInterleavedBufferAttribute) continue;
+    const begin = start * attribute.itemSize;
+    const end = (start + count) * attribute.itemSize;
+    const values = attribute.array.slice(begin, end);
+    geometry.setAttribute(name, new THREE.BufferAttribute(values, attribute.itemSize, attribute.normalized));
+  }
+  return geometry;
+}
+
+/**
+ * Collapses a static custom-asset hierarchy into one mesh and one draw group
+ * per visually equivalent material. This is for runtime-only models: the
+ * Modeler keeps the original part hierarchy so every part remains editable.
+ */
+export function optimizeStaticCustomAssetGroup(group) {
+  if (!group) return group;
+  group.updateMatrixWorld(true);
+  const inverseRoot = group.matrixWorld.clone().invert();
+  const buckets = [];
+  const sourceGeometries = new Set();
+  const sourceMaterials = new Set();
+
+  group.traverse((child) => {
+    if (child === group || !child.isMesh || child.isSkinnedMesh || !child.geometry || !child.material) return;
+    sourceGeometries.add(child.geometry);
+    for (const material of (Array.isArray(child.material) ? child.material : [child.material])) {
+      if (material) sourceMaterials.add(material);
+    }
+    const localMatrix = new THREE.Matrix4().multiplyMatrices(inverseRoot, child.matrixWorld);
+    let baked = child.geometry.clone();
+    if (baked.index) {
+      const indexed = baked;
+      baked = indexed.toNonIndexed();
+      indexed.dispose();
+    }
+    baked.applyMatrix4(localMatrix);
+    for (const name of Object.keys(baked.attributes)) {
+      if (!['position', 'normal', 'uv'].includes(name)) baked.deleteAttribute(name);
+    }
+    if (!baked.getAttribute('normal')) baked.computeVertexNormals();
+    if (!baked.getAttribute('uv')) {
+      const count = baked.getAttribute('position').count;
+      baked.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+    }
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    const groups = baked.groups?.length
+      ? baked.groups
+      : [{ start: 0, count: baked.getAttribute('position').count, materialIndex: 0 }];
+    for (const record of groups) {
+      const material = materials[record.materialIndex] || materials[0];
+      if (!material || !record.count) continue;
+      let bucket = buckets.find((candidate) => sameRuntimeMaterial(candidate.material, material));
+      if (!bucket) {
+        bucket = { material, geometries: [] };
+        buckets.push(bucket);
+      }
+      bucket.geometries.push(geometryRange(baked, record.start, record.count));
+    }
+    baked.dispose();
+  });
+
+  if (!buckets.length) return group;
+  const perMaterial = [];
+  for (const bucket of buckets) {
+    const geometry = bucket.geometries.length === 1
+      ? bucket.geometries[0]
+      : mergeGeometries(bucket.geometries, false);
+    for (const candidate of bucket.geometries) {
+      if (candidate !== geometry) candidate.dispose();
+    }
+    if (geometry) perMaterial.push({ geometry, material: bucket.material });
+  }
+  if (!perMaterial.length) return group;
+  const merged = perMaterial.length === 1
+    ? perMaterial[0].geometry
+    : mergeGeometries(perMaterial.map((entry) => entry.geometry), true);
+  for (const entry of perMaterial) {
+    if (entry.geometry !== merged) entry.geometry.dispose();
+  }
+  if (!merged) return group;
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+
+  const children = [...group.children];
+  for (const child of children) group.remove(child);
+  for (const geometry of sourceGeometries) geometry.dispose();
+  for (const material of sourceMaterials) {
+    if (!perMaterial.some((entry) => entry.material === material)) material.dispose();
+  }
+  const mesh = new THREE.Mesh(
+    merged,
+    perMaterial.length === 1 ? perMaterial[0].material : perMaterial.map((entry) => entry.material),
+  );
+  mesh.name = `${group.name || 'Custom object'} · runtime merged`;
+  mesh.userData.hesiRuntimeMerged = true;
+  group.add(mesh);
+  group.userData.hesiRuntimeDrawGroups = perMaterial.length;
+  return group;
+}
+
 /**
  * Applies saved world surface overrides (road asphalt, building facades,
  * containers, lamp tint, ...) onto the generated map's material set.

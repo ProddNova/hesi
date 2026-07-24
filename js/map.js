@@ -59,7 +59,11 @@ const SERVICE_DASH_PERIOD = 14;
 const ZONE_DASH_LENGTH = 3.0;
 const ZONE_DASH_PERIOD = 6;
 const CHUNK = 600;
-const CHUNK_VISIBLE = 1500;
+// Exponential night fog has already reduced the world to a few percent of its
+// original contrast at these distances. Keeping another full ring of 600 m
+// chunks alive mostly adds draw submissions for geometry the player cannot
+// read. Quality controls the useful horizon; mobile can scale it further.
+const CHUNK_VISIBLE_BY_QUALITY = Object.freeze({ low: 850, medium: 1050, high: 1250 });
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 
 // Land mask resolution and reach (see _buildTerrain). The halo is measured
@@ -586,7 +590,8 @@ export class HighwayMap {
     // setQuality can hide them on Low.
     this._effectTypes = new Set(['lightStreak']);
     this._effectMeshes = [];
-    this._quality = this.options.quality === 'low' ? 'low' : 'high';
+    this._quality = ['low', 'medium', 'high'].includes(this.options.quality) ? this.options.quality : 'high';
+    this._viewDistanceScale = clamp(Number(this.options.viewDistanceScale) || 1, 0.6, 1.2);
     this._signMaterials = new Map();
     this._ownedTextures = new Set();
     this._disposed = false;
@@ -9754,6 +9759,13 @@ export class HighwayMap {
     for (const mesh of this._effectMeshes) mesh.visible = visible;
   }
 
+  setViewDistanceScale(scale = 1) {
+    const next = clamp(Number(scale) || 1, 0.6, 1.2);
+    if (next === this._viewDistanceScale) return;
+    this._viewDistanceScale = next;
+    this._visibleKey = null;
+  }
+
   update(playerPosition = null, timeSeconds = 0) {
     // Chunk streaming: toggle visibility around the player. Cheap enough to
     // run whenever the player crosses into a new cell or every 0.6 s.
@@ -9762,10 +9774,12 @@ export class HighwayMap {
       if (key !== this._visibleKey || timeSeconds - this._lastVisibleUpdate > 0.6) {
         this._visibleKey = key;
         this._lastVisibleUpdate = timeSeconds;
+        const visibleDistance = (CHUNK_VISIBLE_BY_QUALITY[this._quality] || CHUNK_VISIBLE_BY_QUALITY.medium)
+          * this._viewDistanceScale;
         for (const chunk of this._chunks.values()) {
           const dx = chunk.center.x - playerPosition.x;
           const dz = chunk.center.z - playerPosition.z;
-          chunk.group.visible = chunk.alwaysVisible || (dx * dx + dz * dz) <= (CHUNK_VISIBLE + CHUNK * 0.71) ** 2;
+          chunk.group.visible = chunk.alwaysVisible || (dx * dx + dz * dz) <= (visibleDistance + CHUNK * 0.71) ** 2;
         }
       }
     }

@@ -325,9 +325,24 @@ export class TrafficSystem {
       taillamp: new THREE.MeshBasicMaterial({ color: 0x8a1512, toneMapped: false }),
       indicator: new THREE.MeshBasicMaterial({ color: 0xffa51f, toneMapped: false }),
     };
+    // Every authored traffic model is identical within its vehicle class. Draw
+    // those repeated meshes through InstancedMesh batches instead of submitting
+    // 3-7 draw calls for every car. The ordinary pooled groups remain as the
+    // gameplay/collision anchors (and as an editor-friendly representation),
+    // but their visual children are hidden while their class is batchable.
+    this._batchRoot = new THREE.Group();
+    this._batchRoot.name = 'traffic-render-batches';
+    this.scene.add(this._batchRoot);
+    this._renderBatchByType = {};
+    this._batchOwnedMaterials = [];
+    this._batchOwnedGeometries = [];
+    this._batchMatrix = new THREE.Matrix4();
+    this._batchRootInverse = new THREE.Matrix4();
+    this._batchColor = new THREE.Color();
     this.pool = [];
     this.active = [];
     for (let i = 0; i < this.options.maxVehicles; i += 1) this._createPooledVehicle(i);
+    this._rebuildRenderBatches();
   }
 
   _createPooledVehicle(index) {
@@ -375,6 +390,241 @@ export class TrafficSystem {
     };
     mesh.userData.trafficVehicle = vehicle;
     this.pool.push(vehicle);
+  }
+
+  _disposeRenderBatches() {
+    if (this._batchRoot) {
+      for (const child of [...this._batchRoot.children]) {
+        child.dispose?.();
+        this._batchRoot.remove(child);
+      }
+    }
+    for (const material of this._batchOwnedMaterials || []) material.dispose?.();
+    for (const geometry of this._batchOwnedGeometries || []) geometry.dispose?.();
+    this._batchOwnedMaterials = [];
+    this._batchOwnedGeometries = [];
+    this._renderBatchByType = {};
+  }
+
+  _makeRenderBatch(geometry, material, name) {
+    const mesh = new THREE.InstancedMesh(geometry, material, this.options.maxVehicles);
+    mesh.name = name;
+    mesh.count = 0;
+    // Traffic is already bounded by spawn/despawn radii. Recomputing a moving
+    // aggregate bounding sphere every frame costs more CPU than drawing the
+    // tiny instance set that happens to sit behind the camera.
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this._batchRoot.add(mesh);
+    return mesh;
+  }
+
+  _batchDescriptor(typeId, geometry, material, localMatrix, role, colorMode = null) {
+    const label = `${typeId}-${role || 'part'}-${this._batchRoot.children.length}`;
+    const descriptor = {
+      role: role || 'static',
+      colorMode,
+      localMatrix: localMatrix?.clone?.() || new THREE.Matrix4(),
+      mesh: this._makeRenderBatch(geometry, material, `traffic-batch-${label}`),
+      count: 0,
+      brakeMesh: null,
+      brakeCount: 0,
+    };
+    if (descriptor.role === 'taillamp') {
+      descriptor.brakeMesh = this._makeRenderBatch(
+        geometry,
+        this._brakeMaterial(),
+        `traffic-batch-${label}-brake`,
+      );
+    }
+    return descriptor;
+  }
+
+  _buildProceduralRenderBatch(type) {
+    const geometries = this._typeGeometries[type.id] || this._typeGeometries.car;
+    const bodyMaterial = new THREE.MeshLambertMaterial({
+      color: 0xffffff,
+      emissive: 0x242424,
+      emissiveIntensity: TRAFFIC_VISIBILITY_FLOOR,
+      flatShading: true,
+    });
+    this._batchOwnedMaterials.push(bodyMaterial);
+    const identity = new THREE.Matrix4();
+    return {
+      descriptors: [
+        this._batchDescriptor(type.id, geometries.body, bodyMaterial, identity, 'body', 'body'),
+        this._batchDescriptor(type.id, geometries.lamps, this._sharedMaterials.headlamp, identity, 'headlamp'),
+        this._batchDescriptor(type.id, geometries.brake, this._sharedMaterials.taillamp, identity, 'taillamp'),
+        this._batchDescriptor(type.id, geometries.blinkerL, this._sharedMaterials.indicator, identity, 'indicator-left'),
+        this._batchDescriptor(type.id, geometries.blinkerR, this._sharedMaterials.indicator, identity, 'indicator-right'),
+      ],
+    };
+  }
+
+  _sameBatchMaterial(a, b) {
+    if (a === b) return true;
+    if (!a || !b || a.type !== b.type) return false;
+    return a.map === b.map
+      && a.alphaMap === b.alphaMap
+      && a.normalMap === b.normalMap
+      && a.emissiveMap === b.emissiveMap
+      && a.color?.getHex?.() === b.color?.getHex?.()
+      && a.emissive?.getHex?.() === b.emissive?.getHex?.()
+      && a.emissiveIntensity === b.emissiveIntensity
+      && a.opacity === b.opacity
+      && a.transparent === b.transparent
+      && a.alphaTest === b.alphaTest
+      && a.side === b.side
+      && a.blending === b.blending
+      && a.depthTest === b.depthTest
+      && a.depthWrite === b.depthWrite
+      && a.flatShading === b.flatShading
+      && a.vertexColors === b.vertexColors
+      && a.toneMapped === b.toneMapped
+      && a.fog === b.fog;
+  }
+
+  _compactBatchGeometry(geometry, material) {
+    if (!Array.isArray(material) || material.length <= 1) {
+      return { geometry, material: Array.isArray(material) ? material[0] : material };
+    }
+    const unique = [];
+    const remap = material.map((candidate) => {
+      let index = unique.findIndex((existing) => this._sameBatchMaterial(existing, candidate));
+      if (index < 0) {
+        index = unique.length;
+        unique.push(candidate);
+      }
+      return index;
+    });
+    if (unique.length === 1) return { geometry, material: unique[0] };
+    if (unique.length === material.length || !geometry.groups?.length) return { geometry, material };
+
+    // Reorder only the index buffer so all faces using an equivalent material
+    // become one contiguous group and therefore one draw call. Vertex data and
+    // UVs stay byte-for-byte identical.
+    const sourceIndex = geometry.index?.array || null;
+    const byMaterial = Array.from({ length: unique.length }, () => []);
+    for (const group of geometry.groups) {
+      const target = byMaterial[remap[group.materialIndex] ?? 0];
+      const end = group.start + group.count;
+      for (let i = group.start; i < end; i += 1) target.push(sourceIndex ? sourceIndex[i] : i);
+    }
+    const total = byMaterial.reduce((sum, indices) => sum + indices.length, 0);
+    const IndexArray = sourceIndex?.constructor
+      || (geometry.getAttribute('position')?.count > 65535 ? Uint32Array : Uint16Array);
+    const compactIndex = new IndexArray(total);
+    const compact = geometry.clone();
+    compact.clearGroups();
+    let offset = 0;
+    byMaterial.forEach((indices, materialIndex) => {
+      compactIndex.set(indices, offset);
+      compact.addGroup(offset, indices.length, materialIndex);
+      offset += indices.length;
+    });
+    compact.setIndex(new THREE.BufferAttribute(compactIndex, 1));
+    compact.computeBoundingSphere();
+    this._batchOwnedGeometries.push(compact);
+    return { geometry: compact, material: unique };
+  }
+
+  _buildCustomRenderBatch(type, template) {
+    let unsupported = false;
+    const renderable = [];
+    template.updateMatrixWorld(true);
+    this._batchRootInverse.copy(template.matrixWorld).invert();
+    template.traverse((object) => {
+      if (object === template || object.visible === false) return;
+      if (object.isMesh && !object.isSkinnedMesh && object.geometry && object.material) {
+        renderable.push(object);
+      } else if (object.isLine || object.isPoints || object.isSprite || object.isSkinnedMesh) {
+        unsupported = true;
+      }
+    });
+    if (unsupported || !renderable.length) return null;
+    return {
+      descriptors: renderable.map((object) => {
+        const localMatrix = new THREE.Matrix4().multiplyMatrices(this._batchRootInverse, object.matrixWorld);
+        const role = object.userData?.hesiTrafficPartRole || 'static';
+        const compact = this._compactBatchGeometry(object.geometry, object.material);
+        const descriptor = this._batchDescriptor(type.id, compact.geometry, compact.material, localMatrix, role);
+        descriptor.mesh.renderOrder = object.renderOrder;
+        descriptor.mesh.castShadow = object.castShadow;
+        descriptor.mesh.receiveShadow = object.receiveShadow;
+        if (descriptor.brakeMesh) descriptor.brakeMesh.renderOrder = object.renderOrder;
+        return descriptor;
+      }),
+    };
+  }
+
+  _rebuildRenderBatches() {
+    this._disposeRenderBatches();
+    for (const type of Object.values(this.vehicleTypes)) {
+      const template = this._customModelTemplates[type.id] || null;
+      const batch = template
+        ? this._buildCustomRenderBatch(type, template)
+        : this._buildProceduralRenderBatch(type);
+      if (batch) this._renderBatchByType[type.id] = batch;
+    }
+  }
+
+  _hideBatchedVehicleVisual(vehicle) {
+    const ud = vehicle.mesh.userData;
+    if (ud.body) ud.body.visible = false;
+    if (ud.lamps) ud.lamps.visible = false;
+    for (const lamp of ud.generatedTaillamps || []) lamp.visible = false;
+    for (const indicator of ud.generatedIndicators || []) {
+      for (const mesh of indicator.meshes || []) mesh.visible = false;
+    }
+    if (ud.customModel) ud.customModel.visible = false;
+  }
+
+  _syncRenderBatches() {
+    const batches = Object.values(this._renderBatchByType || {});
+    for (const batch of batches) {
+      for (const descriptor of batch.descriptors) {
+        descriptor.count = 0;
+        descriptor.brakeCount = 0;
+      }
+    }
+
+    const blink = Math.floor(this.time * 3) % 2 === 0;
+    for (const vehicle of this.active) {
+      const batch = this._renderBatchByType[vehicle.type?.id];
+      if (!batch) {
+        if (vehicle.mesh.userData.customModel) vehicle.mesh.userData.customModel.visible = true;
+        continue;
+      }
+      this._hideBatchedVehicleVisual(vehicle);
+      vehicle.mesh.updateMatrix();
+      for (const descriptor of batch.descriptors) {
+        if (descriptor.role === 'indicator-left' && (!blink || vehicle.indicator !== -1)) continue;
+        if (descriptor.role === 'indicator-right' && (!blink || vehicle.indicator !== 1)) continue;
+        const braking = descriptor.role === 'taillamp' && vehicle.braking;
+        const target = braking ? descriptor.brakeMesh : descriptor.mesh;
+        const index = braking ? descriptor.brakeCount++ : descriptor.count++;
+        this._batchMatrix.multiplyMatrices(vehicle.mesh.matrix, descriptor.localMatrix);
+        target.setMatrixAt(index, this._batchMatrix);
+        if (descriptor.colorMode === 'body') {
+          this._batchColor.copy(vehicle.mesh.userData.body.material.color);
+          target.setColorAt(index, this._batchColor);
+        }
+      }
+    }
+
+    for (const batch of batches) {
+      for (const descriptor of batch.descriptors) {
+        descriptor.mesh.count = descriptor.count;
+        if (descriptor.count) {
+          descriptor.mesh.instanceMatrix.needsUpdate = true;
+          if (descriptor.mesh.instanceColor) descriptor.mesh.instanceColor.needsUpdate = true;
+        }
+        if (descriptor.brakeMesh) {
+          descriptor.brakeMesh.count = descriptor.brakeCount;
+          if (descriptor.brakeCount) descriptor.brakeMesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+    }
   }
 
   setMap(map) {
@@ -500,6 +750,7 @@ export class TrafficSystem {
    */
   applyModelOverrides(document, { resolveAssetPart = () => null } = {}) {
     if (this._disposed) return { models: 0, settings: 0, active: 0 };
+    this._disposeRenderBatches();
     for (const vehicle of this.pool) this._removeVehicleCustomModel(vehicle);
     this._disposeCustomModelTemplates();
 
@@ -544,6 +795,7 @@ export class TrafficSystem {
         nextType.maxSpeed * 1.15,
       );
     }
+    this._rebuildRenderBatches();
     for (const set of Object.values(oldGeometries || {})) {
       for (const geometry of Object.values(set)) geometry.dispose?.();
     }
@@ -723,6 +975,7 @@ export class TrafficSystem {
 
     this._previousPlayerPosition.copy(player.position);
     for (const event of this._events) this._eventQueue.push(event);
+    this._syncRenderBatches();
     return this._events.slice();
   }
 
@@ -1320,10 +1573,12 @@ export class TrafficSystem {
   _findLeader(vehicle, player) {
     let best = null;
     const consider = (position, speed, length, sameDirection = true, source = null) => {
-      const difference = new THREE.Vector3().subVectors(position, vehicle.position);
-      const ahead = difference.dot(vehicle.tangent);
+      const dx = position.x - vehicle.position.x;
+      const dy = position.y - vehicle.position.y;
+      const dz = position.z - vehicle.position.z;
+      const ahead = dx * vehicle.tangent.x + dy * vehicle.tangent.y + dz * vehicle.tangent.z;
       if (ahead <= 0 || ahead > 90) return;
-      const lateral = Math.abs(difference.dot(vehicle.right));
+      const lateral = Math.abs(dx * vehicle.right.x + dy * vehicle.right.y + dz * vehicle.right.z);
       if (lateral > vehicle.width * 0.55 + finite(source?.width, 1.8) * 0.55 + 0.65) return;
       if (!sameDirection) return;
       const gap = ahead - (vehicle.length + length) * 0.5;
@@ -1363,7 +1618,9 @@ export class TrafficSystem {
       // lane-index convention) and cross slowly over 3.5-6 s.
       const targetSample = this._sampleLane(adjacent, vehicle.s);
       const lateralSign = targetSample
-        ? (new THREE.Vector3().subVectors(targetSample.position, vehicle.position).dot(vehicle.right) >= 0 ? 1 : -1)
+        ? (((targetSample.position.x - vehicle.position.x) * vehicle.right.x
+          + (targetSample.position.y - vehicle.position.y) * vehicle.right.y
+          + (targetSample.position.z - vehicle.position.z) * vehicle.right.z) >= 0 ? 1 : -1)
         : direction;
       vehicle.laneChange = {
         from: vehicle.laneRef,
@@ -1420,9 +1677,11 @@ export class TrafficSystem {
     if (!sample) return false;
     for (const other of this.active) {
       if (other === vehicle || !other.active) continue;
-      const difference = new THREE.Vector3().subVectors(other.position, sample.position);
-      const longitudinal = difference.dot(sample.tangent);
-      const lateral = Math.abs(difference.dot(sample.right));
+      const dx = other.position.x - sample.position.x;
+      const dy = other.position.y - sample.position.y;
+      const dz = other.position.z - sample.position.z;
+      const longitudinal = dx * sample.tangent.x + dy * sample.tangent.y + dz * sample.tangent.z;
+      const lateral = Math.abs(dx * sample.right.x + dy * sample.right.y + dz * sample.right.z);
       if (lateral < (vehicle.width + other.width) * 0.55 + 0.5 && longitudinal > -Math.max(18, other.speed * 0.8) && longitudinal < Math.max(14, vehicle.speed * 0.55)) return false;
     }
     return true;
@@ -1470,12 +1729,16 @@ export class TrafficSystem {
     }
     const trafficForward = vehicle.tangent;
     const trafficRight = vehicle.right;
-    const relativeStartWorld = player.previousPosition.clone().sub(vehicle.previousPosition);
-    const relativeEndWorld = player.position.clone().sub(vehicle.position);
-    const startX = relativeStartWorld.dot(trafficRight);
-    const startZ = relativeStartWorld.dot(trafficForward);
-    const endX = relativeEndWorld.dot(trafficRight);
-    const endZ = relativeEndWorld.dot(trafficForward);
+    const startDx = player.previousPosition.x - vehicle.previousPosition.x;
+    const startDy = player.previousPosition.y - vehicle.previousPosition.y;
+    const startDz = player.previousPosition.z - vehicle.previousPosition.z;
+    const endDx = player.position.x - vehicle.position.x;
+    const endDy = player.position.y - vehicle.position.y;
+    const endDz = player.position.z - vehicle.position.z;
+    const startX = startDx * trafficRight.x + startDy * trafficRight.y + startDz * trafficRight.z;
+    const startZ = startDx * trafficForward.x + startDy * trafficForward.y + startDz * trafficForward.z;
+    const endX = endDx * trafficRight.x + endDy * trafficRight.y + endDz * trafficRight.z;
+    const endZ = endDx * trafficForward.x + endDy * trafficForward.y + endDz * trafficForward.z;
     const playerHalfX = rectangleSupport(trafficRight, player.right, player.forward, player.width * 0.5, player.length * 0.5);
     const playerHalfZ = rectangleSupport(trafficForward, player.right, player.forward, player.width * 0.5, player.length * 0.5);
     const halfX = vehicle.width * 0.5 + playerHalfX;
@@ -1522,18 +1785,34 @@ export class TrafficSystem {
 
     vehicle.playerContact = false;
     const closest = segmentClosestToOrigin(startX, startZ, endX, endZ);
-    const separation = new THREE.Vector3()
-      .addScaledVector(trafficRight, closest.x)
-      .addScaledVector(trafficForward, closest.z);
-    const direction = separation.lengthSq() > EPSILON ? separation.normalize() : trafficRight;
-    const trafficSupport = rectangleSupport(direction, trafficRight, trafficForward, vehicle.width * 0.5, vehicle.length * 0.5);
-    const playerSupport = rectangleSupport(direction, player.right, player.forward, player.width * 0.5, player.length * 0.5);
+    const inverseDistance = closest.distance > EPSILON ? 1 / closest.distance : 0;
+    const directionX = inverseDistance
+      ? (trafficRight.x * closest.x + trafficForward.x * closest.z) * inverseDistance
+      : trafficRight.x;
+    const directionY = inverseDistance
+      ? (trafficRight.y * closest.x + trafficForward.y * closest.z) * inverseDistance
+      : trafficRight.y;
+    const directionZ = inverseDistance
+      ? (trafficRight.z * closest.x + trafficForward.z * closest.z) * inverseDistance
+      : trafficRight.z;
+    const trafficDotRight = directionX * trafficRight.x + directionY * trafficRight.y + directionZ * trafficRight.z;
+    const trafficDotForward = directionX * trafficForward.x + directionY * trafficForward.y + directionZ * trafficForward.z;
+    const playerDotRight = directionX * player.right.x + directionY * player.right.y + directionZ * player.right.z;
+    const playerDotForward = directionX * player.forward.x + directionY * player.forward.y + directionZ * player.forward.z;
+    const trafficSupport = Math.abs(trafficDotRight) * vehicle.width * 0.5
+      + Math.abs(trafficDotForward) * vehicle.length * 0.5;
+    const playerSupport = Math.abs(playerDotRight) * player.width * 0.5
+      + Math.abs(playerDotForward) * player.length * 0.5;
     const clearance = closest.distance - trafficSupport - playerSupport;
     const lateralAtClosest = Math.abs(closest.x);
     const overlapAlongside = Math.abs(closest.z) < (vehicle.length + player.length) * 0.5 + 0.8;
     const sideBySide = lateralAtClosest > (vehicle.width + player.width) * 0.27;
     const relativeMotion = Math.hypot(endX - startX, endZ - startZ);
-    const relativeSpeed = player.velocity.clone().sub(vehicle.velocity).length();
+    const relativeSpeed = Math.hypot(
+      player.velocity.x - vehicle.velocity.x,
+      player.velocity.y - vehicle.velocity.y,
+      player.velocity.z - vehicle.velocity.z,
+    );
 
     if (
       vehicle.nearMissArmed
@@ -1601,6 +1880,7 @@ export class TrafficSystem {
     this._events.length = 0;
     this._eventQueue.length = 0;
     this._hasPreviousPlayer = false;
+    this._syncRenderBatches();
   }
 
   consumeEvents(type = null) {
@@ -1633,6 +1913,8 @@ export class TrafficSystem {
   dispose() {
     if (this._disposed) return;
     this.clear();
+    this._disposeRenderBatches();
+    this._batchRoot?.removeFromParent?.();
     // Part geometries are shared per class, so dispose them once (below) rather
     // than per mesh; only the per-vehicle body material is owned individually.
     for (const vehicle of this.pool) {

@@ -1,5 +1,51 @@
 # Performance foundation status (2026-07-14)
 
+## Targeted PC/iPad pass (2026-07-24)
+
+Input diagnostic: `hesi-diagnostic-2026-07-24_16-52-38-267.json`.
+The recorded desktop session averaged 96.1 fps (94.7 while driving), with
+5.05 ms render, 1.19 ms traffic and 8.02 ms total CPU time on average.
+Traffic at the changed setting was recorded as 1.4x by the diagnostic.
+
+The runtime now selects two explicit performance profiles:
+
+- `desktop-144`: 144 fps presentation cap, High at native resolution, 56 base
+  / 84 maximum traffic vehicles.
+- `ipad-30`: 30 fps presentation cap, Medium at a 1.25 MP maximum,
+  40 base / 60 maximum traffic vehicles, shorter chunk and traffic ranges.
+
+Traffic vehicles are rendered through per-model instanced batches, equivalent
+material groups are compacted, and the 26-part player model is merged into one
+static mesh with six material groups. The player spotlight was replaced with
+an additive road wash, the duplicate wall sweep was removed, and HUD/minimap
+work is throttled independently from driving physics.
+
+Repeatable browser results at 1.5x traffic:
+
+| Profile | Draw calls | Traffic | World | Essentials | Workload p50 | Workload p95 | Budget |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Desktop High, 1920x911 | 134 | 24 | 101 | 9 | 5.0 ms | 9.7 ms | 6.94 ms |
+| iPad Medium, 844x390 @2x | 112 | 23 | 80 | 9 | 4.8 ms | 12.2 ms | 33.33 ms |
+
+`workload` is synchronous full `updateDriving + render` time, avoiding
+headless Chromium's artificial `requestAnimationFrame` throttling. It is a
+regression budget, not a substitute for final thermal testing on the physical
+iPad. Both profiles pass their performance limits with no browser errors.
+
+Verification:
+
+- `node .devtests/performance.mjs --desktop`: PASS.
+- `node .devtests/performance.mjs`: PASS.
+- `node .devtests/traffic-visual-probe.mjs`: 13/14; the only failure is its
+  obsolete immortality assertion (the current game intentionally has 3 lives).
+- `npm run editor:test`: 150/150.
+
+The supplied diagnostic identifies the adapter as an RTX 5050 Laptop GPU,
+despite the device description saying RTX 5060. A fresh on-device diagnostic
+is required to confirm which GPU/browser is actually used.
+
+## Historical foundation (2026-07-14)
+
 Scope: measurement foundation after the adaptive road-frame pass. No broad
 refactor and no speculative optimization were performed. Merged geometry per
 chunk/material, repeated-prop instancing, chunk visibility and resolution

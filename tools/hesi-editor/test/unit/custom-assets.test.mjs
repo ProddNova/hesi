@@ -28,6 +28,7 @@ import {
   faceTextureTransform,
   clearObjectFaceStyles,
   objectFaceSlots,
+  optimizeStaticCustomAssetGroup,
   partGeometry,
   textureSourceUrl,
   weldedVertices,
@@ -263,6 +264,24 @@ test('buildCustomAssetGroup skips unresolvable assembled parts without throwing'
   assert.equal(group.userData.customAssetSkippedParts, 1);
   const resolved = buildCustomAssetGroup(definition, {}, { resolveAssetPart: () => new THREE.Group() });
   assert.equal(resolved.children.length, 2);
+});
+
+test('optimizeStaticCustomAssetGroup merges static parts by equivalent material', () => {
+  const definition = {
+    id: 'custom:runtime-car',
+    label: 'Runtime car',
+    parts: [
+      { kind: 'plane', position: [-1, 0, 0], color: '#ff0000' },
+      { kind: 'plane', position: [1, 0, 0], color: '#ff0000' },
+      { kind: 'plane', position: [0, 1, 0], color: '#0000ff' },
+    ],
+  };
+  const group = optimizeStaticCustomAssetGroup(buildCustomAssetGroup(definition, {}));
+  assert.equal(group.children.length, 1);
+  assert.equal(group.children[0].isMesh, true);
+  assert.equal(group.children[0].geometry.groups.length, 2);
+  assert.equal(group.children[0].geometry.getAttribute('position').count, 18);
+  assert.equal(group.userData.hesiRuntimeDrawGroups, 2);
 });
 
 test('applyWorldTextureOverrides only touches known slots with real textures', () => {
