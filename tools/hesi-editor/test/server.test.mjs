@@ -76,6 +76,9 @@ test('server starts and editor page resolves', async () => {
   const page = await fetch(`${BASE}/tools/hesi-editor/index.html`);
   assert.equal(page.status, 200);
   assert.match(await page.text(), /src\/main\.js/);
+  const game = await fetch(`${BASE}/index.html`);
+  assert.equal(game.status, 200);
+  assert.match(await game.text(), /js\/game\.js/);
 });
 
 test('server redirects editor aliases and blocks traversal', async () => {

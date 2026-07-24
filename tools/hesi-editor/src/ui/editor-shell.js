@@ -96,11 +96,15 @@ export function createEditorShell(root) {
     element('span', 'toolbar-divider'),
     button('Save Draft', 'save-project', { title: 'Save locally and update the editor map with your road edits; the playable game stays unchanged (Ctrl+S)' }),
     button('Apply to Game', 'rebuild-world', { title: 'Save the draft, publish road curves and game files to the playable game, then reload' }),
+    button('Test Game', 'test-game', { title: 'Apply the current draft locally and open the playable game in a new tab' }),
   );
   appbar.querySelector('[data-action="save-project"]').classList.add('accent');
   const applyToGameButton = appbar.querySelector('[data-action="rebuild-world"]');
+  const testGameButton = appbar.querySelector('[data-action="test-game"]');
   applyToGameButton.classList.add('primary');
+  testGameButton.classList.add('accent');
   applyToGameButton.disabled = true;
+  testGameButton.disabled = true;
 
   const toolGroup = (label, ...nodes) => {
     const group = element('div', 'tool-group');
@@ -1732,9 +1736,13 @@ export function createEditorShell(root) {
       adapterChip.classList.toggle('warning', !adapter.isRealWorld);
       adapterChip.title = adapter.warning || adapter.label;
       applyToGameButton.disabled = !adapter.isRealWorld;
+      testGameButton.disabled = !adapter.isRealWorld;
       applyToGameButton.title = adapter.isRealWorld
         ? 'Save the draft, publish road curves and game files to the playable game, then reload'
         : 'Unavailable in the demo/fallback world. Open the real world to update the playable game.';
+      testGameButton.title = adapter.isRealWorld
+        ? 'Apply the current draft locally and open the playable game in a new tab'
+        : 'Unavailable in the demo/fallback world. Open the real world to test the playable game.';
       bottomCaption.textContent = adapter.isRealWorld ? 'Production generator metadata' : 'Non-production world';
       presetSelect.innerHTML = '';
       const unavailable = !adapter.presets.has('tatsumi-pa');

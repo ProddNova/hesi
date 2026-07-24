@@ -81,8 +81,9 @@ try {
   const saveLabels = await page.evaluate(() => ({
     draft: document.querySelector('[data-action="save-project"]')?.textContent,
     apply: document.querySelector('[data-action="rebuild-world"]')?.textContent,
+    test: document.querySelector('[data-action="test-game"]')?.textContent,
   }));
-  if (saveLabels.draft !== 'Save Draft' || saveLabels.apply !== 'Apply to Game') {
+  if (saveLabels.draft !== 'Save Draft' || saveLabels.apply !== 'Apply to Game' || saveLabels.test !== 'Test Game') {
     throw new Error(`Draft/game actions are not explicit: ${JSON.stringify(saveLabels)}`);
   }
 

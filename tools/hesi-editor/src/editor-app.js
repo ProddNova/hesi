@@ -219,6 +219,29 @@ export async function createEditorApp(root) {
     await applyWorkspaceToGame();
     reloadEditor();
   }));
+  shell.onToolbar('test-game', () => {
+    if (activeProjectTask) {
+      shell.setStatus('A project operation is already in progress');
+      return;
+    }
+    const gameWindow = window.open('about:blank', 'hesi-local-game-test');
+    if (!gameWindow) {
+      shell.setStatus('Test Game was blocked by the browser · allow pop-ups for this local editor');
+      return;
+    }
+    gameWindow.document.title = 'Preparing HESI local test';
+    gameWindow.document.body.textContent = 'Applying the editor draft and starting the local game…';
+    runProjectTask(async () => {
+      await applyWorkspaceToGame();
+      const gameUrl = new URL('/index.html', window.location.origin);
+      gameUrl.searchParams.set('editorTest', Date.now().toString());
+      gameWindow.location.replace(gameUrl.toString());
+      shell.setStatus('Local game opened · this tab is still connected to the editor');
+      return true;
+    }).then((opened) => {
+      if (!opened && !gameWindow.closed) gameWindow.close();
+    });
+  });
   shell.onToolbar('add-object', () => {
     shell.showTab('assets');
     shell.setStatus('Choose an asset below, then click a surface in the world to place it · Esc cancels');

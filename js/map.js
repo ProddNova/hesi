@@ -571,6 +571,10 @@ export class HighwayMap {
     this.progressiveTransitionById = new Map();
     this.routeSamples = Object.create(null);
     this.animatedMarkers = [];
+    // Authored lamp/tunnel fixture positions. The game maps a small fixed
+    // number of real lights onto the nearest entries so vehicles receive
+    // spatial lighting without one PointLight per fixture.
+    this.roadLightSources = [];
     // options.markingDebug: per-piece paint/suppression records (see
     // _paintStrip / _dressGores). Besides orientation, the A-B junction
     // probe needs to explain which system attempted every boundary and why
@@ -5025,6 +5029,11 @@ export class HighwayMap {
     });
   }
 
+  _recordRoadLight(position, color = 0xff8a2e, intensity = 1) {
+    if (this._suppressServiceAreaObjects || this._insideTatsumiClearing(position)) return;
+    this.roadLightSources.push({ position: position.clone(), color, intensity });
+  }
+
   /** True when `object` is or contains a light anywhere in its subtree. */
   _containsLight(object) {
     let found = false;
@@ -6928,6 +6937,7 @@ export class HighwayMap {
       const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
       lens.y = base.y + 9.26;
       this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
+      this._recordRoadLight(lens);
 
       const jL = lampNoise(distance);
       const jW = lampNoise(distance * 1.7 + 41);
@@ -7013,6 +7023,7 @@ export class HighwayMap {
           const position = center.position.clone().addScaledVector(horizontalNormal(center.baseTangent), side);
           position.y += 5.7;
           this._instance(position, vec(0.55, 0.1, 2.6), quaternion, null, `box:${style}`);
+          this._recordRoadLight(position, style === 'tunnelLampOrange' ? 0xffb15e : 0xf3f7e8, 0.86);
         }
         // wall panels
         for (const side of [1, -1]) {
@@ -7783,6 +7794,7 @@ export class HighwayMap {
         const lens = position.clone().addScaledVector(armDirection, 2.28);
         lens.y = area.elevation + 9.26;
         this._instance(lens, vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
+        this._recordRoadLight(lens);
         const pool = position.clone().addScaledVector(armDirection, 3.4);
         pool.y = area.elevation + 0.07;
         this._instance(pool, vec(11, 1, 14), orientation, null, 'pool:lightPool');
@@ -7953,7 +7965,9 @@ export class HighwayMap {
     const lampAt = (u, v, armVSign) => {
       const orientation = yawQuaternion(tangent.clone().multiplyScalar(armVSign > 0 ? -1 : 1));
       this._instance(at(u, v, 0), vec(1, 1, 1), orientation, null, 'lamppost:concrete');
-      this._instance(at(u, v + armVSign * 2.28, 9.26), vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
+      const lens = at(u, v + armVSign * 2.28, 9.26);
+      this._instance(lens, vec(1.1, 0.1, 0.34), orientation, null, 'box:lampSodium');
+      this._recordRoadLight(lens);
       this._instance(at(u, v + armVSign * 3.4, 0.07), vec(11, 1, 14), orientation, null, 'pool:lightPool');
     };
     for (const i of [6, 13]) lampAt(truckU0 + i * TRUCK_PITCH, R * (halfW - 1.0), -R);
@@ -9739,6 +9753,7 @@ export class HighwayMap {
     materials.forEach((material) => material.dispose());
     this._ownedTextures.forEach((texture) => texture.dispose());
     this.buildingBoxes.length = 0;
+    this.roadLightSources.length = 0;
     this.group.clear();
   }
 }

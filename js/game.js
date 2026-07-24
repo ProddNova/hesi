@@ -11,7 +11,11 @@ import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-
 // (and one texture cache/budget); a ?v= query here would fork the module.
 import { buildCustomAssetGroup, fetchCustomAssetsDocument, setTextureSizeBudget } from './custom-assets.js';
 import { carModelEntry, carModelTarget } from './car-models.js';
-import { DEFAULT_LIGHTING } from './lighting-config.js';
+import {
+  createRuntimeRoadLightRig,
+  DEFAULT_LIGHTING,
+  updateRuntimeRoadLightRig,
+} from './lighting-config.js';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 import { DebugStats } from './debug-stats.js?v=20260720a';
@@ -110,6 +114,9 @@ class ShutokoNights {
     // saved config at boot.
     const tag=l=>{l.userData.gameSceneLight=true;return l;};
     this.roadScene.add(tag(new THREE.HemisphereLight(0x564a40,0x1e1510,1.58)));this.roadScene.add(tag(new THREE.AmbientLight(0x64524a,.66)));const moon=tag(new THREE.DirectionalLight(0x9aa6c4,.72));moon.position.set(-200,300,-100);this.roadScene.add(moon);
+    // A fixed light count follows the nearest generated fixtures. Unlike the
+    // additive asphalt pools, these real lights reach player and traffic cars.
+    this.runtimeRoadLightRig=createRuntimeRoadLightRig();this.roadScene.add(this.runtimeRoadLightRig);
     this.garageScene.add(tag(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7)));
   }
   buildWorld(){
@@ -118,6 +125,7 @@ class ShutokoNights {
     // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
     try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';const p2HandoffDebug=params.get('p2HandoffDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(p2HandoffDebug?{progressiveMergeHandoffDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    if(this.map?.initialSpawn?.position)updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map.roadLightSources,this.map.initialSpawn.position,{force:true});
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
@@ -351,7 +359,7 @@ class ShutokoNights {
   }
   finishFrameProf(frameStart){const pf=this.frameProf;pf.total=performance.now()-frameStart;pf.other=Math.max(0,pf.total-pf.phys-pf.traffic-pf.map-pf.render-pf.persist);this.debugStats?.frame(pf);}
   updateMobileFPS(now){if(!this.isTouchDevice)return;const meter=this.mobileFPS;meter.frames++;const elapsed=now-meter.startedAt;if(elapsed<500)return;this.ui.updateFPS(meter.frames*1000/elapsed);meter.frames=0;meter.startedAt=now;}
-  updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
+  updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map?.roadLightSources,center);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
     this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'WANGAN WORKS'});
@@ -404,6 +412,7 @@ class ShutokoNights {
     this.camera.position.copy(w.position);this.camera.up.set(0,1,0);
     this.camera.lookAt(w.position.x-Math.sin(w.yaw)*cosP,w.position.y+Math.sin(w.pitch),w.position.z-Math.cos(w.yaw)*cosP);
     this.map?.update?.(w.position,performance.now()/1000);
+    updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map?.roadLightSources,w.position);
     const near=Math.hypot(w.position.x-w.carPos.x,w.position.z-w.carPos.z)<4.5;
     this.ui.prompt(near?'<kbd>G</kbd> GET IN CAR':'WASD walk · look with mouse · <kbd>G</kbd> return to car',true);
   }
@@ -428,6 +437,8 @@ class ShutokoNights {
     this.syncFuelFromPhysics();this.resolveMapCollision();
     t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo,playerGhost:this.ghostTimer>0});pf.traffic+=performance.now()-t0;
     this.handleTrafficEvents();this.updatePlayerMesh();
+    const litState=this.getVehicleState(),litPosition=vec(litState.position||litState);
+    updateRuntimeRoadLightRig(this.runtimeRoadLightRig,this.map?.roadLightSources,litPosition);
     t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
     const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}

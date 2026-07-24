@@ -26,6 +26,7 @@ export const DEFAULT_LIGHTING = Object.freeze({
   streetLampTemperature: 0,
 });
 export const LOCAL_LIGHT_ASSET_ID = 'editor:light:soft-spot';
+export const RUNTIME_ROAD_LIGHT_COUNT = 4;
 export const DEFAULT_LOCAL_LIGHT = Object.freeze({
   color: '#ffd3a1',
   temperature: -0.28,
@@ -144,6 +145,102 @@ function localLightColour(config) {
     Math.min(1, colour.b * tb),
   );
   return colour;
+}
+
+function applyRuntimeRoadLightConfig(light, config) {
+  const c = normalizeLighting(config);
+  const sourceColour = light.userData.runtimeRoadLightSourceColor ?? DEFAULT_LIGHTING.streetLampColor;
+  const customColour = c.streetLampColor !== DEFAULT_LIGHTING.streetLampColor;
+  const colour = new THREE.Color(customColour ? c.streetLampColor : sourceColour);
+  const [tr, tg, tb] = temperatureRGB(c.streetLampTemperature);
+  colour.setRGB(
+    Math.min(1, colour.r * tr),
+    Math.min(1, colour.g * tg),
+    Math.min(1, colour.b * tb),
+  );
+  light.color.copy(colour);
+  light.intensity = light.userData.runtimeRoadLightBaseIntensity
+    * (light.userData.runtimeRoadLightSourceIntensity ?? 1)
+    * c.streetLampIntensity;
+  light.userData.runtimeRoadLightConfig = c;
+}
+
+/**
+ * Four real, permanently registered point lights follow the nearest authored
+ * road fixtures. Keeping the count fixed avoids shader recompiles while still
+ * letting vehicles and other lit materials react to lamps and tunnel lights.
+ */
+export function createRuntimeRoadLightRig({
+  count = RUNTIME_ROAD_LIGHT_COUNT,
+  intensity = 180,
+  range = 36,
+  decay = 1.8,
+} = {}) {
+  const rig = new THREE.Group();
+  rig.name = 'Runtime road fixture lights';
+  rig.userData.runtimeRoadLights = [];
+  rig.userData.runtimeRoadLightAnchor = new THREE.Vector3(Infinity, Infinity, Infinity);
+  for (let index = 0; index < Math.max(1, Math.floor(count)); index += 1) {
+    const light = new THREE.PointLight(DEFAULT_LIGHTING.streetLampColor, intensity, range, decay);
+    light.name = `Runtime road fixture ${index + 1}`;
+    light.position.set(0, -10000, 0);
+    light.userData.runtimeRoadLight = true;
+    light.userData.runtimeRoadLightBaseIntensity = intensity;
+    light.userData.runtimeRoadLightSourceColor = DEFAULT_LIGHTING.streetLampColor;
+    light.userData.runtimeRoadLightSourceIntensity = 1;
+    applyRuntimeRoadLightConfig(light, DEFAULT_LIGHTING);
+    rig.add(light);
+    rig.userData.runtimeRoadLights.push(light);
+  }
+  return rig;
+}
+
+/**
+ * Moves the fixed light slots to the nearest fixture records. Re-selection is
+ * distance-throttled; the fixtures themselves are static.
+ */
+export function updateRuntimeRoadLightRig(rig, sources, anchor, {
+  force = false,
+  updateDistance = 4,
+  maxDistance = 110,
+} = {}) {
+  const lights = rig?.userData?.runtimeRoadLights;
+  if (!lights?.length || !anchor || !Array.isArray(sources)) return false;
+  const previous = rig.userData.runtimeRoadLightAnchor;
+  if (!force && previous?.distanceToSquared(anchor) < updateDistance * updateDistance) return false;
+  previous.copy(anchor);
+
+  const nearest = [];
+  const maximumDistanceSq = maxDistance * maxDistance;
+  for (const source of sources) {
+    const position = source?.position?.isVector3 ? source.position : (source?.isVector3 ? source : null);
+    if (!position) continue;
+    const distanceSq = position.distanceToSquared(anchor);
+    if (distanceSq > maximumDistanceSq) continue;
+    let insertAt = nearest.findIndex((entry) => distanceSq < entry.distanceSq);
+    if (insertAt < 0) insertAt = nearest.length;
+    if (insertAt >= lights.length && nearest.length >= lights.length) continue;
+    nearest.splice(insertAt, 0, { source, position, distanceSq });
+    if (nearest.length > lights.length) nearest.length = lights.length;
+  }
+
+  for (let index = 0; index < lights.length; index += 1) {
+    const light = lights[index];
+    const entry = nearest[index];
+    if (entry) {
+      light.position.copy(entry.position);
+      light.userData.runtimeRoadLightSourceColor = entry.source.color ?? DEFAULT_LIGHTING.streetLampColor;
+      light.userData.runtimeRoadLightSourceIntensity = entry.source.intensity ?? 1;
+    } else {
+      // Stay registered and keep the shader light count stable, but move the
+      // unused slot well outside its finite range.
+      light.position.set(anchor.x, anchor.y - 10000, anchor.z);
+      light.userData.runtimeRoadLightSourceColor = DEFAULT_LIGHTING.streetLampColor;
+      light.userData.runtimeRoadLightSourceIntensity = 1;
+    }
+    applyRuntimeRoadLightConfig(light, light.userData.runtimeRoadLightConfig || DEFAULT_LIGHTING);
+  }
+  return true;
 }
 
 const cookieCache = new Map();
@@ -335,7 +432,10 @@ export function applySceneLighting(scene, config) {
   const visitedStreetLampMaterials = new Set();
   let touched = 0;
   scene.traverse((object) => {
-    if (object.isLight && object.userData?.gameSceneLight) {
+    if (object.isLight && object.userData?.runtimeRoadLight) {
+      applyRuntimeRoadLightConfig(object, c);
+      touched += 1;
+    } else if (object.isLight && object.userData?.gameSceneLight) {
       let base = object.userData.baseLighting;
       if (!base) {
         base = {
