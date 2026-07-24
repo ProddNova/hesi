@@ -2,7 +2,13 @@ import { sceneList } from '../scenes/scene-registry.js';
 import { GRID_SNAP_STEPS } from '../interaction/grid-snap.js';
 import { objectFaceSlots, textureSourceUrl } from '/js/custom-assets.js';
 import { normalizeSkyboxConfig } from '/js/skybox-config.js';
-import { normalizeLighting, DEFAULT_LIGHTING } from '/js/lighting-config.js';
+import {
+  DEFAULT_LIGHTING,
+  DEFAULT_LOCAL_LIGHT,
+  LOCAL_LIGHT_ASSET_ID,
+  normalizeLighting,
+  normalizeLocalLight,
+} from '/js/lighting-config.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -92,7 +98,9 @@ export function createEditorShell(root) {
     button('Apply to Game', 'rebuild-world', { title: 'Save the draft, publish road curves and game files to the playable game, then reload' }),
   );
   appbar.querySelector('[data-action="save-project"]').classList.add('accent');
-  appbar.querySelector('[data-action="rebuild-world"]').classList.add('primary');
+  const applyToGameButton = appbar.querySelector('[data-action="rebuild-world"]');
+  applyToGameButton.classList.add('primary');
+  applyToGameButton.disabled = true;
 
   const toolGroup = (label, ...nodes) => {
     const group = element('div', 'tool-group');
@@ -730,34 +738,52 @@ export function createEditorShell(root) {
     const intro = element('section', 'skybox-card skybox-intro');
     const introCopy = element('div');
     introCopy.append(
-      element('h3', '', 'In-game lighting'),
-      element('p', '', `Colour, warmth and intensity of the night lighting for ${currentScene?.label || 'this scene'} — road lamps and the garage follow too. Switch the viewport to Game lighting (press L) to preview; Apply to Game bakes it into the playable game.`),
+      element('h3', '', 'Lighting studio'),
+      element('p', '', `Shape the master night look for ${currentScene?.label || 'this scene'}, then place focused lights by hand. Local lights use a feathered procedural cloud mask, so their pool breaks up naturally instead of ending in a perfect circle.`),
     );
     intro.append(introCopy);
-    const controls = element('section', 'skybox-card skybox-placement');
-    controls.append(element('h3', '', 'Colour · warmth · intensity'));
-    const fields = element('div', 'skybox-fields');
-    const slider = (label, value, { min, max, step }, testid, onInput) => {
+
+    const slider = (host, label, value, { min, max, step, digits = 2 }, testid, { onInput, onChange = onInput }) => {
       const field = element('label', 'skybox-field');
       const row = element('div', 'lights-slider-row');
       const input = document.createElement('input');
       input.type = 'range';
-      input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(value);
-      input.dataset.testid = testid;
-      const out = element('code', '', Number(value).toFixed(2));
-      input.addEventListener('input', () => { out.textContent = Number(input.value).toFixed(2); onInput(Number(input.value)); });
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(value);
+      if (testid) input.dataset.testid = testid;
+      const out = element('code', '', Number(value).toFixed(digits));
+      input.addEventListener('input', () => {
+        out.textContent = Number(input.value).toFixed(digits);
+        onInput?.(Number(input.value));
+      });
+      input.addEventListener('change', () => onChange?.(Number(input.value)));
       row.append(input, out);
       field.append(element('span', '', label), row);
-      fields.append(field);
+      host.append(field);
+      return input;
     };
-    slider('Intensity', cfg.intensity, { min: 0, max: 3, step: 0.05 }, 'lights-intensity', (v) => triggerAction('lights-update', { patch: { intensity: v } }));
-    slider('Warmth (← warm · cool →)', cfg.temperature, { min: -1, max: 1, step: 0.05 }, 'lights-temperature', (v) => triggerAction('lights-update', { patch: { temperature: v } }));
+
+    const controls = element('section', 'skybox-card skybox-placement');
+    controls.append(element('h3', '', 'Master world light'));
+    controls.append(element('p', 'lights-help', 'Multiplies the shipped scene rig and every light you place. Preview is automatic in Game mode; Apply to Game writes the same result into the playable build.'));
+    const fields = element('div', 'skybox-fields lights-global-fields');
+    slider(fields, 'Intensity', cfg.intensity, { min: 0, max: 3, step: 0.05 }, 'lights-intensity', {
+      onInput: (v) => triggerAction('lights-preview', { patch: { intensity: v } }),
+      onChange: (v) => triggerAction('lights-update', { patch: { intensity: v } }),
+    });
+    slider(fields, 'Warmth (warm ← → cool)', cfg.temperature, { min: -1, max: 1, step: 0.05 }, 'lights-temperature', {
+      onInput: (v) => triggerAction('lights-preview', { patch: { temperature: v } }),
+      onChange: (v) => triggerAction('lights-update', { patch: { temperature: v } }),
+    });
     const tintField = element('label', 'skybox-field');
     const tint = document.createElement('input');
     tint.type = 'color';
     tint.value = cfg.tint;
     tint.dataset.testid = 'lights-tint';
-    tint.addEventListener('input', () => triggerAction('lights-update', { patch: { tint: tint.value } }));
+    tint.addEventListener('input', () => triggerAction('lights-preview', { patch: { tint: tint.value } }));
+    tint.addEventListener('change', () => triggerAction('lights-update', { patch: { tint: tint.value } }));
     tintField.append(element('span', '', 'Colour tint'), tint);
     fields.append(tintField);
     controls.append(fields);
@@ -767,7 +793,109 @@ export function createEditorShell(root) {
     reset.addEventListener('click', () => triggerAction('lights-reset'));
     actions.append(reset);
     controls.append(actions);
-    panel.append(intro, controls);
+
+    const local = element('section', 'skybox-card lights-local');
+    const localHeader = element('div', 'lights-local-header');
+    const localHeading = element('div');
+    localHeading.append(
+      element('h3', '', 'Placed local lights'),
+      element('p', 'lights-help', 'Place one on a ceiling or wall, then use Move / Rotate to aim it. Reach controls distance; pool radius controls width independently.'),
+    );
+    const addLight = button('+ Place soft light', '', { title: 'Click a surface in the viewport to place a new cloudy light' });
+    addLight.dataset.testid = 'lights-add-local';
+    addLight.addEventListener('click', () => triggerAction('place-asset', LOCAL_LIGHT_ASSET_ID));
+    localHeader.append(localHeading, addLight);
+    local.append(localHeader);
+
+    const lightEntities = registryRef
+      ? registryRef.list().filter((entity) => entity.assetId === LOCAL_LIGHT_ASSET_ID)
+      : [];
+    const selectedLight = selectedEntity?.assetId === LOCAL_LIGHT_ASSET_ID ? selectedEntity : null;
+    const lightList = element('div', 'lights-local-list');
+    if (!lightEntities.length) {
+      lightList.append(element('p', 'lights-empty', 'No authored lights in this scene yet.'));
+    } else {
+      for (const entity of lightEntities) {
+        const record = normalizeLocalLight(entity.metadata?.localLight || entity.object3D?.userData?.localLightConfig || DEFAULT_LOCAL_LIGHT);
+        const item = element('button', `lights-local-item${selectedLight?.id === entity.id ? ' selected' : ''}`);
+        item.type = 'button';
+        item.dataset.lightId = entity.id;
+        item.title = 'Select and edit this light';
+        const swatch = element('span', 'lights-local-swatch');
+        swatch.style.background = record.color;
+        item.append(
+          swatch,
+          element('b', '', entity.name),
+          element('small', '', `${Math.round(record.intensity)} cd · ${record.range.toFixed(1)} m reach · ${record.radius.toFixed(1)} m pool`),
+        );
+        item.addEventListener('click', () => triggerAction('local-light-select', entity.id));
+        lightList.append(item);
+      }
+    }
+    local.append(lightList);
+
+    if (selectedLight) {
+      const lightCfg = normalizeLocalLight(selectedLight.metadata?.localLight || selectedLight.object3D?.userData?.localLightConfig || DEFAULT_LOCAL_LIGHT);
+      const editor = element('div', 'lights-local-editor');
+      const editorHeading = element('div', 'lights-local-editor-heading');
+      const editorCopy = element('div');
+      editorCopy.append(
+        element('h3', '', `Tune · ${selectedLight.name}`),
+        element('small', '', 'The viewport previews continuously. Releasing a slider creates one undoable edit.'),
+      );
+      const remove = button('Delete light', '', { title: 'Remove this authored light from the scene' });
+      remove.classList.add('danger');
+      remove.addEventListener('click', () => triggerAction('local-light-delete', selectedLight.id));
+      editorHeading.append(editorCopy, remove);
+      editor.append(editorHeading);
+
+      const localFields = element('div', 'lights-local-fields');
+      const lightSlider = (label, key, options, digits = 2) => slider(
+        localFields,
+        label,
+        lightCfg[key],
+        { ...options, digits },
+        `local-light-${key}`,
+        {
+          onInput: (value) => triggerAction('local-light-preview', { id: selectedLight.id, patch: { [key]: value } }),
+          onChange: (value) => triggerAction('local-light-update', { id: selectedLight.id, patch: { [key]: value } }),
+        },
+      );
+      lightSlider('Intensity (cd)', 'intensity', { min: 0, max: 3000, step: 25 }, 0);
+      lightSlider('Warmth (warm ← → cool)', 'temperature', { min: -1, max: 1, step: 0.05 });
+      lightSlider('Reach (m)', 'range', { min: 0.5, max: 60, step: 0.25 });
+      lightSlider('Pool radius (m)', 'radius', { min: 0.25, max: 30, step: 0.25 });
+      lightSlider('Edge softness', 'softness', { min: 0, max: 1, step: 0.02 });
+      lightSlider('Physical falloff', 'decay', { min: 0, max: 3, step: 0.05 });
+      lightSlider('Cloud irregularity', 'irregularity', { min: 0.15, max: 1, step: 0.05 });
+
+      const colorField = element('label', 'skybox-field local-light-color');
+      const color = document.createElement('input');
+      color.type = 'color';
+      color.value = lightCfg.color;
+      color.dataset.testid = 'local-light-color';
+      color.addEventListener('input', () => triggerAction('local-light-preview', { id: selectedLight.id, patch: { color: color.value } }));
+      color.addEventListener('change', () => triggerAction('local-light-update', { id: selectedLight.id, patch: { color: color.value } }));
+      colorField.append(element('span', '', 'Lamp colour'), color);
+      localFields.append(colorField);
+      editor.append(localFields);
+
+      const presets = element('div', 'lights-presets');
+      presets.append(element('span', '', 'Quick looks'));
+      for (const [label, patch] of [
+        ['Warm workshop', { color: '#ffd0a0', temperature: -0.45, softness: 0.82, irregularity: 0.72 }],
+        ['Fluorescent', { color: '#dcecff', temperature: 0.18, softness: 0.68, irregularity: 0.5 }],
+        ['Sodium haze', { color: '#ff9a52', temperature: -0.72, softness: 0.9, irregularity: 0.86 }],
+      ]) {
+        const preset = button(label, '', { title: `Apply ${label.toLowerCase()} colour and texture` });
+        preset.addEventListener('click', () => triggerAction('local-light-update', { id: selectedLight.id, patch }));
+        presets.append(preset);
+      }
+      editor.append(presets);
+      local.append(editor);
+    }
+
+    panel.append(intro, controls, local);
     return panel;
   };
 
@@ -1430,7 +1558,7 @@ export function createEditorShell(root) {
       this.setToggle('transform-space', transformState.space === 'world');
       const space = header.querySelector('[data-action="transform-space"]');
       if (space) space.textContent = transformState.space === 'world' ? 'World' : 'Local';
-      if (currentTab === 'edit') renderBottom();
+      if (currentTab === 'edit' || currentTab === 'lights') renderBottom();
     },
     setDirty(dirty) {
       historyState.dirty = Boolean(dirty);
@@ -1452,7 +1580,7 @@ export function createEditorShell(root) {
       if (currentTab === 'project') renderBottom();
     },
     showTab(tab) {
-      if (!['assets', 'edit', 'skybox', 'project', 'world', 'help'].includes(tab)) return false;
+      if (!['assets', 'edit', 'skybox', 'lights', 'project', 'world', 'help'].includes(tab)) return false;
       currentTab = tab;
       renderBottom();
       return true;
@@ -1492,6 +1620,10 @@ export function createEditorShell(root) {
       adapterChip.textContent = `World: ${adapter.label}`;
       adapterChip.classList.toggle('warning', !adapter.isRealWorld);
       adapterChip.title = adapter.warning || adapter.label;
+      applyToGameButton.disabled = !adapter.isRealWorld;
+      applyToGameButton.title = adapter.isRealWorld
+        ? 'Save the draft, publish road curves and game files to the playable game, then reload'
+        : 'Unavailable in the demo/fallback world. Open the real world to update the playable game.';
       bottomCaption.textContent = adapter.isRealWorld ? 'Production generator metadata' : 'Non-production world';
       presetSelect.innerHTML = '';
       const unavailable = !adapter.presets.has('tatsumi-pa');

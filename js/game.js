@@ -6,7 +6,7 @@ import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260723b';
-import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=20260723c';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=20260724a';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
 import { buildCustomAssetGroup, fetchCustomAssetsDocument, setTextureSizeBudget } from './custom-assets.js';

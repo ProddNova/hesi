@@ -15,19 +15,76 @@ import * as THREE from 'three';
 // reversible (the shipped values are captured once in `userData.baseLighting`).
 
 export const DEFAULT_LIGHTING = Object.freeze({ intensity: 1, temperature: 0, tint: '#ffffff' });
+export const LOCAL_LIGHT_ASSET_ID = 'editor:light:soft-spot';
+export const DEFAULT_LOCAL_LIGHT = Object.freeze({
+  color: '#ffd3a1',
+  temperature: -0.28,
+  intensity: 650,
+  range: 14,
+  radius: 6.5,
+  softness: 0.78,
+  decay: 1.8,
+  irregularity: 0.78,
+  seed: 1,
+});
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number.isFinite(+value) ? +value : 0));
 
 const HEX = /^#?[0-9a-f]{6}$/i;
+const normalizedHex = (value, fallback) => {
+  let hex = typeof value === 'string' && HEX.test(value.trim()) ? value.trim() : fallback;
+  if (hex[0] !== '#') hex = `#${hex}`;
+  return hex.toLowerCase();
+};
+
 export function normalizeLighting(config) {
   const source = config && typeof config === 'object' ? config : {};
-  let tint = typeof source.tint === 'string' && HEX.test(source.tint.trim()) ? source.tint.trim() : DEFAULT_LIGHTING.tint;
-  if (tint[0] !== '#') tint = `#${tint}`;
   return {
     intensity: clamp(source.intensity ?? DEFAULT_LIGHTING.intensity, 0, 3),
     temperature: clamp(source.temperature ?? DEFAULT_LIGHTING.temperature, -1, 1),
-    tint: tint.toLowerCase(),
+    tint: normalizedHex(source.tint, DEFAULT_LIGHTING.tint),
   };
+}
+
+export function normalizeLocalLight(config) {
+  const source = config && typeof config === 'object' ? config : {};
+  return {
+    color: normalizedHex(source.color, DEFAULT_LOCAL_LIGHT.color),
+    temperature: clamp(source.temperature ?? DEFAULT_LOCAL_LIGHT.temperature, -1, 1),
+    intensity: clamp(source.intensity ?? DEFAULT_LOCAL_LIGHT.intensity, 0, 3000),
+    range: clamp(source.range ?? DEFAULT_LOCAL_LIGHT.range, 0.5, 60),
+    radius: clamp(source.radius ?? DEFAULT_LOCAL_LIGHT.radius, 0.25, 30),
+    softness: clamp(source.softness ?? DEFAULT_LOCAL_LIGHT.softness, 0, 1),
+    decay: clamp(source.decay ?? DEFAULT_LOCAL_LIGHT.decay, 0, 3),
+    // A small amount of asymmetry is intentional even at the minimum: these
+    // authored lights should never collapse back to a perfect CGI circle.
+    irregularity: clamp(source.irregularity ?? DEFAULT_LOCAL_LIGHT.irregularity, 0.15, 1),
+    seed: Math.max(0, Math.min(2147483647, Math.round(Number.isFinite(+source.seed) ? +source.seed : DEFAULT_LOCAL_LIGHT.seed))),
+  };
+}
+
+export function localLightConfigErrors(config, { path = 'light' } = {}) {
+  const errors = [];
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return [`${path} must be an object`];
+  if (typeof config.color !== 'string' || !HEX.test(config.color.trim())) errors.push(`${path}.color must be a #rrggbb colour`);
+  const ranges = {
+    temperature: [-1, 1],
+    intensity: [0, 3000],
+    range: [0.5, 60],
+    radius: [0.25, 30],
+    softness: [0, 1],
+    decay: [0, 3],
+    irregularity: [0.15, 1],
+  };
+  for (const [key, [min, max]] of Object.entries(ranges)) {
+    if (!Number.isFinite(config[key]) || config[key] < min || config[key] > max) {
+      errors.push(`${path}.${key} must be a finite number from ${min} to ${max}`);
+    }
+  }
+  if (!Number.isInteger(config.seed) || config.seed < 0 || config.seed > 2147483647) {
+    errors.push(`${path}.seed must be an integer from 0 to 2147483647`);
+  }
+  return errors;
 }
 
 /** True when the config leaves every light exactly as shipped. */
@@ -44,13 +101,194 @@ function temperatureRGB(t) {
 }
 
 function hexRGB(hex) {
-  const n = parseInt(hex.replace('#', ''), 16);
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  const colour = new THREE.Color(hex);
+  return [colour.r, colour.g, colour.b];
 }
 
 function tintColour(colour, baseHex, mr, mg, mb) {
-  const [r, g, b] = hexRGB(`#${baseHex.toString(16).padStart(6, '0')}`);
+  const [r, g, b] = new THREE.Color(baseHex).toArray();
   colour.setRGB(Math.min(1, r * mr), Math.min(1, g * mg), Math.min(1, b * mb));
+}
+
+function localLightColour(config) {
+  const c = normalizeLocalLight(config);
+  const colour = new THREE.Color(c.color);
+  const [tr, tg, tb] = temperatureRGB(c.temperature);
+  colour.setRGB(
+    Math.min(1, colour.r * tr),
+    Math.min(1, colour.g * tg),
+    Math.min(1, colour.b * tb),
+  );
+  return colour;
+}
+
+const cookieCache = new Map();
+const smoothstep = (edge0, edge1, value) => {
+  const t = clamp((value - edge0) / Math.max(1e-6, edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+const noiseHash = (x, y, seed) => {
+  let value = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1274126177, 2246822519) ^ Math.imul(seed + 1013904223, 3266489917);
+  value = Math.imul(value ^ (value >>> 13), 1274126177);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
+};
+const valueNoise = (x, y, seed) => {
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const tx = smoothstep(0, 1, x - x0), ty = smoothstep(0, 1, y - y0);
+  const a = noiseHash(x0, y0, seed), b = noiseHash(x0 + 1, y0, seed);
+  const c = noiseHash(x0, y0 + 1, seed), d = noiseHash(x0 + 1, y0 + 1, seed);
+  return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a, b, tx), THREE.MathUtils.lerp(c, d, tx), ty);
+};
+const cloudNoise = (x, y, seed) => {
+  let sum = 0, amplitude = 0.57, scale = 1.7, total = 0;
+  for (let octave = 0; octave < 4; octave += 1) {
+    sum += valueNoise(x * scale + 13.1 * octave, y * scale - 7.3 * octave, seed + octave * 97) * amplitude;
+    total += amplitude;
+    amplitude *= 0.5;
+    scale *= 2.03;
+  }
+  return sum / total;
+};
+
+// Procedural gobo/cookie used by every authored spot light. It combines a
+// feathered edge with low-frequency cloud noise and an asymmetric outline, so
+// a light landing square-on a floor still has an organic, broken-up pool
+// instead of the unmistakable perfect circle of a plain SpotLight.
+function softLightCookie(config) {
+  const c = normalizeLocalLight(config);
+  const quantized = Math.round(c.irregularity * 20) / 20;
+  const key = `${c.seed}:${quantized}`;
+  if (cookieCache.has(key)) return cookieCache.get(key);
+  const size = 96;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const nx = ((x + 0.5) / size) * 2 - 1;
+      const ny = ((y + 0.5) / size) * 2 - 1;
+      const radius = Math.hypot(nx, ny);
+      const theta = Math.atan2(ny, nx);
+      const outlineNoise = cloudNoise(Math.cos(theta) * 1.8, Math.sin(theta) * 1.8, c.seed + 401) - 0.5;
+      const lobes = Math.sin(theta * 3 + c.seed * 0.17) * 0.035 + Math.sin(theta * 7 - c.seed * 0.11) * 0.018;
+      const boundary = 0.78 + quantized * (outlineNoise * 0.36 + lobes);
+      const feather = THREE.MathUtils.lerp(0.24, 0.42, quantized);
+      const edge = 1 - smoothstep(boundary - feather, boundary + 0.08, radius);
+      const cloud = cloudNoise(nx * 1.35, ny * 1.35, c.seed + 17);
+      const broadCloud = cloudNoise(nx * 0.72 + 3.1, ny * 0.72 - 2.7, c.seed + 233);
+      const mottling = THREE.MathUtils.lerp(1, (0.36 + cloud * 0.72) * (0.78 + broadCloud * 0.34), quantized);
+      const centreLift = 0.84 + 0.16 * (1 - Math.min(1, radius));
+      const value = clamp(edge * mottling * centreLift, 0, 1);
+      const index = (y * size + x) * 4;
+      const channel = Math.round(value * 255);
+      data[index] = channel;
+      data[index + 1] = channel;
+      data[index + 2] = channel;
+      data[index + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.name = `HESI cloudy light cookie ${key}`;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  cookieCache.set(key, texture);
+  return texture;
+}
+
+function coneHelperGeometry() {
+  const points = [];
+  const segments = 32;
+  for (let index = 0; index < segments; index += 1) {
+    const a = index / segments * Math.PI * 2;
+    const b = (index + 1) / segments * Math.PI * 2;
+    points.push(
+      Math.cos(a), -1, Math.sin(a), Math.cos(b), -1, Math.sin(b),
+    );
+    if (index % 8 === 0) points.push(0, 0, 0, Math.cos(a), -1, Math.sin(a));
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  return geometry;
+}
+
+export function applyLocalLightConfig(root, config) {
+  if (!root) return null;
+  const c = normalizeLocalLight(config);
+  const light = root.userData?.localLightObject || root.children?.find((child) => child.isSpotLight);
+  if (!light) return null;
+  const colour = localLightColour(c);
+  light.color.copy(colour);
+  light.intensity = c.intensity;
+  light.distance = c.range;
+  light.decay = c.decay;
+  light.angle = Math.min(Math.PI / 2 - 0.01, Math.max(0.02, Math.atan2(c.radius, c.range)));
+  light.penumbra = c.softness;
+  light.map = softLightCookie(c);
+  light.userData.gameSceneLight = true;
+  // Master world-lighting dials always start from the authored local values.
+  light.userData.baseLighting = { color: colour.getHex(), ground: null, intensity: c.intensity };
+  const target = root.userData.localLightTarget;
+  if (target) target.position.set(0, -Math.max(1, c.range), 0);
+  const cone = root.userData.localLightCone;
+  if (cone) {
+    cone.scale.set(c.radius, c.range, c.radius);
+    cone.material.color.copy(colour);
+    cone.material.opacity = THREE.MathUtils.lerp(0.2, 0.09, c.softness);
+  }
+  const handle = root.userData.localLightHandle;
+  if (handle?.material) {
+    handle.material.color.copy(colour);
+    handle.material.emissive.copy(colour);
+  }
+  root.userData.localLightConfig = c;
+  return c;
+}
+
+export function createSoftSpotLight(config = DEFAULT_LOCAL_LIGHT, { editor = false } = {}) {
+  const root = new THREE.Group();
+  root.name = 'Soft cloudy light';
+  root.userData.localLight = true;
+  const light = new THREE.SpotLight();
+  light.name = 'Soft cloudy spot';
+  const target = new THREE.Object3D();
+  target.name = 'Soft light target';
+  light.target = target;
+  root.add(light, target);
+  root.userData.localLightObject = light;
+  root.userData.localLightTarget = target;
+
+  if (editor) {
+    const handleMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffd3a1,
+      emissive: 0xffd3a1,
+      emissiveIntensity: 1.8,
+      roughness: 0.3,
+      metalness: 0.12,
+      depthTest: false,
+    });
+    const handle = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 12), handleMaterial);
+    handle.name = 'Local light handle';
+    handle.renderOrder = 9000;
+    root.add(handle);
+    root.userData.localLightHandle = handle;
+
+    const coneMaterial = new THREE.LineBasicMaterial({ color: 0xffd3a1, transparent: true, opacity: 0.12, depthWrite: false });
+    const cone = new THREE.LineSegments(coneHelperGeometry(), coneMaterial);
+    cone.name = 'Local light range preview';
+    cone.userData.editorHelper = true;
+    cone.renderOrder = 8999;
+    root.add(cone);
+    root.userData.localLightCone = cone;
+  }
+  applyLocalLightConfig(root, config);
+  return root;
+}
+
+export function localLightConfigFromObject(root) {
+  return normalizeLocalLight(root?.userData?.localLightConfig || DEFAULT_LOCAL_LIGHT);
 }
 
 /**

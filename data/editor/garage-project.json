@@ -202,7 +202,8 @@
           1,
           1
         ]
-      }
+      },
+      "visible": false
     },
     "garage-part:0036": {
       "transform": {
@@ -221,7 +222,8 @@
           1,
           1
         ]
-      }
+      },
+      "visible": false
     },
     "garage-part:0038": {
       "transform": {
@@ -240,7 +242,8 @@
           1,
           1
         ]
-      }
+      },
+      "visible": false
     },
     "garage-part:0040": {
       "transform": {
@@ -259,7 +262,8 @@
           1,
           1
         ]
-      }
+      },
+      "visible": false
     },
     "garage-part:0043": {
       "faceTextures": {
@@ -269,7 +273,7 @@
       },
       "transform": {
         "position": [
-          5.69509,
+          7.34551,
           2.07985,
           13.9379
         ],
@@ -412,9 +416,9 @@
     "garage-part:0075": {
       "transform": {
         "position": [
-          -2.5,
+          -3.699,
           0.07518,
-          11.75
+          4.61433
         ],
         "rotation": [
           0,
@@ -422,9 +426,9 @@
           0
         ],
         "scale": [
-          0.7,
+          0.30033,
           1,
-          0.7
+          0.33466
         ]
       }
     },
@@ -457,14 +461,14 @@
     "garage-part:0079": {
       "transform": {
         "position": [
-          3.39254,
-          -0.05034,
-          4.31277
+          -1.56462,
+          -0.05039,
+          11.52639
         ],
         "rotation": [
-          3.14159,
-          -0.01543,
-          3.14159
+          0.00283,
+          -1.56992,
+          0.00282
         ],
         "scale": [
           1.5,
@@ -476,9 +480,9 @@
     "garage-part:0080": {
       "transform": {
         "position": [
-          1.1,
-          -0.96529,
-          13.3
+          3.2466,
+          -0.87381,
+          13.22632
         ],
         "rotation": [
           0,
@@ -486,9 +490,9 @@
           0
         ],
         "scale": [
-          1.3,
-          1.4,
-          1.3
+          1.06554,
+          1.2797,
+          1.07258
         ]
       }
     },
@@ -1295,7 +1299,7 @@
       "sourceEntityId": null,
       "transform": {
         "position": [
-          1.31068,
+          3.43263,
           0.044,
           15.29515
         ],
@@ -1347,13 +1351,13 @@
       "sourceEntityId": null,
       "transform": {
         "position": [
-          5.3,
+          6.51457,
           0.008,
-          -0.4
+          -0.78717
         ],
         "rotation": [
           0,
-          -0.2618,
+          -0.51499,
           0
         ],
         "scale": [
@@ -1493,9 +1497,200 @@
         ]
       },
       "visible": true
+    },
+    {
+      "assetId": "editor:light:soft-spot",
+      "id": "placed:0040",
+      "layer": "Lighting",
+      "light": {
+        "color": "#ebf3ff",
+        "decay": 2,
+        "intensity": 350,
+        "irregularity": 0.78,
+        "radius": 30,
+        "range": 13,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": -1
+      },
+      "locked": false,
+      "name": "Soft Cloudy Light",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          9.5612,
+          3.48309,
+          10.06371
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "editor:light:soft-spot",
+      "id": "placed:0043",
+      "layer": "Lighting",
+      "light": {
+        "color": "#ffb8b8",
+        "decay": 1.8,
+        "intensity": 650,
+        "irregularity": 0.78,
+        "radius": 30,
+        "range": 14,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": 0.85
+      },
+      "locked": false,
+      "name": "Soft Cloudy Light copy",
+      "sourceEntityId": "placed:0040",
+      "transform": {
+        "position": [
+          -3.68759,
+          6.3926,
+          -1.03688
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "editor:light:soft-spot",
+      "id": "placed:0044",
+      "layer": "Lighting",
+      "light": {
+        "color": "#ffffff",
+        "decay": 2.3,
+        "intensity": 1500,
+        "irregularity": 0.78,
+        "radius": 17,
+        "range": 14,
+        "seed": 44,
+        "softness": 1,
+        "temperature": 1
+      },
+      "locked": false,
+      "name": "Soft Cloudy Light",
+      "sourceEntityId": null,
+      "transform": {
+        "position": [
+          8.32324,
+          6.10328,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "editor:light:soft-spot",
+      "id": "placed:0046",
+      "layer": "Lighting",
+      "light": {
+        "color": "#d1faff",
+        "decay": 1.5,
+        "intensity": 650,
+        "irregularity": 0.78,
+        "radius": 30,
+        "range": 14,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": 1
+      },
+      "locked": false,
+      "name": "Soft Cloudy Light copy copy",
+      "sourceEntityId": "placed:0043",
+      "transform": {
+        "position": [
+          -2.18681,
+          4.51719,
+          11.52819
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
+    },
+    {
+      "assetId": "editor:light:soft-spot",
+      "id": "placed:0047",
+      "layer": "Lighting",
+      "light": {
+        "color": "#c2ffd1",
+        "decay": 0.75,
+        "intensity": 250,
+        "irregularity": 1,
+        "radius": 30,
+        "range": 59.25,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": -1
+      },
+      "locked": false,
+      "name": "Soft Cloudy Light copy",
+      "sourceEntityId": "placed:0040",
+      "transform": {
+        "position": [
+          3.21093,
+          3.61369,
+          13.55857
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true
     }
   ],
   "groups": [],
-  "environment": {},
+  "environment": {
+    "lighting": {
+      "intensity": 0.35,
+      "temperature": 1,
+      "tint": "#ffffff"
+    }
+  },
   "editorState": {}
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { applyObjectFaceStyles, applyWorldModelOverrides, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js';
 import { SkyboxRenderer } from './skybox.js';
-import { applySceneLighting } from './lighting-config.js';
+import { applySceneLighting, createSoftSpotLight } from './lighting-config.js';
 
 // Applies HESI world-editor builds to the running game.
 //
@@ -147,6 +147,13 @@ function buildPlacedObject(op, donorForMaterialKey, customAssets = null) {
   return root;
 }
 
+function buildPlacedLight(op) {
+  const root = createSoftSpotLight(op.light, { editor: false });
+  root.name = op.name || 'Soft cloudy light';
+  applyTransformOp(root, op);
+  return root;
+}
+
 export function applyHighwayBuild(map, build, customAssets = null) {
   const summary = { applied: 0, skipped: 0 };
   if (!map?.group || !build) return summary;
@@ -185,6 +192,15 @@ export function applyHighwayBuild(map, build, customAssets = null) {
       if (!target) { summary.skipped += 1; continue; }
       applyTransformOp(target, op);
       applyObjectFaceStyles(target, op.faceTextures || {}, customAssets?.textures || {});
+      summary.applied += 1;
+      continue;
+    }
+    if (op.op === 'place-light') {
+      // Lights stay attached to the scene rather than streamed chunks. A
+      // changing light count would invalidate Three.js shader programs as the
+      // player crosses chunk boundaries; the finite range keeps their actual
+      // contribution local without creating mid-drive compilation stalls.
+      placedGroup(map.group).add(buildPlacedLight(op));
       summary.applied += 1;
       continue;
     }
@@ -238,6 +254,11 @@ export function applyGarageBuild(garageRoot, build, customAssets = null) {
         applyObjectFaceStyles(operationTarget, op.faceTextures || {}, customAssets?.textures || {});
       }
       if (target.userData?.editorAnchorFollower) target.userData.editorBuildTransformApplied = true;
+      summary.applied += 1;
+      continue;
+    }
+    if (op.op === 'place-light') {
+      placedGroup(garageRoot).add(buildPlacedLight(op));
       summary.applied += 1;
       continue;
     }
@@ -308,17 +329,19 @@ export async function applyEditorBuilds({ map = null, garageRoot = null, roadSce
       if (models.applied) summary.scenes.push({ scene: 'world-models', ...models });
     }
     if (applyBuildSkybox(roadScene, highwayBuild, customAssets)) merge('highway-skybox', { applied: 1, skipped: 0 });
+    if (highwayBuild) merge('highway', applyHighwayBuild(map, highwayBuild, customAssets));
+    // Apply the master look after authored lights exist so it multiplies both
+    // shipped scene lights and newly placed local lights.
     if (roadScene && highwayBuild?.environment?.lighting && applySceneLighting(roadScene, highwayBuild.environment.lighting)) {
       summary.scenes.push({ scene: 'highway-lighting', applied: 1, skipped: 0 });
     }
-    if (highwayBuild) merge('highway', applyHighwayBuild(map, highwayBuild, customAssets));
   }
   if (garageRoot) {
     if (applyBuildSkybox(garageScene, garageBuild, customAssets)) merge('garage-skybox', { applied: 1, skipped: 0 });
+    if (garageBuild) merge('garage', applyGarageBuild(garageRoot, garageBuild, customAssets));
     if (garageScene && garageBuild?.environment?.lighting && applySceneLighting(garageScene, garageBuild.environment.lighting)) {
       summary.scenes.push({ scene: 'garage-lighting', applied: 1, skipped: 0 });
     }
-    if (garageBuild) merge('garage', applyGarageBuild(garageRoot, garageBuild, customAssets));
   }
   return summary;
 }

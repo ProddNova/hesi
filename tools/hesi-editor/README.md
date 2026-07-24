@@ -35,7 +35,9 @@ silently presents demo geometry as the production map.
 
 Demo mode uses `data/editor/demo-highway-project.json` by default, keeping its
 small fixture entity IDs separate from the real highway project. An explicit
-`?project=data/editor/*.json` query still overrides that default.
+`?project=data/editor/*.json` query still overrides that default. Demo and
+real recent-project memory are isolated, and **Apply to Game** is disabled for
+demo/fallback worlds so a test fixture cannot overwrite a production build.
 
 ## Scenes
 
@@ -312,6 +314,10 @@ available on Windows.
 - editor-only inspection lighting by default (bright neutral rig, softened fog)
   with a one-key toggle to the original game night lighting (`L`), exposure
   slider, and full-fog toggle under the View menu
+- placeable soft spot lights with per-light colour, warmth, intensity, reach,
+  pool radius, penumbra, physical falloff, and a procedural irregular cloud
+  cookie; the normal transform gizmo moves and aims them, and project builds
+  recreate them in the playable game
 - orbit and dedicated no-clip fly cameras
 - fly controls: click viewport for mouse look, `W/A/S/D`, `E`/`Space` up,
   `Q`/`CapsLock` down, `Shift` boost, mouse wheel, and `Escape` (`Ctrl` combos

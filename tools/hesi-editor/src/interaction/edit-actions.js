@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import { applyEntityTransform, setEntityVisible, snapshotTransform, sourceTransformFor, transformsEqual } from './entity-transform.js';
+import {
+  applyLocalLightConfig,
+  LOCAL_LIGHT_ASSET_ID,
+  localLightConfigFromObject,
+  normalizeLocalLight,
+} from '../../../../js/lighting-config.js';
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 
@@ -119,6 +125,36 @@ export class EditActions {
     const label = this.assetRegistry.get(assetId)?.label || placed.name;
     return this._addPlacedEntity(placed, `Place ${label}`,
       `Placed ${placed.name} at ${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}`);
+  }
+
+  setLocalLight(patch, entity = this.entity, { preview = false } = {}) {
+    if (!entity?.object3D || entity.assetId !== LOCAL_LIGHT_ASSET_ID) {
+      return this._status('Select a placed soft light first');
+    }
+    const before = normalizeLocalLight(
+      this.projectState.getPlaced(entity.id)?.light || localLightConfigFromObject(entity.object3D),
+    );
+    const after = normalizeLocalLight({ ...before, ...(patch || {}) });
+    const apply = (config, persist = true) => {
+      const normalized = applyLocalLightConfig(entity.object3D, config);
+      entity.metadata.localLight = normalized;
+      if (persist) this.projectState.updatePlaced(entity.id, { light: normalized });
+      this.registry.update(entity.id, { metadata: entity.metadata });
+      if (persist) this.onChange(entity);
+      return entity;
+    };
+    if (preview) return apply(after, false);
+    if (JSON.stringify(before) === JSON.stringify(after)) {
+      // A preceding live preview may already have changed the Three.js light;
+      // restore its authored baseline even when the persisted values match.
+      return apply(before, false);
+    }
+    this.history.execute({
+      label: `Tune light · ${entity.name}`,
+      redo: () => apply(after),
+      undo: () => apply(before),
+    });
+    return entity;
   }
 
   _addPlacedEntity(placed, commandLabel, doneMessage) {

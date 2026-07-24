@@ -47,3 +47,34 @@ test('garage builds mark edited follower anchors so runtime refreshes preserve t
   assert.deepEqual(marker.position.toArray(), [1.25, -0.38, -0.68]);
   assert.equal(marker.userData.editorBuildTransformApplied, true);
 });
+
+test('garage builds recreate authored cloudy spot lights', () => {
+  const root = new THREE.Group();
+  const summary = applyGarageBuild(root, {
+    operations: [{
+      op: 'place-light',
+      name: 'Workbench light',
+      position: [3, 7, -2],
+      quaternion: [0, 0, 0, 1],
+      scale: [1, 1, 1],
+      visible: true,
+      light: {
+        color: '#ffd0a0',
+        temperature: -0.4,
+        intensity: 850,
+        range: 15,
+        radius: 6,
+        softness: 0.8,
+        decay: 1.9,
+        irregularity: 0.75,
+        seed: 8,
+      },
+    }],
+  });
+  assert.deepEqual(summary, { applied: 1, skipped: 0 });
+  const placed = root.getObjectByName('Workbench light');
+  assert.ok(placed);
+  assert.deepEqual(placed.position.toArray(), [3, 7, -2]);
+  assert.equal(placed.userData.localLightObject.intensity, 850);
+  assert.ok(placed.userData.localLightObject.map?.isDataTexture);
+});

@@ -1,5 +1,9 @@
 import { normalizeSkyboxConfig, skyboxConfigErrors } from '../../../../js/skybox-config.js';
-import { normalizeLighting } from '../../../../js/lighting-config.js';
+import {
+  localLightConfigErrors,
+  normalizeLighting,
+  normalizeLocalLight,
+} from '../../../../js/lighting-config.js';
 
 /**
  * Built-map document schema.
@@ -77,6 +81,12 @@ const OPERATION_VALIDATORS = {
   'garage-object'(op, path, errors) {
     if (!Number.isInteger(op.childIndex) || op.childIndex < 0) errors.push(`${path}.childIndex must be a non-negative integer`);
     validateTransformFields(op, path, errors);
+  },
+  // Add one authored, aimable local light with an organic projected cookie.
+  'place-light'(op, path, errors) {
+    if (op.name !== undefined && typeof op.name !== 'string') errors.push(`${path}.name must be a string`);
+    validateTransformFields(op, path, errors);
+    errors.push(...localLightConfigErrors(op.light, { path: `${path}.light` }));
   },
   // Add a placed clone of a generated world asset (geometry donated at runtime).
   place(op, path, errors) {
@@ -197,7 +207,11 @@ export function serializeBuildDocument(document) {
     generatedAt: document.generatedAt,
     project: stableValue(document.project),
     environment: buildEnvironment(document.environment),
-    operations: document.operations.map(stableValue),
+    operations: document.operations.map((operation) => stableValue(
+      operation.op === 'place-light'
+        ? { ...operation, light: normalizeLocalLight(operation.light) }
+        : operation,
+    )),
   };
   return `${JSON.stringify(canonical, null, 2)}\n`;
 }

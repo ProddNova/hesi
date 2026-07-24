@@ -84,3 +84,46 @@ test('project schema persists a photographic skybox and validates its image refe
   assert.match(serialized, /"texture": "tex:0042"/);
   assert.throws(() => validateProjectDocument(document, { textureIds: new Set() }), /missing texture tex:0042/);
 });
+
+test('project serialization keeps master lighting and world finish settings', () => {
+  const document = blankProjectDocument('Lighting persistence');
+  document.environment.lighting = {
+    intensity: 1.65,
+    temperature: -0.4,
+    tint: '#ffd2aa',
+  };
+  document.environment.surfaceGloss = 1.75;
+  const parsed = parseProjectDocument(serializeProjectDocument(document));
+  assert.deepEqual(parsed.environment.lighting, {
+    intensity: 1.65,
+    temperature: -0.4,
+    tint: '#ffd2aa',
+  });
+  assert.equal(parsed.environment.surfaceGloss, 1.75);
+});
+
+test('project schema round-trips placed soft-light controls', () => {
+  const document = blankProjectDocument('Local lights');
+  document.placedObjects.push({
+    id: 'placed:0001',
+    name: 'Garage work light',
+    assetId: 'editor:light:soft-spot',
+    layer: 'Lighting',
+    transform: { position: [2, 7, -3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    light: {
+      color: '#ffd3a1',
+      temperature: -0.28,
+      intensity: 725,
+      range: 13,
+      radius: 5.5,
+      softness: 0.82,
+      decay: 1.9,
+      irregularity: 0.7,
+      seed: 17,
+    },
+  });
+  const parsed = parseProjectDocument(serializeProjectDocument(document));
+  assert.deepEqual(parsed.placedObjects[0].light, document.placedObjects[0].light);
+  delete document.placedObjects[0].light;
+  assert.throws(() => validateProjectDocument(document), /light is required/);
+});

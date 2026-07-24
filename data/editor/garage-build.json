@@ -1,13 +1,19 @@
 {
   "version": 1,
   "scene": "garage",
-  "generatedAt": "2026-07-23T18:56:03.866Z",
+  "generatedAt": "2026-07-24T00:02:46.179Z",
   "project": {
-    "draftSignature": "fnv1a32:131e3328",
+    "draftSignature": "fnv1a32:3fa20a36",
     "name": "HESI Garage Interior",
     "path": "data/editor/garage-project.json"
   },
-  "environment": {},
+  "environment": {
+    "lighting": {
+      "intensity": 0.35,
+      "temperature": 1,
+      "tint": "#ffffff"
+    }
+  },
   "operations": [
     {
       "childIndex": 0,
@@ -562,7 +568,7 @@
         1,
         1
       ],
-      "visible": true
+      "visible": false
     },
     {
       "childIndex": 35,
@@ -583,7 +589,7 @@
         1,
         1
       ],
-      "visible": true
+      "visible": false
     },
     {
       "childIndex": 37,
@@ -604,7 +610,7 @@
         1,
         1
       ],
-      "visible": true
+      "visible": false
     },
     {
       "childIndex": 39,
@@ -625,7 +631,7 @@
         1,
         1
       ],
-      "visible": true
+      "visible": false
     },
     {
       "childIndex": 42,
@@ -636,7 +642,7 @@
       },
       "op": "garage-object",
       "position": [
-        5.69509,
+        7.34551,
         2.07985,
         13.9379
       ],
@@ -1287,9 +1293,9 @@
       "childIndex": 74,
       "op": "garage-object",
       "position": [
-        -2.5,
+        -3.699,
         0.07518,
-        11.75
+        4.61433
       ],
       "quaternion": [
         0,
@@ -1298,9 +1304,9 @@
         1
       ],
       "scale": [
-        0.7,
+        0.30033,
         1,
-        0.7
+        0.33466
       ],
       "visible": true
     },
@@ -1371,15 +1377,15 @@
       "childIndex": 78,
       "op": "garage-object",
       "position": [
-        3.39254,
-        -0.05034,
-        4.31277
+        -1.56462,
+        -0.05039,
+        11.52639
       ],
       "quaternion": [
         0,
-        -0.99997,
+        -0.7068,
         0,
-        0.00771
+        0.70742
       ],
       "scale": [
         1.5,
@@ -1392,9 +1398,9 @@
       "childIndex": 79,
       "op": "garage-object",
       "position": [
-        1.1,
-        -0.96529,
-        13.3
+        3.2466,
+        -0.87381,
+        13.22632
       ],
       "quaternion": [
         0,
@@ -1403,9 +1409,9 @@
         1
       ],
       "scale": [
-        1.3,
-        1.4,
-        1.3
+        1.06554,
+        1.2797,
+        1.07258
       ],
       "visible": true
     },
@@ -2094,7 +2100,7 @@
       "name": "door_garage",
       "op": "place-custom",
       "position": [
-        1.31068,
+        3.43263,
         0.044,
         15.29515
       ],
@@ -2138,15 +2144,15 @@
       "name": "attrezzi",
       "op": "place-custom",
       "position": [
-        5.3,
+        6.51457,
         0.008,
-        -0.4
+        -0.78717
       ],
       "quaternion": [
         0,
-        -0.13053,
+        -0.25466,
         0,
-        0.99144
+        0.96703
       ],
       "scale": [
         1,
@@ -2262,6 +2268,166 @@
         1.30347,
         0.6,
         0.5
+      ],
+      "visible": true
+    },
+    {
+      "light": {
+        "color": "#ebf3ff",
+        "decay": 2,
+        "intensity": 350,
+        "irregularity": 0.78,
+        "radius": 30,
+        "range": 13,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": -1
+      },
+      "name": "Soft Cloudy Light",
+      "op": "place-light",
+      "position": [
+        9.5612,
+        3.48309,
+        10.06371
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "light": {
+        "color": "#ffb8b8",
+        "decay": 1.8,
+        "intensity": 650,
+        "irregularity": 0.78,
+        "radius": 30,
+        "range": 14,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": 0.85
+      },
+      "name": "Soft Cloudy Light copy",
+      "op": "place-light",
+      "position": [
+        -3.68759,
+        6.3926,
+        -1.03688
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "light": {
+        "color": "#ffffff",
+        "decay": 2.3,
+        "intensity": 1500,
+        "irregularity": 0.78,
+        "radius": 17,
+        "range": 14,
+        "seed": 44,
+        "softness": 1,
+        "temperature": 1
+      },
+      "name": "Soft Cloudy Light",
+      "op": "place-light",
+      "position": [
+        8.32324,
+        6.10328,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "light": {
+        "color": "#d1faff",
+        "decay": 1.5,
+        "intensity": 650,
+        "irregularity": 0.78,
+        "radius": 30,
+        "range": 14,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": 1
+      },
+      "name": "Soft Cloudy Light copy copy",
+      "op": "place-light",
+      "position": [
+        -2.18681,
+        4.51719,
+        11.52819
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true
+    },
+    {
+      "light": {
+        "color": "#c2ffd1",
+        "decay": 0.75,
+        "intensity": 250,
+        "irregularity": 1,
+        "radius": 30,
+        "range": 59.25,
+        "seed": 40,
+        "softness": 0.78,
+        "temperature": -1
+      },
+      "name": "Soft Cloudy Light copy",
+      "op": "place-light",
+      "position": [
+        3.21093,
+        3.61369,
+        13.55857
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
       ],
       "visible": true
     }

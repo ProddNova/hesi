@@ -17,6 +17,12 @@ const clone = (value) => value == null ? value : structuredClone(value);
 // The highway scene keeps the historical un-suffixed keys so existing local
 // editor state survives the multi-scene upgrade.
 const sceneKey = (base, sceneId) => sceneId === 'highway' ? base : `${base}:${sceneId}`;
+// Real projects keep their historical keys. Non-production editor modes use
+// isolated keys so opening the demo can never replace the real current project.
+const scopedSceneKey = (base, sceneId, scope) => {
+  const key = sceneKey(base, sceneId);
+  return scope === 'real' ? key : `${key}:${scope}`;
+};
 
 function normalizeProjectPath(value) {
   const path = String(value || '').trim().replace(/\\/g, '/').replace(/^\.\//, '');
@@ -56,8 +62,8 @@ async function responseJson(response) {
 }
 
 export class ProjectPersistence {
-  constructor({ projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore = null, scene = FALLBACK_SCENE, onStatus = () => {}, onProjectChange = () => {}, onRecovery = () => {} }) {
-    Object.assign(this, { projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore, scene, onStatus, onProjectChange, onRecovery });
+  constructor({ projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore = null, scene = FALLBACK_SCENE, storageScope = 'real', onStatus = () => {}, onProjectChange = () => {}, onRecovery = () => {} }) {
+    Object.assign(this, { projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore, scene, storageScope, onStatus, onProjectChange, onRecovery });
     this.currentPath = scene.projectPath || DEFAULT_PROJECT_PATH;
     this.lastSavedDocument = blankProjectDocument(scene.projectName);
     this.lastSavedModifiedMs = 0;
@@ -65,6 +71,7 @@ export class ProjectPersistence {
   }
 
   entityIds() { return new Set(this.registry.list().filter((entity) => entity.generated).map((entity) => entity.id)); }
+  storageKey(base) { return scopedSceneKey(base, this.scene.id, this.storageScope); }
 
   validationOptions() {
     return {
@@ -92,15 +99,15 @@ export class ProjectPersistence {
   }
 
   recentProjects() {
-    try { return JSON.parse(localStorage.getItem(sceneKey(RECENTS_KEY, this.scene.id)) || '[]').filter((item) => typeof item === 'string').slice(0, 8); }
+    try { return JSON.parse(localStorage.getItem(this.storageKey(RECENTS_KEY)) || '[]').filter((item) => typeof item === 'string').slice(0, 8); }
     catch { return []; }
   }
 
   remember(path) {
     const recent = [path, ...this.recentProjects().filter((item) => item !== path)].slice(0, 8);
     try {
-      localStorage.setItem(sceneKey(RECENTS_KEY, this.scene.id), JSON.stringify(recent));
-      localStorage.setItem(sceneKey(CURRENT_KEY, this.scene.id), path);
+      localStorage.setItem(this.storageKey(RECENTS_KEY), JSON.stringify(recent));
+      localStorage.setItem(this.storageKey(CURRENT_KEY), path);
     } catch { /* UI convenience state is allowed to fail without affecting disk persistence. */ }
     return recent;
   }
@@ -108,7 +115,13 @@ export class ProjectPersistence {
   initialPath() {
     const query = new URLSearchParams(window.location.search).get('project');
     if (query) return normalizeProjectPath(query);
-    try { return normalizeProjectPath(localStorage.getItem(sceneKey(CURRENT_KEY, this.scene.id)) || this.currentPath); }
+    try {
+      const remembered = normalizeProjectPath(localStorage.getItem(this.storageKey(CURRENT_KEY)) || this.currentPath);
+      // Repair state left by older versions, where visiting ?world=demo wrote
+      // its fixture path into the real scene's shared "current project" key.
+      const legacyDemoPath = `data/editor/demo-${this.scene.id}-project.json`;
+      return this.storageScope === 'real' && remembered === legacyDemoPath ? this.currentPath : remembered;
+    }
     catch { return this.currentPath; }
   }
 
@@ -133,6 +146,7 @@ export class ProjectPersistence {
       transform: toPersistedTransform(placed.transform),
       visible: placed.visible !== false,
       locked: Boolean(placed.locked),
+      ...(placed.light ? { light: clone(placed.light) } : {}),
       ...(placed.faceTextures && Object.keys(placed.faceTextures).length ? { faceTextures: clone(placed.faceTextures) } : {}),
     }));
     const document = {
@@ -208,7 +222,11 @@ export class ProjectPersistence {
         const sourceId = this.assetRegistry.sourceEntityId(placed.assetId);
         const source = sourceId ? this.registry.getById(sourceId) : placed.assetId;
         if (!source) throw new Error(`Reusable asset source is unavailable: ${placed.assetId}`);
-        const entity = this.assetRegistry.createPlacedEntity(source, { id: placed.id, name: placed.name || placed.id });
+        const entity = this.assetRegistry.createPlacedEntity(source, {
+          id: placed.id,
+          name: placed.name || placed.id,
+          light: placed.light || null,
+        });
         const transform = toInternalTransform(placed.transform);
         applyEntityTransform(entity, transform, { visible: placed.visible !== false });
         entity.object3D.visible = placed.visible !== false;

@@ -22,7 +22,12 @@ import { SurfacesPanel } from './surfaces/surfaces-panel.js';
 import { FaceTextureController } from './interaction/face-texture-controller.js';
 import { applyWorldModelOverrides, applyWorldTextureOverrides } from '/js/custom-assets.js';
 import { SkyboxController } from './world/skybox-controller.js';
-import { normalizeLighting, DEFAULT_LIGHTING, isDefaultLighting } from '/js/lighting-config.js';
+import {
+  normalizeLighting,
+  DEFAULT_LIGHTING,
+  isDefaultLighting,
+  LOCAL_LIGHT_ASSET_ID,
+} from '/js/lighting-config.js';
 
 export async function createEditorApp(root) {
   if (!root) throw new Error('Editor root element is missing');
@@ -150,6 +155,9 @@ export async function createEditorApp(root) {
     return result;
   };
   const applyWorkspaceToGame = async () => {
+    if (!adapter?.isRealWorld) {
+      throw new Error('Apply to Game is unavailable in the demo/fallback world. Open the real world to update the playable game.');
+    }
     await saveRoadEdits();
     await persistence.save({ build: false });
     if (savedRoadRouteCount) await routePersistence.publish();
@@ -271,6 +279,10 @@ export async function createEditorApp(root) {
         if (modeler?.isOpen) modeler.close();
         const entry = assetRegistry.catalog().find((item) => item.id === detail);
         placement.begin(detail, entry?.label || detail);
+        if (detail === LOCAL_LIGHT_ASSET_ID) {
+          viewport.setGameLighting(normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING), { switchToGame: true });
+          syncViewState();
+        }
       },
       'modeler-new': () => modeler?.open(null),
       'modeler-edit-asset': () => modeler?.open(detail),
@@ -309,20 +321,69 @@ export async function createEditorApp(root) {
       'skybox-update': () => skyboxController?.update(detail?.patch || {}, detail?.label || 'Edit skybox'),
       'skybox-reset': () => skyboxController?.resetPlacement(),
       'skybox-remove': () => skyboxController?.remove(),
-      'lights-update': () => {
+      'lights-preview': () => {
         const current = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
         const next = normalizeLighting({ ...current, ...(detail?.patch || {}) });
-        projectState.replaceLighting(isDefaultLighting(next) ? null : next);
-        // render:false — the slider under the pointer keeps its live value.
         shell.setLightingState(next, { render: false });
         viewport.setGameLighting(next, { switchToGame: true });
-        shell.setStatus('Lighting updated · Apply to Game to bake it into the playable game');
+      },
+      'lights-update': () => {
+        const before = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
+        const after = normalizeLighting({ ...before, ...(detail?.patch || {}) });
+        const apply = (config) => {
+          projectState.replaceLighting(isDefaultLighting(config) ? null : config);
+          shell.setLightingState(config, { render: true });
+          viewport.setGameLighting(config, { switchToGame: true });
+        };
+        if (JSON.stringify(before) === JSON.stringify(after)) {
+          apply(before);
+          return;
+        }
+        history.execute({
+          label: 'Tune master world light',
+          redo: () => apply(after),
+          undo: () => apply(before),
+        });
+        shell.setStatus('Lighting updated · Save Draft, then Apply to Game to publish it');
       },
       'lights-reset': () => {
-        projectState.replaceLighting(null);
-        shell.setLightingState(DEFAULT_LIGHTING, { render: true });
-        viewport.setGameLighting(DEFAULT_LIGHTING);
+        const before = normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING);
+        if (isDefaultLighting(before)) return;
+        const apply = (config) => {
+          projectState.replaceLighting(isDefaultLighting(config) ? null : config);
+          shell.setLightingState(config, { render: true });
+          viewport.setGameLighting(config, { switchToGame: true });
+        };
+        history.execute({
+          label: 'Reset master world light',
+          redo: () => apply(DEFAULT_LIGHTING),
+          undo: () => apply(before),
+        });
         shell.setStatus('Lighting reset to the shipped night look');
+      },
+      'local-light-select': () => {
+        const entity = registry.getById(detail);
+        if (entity) selection?.select(entity, { source: 'lights-panel' });
+      },
+      'local-light-preview': () => {
+        const entity = registry.getById(detail?.id);
+        if (!entity || !editActions) return;
+        editActions.setLocalLight(detail?.patch || {}, entity, { preview: true });
+        viewport.setGameLighting(normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING), { switchToGame: true });
+      },
+      'local-light-update': () => {
+        const entity = registry.getById(detail?.id);
+        if (!entity || !editActions) return;
+        editActions.setLocalLight(detail?.patch || {}, entity);
+        viewport.setGameLighting(normalizeLighting(projectState.getLighting() || DEFAULT_LIGHTING), { switchToGame: true });
+        shell.setStatus('Local light updated · Save Draft, then Apply to Game to publish it');
+      },
+      'local-light-delete': () => {
+        const entity = registry.getById(detail);
+        if (!entity || !editActions) return;
+        selection?.select(entity, { source: 'lights-panel' });
+        editActions.deleteSelected();
+        shell.setStatus('Local light removed');
       },
       'world-surface-gloss': () => {
         const value = Math.min(3, Math.max(0, Number(detail)));
@@ -606,6 +667,7 @@ export async function createEditorApp(root) {
     syncViewState();
     persistence = new ProjectPersistence({
       projectState, registry, assetRegistry, adapter, selection, transformManager, history, customAssetStore, scene,
+      storageScope: mode,
       onStatus: (message) => shell.setStatus(message),
       onProjectChange: (state) => shell.setProject(state),
       onRecovery: (message) => shell.showProjectNotice(message),

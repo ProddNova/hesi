@@ -102,6 +102,32 @@ test('placed objects share asset geometry and project JSON remains declarative',
   assert.doesNotMatch(json, /attributes|vertices|materials|geometry/);
 });
 
+test('soft-light assets are placeable and persist their authored controls', () => {
+  const editorGroup = new THREE.Group();
+  const assets = new AssetRegistry({ editorGroup }).collect([]);
+  const placed = assets.createPlacedEntity('editor:light:soft-spot', {
+    id: 'placed:0042',
+    position: new THREE.Vector3(2, 7, -1),
+    light: {
+      color: '#ffd3a1',
+      temperature: -0.3,
+      intensity: 775,
+      range: 16,
+      radius: 7,
+      softness: 0.8,
+      decay: 1.8,
+      irregularity: 0.7,
+      seed: 42,
+    },
+  });
+  const record = assets.recordFor(placed);
+  assert.equal(placed.type, 'placed-soft-light');
+  assert.equal(placed.layer, 'Lighting');
+  assert.equal(record.light.intensity, 775);
+  assert.equal(record.light.seed, 42);
+  assert.ok(placed.object3D.userData.localLightObject.isSpotLight);
+});
+
 test('project state clones override and placed records at its boundary', () => {
   const state = new WorldProjectState();
   const override = { transform: { position: [1, 2, 3] }, visible: false };

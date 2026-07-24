@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ProjectPersistence } from '../../src/overrides/project-persistence.js';
 
-function fixture(customAssetStore) {
+function fixture(customAssetStore, options = {}) {
   const projectState = {
     toJSON: () => ({
       version: 1,
@@ -22,7 +22,26 @@ function fixture(customAssetStore) {
     registry: { list: () => [{ id: 'garage-part:0001', generated: true }] },
     assetRegistry: { ids: () => [] },
     customAssetStore,
+    ...options,
   });
+}
+
+function withBrowserStorage(values, run) {
+  const originalWindow = globalThis.window;
+  const originalLocalStorage = globalThis.localStorage;
+  const entries = new Map(Object.entries(values));
+  globalThis.window = { location: { search: '' } };
+  globalThis.localStorage = {
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => entries.set(key, String(value)),
+  };
+  try { return run(entries); }
+  finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+    if (originalLocalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalLocalStorage;
+  }
 }
 
 test('project persistence validates face textures against the injected shared library', () => {
@@ -73,4 +92,24 @@ test('project save writes a dirty shared texture library before its referencing 
 
   await persistence.save({ markSaved: false, build: false });
   assert.deepEqual(events, ['save-library', 'validate-project', 'write-project']);
+});
+
+test('real mode repairs a demo project remembered by older editor versions', () => {
+  withBrowserStorage({
+    'hesi-editor:current-project': 'data/editor/demo-highway-project.json',
+  }, () => {
+    const persistence = fixture({ texturesById: () => ({}) });
+    assert.equal(persistence.initialPath(), 'data/editor/hesi-world-project.json');
+  });
+});
+
+test('demo and real modes remember their current projects independently', () => {
+  withBrowserStorage({}, (entries) => {
+    const real = fixture({ texturesById: () => ({}) });
+    const demo = fixture({ texturesById: () => ({}) }, { storageScope: 'demo' });
+    real.remember('data/editor/hesi-world-project.json');
+    demo.remember('data/editor/demo-highway-project.json');
+    assert.equal(entries.get('hesi-editor:current-project'), 'data/editor/hesi-world-project.json');
+    assert.equal(entries.get('hesi-editor:current-project:demo'), 'data/editor/demo-highway-project.json');
+  });
 });

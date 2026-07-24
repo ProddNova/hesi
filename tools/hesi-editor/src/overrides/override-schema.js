@@ -1,4 +1,10 @@
 import { normalizeSkyboxConfig, skyboxConfigErrors } from '../../../../js/skybox-config.js';
+import {
+  isDefaultLighting,
+  LOCAL_LIGHT_ASSET_ID,
+  localLightConfigErrors,
+  normalizeLighting,
+} from '../../../../js/lighting-config.js';
 
 export const PROJECT_SCHEMA_VERSION = 1;
 export const DEFAULT_PROJECT_PATH = 'data/editor/hesi-world-project.json';
@@ -100,6 +106,11 @@ export function validateProjectDocument(document, { entityIds = null, assetIds =
       if (typeof placed.layer !== 'string' || !placed.layer.trim()) errors.push(`${path}.layer is required`);
       if (placed.name !== undefined && (typeof placed.name !== 'string' || !placed.name.trim() || placed.name.length > 200)) errors.push(`${path}.name is invalid`);
       validateTransform(placed.transform, `${path}.transform`, errors);
+      if (placed.light !== undefined) {
+        errors.push(...localLightConfigErrors(placed.light, { path: `${path}.light` }));
+      } else if (placed.assetId === LOCAL_LIGHT_ASSET_ID) {
+        errors.push(`${path}.light is required for a placed soft light`);
+      }
       if (placed.faceTextures !== undefined) validateFaceTextures(placed.faceTextures, `${path}.faceTextures`, errors, textureIds);
       for (const key of ['visible', 'locked']) if (placed[key] !== undefined && typeof placed[key] !== 'boolean') errors.push(`${path}.${key} must be boolean`);
     });
@@ -107,11 +118,24 @@ export function validateProjectDocument(document, { entityIds = null, assetIds =
   if (!Array.isArray(document.groups)) errors.push('groups must be an array');
   if (document.environment !== undefined) {
     if (!isRecord(document.environment)) errors.push('environment must be an object');
-    else if (document.environment.skybox !== undefined && document.environment.skybox !== null) {
-      errors.push(...skyboxConfigErrors(document.environment.skybox, {
-        textureIds,
-        path: 'environment.skybox',
-      }));
+    else {
+      if (document.environment.skybox !== undefined && document.environment.skybox !== null) {
+        errors.push(...skyboxConfigErrors(document.environment.skybox, {
+          textureIds,
+          path: 'environment.skybox',
+        }));
+      }
+      const lighting = document.environment.lighting;
+      if (lighting !== undefined && lighting !== null) {
+        if (!isRecord(lighting)) errors.push('environment.lighting must be an object');
+        else {
+          if (lighting.intensity !== undefined && !Number.isFinite(lighting.intensity)) errors.push('environment.lighting.intensity must be a number');
+          if (lighting.temperature !== undefined && !Number.isFinite(lighting.temperature)) errors.push('environment.lighting.temperature must be a number');
+          if (lighting.tint !== undefined && !/^#?[0-9a-f]{6}$/i.test(String(lighting.tint))) errors.push('environment.lighting.tint must be a #rrggbb colour');
+        }
+      }
+      const gloss = document.environment.surfaceGloss;
+      if (gloss !== undefined && gloss !== null && !Number.isFinite(gloss)) errors.push('environment.surfaceGloss must be a number');
     }
   }
   if (!isRecord(document.editorState)) errors.push('editorState must be an object');
@@ -135,13 +159,21 @@ export function canonicalizeProjectDocument(document) {
   const placedObjects = document.placedObjects.map(stableValue).sort((a, b) => a.id.localeCompare(b.id));
   const groups = document.groups.map(stableValue).sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
   const skybox = document.environment?.skybox ? normalizeSkyboxConfig(document.environment.skybox) : null;
+  const lighting = document.environment?.lighting ? normalizeLighting(document.environment.lighting) : null;
+  const surfaceGloss = document.environment?.surfaceGloss;
+  const environment = {};
+  if (skybox) environment.skybox = stableValue(skybox);
+  if (lighting && !isDefaultLighting(lighting)) environment.lighting = stableValue(lighting);
+  if (Number.isFinite(surfaceGloss) && Math.abs(surfaceGloss - 1) > 1e-3) {
+    environment.surfaceGloss = roundNumber(Math.min(3, Math.max(0, surfaceGloss)));
+  }
   return {
     version: PROJECT_SCHEMA_VERSION,
     project: stableValue(document.project),
     entityOverrides,
     placedObjects,
     groups,
-    environment: skybox ? { skybox: stableValue(skybox) } : {},
+    environment,
     editorState: stableValue(document.editorState),
   };
 }

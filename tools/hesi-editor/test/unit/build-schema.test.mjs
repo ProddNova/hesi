@@ -66,3 +66,35 @@ test('build schema carries validated skybox environment settings', () => {
   build.environment.skybox.zoom = 99;
   assert.throws(() => validateBuildDocument(build), BuildValidationError);
 });
+
+test('build schema validates a persisted cloudy local light', () => {
+  const build = {
+    version: 1,
+    scene: 'garage',
+    generatedAt: new Date(0).toISOString(),
+    project: { name: 'Garage lights', path: 'data/editor/garage-project.json' },
+    environment: {},
+    operations: [{
+      op: 'place-light',
+      name: 'Workbench glow',
+      position: [3, 7, -2],
+      quaternion: [0, 0, 0, 1],
+      scale: [1, 1, 1],
+      visible: true,
+      light: {
+        color: '#ffd0a0',
+        temperature: -0.45,
+        intensity: 800,
+        range: 14,
+        radius: 6,
+        softness: 0.82,
+        decay: 1.8,
+        irregularity: 0.72,
+        seed: 23,
+      },
+    }],
+  };
+  assert.equal(validateBuildDocument(build), true);
+  build.operations[0].light.irregularity = 0;
+  assert.throws(() => validateBuildDocument(build), /irregularity/);
+});

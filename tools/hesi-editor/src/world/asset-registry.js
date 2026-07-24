@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import { instanceWorldMatrix, objectRenderMetadata } from './world-metadata.js';
+import {
+  createSoftSpotLight,
+  DEFAULT_LOCAL_LIGHT,
+  LOCAL_LIGHT_ASSET_ID,
+  localLightConfigFromObject,
+  normalizeLocalLight,
+} from '../../../../js/lighting-config.js';
 
 function matrixFromArray(values) {
   return new THREE.Matrix4().fromArray(values);
@@ -34,6 +41,7 @@ const WORLD_ASSET_LABELS = Object.freeze({
 });
 
 const CATALOG_ORDER = [
+  LOCAL_LIGHT_ASSET_ID,
   'hesi:lamppost:concrete',
   'hesi:box:concrete',
   'hesi:box:concreteDark',
@@ -100,6 +108,7 @@ export class AssetRegistry {
       });
     }
     this._definePrimitives();
+    this._defineLights();
     return this;
   }
 
@@ -132,6 +141,21 @@ export class AssetRegistry {
         baseWorldMatrix: new THREE.Matrix4(),
       });
     }
+  }
+
+  _defineLights() {
+    if (this.assets.has(LOCAL_LIGHT_ASSET_ID)) return;
+    this.assets.set(LOCAL_LIGHT_ASSET_ID, {
+      id: LOCAL_LIGHT_ASSET_ID,
+      kind: 'light',
+      label: 'Soft Cloudy Light',
+      description: 'Aimable local light with a feathered, irregular pool',
+      layer: 'Lighting',
+      editorOwned: true,
+      sourceEntityId: null,
+      components: [],
+      baseWorldMatrix: new THREE.Matrix4(),
+    });
   }
 
   /**
@@ -203,7 +227,7 @@ export class AssetRegistry {
     return entries;
   }
 
-  createPlacedEntity(sourceOrId, { id = null, name = null, position = null } = {}) {
+  createPlacedEntity(sourceOrId, { id = null, name = null, position = null, light = null } = {}) {
     const fromId = typeof sourceOrId === 'string';
     const sourceEntity = fromId ? null : sourceOrId;
     const asset = this.assets.get(fromId ? sourceOrId : sourceEntity?.assetId);
@@ -211,18 +235,26 @@ export class AssetRegistry {
     const placedId = id || `placed:${String(this.nextPlacedIndex++).padStart(4, '0')}`;
     const placedIndex = Number(placedId.match(/^placed:(\d+)$/)?.[1]);
     if (Number.isInteger(placedIndex)) this.nextPlacedIndex = Math.max(this.nextPlacedIndex, placedIndex + 1);
-    const root = new THREE.Group();
+    const sourceLight = sourceEntity?.metadata?.localLight || sourceEntity?.object3D?.userData?.localLightConfig;
+    const lightConfig = asset.kind === 'light'
+      ? normalizeLocalLight(light || sourceLight || { ...DEFAULT_LOCAL_LIGHT, seed: Math.max(1, placedIndex || this.nextPlacedIndex) })
+      : null;
+    const root = asset.kind === 'light'
+      ? createSoftSpotLight(lightConfig, { editor: true })
+      : new THREE.Group();
     root.name = name || (sourceEntity ? `${sourceEntity.name} copy` : asset.label || asset.id);
     root.userData.editorPlacedObject = true;
-    const baseInverse = asset.baseWorldMatrix.clone().invert();
-    for (const component of asset.components) {
-      const mesh = new THREE.Mesh(component.geometry, component.material);
-      mesh.name = component.name || asset.id;
-      mesh.castShadow = component.castShadow;
-      mesh.receiveShadow = component.receiveShadow;
-      mesh.matrixAutoUpdate = false;
-      mesh.matrix.multiplyMatrices(baseInverse, component.sourceWorldMatrix);
-      root.add(mesh);
+    if (asset.kind !== 'light') {
+      const baseInverse = asset.baseWorldMatrix.clone().invert();
+      for (const component of asset.components) {
+        const mesh = new THREE.Mesh(component.geometry, component.material);
+        mesh.name = component.name || asset.id;
+        mesh.castShadow = component.castShadow;
+        mesh.receiveShadow = component.receiveShadow;
+        mesh.matrixAutoUpdate = false;
+        mesh.matrix.multiplyMatrices(baseInverse, component.sourceWorldMatrix);
+        root.add(mesh);
+      }
     }
     if (sourceEntity) {
       root.position.copy(sourceEntity.object3D.position);
@@ -236,7 +268,7 @@ export class AssetRegistry {
     const entity = {
       id: placedId,
       name: root.name,
-      type: 'placed-asset-instance',
+      type: asset.kind === 'light' ? 'placed-soft-light' : 'placed-asset-instance',
       layer: sourceEntity?.layer || asset.layer || 'Props',
       object3D: root,
       source: `editor asset reference:${asset.id}`,
@@ -250,11 +282,12 @@ export class AssetRegistry {
         sourceKind: 'PLACED OBJECT',
         placed: true,
         sourceEntityId: asset.sourceEntityId ?? sourceEntity?.id ?? null,
-        static: true,
+        static: asset.kind !== 'light',
         instanced: false,
         render: objectRenderMetadata(root),
         initialTransform: transformRecord(root),
         initialName: root.name,
+        ...(lightConfig ? { localLight: lightConfig } : {}),
       },
     };
     return entity;
@@ -270,6 +303,9 @@ export class AssetRegistry {
       transform: transformRecord(entity.object3D),
       visible: entity.object3D.visible,
       locked: Boolean(entity.metadata.locked),
+      ...(entity.assetId === LOCAL_LIGHT_ASSET_ID
+        ? { light: localLightConfigFromObject(entity.object3D) }
+        : {}),
       ...(entity.metadata.faceTextures && Object.keys(entity.metadata.faceTextures).length
         ? { faceTextures: structuredClone(entity.metadata.faceTextures) }
         : {}),

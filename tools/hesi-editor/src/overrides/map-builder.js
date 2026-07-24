@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { BUILD_SCHEMA_VERSION, buildDraftSignature, validateBuildDocument } from './build-schema.js';
 import { normalizeSkyboxConfig } from '../../../../js/skybox-config.js';
-import { normalizeLighting, isDefaultLighting } from '../../../../js/lighting-config.js';
+import {
+  LOCAL_LIGHT_ASSET_ID,
+  normalizeLighting,
+  normalizeLocalLight,
+  isDefaultLighting,
+} from '../../../../js/lighting-config.js';
 
 /**
  * Resolves a saved project document against the live world into a flat build
@@ -131,6 +136,10 @@ function placedOperations({ assetRegistry, projectDocument }) {
       visible: placed.visible !== false,
       ...(placed.faceTextures && Object.keys(placed.faceTextures).length ? { faceTextures: placed.faceTextures } : {}),
     };
+    if (asset.kind === 'light' || placed.assetId === LOCAL_LIGHT_ASSET_ID) {
+      operations.push({ op: 'place-light', light: normalizeLocalLight(placed.light), ...base });
+      continue;
+    }
     if (asset.kind === 'primitive') {
       operations.push({ op: 'place-primitive', primitive: placed.assetId.split(':').pop(), ...base });
       continue;

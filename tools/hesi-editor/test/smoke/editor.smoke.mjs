@@ -582,8 +582,10 @@ try {
     strategy: window.hesiEditor.adapter.strategy,
     real: window.hesiEditor.adapter.isRealWorld,
     project: window.hesiEditor.persistence.currentPath,
+    applyDisabled: document.querySelector('[data-action="rebuild-world"]')?.disabled,
   }));
-  if (demoState.strategy !== 'demo' || demoState.real || demoState.project !== 'data/editor/demo-highway-project.json') {
+  if (demoState.strategy !== 'demo' || demoState.real || demoState.project !== 'data/editor/demo-highway-project.json'
+    || !demoState.applyDisabled) {
     throw new Error(`Explicit demo mode failed: ${JSON.stringify(demoState)}`);
   }
   await demo.close();
