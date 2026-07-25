@@ -1016,8 +1016,16 @@ class ShutokoNights {
   beginCrash(){this.wasteRun();}
   updateCrash(){this.crash.active=false;this.wasteRun();}
   // The third life no longer starts a crash animation or relocates the car: it
-  // only wipes the unbanked score and refills the three-hit counter.
-  wasteRun(){this.debugStats?.event('run_wasted',{score_lost:this.run.score});this.crash.active=false;this.run.score=0;this.run.lives=3;this.ui.toast('WASTED // SCORE RESET — RESTART FROM 0','red');}
+  // pays out the completed run and refills the three-hit counter in place.
+  wasteRun(){
+    const score=Math.max(0,Number(this.run.score)||0),configuredMultiplier=Number(Data.ECONOMY?.runEndPayoutMultiplier);
+    const multiplier=Number.isFinite(configuredMultiplier)?Math.max(0,configuredMultiplier):5;
+    const basePayout=Data.calculateScorePayout(score),earned=Data.calculateScorePayout(score,multiplier);
+    this.debugStats?.event('run_wasted',{score,base_payout:basePayout,payout_multiplier:multiplier,earned});
+    this.crash.active=false;this.state.money+=earned;this.state.records.bestScore=Math.max(this.state.records.bestScore||0,Math.floor(score));this.state.records.totalBanked=(this.state.records.totalBanked||0)+earned;
+    this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.persist();
+    this.ui.toast(`RUN OVER // PAYOUT ×${multiplier} = ¥${earned.toLocaleString()} // RESTART FROM 0`,'amber');
+  }
 
   resolveMapCollision(){
     const s=this.getVehicleState(),position=vec(s.position||s),previous=vec(s.previousPosition||position),velocity=vec(s.velocity||{});let hit=null;
@@ -1040,7 +1048,7 @@ class ShutokoNights {
     if(!prox){let g=false;try{g=this.map?.checkGarageTransition?.(p,t.speedKmh);}catch(e){}if(g&&t.speedKmh<12){interactAvailable=true;this.ui.prompt('<kbd>E</kbd> ENTER GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}}
     document.body.classList.toggle('interact-available',interactAvailable);
   }
-  bankScore(name){if(this.run.score<1)return;const earned=Math.floor(this.run.score*(Data.ECONOMY?.scoreToMoney??Data.SCORE_TO_MONEY??.42));this.debugStats?.event('score_banked',{location:name,score:this.run.score,earned,combo:this.run.combo,near_misses:this.run.nearMisses});this.state.money+=earned;this.state.records.bestScore=Math.max(this.state.records.bestScore||0,Math.floor(this.run.score));this.state.records.totalBanked=(this.state.records.totalBanked||0)+earned;this.ui.toast(`${name.toUpperCase()} // ${Math.floor(this.run.score).toLocaleString()} BANKED = ¥${earned.toLocaleString()}`,'amber');this.run.score=0;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;this.persist();}
+  bankScore(name){if(this.run.score<1)return;const earned=Data.calculateScorePayout(this.run.score);this.debugStats?.event('score_banked',{location:name,score:this.run.score,earned,combo:this.run.combo,near_misses:this.run.nearMisses});this.state.money+=earned;this.state.records.bestScore=Math.max(this.state.records.bestScore||0,Math.floor(this.run.score));this.state.records.totalBanked=(this.state.records.totalBanked||0)+earned;this.ui.toast(`${name.toUpperCase()} // ${Math.floor(this.run.score).toLocaleString()} BANKED = ¥${earned.toLocaleString()}`,'amber');this.run.score=0;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;this.persist();}
   autoRefuel(area){const car=this.getEffectiveCar(),capacity=car.fuelCapacity||45,needed=Math.max(0,capacity-this.state.fuel);if(needed<1)return;const cost=Math.ceil(needed*(Data.ECONOMY?.refuelPricePerLiter||Data.ECONOMY?.fuelPerLiter||170));if(this.state.money>=cost||this.admin.infiniteMoney){if(!this.admin.infiniteMoney)this.state.money-=cost;this.setPhysicsFuel(capacity);this.fuelWarned=false;this.ui.toast(`REFUELED ${needed.toFixed(1)}L // ¥${cost.toLocaleString()}`);this.persist();}else this.ui.toast('Not enough money to refuel','red');}
 
   updatePlayerMesh(){const s=this.getVehicleState(),p=vec(s.position||s);this.playerMesh.position.copy(p);this.playerMesh.rotation.y=(s.heading??s.yaw??0)+Math.PI;const steer=s.steerAngle??s.steering??0;for(const w of this.playerMesh.userData.frontWheels||[])w.rotation.y=steer;this.customCar?.object?.userData?.setSteering?.(steer);}

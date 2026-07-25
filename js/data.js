@@ -352,6 +352,7 @@ export const ECONOMY = deepFreeze({
   currency: '¥',
   startingMoney: 135000,
   scoreToMoney: 0.44,
+  runEndPayoutMultiplier: 5,
   minimumBankPayout: 100,
   refuelPricePerLiter: 185,
   fuelPerLiter: 185,
@@ -367,6 +368,13 @@ export const ECONOMY = deepFreeze({
   nearMissBaseScore: 260,
   speedScorePerSecond: 3.8,
 });
+
+export function calculateScorePayout(score, multiplier = 1) {
+  const normalizedScore = Math.max(0, Number(score) || 0);
+  const normalizedMultiplier = Math.max(0, Number(multiplier) || 0);
+  const basePayout = Math.floor(normalizedScore * ECONOMY.scoreToMoney);
+  return Math.floor(basePayout * normalizedMultiplier);
+}
 
 export const CONDITION_GRADES = deepFreeze({
   '5': { label: '5 / Museum', power: 1.000, grip: 1.000, brake: 1.000, suspension: 1.000, value: 1.14 },

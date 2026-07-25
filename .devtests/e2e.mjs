@@ -312,6 +312,19 @@ const moneyBefore = await page.evaluate(() => window.shutoko.state.money);
 const bank = await page.evaluate(() => { const g = window.shutoko; g.physics.setSpeed(0); const before = g.run.score; g.bankScore('TEST PA'); return { before, money: g.state.money, score: g.run.score }; });
 check('banking converts score to money and zeroes it', bank.money > moneyBefore && bank.score < 1, `+¥${bank.money - moneyBefore}`);
 
+// --- Last life ends the run and pays its score at the temporary x5 rate ---
+const runEndPayout = await page.evaluate(() => {
+  const g = window.shutoko;
+  g.run.score = 1000;
+  g.run.lives = 1;
+  g.contactCooldown = 0;
+  g.ghostTimer = 0;
+  const money = g.state.money;
+  g.registerContact('test', { severity: 3 });
+  return { earned: g.state.money - money, score: g.run.score, lives: g.run.lives };
+});
+check('last life pays run score at x5 and resets the run', runEndPayout.earned === 2200 && runEndPayout.score === 0 && runEndPayout.lives === 3, `+¥${runEndPayout.earned}`);
+
 // --- Wall crash: car must settle and stay driveable, R recovers ---
 await page.evaluate(() => {
   window.__frames = 0;
