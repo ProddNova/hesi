@@ -1,4 +1,5 @@
 import { PSX_CAR_MODELS } from './psx-car-pack.js';
+import { normalizeLocalLight } from './lighting-config.js';
 
 /**
  * Shared catalogue for every vehicle shape the Modeler can replace.
@@ -113,10 +114,16 @@ export function carModelEntry(document, target) {
   return entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : null;
 }
 
-export const TRAFFIC_CAR_SETTING_FIELDS = Object.freeze([
+export const CAR_HITBOX_SETTING_FIELDS = Object.freeze([
   Object.freeze({ key: 'width', label: 'Collision width', unit: 'm', min: 0.6, max: 5, step: 0.01 }),
   Object.freeze({ key: 'length', label: 'Collision length', unit: 'm', min: 1.5, max: 30, step: 0.01 }),
   Object.freeze({ key: 'height', label: 'Collision height', unit: 'm', min: 0.5, max: 8, step: 0.01 }),
+  Object.freeze({ key: 'offsetX', label: 'Hitbox offset X', unit: 'm', min: -5, max: 5, step: 0.01, defaultValue: 0 }),
+  Object.freeze({ key: 'offsetY', label: 'Hitbox offset Y', unit: 'm', min: -5, max: 5, step: 0.01, defaultValue: 0 }),
+  Object.freeze({ key: 'offsetZ', label: 'Hitbox offset Z', unit: 'm', min: -5, max: 5, step: 0.01, defaultValue: 0 }),
+]);
+
+export const TRAFFIC_BEHAVIOR_SETTING_FIELDS = Object.freeze([
   Object.freeze({ key: 'minSpeedKmh', label: 'Minimum cruise', unit: 'km/h', min: 20, max: 220, step: 1 }),
   Object.freeze({ key: 'maxSpeedKmh', label: 'Maximum cruise', unit: 'km/h', min: 20, max: 260, step: 1 }),
   Object.freeze({ key: 'acceleration', label: 'Acceleration', unit: 'm/s²', min: 0.1, max: 15, step: 0.05 }),
@@ -126,6 +133,170 @@ export const TRAFFIC_CAR_SETTING_FIELDS = Object.freeze([
   Object.freeze({ key: 'laneSpread', label: 'Lane spread', unit: '', min: 0.05, max: 2, step: 0.01 }),
 ]);
 
+export const TRAFFIC_CAR_SETTING_FIELDS = Object.freeze([
+  ...CAR_HITBOX_SETTING_FIELDS,
+  ...TRAFFIC_BEHAVIOR_SETTING_FIELDS,
+]);
+
+export const CAR_REAR_LIGHT_FIELDS = Object.freeze([
+  Object.freeze({ key: 'width', label: 'Lens width', unit: 'm', min: 0.05, max: 1.5, step: 0.01 }),
+  Object.freeze({ key: 'height', label: 'Lens height', unit: 'm', min: 0.04, max: 1, step: 0.01 }),
+  Object.freeze({ key: 'depth', label: 'Lens depth', unit: 'm', min: 0.02, max: 0.5, step: 0.01 }),
+  Object.freeze({ key: 'spacing', label: 'Light spacing', unit: 'm', min: 0.1, max: 4, step: 0.01 }),
+  Object.freeze({ key: 'elevation', label: 'Height from road', unit: 'm', min: 0.1, max: 5, step: 0.01 }),
+  Object.freeze({ key: 'inset', label: 'Inset from rear', unit: 'm', min: -0.5, max: 2, step: 0.01 }),
+  Object.freeze({ key: 'offsetX', label: 'Pair offset X', unit: 'm', min: -5, max: 5, step: 0.01, defaultValue: 0 }),
+  Object.freeze({ key: 'offsetY', label: 'Pair offset Y', unit: 'm', min: -5, max: 5, step: 0.01, defaultValue: 0 }),
+  Object.freeze({ key: 'offsetZ', label: 'Pair offset Z', unit: 'm', min: -5, max: 5, step: 0.01, defaultValue: 0 }),
+]);
+
+// Headlights share the same photometric controls as the editor's Soft Custom
+// Light, plus a small lens/placement section tied to the selected car. Keeping
+// these ranges in the shared car schema makes the Modeler preview and the live
+// player SpotLight consume one authoritative record.
+export const CAR_HEADLIGHT_FIELDS = Object.freeze([
+  Object.freeze({ key: 'width', label: 'Lens width', unit: 'm', min: 0.05, max: 1.5, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'height', label: 'Lens height', unit: 'm', min: 0.04, max: 1, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'depth', label: 'Lens depth', unit: 'm', min: 0.02, max: 0.5, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'spacing', label: 'Light spacing', unit: 'm', min: 0.1, max: 4, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'elevation', label: 'Height from road', unit: 'm', min: 0.1, max: 5, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'inset', label: 'Inset from front', unit: 'm', min: -0.5, max: 2, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'offsetX', label: 'Pair / beam offset X', unit: 'm', min: -5, max: 5, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'offsetY', label: 'Pair / beam offset Y', unit: 'm', min: -5, max: 5, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'offsetZ', label: 'Pair / beam offset Z', unit: 'm', min: -5, max: 5, step: 0.01, group: 'lens' }),
+  Object.freeze({ key: 'temperature', label: 'Temperature', unit: 'warm ↔ cool', min: -1, max: 1, step: 0.02, group: 'beam' }),
+  Object.freeze({ key: 'intensity', label: 'Intensity', unit: 'cd', min: 0, max: 3000, step: 25, group: 'beam' }),
+  Object.freeze({ key: 'range', label: 'Reach', unit: 'm', min: 0.5, max: 60, step: 0.25, group: 'beam' }),
+  Object.freeze({ key: 'radius', label: 'Pool radius', unit: 'm', min: 0.25, max: 30, step: 0.25, group: 'beam' }),
+  Object.freeze({ key: 'softness', label: 'Edge softness', unit: '', min: 0, max: 1, step: 0.02, group: 'beam' }),
+  Object.freeze({ key: 'decay', label: 'Physical falloff', unit: '', min: 0, max: 3, step: 0.05, group: 'beam' }),
+  Object.freeze({ key: 'irregularity', label: 'Cloud irregularity', unit: '', min: 0.15, max: 1, step: 0.02, group: 'beam' }),
+  Object.freeze({ key: 'seed', label: 'Cloud seed', unit: '', min: 0, max: 2147483647, step: 1, integer: true, group: 'beam' }),
+  Object.freeze({ key: 'aimX', label: 'Aim offset X', unit: 'm', min: -10, max: 10, step: 0.05, group: 'aim' }),
+  Object.freeze({ key: 'aimY', label: 'Aim height', unit: 'm', min: -5, max: 5, step: 0.05, group: 'aim' }),
+  Object.freeze({ key: 'aimDistance', label: 'Aim distance', unit: 'm', min: 1, max: 120, step: 0.5, group: 'aim' }),
+]);
+
+const PLAYER_CAR_HITBOX = Object.freeze({
+  width: 1.78,
+  length: 4.35,
+  height: 1.45,
+  offsetX: 0,
+  offsetY: 0,
+  offsetZ: 0,
+});
+
+function clampField(value, field, fallback) {
+  return Number.isFinite(value) ? Math.max(field.min, Math.min(field.max, value)) : fallback;
+}
+
+/** Collision dimensions for either a player model or a traffic class. */
+export function carHitboxSettings(target, document = null, fallback = null) {
+  const parsed = parseCarModelTarget(target);
+  if (!parsed) return { ...PLAYER_CAR_HITBOX };
+  const base = parsed.scope === 'traffic'
+    ? TRAFFIC_CAR_BY_ID[parsed.id]
+    : { ...PLAYER_CAR_HITBOX, ...(fallback || {}) };
+  const saved = carModelEntry(document, target)?.settings || {};
+  return Object.fromEntries(CAR_HITBOX_SETTING_FIELDS.map((field) => [
+    field.key,
+    clampField(saved[field.key], field, base[field.key] ?? field.defaultValue ?? 0),
+  ]));
+}
+
+/** Default pair of always-unlit rear lenses, scaled from the current hitbox. */
+export function defaultCarRearLights(target, document = null) {
+  const hitbox = carHitboxSettings(target, document);
+  return {
+    enabled: true,
+    color: '#ff1833',
+    width: Math.min(0.34, Math.max(0.18, hitbox.width * 0.16)),
+    height: Math.min(0.24, Math.max(0.12, hitbox.height * 0.12)),
+    depth: 0.08,
+    spacing: Math.max(0.45, hitbox.width * 0.68),
+    elevation: Math.max(0.28, hitbox.height * 0.52),
+    inset: 0.04,
+    offsetX: 0,
+    offsetY: 0,
+    offsetZ: 0,
+  };
+}
+
+/**
+ * Rear-light appearance/placement shared by the Modeler preview and runtime.
+ * MeshBasicMaterial consumes these values, so the lenses stay bright in
+ * shadow without adding a PointLight or any per-fragment lighting work.
+ */
+export function carRearLightSettings(target, document = null) {
+  const defaults = defaultCarRearLights(target, document);
+  const saved = carModelEntry(document, target)?.rearLights || {};
+  const result = {
+    enabled: typeof saved.enabled === 'boolean' ? saved.enabled : defaults.enabled,
+    color: /^#[0-9a-f]{6}$/i.test(String(saved.color || '')) ? String(saved.color) : defaults.color,
+  };
+  for (const field of CAR_REAR_LIGHT_FIELDS) {
+    result[field.key] = clampField(saved[field.key], field, defaults[field.key]);
+  }
+  return result;
+}
+
+/** Default visible headlamp pair and the single broad beam used by the player. */
+export function defaultCarHeadlights(target, document = null) {
+  const hitbox = carHitboxSettings(target, document);
+  const parsed = parseCarModelTarget(target);
+  const trafficType = parsed?.scope === 'traffic' ? TRAFFIC_CAR_BY_ID[parsed.id] : null;
+  return {
+    enabled: true,
+    color: '#ffe4bd',
+    width: Math.min(0.34, Math.max(0.18, hitbox.width * 0.17)),
+    height: 0.16,
+    depth: 0.06,
+    spacing: Math.max(0.45, hitbox.width * 0.66),
+    elevation: trafficType?.id === 'truck' ? 1.2 : Math.max(0.35, hitbox.height * 0.5),
+    inset: 0.04,
+    offsetX: 0,
+    offsetY: 0,
+    offsetZ: 0,
+    temperature: -0.12,
+    intensity: 1450,
+    range: 60,
+    radius: 32,
+    softness: 0.74,
+    decay: 1.35,
+    irregularity: 0.42,
+    seed: 1,
+    aimX: 0,
+    aimY: 0.1,
+    aimDistance: 30,
+  };
+}
+
+/**
+ * Full car-headlight record. The photometric subset is normalized by the same
+ * function as placed Soft Custom Lights, so colour temperature, brightness,
+ * reach, pool size, softness, falloff and cloud shape behave identically.
+ */
+export function carHeadlightSettings(target, document = null) {
+  const defaults = defaultCarHeadlights(target, document);
+  const saved = carModelEntry(document, target)?.headlights || {};
+  const local = normalizeLocalLight({ ...defaults, ...saved });
+  const result = {
+    enabled: typeof saved.enabled === 'boolean' ? saved.enabled : defaults.enabled,
+    color: local.color,
+  };
+  for (const field of CAR_HEADLIGHT_FIELDS) {
+    if (Object.hasOwn(local, field.key)) {
+      result[field.key] = local[field.key];
+      continue;
+    }
+    const fallback = defaults[field.key];
+    const value = Number.isFinite(saved[field.key]) ? saved[field.key] : fallback;
+    const bounded = Math.max(field.min, Math.min(field.max, value));
+    result[field.key] = field.integer ? Math.round(bounded) : bounded;
+  }
+  return result;
+}
+
 export function trafficCarSettings(typeOrId) {
   const type = typeof typeOrId === 'string' ? TRAFFIC_CAR_BY_ID[typeOrId] : typeOrId;
   if (!type) return {};
@@ -133,6 +304,9 @@ export function trafficCarSettings(typeOrId) {
     width: type.width,
     length: type.length,
     height: type.height,
+    offsetX: type.offsetX ?? 0,
+    offsetY: type.offsetY ?? 0,
+    offsetZ: type.offsetZ ?? 0,
     minSpeedKmh: type.minSpeed * 3.6,
     maxSpeedKmh: type.maxSpeed * 3.6,
     acceleration: type.acceleration,
@@ -145,13 +319,17 @@ export function trafficCarSettings(typeOrId) {
 
 export function effectiveTrafficCarType(id, document = null) {
   const base = TRAFFIC_CAR_BY_ID[id] || TRAFFIC_CAR_BY_ID.car;
-  const saved = carModelEntry(document, carModelTarget('traffic', base.id))?.settings || {};
+  const target = carModelTarget('traffic', base.id);
+  const saved = carModelEntry(document, target)?.settings || {};
   const finite = (key, fallback) => Number.isFinite(saved[key]) ? saved[key] : fallback;
   return {
     ...base,
     width: finite('width', base.width),
     length: finite('length', base.length),
     height: finite('height', base.height),
+    offsetX: finite('offsetX', base.offsetX ?? 0),
+    offsetY: finite('offsetY', base.offsetY ?? 0),
+    offsetZ: finite('offsetZ', base.offsetZ ?? 0),
     minSpeed: finite('minSpeedKmh', base.minSpeed * 3.6) / 3.6,
     maxSpeed: finite('maxSpeedKmh', base.maxSpeed * 3.6) / 3.6,
     acceleration: finite('acceleration', base.acceleration),
@@ -159,6 +337,8 @@ export function effectiveTrafficCarType(id, document = null) {
     weight: finite('weight', base.weight),
     laneBias: finite('laneBias', base.laneBias),
     laneSpread: finite('laneSpread', base.laneSpread),
+    headlights: carHeadlightSettings(target, document),
+    rearLights: carRearLightSettings(target, document),
   };
 }
 
@@ -185,25 +365,37 @@ export function trafficCarPartSpecs(typeOrId) {
   if (!type) return [];
   const { width: w, length: l, height: h } = type;
   const half = l * 0.5;
-  const headY = type.id === 'truck' ? 1.2 : h * 0.5;
-  const tailY = type.id === 'truck' ? 1.05 : h * 0.52;
-  const frontZ = half - 0.04;
-  const rearZ = -half + 0.04;
-  const lampW = Math.min(0.3, w * 0.17);
+  const target = carModelTarget('traffic', type.id);
+  const headlights = type.headlights || defaultCarHeadlights(target);
+  const frontZ = half - headlights.inset + headlights.offsetZ;
+  const rear = type.rearLights || defaultCarRearLights(target);
+  const rearZ = -half + rear.inset;
+  const tailZ = rearZ + rear.offsetZ;
   const bodyColor = {
     car: '#b9c0c9',
     van: '#e6e8ea',
     truck: '#4a6274',
   }[type.id] || '#b9c0c9';
-  return [
+  const parts = [
     { role: 'body', name: 'Body', scale: [w, h, l], position: [0, h * 0.5, 0], color: bodyColor },
-    { role: 'headlamp', name: 'Headlamp L', scale: [lampW, 0.16, 0.06], position: [-w * 0.33, headY, frontZ], color: '#fff0be' },
-    { role: 'headlamp', name: 'Headlamp R', scale: [lampW, 0.16, 0.06], position: [w * 0.33, headY, frontZ], color: '#fff0be' },
-    { role: 'taillamp', name: 'Taillamp L', scale: [lampW, 0.18, 0.06], position: [-w * 0.34, tailY, rearZ], color: '#8a1512' },
-    { role: 'taillamp', name: 'Taillamp R', scale: [lampW, 0.18, 0.06], position: [w * 0.34, tailY, rearZ], color: '#8a1512' },
-    { role: 'indicator-left', name: 'Indicator L', scale: [0.12, 0.16, 0.06], position: [-(w * 0.34 + 0.22), tailY, rearZ], color: '#ffa51f' },
-    { role: 'indicator-right', name: 'Indicator R', scale: [0.12, 0.16, 0.06], position: [w * 0.34 + 0.22, tailY, rearZ], color: '#ffa51f' },
   ];
+  if (headlights.enabled) {
+    parts.push(
+      { role: 'headlamp', name: 'Headlamp L', scale: [headlights.width, headlights.height, headlights.depth], position: [headlights.offsetX - headlights.spacing * 0.5, headlights.elevation + headlights.offsetY, frontZ], color: headlights.color },
+      { role: 'headlamp', name: 'Headlamp R', scale: [headlights.width, headlights.height, headlights.depth], position: [headlights.offsetX + headlights.spacing * 0.5, headlights.elevation + headlights.offsetY, frontZ], color: headlights.color },
+    );
+  }
+  if (rear.enabled) {
+    parts.push(
+      { role: 'taillamp', name: 'Taillamp L', scale: [rear.width, rear.height, rear.depth], position: [rear.offsetX - rear.spacing * 0.5, rear.elevation + rear.offsetY, tailZ], color: rear.color },
+      { role: 'taillamp', name: 'Taillamp R', scale: [rear.width, rear.height, rear.depth], position: [rear.offsetX + rear.spacing * 0.5, rear.elevation + rear.offsetY, tailZ], color: rear.color },
+    );
+  }
+  parts.push(
+    { role: 'indicator-left', name: 'Indicator L', scale: [0.12, 0.16, 0.06], position: [-(w * 0.34 + 0.22), rear.elevation, rearZ], color: '#ffa51f' },
+    { role: 'indicator-right', name: 'Indicator R', scale: [0.12, 0.16, 0.06], position: [w * 0.34 + 0.22, rear.elevation, rearZ], color: '#ffa51f' },
+  );
+  return parts;
 }
 
 /**

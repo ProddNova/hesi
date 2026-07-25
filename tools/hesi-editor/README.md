@@ -74,15 +74,17 @@ For road curves:
    preview with edge lines, dashed lane dividers, and orange draft edges at the
    runtime collision elevation, and opens the **Road panel** above the
    Inspector: route facts (points, length, width, lanes), Prev/Next point
-   navigation with camera framing, exact X/Z coordinate editing, and per-point
+   navigation with camera framing, exact X/Y/Z coordinate editing, and per-point
    Frame/Delete buttons, plus the unsaved-roads count. In the viewport, drag a
-   point, right-click the draft road to add a point, or right-click an interior
+   point on the ground plane or use its X/Y/Z transform arrows (including the
+   vertical Y arrow), right-click the draft road to add a point, or right-click an interior
    point to remove it. Double-click to add and `Delete`/`Backspace` to remove
    remain available as shortcuts.
 2. Press **Save Draft** as often as needed. Changed routes are stored
    deterministically in
    `data/editor/road-route-overrides.json`; production route files are not
-   changed yet. Saved curve edits reload into the editor automatically.
+   changed yet. The road and its collision route are redrawn live after every
+   point movement, and saving keeps the current viewport and selection in place.
 3. Press **Apply to Game** once when the draft is final. The saved point arrays
    are validated and merged into
    `data/routes-smoothed.json` and `data/routes-smoothed.js`, without replacing
@@ -96,8 +98,8 @@ Runtime-generated access lanes such as `tatsumi_pa_entry` and
 `tatsumi_pa_exit` are saved separately and published as validated synthetic
 route metadata.
 
-The road editor changes the existing smoothed centreline in XZ only: elevation
-(Y), route IDs, endpoints, and junction connectivity are protected. It does
+The road editor changes the existing smoothed centreline in full XYZ: route IDs,
+endpoints, and junction connectivity are protected. It does
 not edit lanes, widths, junction topology, markings, barriers, or tunnels, and
 does not recalculate distance-based metadata. Keep edits local and away from
 junction boundaries. If the normal raw-route smoothing pipeline later
@@ -184,8 +186,14 @@ full-screen modeling section that is always available inside the editor:
   complete normal toolset: parts, face/viewport texture projection, vertex
   sculpting, primitives, assembly, scale, outlines and undo/redo. A saved model
   is mapped back to the exact player model or traffic class it came from.
-  Traffic entries also expose collision dimensions, minimum/maximum cruise
-  speed, acceleration, braking, spawn weight, lane bias and lane spread.
+  Every selected car exposes collision dimensions and a real XYZ hitbox offset,
+  independently configurable front/rear lens size and XYZ placement, and a
+  complete headlight beam using the same colour temperature, intensity, reach,
+  pool radius, softness, falloff, cloudy irregularity, seed and aim controls as
+  a Soft Custom Light. Player settings drive the real road SpotLight; traffic
+  keeps the configured mesh lenses without multiplying expensive scene lights.
+  Traffic entries additionally expose minimum/maximum cruise speed,
+  acceleration, braking, spawn weight, lane bias and lane spread.
   **Save & apply cars** persists the shared document and broadcasts a hot
   reload; a game opened through *Open live game* rebuilds every pooled vehicle,
   including traffic already driving, without changing its route or position.
@@ -378,9 +386,9 @@ available on Windows.
 - automatic project load after a full browser reload, recent project paths,
   30-second disk autosaves, and explicit newer-autosave recovery/discard UX
 - explicit demo adapter and safe real-world fallback state
-- road-centreline editing with bounded nearby control handles, protected route
-  endpoints, undo/redo, a realistic asphalt/lane preview, reloadable draft
-  saves, and one explicit Apply to Game production step
+- road-centreline editing in XYZ with bounded nearby control handles, protected
+  route endpoints, transform arrows, undo/redo, a live asphalt/lane preview,
+  in-place draft saves, and one explicit Apply to Game production step
 
 Editing shortcuts in Orbit mode are `W` move, `E` rotate, `R` scale, and `X`
 world/local. `Delete` disables a generated entity or deletes a placed object;

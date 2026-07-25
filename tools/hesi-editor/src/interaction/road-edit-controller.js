@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { deletePoint, findRoute, insertPointAfter, movePoint, nearestSegment } from './road-edit-ops.js';
 
 const ROUTES_MODULE_URL = '/data/routes-smoothed.js';
@@ -45,6 +46,8 @@ export class RoadEditController {
     this.yOffset = 0;
     this.activeHandle = null;
     this.drag = null;
+    this.gizmoDrag = null;
+    this._gizmoFinishCommit = null;
     this.dirty = new Set();
     this.dirtyRoutes = new Map();
     this.raycaster = new THREE.Raycaster();
@@ -64,8 +67,9 @@ export class RoadEditController {
     this._handleGeometry = new THREE.SphereGeometry(HANDLE_RADIUS, 12, 10);
     this._handleMaterial = new THREE.MeshBasicMaterial({ color: HANDLE_COLOR, depthTest: false, toneMapped: false });
     this._activeHandleMaterial = new THREE.MeshBasicMaterial({ color: ACTIVE_HANDLE_COLOR, depthTest: false, toneMapped: false });
-    this._previewMaterial = new THREE.MeshLambertMaterial({
+    this._previewMaterial = new THREE.MeshBasicMaterial({
       color: 0x171a23, side: THREE.DoubleSide,
+      toneMapped: false,
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     });
     this._previewEdgeMaterial = new THREE.LineBasicMaterial({ color: 0xd8d6bf, depthTest: false, toneMapped: false });
@@ -75,9 +79,52 @@ export class RoadEditController {
     this._previewDraftMaterial = new THREE.LineBasicMaterial({
       color: LINE_COLOR, transparent: true, opacity: 0.92, depthTest: false, toneMapped: false,
     });
+    this.gizmoAnchor = new THREE.Object3D();
+    this.gizmoAnchor.name = 'Road point transform anchor';
+    this.gizmoAnchor.userData.editorHelper = true;
+    this.gizmo = new TransformControls(viewport.camera, viewport.canvas);
+    this.gizmo.name = 'Road elevation and position gizmo';
+    this.gizmo.userData.editorHelper = true;
+    this.gizmo.setMode('translate');
+    this.gizmo.setSpace('world');
+    this.gizmo.setSize(0.82);
+    this.gizmo.visible = false;
+    viewport.scene.add(this.gizmo);
+
+    this._onGizmoMouseDown = () => {
+      const point = this.route?.points?.[this.activeHandle];
+      if (!point) return;
+      this.gizmoDrag = {
+        index: this.activeHandle,
+        before: [...point],
+      };
+      this.viewport.setNavigationBlocked(true, this.gizmo);
+    };
+    this._onGizmoObjectChange = () => {
+      if (!this.gizmoDrag || !this.route) return;
+      if (this.gridSnap?.enabled) {
+        this.gizmoAnchor.position.x = this.gridSnap.snapValue(this.gizmoAnchor.position.x);
+        this.gizmoAnchor.position.z = this.gridSnap.snapValue(this.gizmoAnchor.position.z);
+        const sourceY = this.gizmoAnchor.position.y - this.yOffset - HANDLE_SURFACE_LIFT;
+        this.gizmoAnchor.position.y = this.gridSnap.snapValue(sourceY) + this.yOffset + HANDLE_SURFACE_LIFT;
+      }
+      const mesh = this.handles.find((handle) => handle.userData.pointIndex === this.gizmoDrag.index);
+      if (mesh) mesh.position.copy(this.gizmoAnchor.position);
+      this._refreshDraggedLinePoint(this.gizmoDrag.index, this.gizmoAnchor.position);
+      this._scheduleLivePreview();
+    };
+    this._onGizmoMouseUp = () => {
+      const commit = this._gizmoFinishCommit ?? true;
+      this._gizmoFinishCommit = null;
+      this._finishGizmoDrag({ commit });
+    };
+    this.gizmo.addEventListener('mouseDown', this._onGizmoMouseDown);
+    this.gizmo.addEventListener('objectChange', this._onGizmoObjectChange);
+    this.gizmo.addEventListener('mouseUp', this._onGizmoMouseUp);
 
     this._onPointerDown = (event) => {
       if (!this.active || event.target !== this.viewport.canvas || event.button !== 0) return;
+      if (this.gizmo.visible && this.gizmo.axis) return;
       this._setPointer(event);
       const hit = this.raycaster.intersectObjects(this.handles, false)[0];
       if (!hit) return;
@@ -92,7 +139,7 @@ export class RoadEditController {
         index,
         mesh,
         pointerId: event.pointerId,
-        before: [point[0], point[2]],
+        before: [...point],
         plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldPoint[1]),
         moved: false,
       };
@@ -113,19 +160,8 @@ export class RoadEditController {
       this.drag.moved = true;
       this.drag.mesh.position.set(target.x, worldPoint[1] + HANDLE_SURFACE_LIFT, target.z);
       // Live preview only: ROUTE_DATA itself is mutated once, on commit.
-      const position = this.line.geometry.getAttribute('position');
-      position.setXYZ(this.drag.index, target.x, worldPoint[1] + LINE_SURFACE_LIFT, target.z);
-      if (this.route.closed && this.drag.index === 0 && position.count === this.route.points.length + 1) {
-        position.setXYZ(position.count - 1, target.x, worldPoint[1] + LINE_SURFACE_LIFT, target.z);
-      }
-      position.needsUpdate = true;
-      this.line.geometry.computeBoundingSphere();
-      if (this._previewRefreshFrame == null) {
-        this._previewRefreshFrame = requestAnimationFrame(() => {
-          this._previewRefreshFrame = null;
-          this._refreshPreview();
-        });
-      }
+      this._refreshDraggedLinePoint(this.drag.index, this.drag.mesh.position);
+      this._scheduleLivePreview();
     };
     this._onPointerUp = (event) => {
       if (!this.active || !this.drag) return;
@@ -196,8 +232,17 @@ export class RoadEditController {
   get active() { return Boolean(this.activeEntity); }
 
   finishActiveDrag({ commit = true } = {}) {
+    let finished = false;
+    if (this.gizmoDrag) {
+      if (this.gizmo.dragging) {
+        this._gizmoFinishCommit = commit;
+        this.gizmo.pointerUp(null);
+      } else {
+        finished = this._finishGizmoDrag({ commit }) || finished;
+      }
+    }
     const drag = this.drag;
-    if (!drag) return false;
+    if (!drag) return finished;
     this.drag = null;
     this.viewport.setNavigationBlocked(false, this);
     if (drag.pointerId != null) {
@@ -210,20 +255,55 @@ export class RoadEditController {
       this._previewRefreshFrame = null;
     }
     if (!commit || !drag.moved || !this.route) {
-      if (drag.moved) this._refreshHelpers();
-      return false;
+      if (drag.moved) {
+        this._applyRuntimePreview();
+        this._refreshHelpers();
+      }
+      return finished;
     }
     const route = this.route;
     const synthetic = this.synthetic;
     const index = drag.index;
     const before = drag.before;
-    const after = [drag.mesh.position.x, drag.mesh.position.z];
+    const after = [drag.mesh.position.x, before[1], drag.mesh.position.z];
     this.history.execute({
       label: `Move road point · ${route.name}`,
       redo: () => { movePoint(route, index, after); this._afterRouteMutation(route, synthetic); },
       undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
     });
     this.onStatus('Road point moved');
+    return true;
+  }
+
+  _finishGizmoDrag({ commit = true } = {}) {
+    const drag = this.gizmoDrag;
+    if (!drag) return false;
+    this.gizmoDrag = null;
+    this.viewport.setNavigationBlocked(false, this.gizmo);
+    if (this._previewRefreshFrame != null) {
+      cancelAnimationFrame(this._previewRefreshFrame);
+      this._previewRefreshFrame = null;
+    }
+    const route = this.route;
+    if (!route || !route.points[drag.index]) return false;
+    const after = [
+      this.gizmoAnchor.position.x,
+      this.gizmoAnchor.position.y - this.yOffset - HANDLE_SURFACE_LIFT,
+      this.gizmoAnchor.position.z,
+    ];
+    const changed = after.some((value, index) => Math.abs(value - drag.before[index]) > 1e-6);
+    if (!commit || !changed) {
+      this._applyRuntimePreview();
+      this._refreshHelpers();
+      return false;
+    }
+    const synthetic = this.synthetic;
+    this.history.execute({
+      label: `Move road point in 3D Â· ${route.name}`,
+      redo: () => { movePoint(route, drag.index, after); this._afterRouteMutation(route, synthetic); },
+      undo: () => { movePoint(route, drag.index, drag.before); this._afterRouteMutation(route, synthetic); },
+    });
+    this.onStatus('Road point moved in X / Y / Z');
     return true;
   }
 
@@ -255,12 +335,16 @@ export class RoadEditController {
     const points = this.route.points;
     let length = 0;
     for (let index = 1; index < points.length; index += 1) {
-      length += Math.hypot(points[index][0] - points[index - 1][0], points[index][2] - points[index - 1][2]);
+      length += Math.hypot(
+        points[index][0] - points[index - 1][0],
+        points[index][1] - points[index - 1][1],
+        points[index][2] - points[index - 1][2],
+      );
     }
     if (this.route.closed && points.length > 2) {
       const first = points[0];
       const last = points[points.length - 1];
-      length += Math.hypot(first[0] - last[0], first[2] - last[2]);
+      length += Math.hypot(first[0] - last[0], first[1] - last[1], first[2] - last[2]);
     }
     const index = Number.isInteger(this.activeHandle) && this.activeHandle >= 0 && this.activeHandle < points.length
       ? this.activeHandle
@@ -276,27 +360,27 @@ export class RoadEditController {
       lanes: this.runtimeRoute?.lanes ?? null,
       roadWidth: this.runtimeRoute?.roadWidth ?? null,
       activeIndex: index,
-      activePoint: index != null ? [points[index][0], points[index][2]] : null,
+      activePoint: index != null ? [...points[index]] : null,
       dirtyCount: this.dirty.size,
     });
   }
 
   /** Moves the selected point to exact coordinates (Road panel numeric edit). */
-  setActivePointPosition(x, z) {
+  setActivePointPosition(x, y, z) {
     const route = this.route;
     const index = this.activeHandle;
     if (!route || !Number.isInteger(index) || !route.points[index]) return false;
-    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
       this.onStatus('Road point coordinates must be numbers');
       return false;
     }
     const point = route.points[index];
-    const before = [point[0], point[2]];
-    if (before[0] === x && before[1] === z) return false;
+    const before = [...point];
+    if (before[0] === x && before[1] === y && before[2] === z) return false;
     const synthetic = this.synthetic;
     this.history.execute({
       label: `Move road point · ${route.name}`,
-      redo: () => { movePoint(route, index, [x, z]); this._afterRouteMutation(route, synthetic); },
+      redo: () => { movePoint(route, index, [x, y, z]); this._afterRouteMutation(route, synthetic); },
       undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
     });
     this.onStatus('Road point moved');
@@ -410,19 +494,49 @@ export class RoadEditController {
       if (includeDrag && this.drag?.index === index) {
         return [this.drag.mesh.position.x, point[1] + this.yOffset, this.drag.mesh.position.z];
       }
+      if (includeDrag && this.gizmoDrag?.index === index) {
+        return [
+          this.gizmoAnchor.position.x,
+          this.gizmoAnchor.position.y - HANDLE_SURFACE_LIFT,
+          this.gizmoAnchor.position.z,
+        ];
+      }
       return this._worldPoint(point);
     });
   }
 
-  _runtimePointArrays() {
-    const points = this._worldPointArrays();
+  _runtimePointArrays({ includeDrag = false } = {}) {
+    const points = this._worldPointArrays({ includeDrag });
     return this.synthetic ? points : points.reverse();
   }
 
-  _applyRuntimePreview() {
+  _applyRuntimePreview({ includeDrag = false } = {}) {
     if (!this.runtimeRoute || !this.adapter?.map?.applyEditorRouteOverride) return false;
-    const points = this._runtimePointArrays();
+    const points = this._runtimePointArrays({ includeDrag });
     return this.adapter.map.applyEditorRouteOverride(this.route.id, points, { endpointTolerance: Infinity });
+  }
+
+  _refreshDraggedLinePoint(index, handlePosition) {
+    const position = this.line?.geometry?.getAttribute?.('position');
+    if (!position || !handlePosition) return;
+    const y = handlePosition.y - HANDLE_SURFACE_LIFT + LINE_SURFACE_LIFT;
+    position.setXYZ(index, handlePosition.x, y, handlePosition.z);
+    if (this.route.closed && index === 0 && position.count === this.route.points.length + 1) {
+      position.setXYZ(position.count - 1, handlePosition.x, y, handlePosition.z);
+    }
+    position.needsUpdate = true;
+    this.line.geometry.computeBoundingSphere();
+  }
+
+  _scheduleLivePreview() {
+    if (this._previewRefreshFrame != null) return;
+    this._previewRefreshFrame = requestAnimationFrame(() => {
+      this._previewRefreshFrame = null;
+      // Collision, height queries and the opaque draft surface all follow the
+      // pointer during the drag; Apply to Game is only publication now.
+      this._applyRuntimePreview({ includeDrag: true });
+      this._refreshPreview();
+    });
   }
 
   /**
@@ -524,7 +638,7 @@ export class RoadEditController {
     this.line.renderOrder = 10000;
     this.line.userData.editorHelper = true;
     this.line.frustumCulled = false;
-    group.add(this.previewMesh, this.previewMarkings, this.line);
+    group.add(this.previewMesh, this.previewMarkings, this.line, this.gizmoAnchor);
     this.group = group;
     this.viewport.scene.add(group);
     this._refreshPreview();
@@ -533,6 +647,8 @@ export class RoadEditController {
   }
 
   _clearHelpers() {
+    this.gizmo.detach();
+    this.gizmo.visible = false;
     this.group?.removeFromParent();
     if (this.line) {
       this.line.geometry.dispose();
@@ -629,6 +745,7 @@ export class RoadEditController {
       const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
       const marking = new THREE.Line(lineGeometry, material);
       marking.name = name;
+      marking.renderOrder = 9999;
       marking.frustumCulled = false;
       marking.userData.editorHelper = true;
       if (dashed) marking.computeLineDistances();
@@ -669,7 +786,7 @@ export class RoadEditController {
   }
 
   _refreshHandles({ force = false } = {}) {
-    if (!this.route || !this.group || this.drag) return;
+    if (!this.route || !this.group || this.drag || this.gizmoDrag) return;
     const key = this._handleIndices().join(',');
     if (!force && key === this._handleKey) return;
     this._handleKey = key;
@@ -688,6 +805,7 @@ export class RoadEditController {
       this.group.add(mesh);
       return mesh;
     });
+    this._syncGizmoToActivePoint();
   }
 
   _setActiveHandle(index) {
@@ -695,7 +813,22 @@ export class RoadEditController {
     for (const mesh of this.handles) {
       mesh.material = mesh.userData.pointIndex === index ? this._activeHandleMaterial : this._handleMaterial;
     }
+    this._syncGizmoToActivePoint();
     this._emitState();
+  }
+
+  _syncGizmoToActivePoint() {
+    const point = this.route?.points?.[this.activeHandle];
+    if (!point || !this.group) {
+      this.gizmo.detach();
+      this.gizmo.visible = false;
+      return;
+    }
+    const world = this._worldPoint(point);
+    this.gizmoAnchor.position.set(world[0], world[1] + HANDLE_SURFACE_LIFT, world[2]);
+    this.gizmo.setTranslationSnap(null);
+    this.gizmo.attach(this.gizmoAnchor);
+    this.gizmo.visible = true;
   }
 
   dispose() {
@@ -709,6 +842,12 @@ export class RoadEditController {
     this._previewEdgeMaterial.dispose();
     this._previewLaneMaterial.dispose();
     this._previewDraftMaterial.dispose();
+    this.gizmo.removeEventListener('mouseDown', this._onGizmoMouseDown);
+    this.gizmo.removeEventListener('objectChange', this._onGizmoObjectChange);
+    this.gizmo.removeEventListener('mouseUp', this._onGizmoMouseUp);
+    this.gizmo.detach();
+    this.gizmo.dispose();
+    this.gizmo.removeFromParent();
     if (this._previewRefreshFrame != null) cancelAnimationFrame(this._previewRefreshFrame);
     window.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
     window.removeEventListener('pointermove', this._onPointerMove, { capture: true });

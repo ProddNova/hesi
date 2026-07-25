@@ -78,6 +78,48 @@ test('loading drops overrides for generated entities removed by a world rebuild'
   assert.ok(source.entityOverrides['barrier:removed-route:0003'], 'the server response is not mutated');
 });
 
+test('loading persists stale generated-entity cleanup without a recovery warning', async () => {
+  const statuses = [];
+  const recoveries = [];
+  const persistence = fixture(
+    { texturesById: () => ({}) },
+    {
+      history: { markSaved: () => {} },
+      onStatus: (message) => statuses.push(message),
+      onRecovery: (message) => recoveries.push(message),
+    },
+  );
+  const source = {
+    version: 1,
+    project: { name: 'Road edit cleanup' },
+    entityOverrides: {
+      'garage-part:0001': { visible: false },
+      'marking:obsolete-route:0019': { visible: false },
+    },
+    placedObjects: [],
+    groups: [],
+    environment: {},
+    editorState: {},
+  };
+  persistence.read = async () => ({ document: source, modifiedMs: 10 });
+  persistence.applyDocument = () => {};
+  persistence.remember = () => [];
+  persistence.state = () => ({});
+  let written = null;
+  persistence.write = async (path, document) => {
+    written = { path, document };
+    return { modifiedMs: 11 };
+  };
+
+  const loaded = await persistence.load('data/editor/hesi-world-project.json', { recover: false });
+
+  assert.deepEqual(Object.keys(loaded.entityOverrides), ['garage-part:0001']);
+  assert.deepEqual(Object.keys(written.document.entityOverrides), ['garage-part:0001']);
+  assert.equal(written.path, 'data/editor/hesi-world-project.json');
+  assert.match(statuses.at(-1), /cleaned 1 obsolete generated override automatically/);
+  assert.deepEqual(recoveries, []);
+});
+
 test('project save writes a dirty shared texture library before its referencing document', async () => {
   const events = [];
   const store = {

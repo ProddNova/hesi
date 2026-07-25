@@ -53,6 +53,30 @@ for (const kmh of [60, 100]) {
   check('80 km/h flick settles straight', maxYawAfter < 0.08, `residual yaw ${maxYawAfter.toFixed(3)}`);
 }
 
+// Full service-brake stop from highway speed with a small pre-existing yaw
+// disturbance. ABS must preserve directional grip; the handbrake is tested
+// separately by gameplay and is intentionally still allowed to lock the rear.
+{
+  const car = new VehiclePhysics({ ...spec, brakeForce: 14500, brakeBias: 0.64 });
+  car.setPosition(0, 0, 0, 0);
+  car.setSpeed(160 / 3.6);
+  car.yawRate = 0.025;
+  let maxYaw = 0;
+  let maxLateralSpeed = 0;
+  let maxLock = 0;
+  for (let i = 0; i < 240 && car.state.speedKmh > 4; i += 1) {
+    car.update(1 / 60, { brake: 1, steer: 0 }, road, {});
+    const t = car.getTelemetry();
+    maxYaw = Math.max(maxYaw, Math.abs(t.yawRate));
+    maxLateralSpeed = Math.max(maxLateralSpeed, Math.abs(t.lateralSpeed));
+    maxLock = Math.max(maxLock, t.frontWheelLock, t.rearWheelLock);
+  }
+  check('160 km/h service-brake stop stays straight', Math.abs(car.heading) < 0.08 && maxYaw < 0.08,
+    `heading ${car.heading.toFixed(3)}, max yaw ${maxYaw.toFixed(3)}`);
+  check('service-brake ABS preserves lateral grip', maxLateralSpeed < 0.6 && maxLock < 0.05,
+    `lateral ${maxLateralSpeed.toFixed(2)} m/s, lock ${maxLock.toFixed(2)}`);
+}
+
 // Near-limit at 160 km/h full lock: allowed to slide but must stay catchable
 // (bounded yaw, finite state).
 {

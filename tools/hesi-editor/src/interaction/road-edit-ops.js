@@ -27,14 +27,26 @@ export function findRoute(routeData, routeId) {
   return routeData?.routes?.find((route) => route.id === routeId) || null;
 }
 
-/** Moves one centreline point in the XZ plane; the elevation (y) is preserved. */
-export function movePoint(route, index, [x, z]) {
+/**
+ * Moves one centreline point. A legacy [x, z] pair preserves elevation; a
+ * full [x, y, z] triple edits elevation as well.
+ */
+export function movePoint(route, index, position) {
   const points = requirePoints(route);
   requireIndex(points, index);
-  requireFinite([x, z], 'movePoint position');
+  if (!Array.isArray(position) || (position.length !== 2 && position.length !== 3)) {
+    throw new TypeError('movePoint position must be [x, z] or [x, y, z]');
+  }
+  requireFinite(position, 'movePoint position');
   const point = points[index];
-  point[0] = x;
-  point[2] = z;
+  if (position.length === 3) {
+    point[0] = position[0];
+    point[1] = position[1];
+    point[2] = position[2];
+  } else {
+    point[0] = position[0];
+    point[2] = position[1];
+  }
   return point;
 }
 

@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js';
-import { TRAFFIC_CAR_SETTING_FIELDS, isCarModelTarget } from './car-models.js';
+import {
+  CAR_HITBOX_SETTING_FIELDS,
+  CAR_HEADLIGHT_FIELDS,
+  CAR_REAR_LIGHT_FIELDS,
+  TRAFFIC_CAR_SETTING_FIELDS,
+  isCarModelTarget,
+} from './car-models.js';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -480,6 +486,9 @@ export function customAssetsDocumentErrors(document) {
   }
   if (document.carModels !== undefined && !isRecord(document.carModels)) errors.push('carModels must be an object');
   const trafficSettingFields = new Map(TRAFFIC_CAR_SETTING_FIELDS.map((field) => [field.key, field]));
+  const playerSettingFields = new Map(CAR_HITBOX_SETTING_FIELDS.map((field) => [field.key, field]));
+  const headlightFields = new Map(CAR_HEADLIGHT_FIELDS.map((field) => [field.key, field]));
+  const rearLightFields = new Map(CAR_REAR_LIGHT_FIELDS.map((field) => [field.key, field]));
   for (const [target, entry] of Object.entries(document.carModels || {})) {
     const path = `carModels.${target}`;
     if (!isCarModelTarget(target)) { errors.push(`unknown car model target: ${target}`); continue; }
@@ -492,9 +501,10 @@ export function customAssetsDocumentErrors(document) {
       continue;
     }
     const trafficTarget = target.startsWith('traffic:');
+    const settingFields = trafficTarget ? trafficSettingFields : playerSettingFields;
     for (const [key, value] of Object.entries(entry.settings || {})) {
-      const field = trafficSettingFields.get(key);
-      if (!trafficTarget || !field) { errors.push(`${path}.settings.${key} is unknown`); continue; }
+      const field = settingFields.get(key);
+      if (!field) { errors.push(`${path}.settings.${key} is unknown`); continue; }
       if (!Number.isFinite(value) || value < field.min || value > field.max) {
         errors.push(`${path}.settings.${key} must be between ${field.min} and ${field.max}`);
       }
@@ -503,6 +513,45 @@ export function customAssetsDocumentErrors(document) {
     const maxSpeed = entry.settings?.maxSpeedKmh;
     if (Number.isFinite(minSpeed) && Number.isFinite(maxSpeed) && minSpeed > maxSpeed) {
       errors.push(`${path}.settings.minSpeedKmh cannot exceed maxSpeedKmh`);
+    }
+    if (entry.headlights !== undefined && !isRecord(entry.headlights)) {
+      errors.push(`${path}.headlights must be an object`);
+      continue;
+    }
+    for (const [key, value] of Object.entries(entry.headlights || {})) {
+      if (key === 'enabled') {
+        if (typeof value !== 'boolean') errors.push(`${path}.headlights.enabled must be boolean`);
+        continue;
+      }
+      if (key === 'color') {
+        if (!/^#[0-9a-f]{6}$/i.test(String(value))) errors.push(`${path}.headlights.color must be #rrggbb`);
+        continue;
+      }
+      const field = headlightFields.get(key);
+      if (!field) { errors.push(`${path}.headlights.${key} is unknown`); continue; }
+      if (!Number.isFinite(value) || value < field.min || value > field.max
+        || (field.integer && !Number.isInteger(value))) {
+        errors.push(`${path}.headlights.${key} must be ${field.integer ? 'an integer ' : ''}between ${field.min} and ${field.max}`);
+      }
+    }
+    if (entry.rearLights !== undefined && !isRecord(entry.rearLights)) {
+      errors.push(`${path}.rearLights must be an object`);
+      continue;
+    }
+    for (const [key, value] of Object.entries(entry.rearLights || {})) {
+      if (key === 'enabled') {
+        if (typeof value !== 'boolean') errors.push(`${path}.rearLights.enabled must be boolean`);
+        continue;
+      }
+      if (key === 'color') {
+        if (!/^#[0-9a-f]{6}$/i.test(String(value))) errors.push(`${path}.rearLights.color must be #rrggbb`);
+        continue;
+      }
+      const field = rearLightFields.get(key);
+      if (!field) { errors.push(`${path}.rearLights.${key} is unknown`); continue; }
+      if (!Number.isFinite(value) || value < field.min || value > field.max) {
+        errors.push(`${path}.rearLights.${key} must be between ${field.min} and ${field.max}`);
+      }
     }
   }
   for (const [slot, entry] of Object.entries(document.worldTextures || {})) {

@@ -15,6 +15,13 @@ test('movePoint updates x/z, preserves y, and validates the index', () => {
   assert.throws(() => movePoint(route, 0, [Number.NaN, 0]), TypeError);
 });
 
+test('movePoint accepts a full x/y/z position for elevation editing', () => {
+  const route = makeRoute([[10, 4, 20], [30, 6, 40], [50, 8, 60]]);
+  assert.deepEqual(movePoint(route, 1, [32, 12.5, 44]), [32, 12.5, 44]);
+  assert.deepEqual(route.points[1], [32, 12.5, 44]);
+  assert.throws(() => movePoint(route, 1, [1]), /must be \[x, z\] or \[x, y, z\]/);
+});
+
 test('insertPointAfter inserts mid-polyline and appends after the last index', () => {
   const route = makeRoute([[0, 0, 0], [10, 1, 0], [20, 2, 0]]);
   const inserted = insertPointAfter(route, 0, [5, 0.5, 2]);

@@ -94,7 +94,7 @@ export function createEditorShell(root) {
     dirtyChip,
     publishChip,
     element('span', 'toolbar-divider'),
-    button('Save Draft', 'save-project', { title: 'Save locally and update the editor map with your road edits; the playable game stays unchanged (Ctrl+S)' }),
+    button('Save Draft', 'save-project', { title: 'Save the already-live editor draft; the playable game stays unchanged (Ctrl+S)' }),
     button('Apply to Game', 'rebuild-world', { title: 'Save the draft, publish road curves and game files to the playable game, then reload' }),
     button('Test Game', 'test-game', { title: 'Apply the current draft locally and open the playable game in a new tab' }),
   );
@@ -1185,10 +1185,10 @@ export function createEditorShell(root) {
       const helpSections = [
         ['Roads', [
           ['Click a road', 'Selects the route and enters road editing: draft asphalt, markings, and orange point handles appear. The Road panel on the right shows route facts and point tools.'],
-          ['Drag orange point', 'Reshapes the road; the realistic preview follows live'],
+          ['Drag orange point / arrows', 'Reshapes the road in X/Y/Z; the asphalt and collision preview follow live'],
           ['Right-click road / double-click', 'Adds a point at that position'],
           ['Right-click point · Del', 'Removes the point'],
-          ['Road panel', 'Walk the route with Prev/Next, edit exact X/Z coordinates, frame or delete the selected point'],
+          ['Road panel', 'Walk the route with Prev/Next, edit exact X/Y/Z coordinates, frame or delete the selected point'],
         ]],
         ['Selection & editing', [
           ['Click', 'Select an object · click again cycles overlapping hits · Esc clears'],
@@ -1212,7 +1212,7 @@ export function createEditorShell(root) {
           ['Assemble', 'Shift+click several map objects (sign + pole, ...) → Edit tab → Assemble into object → one placeable asset'],
         ]],
         ['Saving & versions', [
-          ['Save Draft (Ctrl+S)', 'Saves locally and rebuilds the editor map with your road edits · the playable game stays unchanged'],
+          ['Save Draft (Ctrl+S)', 'Saves the live editor draft in place · the playable game stays unchanged'],
           ['Apply to Game', 'The one production update: publishes road curves and game files, then reloads'],
           ['Commits', 'Project tab → snapshot the map as a named version · Restore brings any version back'],
           ['Scenes', 'Highway (real map) or Garage (interior) · each keeps its own project file'],
@@ -1394,7 +1394,11 @@ export function createEditorShell(root) {
     if (hasPoint) {
       const coords = element('div', 'road-point-coords');
       const inputs = {};
-      for (const [axis, value] of [['x', roadState.activePoint[0]], ['z', roadState.activePoint[1]]]) {
+      for (const [axis, value] of [
+        ['x', roadState.activePoint[0]],
+        ['y', roadState.activePoint[1]],
+        ['z', roadState.activePoint[2]],
+      ]) {
         const label = element('label', 'road-coord');
         const input = document.createElement('input');
         input.type = 'number';
@@ -1406,7 +1410,11 @@ export function createEditorShell(root) {
         label.append(element('span', '', axis.toUpperCase()), input);
         coords.append(label);
       }
-      const applyPoint = () => triggerAction('road-point-apply', { x: Number(inputs.x.value), z: Number(inputs.z.value) });
+      const applyPoint = () => triggerAction('road-point-apply', {
+        x: Number(inputs.x.value),
+        y: Number(inputs.y.value),
+        z: Number(inputs.z.value),
+      });
       const apply = button('Apply', 'road-point-apply', { title: 'Move the selected point to these exact coordinates' });
       apply.addEventListener('click', applyPoint);
       for (const input of Object.values(inputs)) {
@@ -1430,6 +1438,7 @@ export function createEditorShell(root) {
     const hints = element('ul', 'road-hints');
     for (const hint of [
       'Drag an orange point to reshape the road — the asphalt preview follows live.',
+      'Use the X/Y/Z arrows on a selected point to edit its elevation and plan position.',
       'Right-click (or double-click) the road to add a point there.',
       'Right-click a point, or press Del, to remove it.',
     ]) hints.append(element('li', '', hint));

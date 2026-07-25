@@ -143,12 +143,9 @@ export async function createEditorApp(root) {
     }
     syncPublishState();
     if (savedRoads) {
-      // Rebuild the editor world from the saved draft so the real asphalt,
-      // markings, and collision show the road change locally; the playable
-      // game keeps its published data until Apply to Game.
-      shell.setStatus('Draft saved · rebuilding the editor map with your road changes · playable game unchanged');
-      shell.setLoading(true, 'Rebuilding the editor map from the saved road draft');
-      reloadEditor();
+      // Asphalt, route samples and collision already follow every drag frame.
+      // Saving persists that live state without tearing down the editor world.
+      shell.setStatus('Road draft saved · live editor preview kept in place · playable game unchanged');
       return result;
     }
     shell.setStatus('Draft saved · editor project and road source updated · playable game unchanged');
@@ -439,7 +436,11 @@ export async function createEditorApp(root) {
       'snap-rotate': () => transformManager.setSnaps({ rotateDegrees: detail }),
       'snap-scale': () => transformManager.setSnaps({ scale: detail }),
       'axis-toggle': () => transformManager.setAxes({ ...transformManager.axes, [detail.axis]: detail.enabled }),
-      'road-point-apply': () => roadEdit?.setActivePointPosition(Number(detail?.x), Number(detail?.z)),
+      'road-point-apply': () => roadEdit?.setActivePointPosition(
+        Number(detail?.x),
+        Number(detail?.y),
+        Number(detail?.z),
+      ),
       'road-point-delete': () => roadEdit?.deleteActivePoint(),
       'road-point-step': () => roadEdit?.stepActivePoint(Number(detail) || 1),
       'road-point-focus': () => roadEdit?.focusActivePoint(),

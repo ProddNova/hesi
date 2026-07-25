@@ -259,7 +259,7 @@ export class ProjectPersistence {
       return null;
     }
     const loaded = this.prepareLoadedDocument(result.document);
-    const staleEntityIds = new Set(loaded.staleEntityIds);
+    const primaryStaleEntityIds = [...loaded.staleEntityIds];
     const loadedDocument = loaded.document;
     this.currentPath = normalized;
     this.lastSavedDocument = clone(loadedDocument);
@@ -273,7 +273,6 @@ export class ProjectPersistence {
       const recovery = await this.read(autosavePath(normalized)).catch(() => null);
       if (recovery && recovery.modifiedMs > this.lastSavedModifiedMs) {
         const preparedRecovery = this.prepareLoadedDocument(recovery.document);
-        preparedRecovery.staleEntityIds.forEach((id) => staleEntityIds.add(id));
         const autosaved = preparedRecovery.document;
         if (serializeProjectDocument(autosaved) !== serializeProjectDocument(loadedDocument)) {
           const saved = clone(loadedDocument);
@@ -288,11 +287,25 @@ export class ProjectPersistence {
         }
       }
     }
-    this.onStatus(`${recovered ? 'Recovered' : 'Loaded'} project · ${normalized}`);
-    const staleNotice = staleEntityIds.size
-      ? `Ignored ${staleEntityIds.size} obsolete generated-entity override${staleEntityIds.size === 1 ? '' : 's'} (${[...staleEntityIds].join(', ')}). Save Draft to remove them from disk.`
-      : '';
-    if (recoveryNotice || staleNotice) this.onRecovery([recoveryNotice, staleNotice].filter(Boolean).join(' '));
+    let cleanedCount = 0;
+    // Road point-count changes legitimately replace generated markings and
+    // barriers with new stable IDs. Their old overrides have already been
+    // filtered safely; persist that cleanup immediately instead of presenting
+    // a huge alarming banner and requiring a second manual Save Draft.
+    if (primaryStaleEntityIds.length && !recovered) {
+      try {
+        const cleaned = await this.write(normalized, loadedDocument);
+        this.lastSavedModifiedMs = cleaned.modifiedMs || this.lastSavedModifiedMs;
+        cleanedCount = primaryStaleEntityIds.length;
+      } catch (error) {
+        recoveryNotice = [recoveryNotice, `Could not clean obsolete generated overrides automatically: ${error.message}`]
+          .filter(Boolean).join(' ');
+      }
+    }
+    this.onStatus(cleanedCount
+      ? `Loaded project · cleaned ${cleanedCount} obsolete generated override${cleanedCount === 1 ? '' : 's'} automatically`
+      : `${recovered ? 'Recovered' : 'Loaded'} project · ${normalized}`);
+    if (recoveryNotice) this.onRecovery(recoveryNotice);
     this.onProjectChange(this.state());
     return loadedDocument;
   }

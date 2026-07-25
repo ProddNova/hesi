@@ -63,7 +63,7 @@ const CHUNK = 600;
 // original contrast at these distances. Keeping another full ring of 600 m
 // chunks alive mostly adds draw submissions for geometry the player cannot
 // read. Quality controls the useful horizon; mobile can scale it further.
-const CHUNK_VISIBLE_BY_QUALITY = Object.freeze({ low: 850, medium: 1050, high: 1250 });
+const CHUNK_VISIBLE_BY_QUALITY = Object.freeze({ low: 850, medium: 1050, high: 1500 });
 const LEVEL = { T: -15, G: 0, E: 12, H: 24, S: 36 };
 
 // Land mask resolution and reach (see _buildTerrain). The halo is measured

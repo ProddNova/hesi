@@ -539921,16 +539921,58 @@
   "worldModels": {},
   "carModels": {
     "traffic:car": {
-      "assetId": "custom:0035"
+      "assetId": "custom:0035",
+      "rearLights": {
+        "width": 0.12,
+        "spacing": 1.61,
+        "height": 0.23,
+        "depth": 0.41
+      },
+      "settings": {
+        "length": 4.35,
+        "width": 1.75
+      }
     },
     "traffic:truck": {
-      "assetId": "custom:0036"
+      "assetId": "custom:0036",
+      "rearLights": {
+        "elevation": 0.47,
+        "inset": 0.02,
+        "offsetZ": -0.17,
+        "offsetY": 0.02,
+        "offsetX": -0.17,
+        "spacing": 2.47
+      },
+      "settings": {
+        "offsetY": 0,
+        "offsetX": -0.15,
+        "width": 2.89,
+        "length": 15.37
+      }
     },
     "traffic:van": {
-      "assetId": "custom:0037"
+      "assetId": "custom:0037",
+      "rearLights": {
+        "inset": -0.5,
+        "elevation": 0.76,
+        "depth": 0.2,
+        "height": 0.31,
+        "width": 0.11,
+        "spacing": 2.05
+      },
+      "settings": {
+        "width": 2,
+        "length": 6.23,
+        "offsetZ": -0.2
+      }
     },
     "player:JapanSedan": {
-      "assetId": "custom:0038"
+      "assetId": "custom:0038",
+      "settings": {
+        "width": 1.42,
+        "length": 3.89,
+        "height": 1.24
+      }
     }
   }
 }

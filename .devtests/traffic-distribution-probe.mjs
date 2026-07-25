@@ -33,6 +33,9 @@ const typeCounts = { car: 0, van: 0, truck: 0 };
 const laneByType = { car: [], van: [], truck: [] };
 let laneChangeStarts = 0;
 let maxConcurrentChanges = 0;
+let laneCoverageSamples = 0;
+let emptyLaneSamples = 0;
+let maxLaneImbalance = 0;
 const seen = new Set();
 
 for (let i = 0; i < 6000; i += 1) {
@@ -48,6 +51,27 @@ for (let i = 0; i < 6000; i += 1) {
     if (v.laneChange) { changing += 1; }
     const idx = v.laneRef?.laneIndex;
     if (Number.isFinite(idx) && i % 30 === 0) laneByType[v.type.id]?.push(idx);
+  }
+  if (i % 30 === 0) {
+    const corridors = new Map();
+    for (const v of traffic.active) {
+      const routeId = v.laneRef?.routeId ?? v.laneRef?.route?.id;
+      const laneCount = Math.max(1, Math.floor(v.laneRef?.laneCount ?? v.laneRef?.route?.lanes ?? 1));
+      const laneIndex = v.laneRef?.laneIndex ?? v.laneRef?.index;
+      const direction = Math.sign(v.laneRef?.direction ?? v.laneSample?.direction ?? 1);
+      if (routeId == null || laneCount < 2 || !Number.isFinite(laneIndex)) continue;
+      const key = `${routeId}:${direction}`;
+      if (!corridors.has(key)) corridors.set(key, Array(laneCount).fill(0));
+      const counts = corridors.get(key);
+      if (laneIndex >= 0 && laneIndex < counts.length) counts[Math.floor(laneIndex)] += 1;
+    }
+    for (const counts of corridors.values()) {
+      const total = counts.reduce((sum, value) => sum + value, 0);
+      if (total < counts.length * 2) continue;
+      laneCoverageSamples += 1;
+      if (counts.some((value) => value === 0)) emptyLaneSamples += 1;
+      maxLaneImbalance = Math.max(maxLaneImbalance, Math.max(...counts) - Math.min(...counts));
+    }
   }
   maxConcurrentChanges = Math.max(maxConcurrentChanges, changing);
 }
@@ -81,6 +105,10 @@ console.log('\n--- LANE CHANGES ---');
 console.log(`lane-change events over ~50s: ${laneChangeStarts}`);
 console.log(`max concurrent lane changes: ${maxConcurrentChanges}`);
 console.log(`active at end: ${traffic.activeCount}`);
+console.log('\n--- LANE COVERAGE ---');
+console.log(`dense corridor samples: ${laneCoverageSamples}`);
+console.log(`samples with an empty lane: ${emptyLaneSamples}`);
+console.log(`maximum lane-count imbalance: ${maxLaneImbalance}`);
 console.log('\n--- SPAWN VISIBILITY ---');
 console.log(`front-spawns: ${frontSpawnCount} · closest in front: ${minFrontSpawn === Infinity ? 'none' : minFrontSpawn.toFixed(1)}m (threshold ${frontThreshold}m)`);
 
@@ -91,5 +119,7 @@ console.log('\n--- CHECKS ---');
 assert('cars are the most common class', typeCounts.car > typeCounts.van && typeCounts.car > typeCounts.truck);
 assert('tir are the rarest class', typeCounts.truck < typeCounts.van && typeCounts.truck <= typeCounts.car);
 assert('trucks sit further out than cars', avg(laneByType.truck) === 'n/a' || +avg(laneByType.truck) >= +avg(laneByType.car));
+assert('dense corridors almost never leave a lane empty',
+  laneCoverageSamples > 0 && emptyLaneSamples / laneCoverageSamples < 0.03);
 assert('nothing spawns in view ahead of the player', minFrontSpawn === Infinity || minFrontSpawn >= frontThreshold - 1);
 process.exit(ok ? 0 : 1);

@@ -4,7 +4,10 @@ import * as THREE from 'three';
 import {
   CAR_MODEL_GROUPS,
   TRAFFIC_CAR_TYPES,
+  carHeadlightSettings,
+  carHitboxSettings,
   carModelTarget,
+  carRearLightSettings,
   parseCarModelTarget,
   trafficCarDefinition,
   trafficCarPartSpecs,
@@ -13,6 +16,7 @@ import {
   blankCustomAssetsDocument,
   customAssetsDocumentErrors,
 } from '../../../../js/custom-assets.js';
+import { VehiclePhysics } from '../../../../js/physics.js';
 import { TrafficSystem } from '../../../../js/traffic.js';
 
 test('Cars catalogue exposes every PSX player model and all live traffic classes', () => {
@@ -37,6 +41,9 @@ test('car model document entries validate shape references and traffic behavior'
       width: 2.05,
       length: 4.8,
       height: 1.5,
+      offsetX: 0.12,
+      offsetY: -0.08,
+      offsetZ: 0.25,
       minSpeedKmh: 80,
       maxSpeedKmh: 145,
       acceleration: 3.2,
@@ -56,6 +63,101 @@ test('car model document entries validate shape references and traffic behavior'
   invalidSpeed.carModels['traffic:car'].settings.minSpeedKmh = 180;
   invalidSpeed.carModels['traffic:car'].settings.maxSpeedKmh = 100;
   assert.ok(customAssetsDocumentErrors(invalidSpeed).some((error) => error.includes('cannot exceed')));
+});
+
+test('player cars accept per-model hitboxes plus complete front/rear light controls', () => {
+  const document = blankCustomAssetsDocument();
+  const target = CAR_MODEL_GROUPS.find((group) => group.group === 'Player cars').cars[0];
+  const key = carModelTarget(target.scope, target.id);
+  document.carModels[key] = {
+    settings: {
+      width: 1.92,
+      length: 4.62,
+      height: 1.36,
+      offsetX: 0.14,
+      offsetY: -0.06,
+      offsetZ: 0.22,
+    },
+    headlights: {
+      enabled: true,
+      color: '#dcecff',
+      width: 0.28,
+      height: 0.14,
+      depth: 0.06,
+      spacing: 1.16,
+      elevation: 0.68,
+      inset: 0.08,
+      offsetX: 0.03,
+      offsetY: -0.02,
+      offsetZ: -0.06,
+      temperature: 0.18,
+      intensity: 2200,
+      range: 58,
+      radius: 24,
+      softness: 0.82,
+      decay: 1.7,
+      irregularity: 0.64,
+      seed: 42,
+      aimX: 0.2,
+      aimY: 0.05,
+      aimDistance: 36,
+    },
+    rearLights: {
+      enabled: true,
+      color: '#ff002a',
+      width: 0.3,
+      height: 0.16,
+      depth: 0.07,
+      spacing: 1.24,
+      elevation: 0.7,
+      inset: 0.05,
+      offsetX: -0.08,
+      offsetY: 0.04,
+      offsetZ: 0.11,
+    },
+  };
+  assert.deepEqual(customAssetsDocumentErrors(document), []);
+  assert.deepEqual(carHitboxSettings(key, document), {
+    width: 1.92,
+    length: 4.62,
+    height: 1.36,
+    offsetX: 0.14,
+    offsetY: -0.06,
+    offsetZ: 0.22,
+  });
+  assert.deepEqual(
+    (({ color, intensity, range, radius, offsetX, aimX, aimDistance }) => (
+      { color, intensity, range, radius, offsetX, aimX, aimDistance }
+    ))(carHeadlightSettings(key, document)),
+    {
+      color: '#dcecff',
+      intensity: 2200,
+      range: 58,
+      radius: 24,
+      offsetX: 0.03,
+      aimX: 0.2,
+      aimDistance: 36,
+    },
+  );
+  assert.deepEqual(
+    (({ color, offsetX, offsetY, offsetZ }) => ({ color, offsetX, offsetY, offsetZ }))(
+      carRearLightSettings(key, document),
+    ),
+    { color: '#ff002a', offsetX: -0.08, offsetY: 0.04, offsetZ: 0.11 },
+  );
+
+  const invalid = structuredClone(document);
+  invalid.carModels[key].headlights.intensity = 9999;
+  assert.ok(customAssetsDocumentErrors(invalid).some((error) => error.includes('headlights.intensity')));
+  invalid.carModels[key].headlights.intensity = 2200;
+  invalid.carModels[key].headlights.seed = 4.2;
+  assert.ok(customAssetsDocumentErrors(invalid).some((error) => error.includes('headlights.seed')));
+  invalid.carModels[key].headlights.seed = 42;
+  invalid.carModels[key].rearLights.width = 99;
+  assert.ok(customAssetsDocumentErrors(invalid).some((error) => error.includes('rearLights.width')));
+  invalid.carModels[key].rearLights.width = 0.3;
+  invalid.carModels[key].settings.offsetX = 99;
+  assert.ok(customAssetsDocumentErrors(invalid).some((error) => error.includes('settings.offsetX')));
 });
 
 test('traffic Modeler definitions are the exact boxes used by live traffic', () => {
@@ -104,13 +206,25 @@ test('traffic Modeler overrides rebuild vehicles that are already active', () =>
   };
   document.carModels['traffic:car'] = {
     assetId: 'custom:traffic-live',
-    settings: { width: 2.1, length: 5, height: 1.6, minSpeedKmh: 90, maxSpeedKmh: 150 },
+    settings: {
+      width: 2.1,
+      length: 5,
+      height: 1.6,
+      offsetX: 0.2,
+      offsetY: 0.1,
+      offsetZ: -0.35,
+      minSpeedKmh: 90,
+      maxSpeedKmh: 150,
+    },
   };
 
   const result = traffic.applyModelOverrides(document);
   assert.deepEqual(result, { models: 1, settings: 1, active: 1 });
   assert.equal(vehicle.width, 2.1);
   assert.equal(vehicle.length, 5);
+  assert.equal(vehicle.offsetX, 0.2);
+  assert.equal(vehicle.offsetY, 0.1);
+  assert.equal(vehicle.offsetZ, -0.35);
   assert.equal(vehicle.mesh.userData.body.visible, false);
   assert.equal(vehicle.mesh.userData.customModelType, 'car');
   assert.ok(vehicle.mesh.userData.customModel?.children.length);
@@ -131,7 +245,57 @@ test('traffic Modeler overrides rebuild vehicles that are already active', () =>
   traffic.dispose();
 });
 
-test('editable traffic lamps replace generated lamps and retain live behavior', () => {
+test('hitbox offsets move wall sweeps and traffic contact centers', () => {
+  const physics = new VehiclePhysics({
+    width: 1.8,
+    length: 4.4,
+    height: 1.4,
+    collisionOffsetX: 1,
+    collisionOffsetY: 0.5,
+    collisionOffsetZ: 2,
+  });
+  let sweep = null;
+  physics._resolveRoadBounds({
+    sweep: (from, to) => {
+      sweep = { from: from.toArray(), to: to.toArray() };
+      return null;
+    },
+  }, new THREE.Vector3(10, 2, 20), new THREE.Vector3(11, 2, 21));
+  assert.deepEqual(sweep, {
+    from: [11, 2.5, 22],
+    to: [12, 2.5, 23],
+  });
+  assert.equal(physics.getState().collisionOffsetZ, 2);
+
+  const traffic = new TrafficSystem(new THREE.Scene(), null, { maxVehicles: 1, count: 0 });
+  const document = blankCustomAssetsDocument();
+  document.carModels['traffic:car'] = { settings: { offsetX: 5 } };
+  traffic.applyModelOverrides(document);
+  const vehicle = traffic.pool[0];
+  vehicle.active = true;
+  vehicle.spawnGrace = 0;
+  vehicle.position.set(0, 0, 0);
+  vehicle.previousPosition.set(0, 0, 0);
+  traffic.active.push(vehicle);
+  const player = traffic._normalizePlayer({
+    position: new THREE.Vector3(),
+    previousPosition: new THREE.Vector3(),
+    velocity: new THREE.Vector3(),
+    heading: 0,
+    width: 1.8,
+    length: 4.4,
+    height: 1.4,
+  });
+  traffic._events = [];
+  traffic._checkPlayerInteraction(vehicle, player, null);
+  assert.equal(traffic._events.length, 0, 'offset traffic hitbox no longer overlaps the player');
+  vehicle.offsetX = 0;
+  traffic._checkPlayerInteraction(vehicle, player, null);
+  assert.equal(traffic._events.length, 1, 'centred hitbox overlaps the player');
+  traffic.dispose();
+});
+
+test('traffic configured lights stay unlit and retain live braking over custom bodies', () => {
   const traffic = new TrafficSystem(new THREE.Scene(), null, { maxVehicles: 1, count: 0 });
   const vehicle = traffic.pool[0];
   vehicle.active = true;
@@ -146,10 +310,22 @@ test('editable traffic lamps replace generated lamps and retain live behavior', 
 
   const ud = vehicle.mesh.userData;
   assert.equal(ud.body.visible, false);
-  assert.equal(ud.lamps.visible, false);
-  assert.equal(ud.generatedTaillamps[0].visible, false);
-  assert.equal(ud.taillamps.length, 2);
-  assert.ok(ud.taillamps.every((lamp) => lamp.userData.hesiTrafficPartRole === 'taillamp'));
+  assert.equal(ud.lamps.visible, true);
+  assert.ok(ud.lamps.material.isMeshBasicMaterial);
+  assert.equal(ud.generatedTaillamps[0].visible, true);
+  assert.equal(ud.taillamps.length, 1);
+  assert.ok(ud.taillamps[0].material.isMeshBasicMaterial);
+  assert.equal(ud.taillamps[0].material.toneMapped, false);
+  const customTailParts = [];
+  const customHeadParts = [];
+  ud.customModel.traverse((part) => {
+    if (part.userData?.hesiTrafficPartRole === 'taillamp') customTailParts.push(part);
+    if (part.userData?.hesiTrafficPartRole === 'headlamp') customHeadParts.push(part);
+  });
+  assert.ok(customTailParts.length >= 2);
+  assert.ok(customTailParts.every((part) => part.visible === false));
+  assert.ok(customHeadParts.length >= 2);
+  assert.ok(customHeadParts.every((part) => part.visible === false));
   assert.ok(ud.indicators.every((indicator) => (
     indicator.meshes.every((mesh) => mesh.userData.hesiTrafficPartRole?.startsWith('indicator-'))
   )));

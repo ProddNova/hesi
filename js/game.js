@@ -10,8 +10,14 @@ import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
 import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js';
-import { carModelEntry, carModelTarget } from './car-models.js';
-import { DEFAULT_LIGHTING } from './lighting-config.js';
+import {
+  carHeadlightSettings,
+  carHitboxSettings,
+  carModelEntry,
+  carModelTarget,
+  carRearLightSettings,
+} from './car-models.js';
+import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js';
 import { GameUI } from './ui.js?v=20260713a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 import { DebugStats } from './debug-stats.js?v=20260724b';
@@ -29,11 +35,10 @@ class ShutokoNights {
     this.canvas=document.getElementById('game-canvas');
     this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
     this.performanceProfile=this.createPerformanceProfile();
-    // Native WebGL MSAA multiplies fragment/bandwidth cost across the whole
-    // frame. The real-device log remained render-bound at 1080p, so both
-    // profiles spend that budget on frame rate and use resolution scaling for
-    // edge softness instead.
-    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:false,powerPreference:'high-performance',alpha:false,precision:this.isTouchDevice?'mediump':'highp'});
+    // Desktop uses native MSAA so High has clean car silhouettes, rails and
+    // one-pixel lamp posts. Touch devices retain the cheaper non-MSAA path and
+    // their explicit resolution/performance budget.
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isTouchDevice,powerPreference:'high-performance',alpha:false,precision:this.isTouchDevice?'mediump':'highp'});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=DEFAULT_LIGHTING.exposure;this.renderer.shadowMap.enabled=false;
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
@@ -57,11 +62,19 @@ class ShutokoNights {
     this.setupDebugMenu();
     this.setupDevMap();
     this.setupDebugStats();
-    this.resize();window.addEventListener('resize',()=>this.resize());
-    // iOS Safari: orientation changes and browser-chrome show/hide don't always
-    // fire a plain resize, so listen to everything and settle late.
-    window.addEventListener('orientationchange',()=>{this.resize();setTimeout(()=>this.resize(),350);});
-    window.visualViewport?.addEventListener('resize',()=>this.resize());
+    this._stableViewportSize={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
+    this._resizeTimer=null;
+    this.resize({force:true});
+    // Mobile browser chrome can emit dozens of height-only resize events while
+    // the address bar settles. Reallocating WebGL's drawing buffer for each one
+    // clears the canvas and can trigger a multi-second context recovery on
+    // phones, so coalesce them and ignore small chrome-only height changes.
+    window.addEventListener('resize',()=>this.scheduleResize());
+    window.addEventListener('orientationchange',()=>{
+      this.scheduleResize(80,{force:true});
+      setTimeout(()=>this.scheduleResize(0,{force:true}),420);
+    });
+    window.visualViewport?.addEventListener('resize',()=>this.scheduleResize(180));
     this.ui.showBoot(this.hadSave);this.ui.finishLoading();this.animate();
   }
 
@@ -71,12 +84,17 @@ class ShutokoNights {
       // Let requestAnimationFrame follow the display's native refresh rate on
       // mobile. targetFps remains the performance governor's quality budget;
       // frameIntervalMs=0 means there is no artificial presentation cap.
-      return{name:apple?'ipad-unlocked':'touch-unlocked',targetFps:60,frameIntervalMs:0,hudIntervalMs:100,trafficCount:40,maxTraffic:60,spawnRadius:720,despawnRadius:920,trafficRenderRadius:650,viewDistanceScale:.78,maxPixels:1250000,initialRenderScale:.72,minRenderScale:.5};
+      return{name:apple?'ipad-stable':'touch-stable',targetFps:60,frameIntervalMs:0,hudIntervalMs:100,trafficCount:40,maxTraffic:60,spawnRadius:720,despawnRadius:920,trafficRenderRadius:650,viewDistanceScale:.78,maxPixels:1250000,initialRenderScale:.72,minRenderScale:.72,adaptiveResolution:false};
     }
-    return{name:'desktop-144',targetFps:144,frameIntervalMs:1000/144,hudIntervalMs:1000/30,trafficCount:56,maxTraffic:84,spawnRadius:850,despawnRadius:1100,trafficRenderRadius:900,viewDistanceScale:1,maxPixels:3200000,initialRenderScale:.82,minRenderScale:.68};
+    return{name:'desktop-144',targetFps:144,frameIntervalMs:1000/144,hudIntervalMs:1000/30,trafficCount:56,maxTraffic:84,spawnRadius:850,despawnRadius:1100,trafficRenderRadius:900,viewDistanceScale:1,maxPixels:3200000,initialRenderScale:.82,minRenderScale:.68,adaptiveResolution:true};
   }
 
-  effectiveViewDistanceScale(){return this.performanceProfile.viewDistanceScale*(.65+.35*this._dynamicRenderScale);}
+  effectiveRenderScale(){
+    // High is an image-quality promise on desktop: the adaptive 144-fps
+    // governor must not silently turn it into a 68-82% internal framebuffer.
+    return !this.isTouchDevice&&this.renderQuality?.()==='high'?1:this._dynamicRenderScale;
+  }
+  effectiveViewDistanceScale(){return this.performanceProfile.viewDistanceScale*(.65+.35*this.effectiveRenderScale());}
 
   shouldUpdateHUD(now=performance.now()){
     if(now<this._nextHudUpdate)return false;
@@ -186,6 +204,14 @@ class ShutokoNights {
   // land so streamed placements and imported textures are covered too.
   prewarmGpuResources(){
     if(!this.renderer||!this.roadScene)return;
+    // A one-frame all-map upload is beneficial on desktop, but it can exceed
+    // the transient tile-memory budget of mobile GPUs and present a black
+    // canvas while WebGL recovers. Phones use the stable visible-chunk path;
+    // resources stream normally as the player approaches them.
+    if(this.isTouchDevice){
+      this.performanceMetrics={...(this.performanceMetrics||{}),prewarmMs:0,prewarmed:{skipped:'mobile-stable-rendering'}};
+      return;
+    }
     const t0=performance.now();
     const restore=[];
     try{
@@ -395,6 +421,8 @@ class ShutokoNights {
   }
   finishFrameProf(frameStart){const pf=this.frameProf;pf.total=performance.now()-frameStart;pf.other=Math.max(0,pf.total-pf.phys-pf.traffic-pf.map-pf.render-pf.persist);this.debugStats?.frame(pf);this.updatePerformanceGovernor(pf.total);}
   updatePerformanceGovernor(frameMs,now=performance.now()){
+    if(this.performanceProfile.adaptiveResolution===false)return;
+    if(!this.isTouchDevice&&this.renderQuality()==='high')return;
     if(this.mode!=='driving'||this.debug.noclip||this.debug.menuOpen||this.ui.phoneOpen||this.ui.pcOpen)return;
     const budget=1000/this.performanceProfile.targetFps;
     if(!Number.isFinite(frameMs)||frameMs<=0||frameMs>budget*4)return;
@@ -811,6 +839,12 @@ class ShutokoNights {
     if(!document)return null;
     this.editorCarAssets=document;
     this.editorCarResolver=createRuntimeAssetPartResolver(document,this.map);
+    // Player hitbox and light settings live beside its Modeler shape. Rebuild
+    // physics plus both light rigs immediately so hot apply needs no restart.
+    this._effectiveCarCache=null;
+    if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());
+    this.refreshPlayerHeadlights();
+    this.refreshPlayerRearLights();
     const result=this.traffic?.applyModelOverrides?.(document,{resolveAssetPart:this.editorCarResolver})||{models:0,settings:0,active:0};
     // Model overrides rebuild the type catalogue and its default weights.
     // Reapply the saved/admin mix so an asynchronous editor asset load cannot
@@ -831,7 +865,7 @@ class ShutokoNights {
   syncPlayerVisuals(){
     // There is no procedural fallback: the player anchor contains lights only,
     // while the selected PSX model is the sole visible vehicle in both scenes.
-    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=this.customCar?.object?.parent===this.playerMesh,customInGarage=this.customCar?.object?.parent===this.garage?.carDisplay;if(this.garage?.carDisplay)this.garage.carDisplay.visible=!!customInGarage;if(this.garage?.parkedGroup)this.garage.parkedGroup.visible=false;if(this.customCar?.object)this.customCar.object.visible=(chase&&customOnRoad)||(this.mode==='garage'&&customInGarage);
+    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=this.customCar?.object?.parent===this.playerMesh,customInGarage=this.customCar?.object?.parent===this.garage?.carDisplay,onRoadVisible=chase&&customOnRoad&&this.mode==='driving';if(this.garage?.carDisplay)this.garage.carDisplay.visible=!!customInGarage;if(this.garage?.parkedGroup)this.garage.parkedGroup.visible=false;if(this.customCar?.object)this.customCar.object.visible=onRoadVisible||(this.mode==='garage'&&customInGarage);if(this.playerMesh.userData.rearLights)this.playerMesh.userData.rearLights.visible=onRoadVisible;if(this.playerMesh.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=onRoadVisible&&this.headlightsOn!==false&&this.playerMesh.userData.headlightConfig?.enabled!==false;
   }
   attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=(this.mode==='garage'?this.garage?.carDisplay:null)||this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);this.syncPlayerVisuals();}
   ensureGarageCar(){
@@ -884,8 +918,11 @@ class ShutokoNights {
     this.customCar.enabled=true;this.state.settings.customCar=true;this.state.settings.customCarScale=DEFAULT_CUSTOM_CAR_SCALE;if(persist)this.persist();this.syncCustomCarControls();if(!silent)this.ui?.toast?.('PSXSTYLE CAR // CARICAMENTO MODELLO','amber');try{const visual=await this.loadCustomCar();if(visual){this.attachCustomCarVisual();if(!silent)this.ui?.toast?.(`PSXSTYLE CAR // ${getPSXCarModel(this.customCar.modelId).label.toUpperCase()}`,'amber');}}catch(error){console.error('PSX car load',error);this.customCar.status='error';this.syncCustomCarControls();if(!silent)this.ui?.toast?.('PSXSTYLE CAR // MODELLO NON DISPONIBILE','red');}
   }
   async setCustomCarModel(modelId,{persist=true,silent=false}={}){
-    const next=getPSXCarModel(modelId);if(next.id===this.customCar.modelId){this.syncCustomCarControls();return;}const previousId=this.customCar.modelId;this.customCar.modelId=next.id;this.state.settings.customCarModel=next.id;this.state.settings.customCarVersion=1;if(persist)this.persist();this.syncCustomCarControls();
-    try{const visual=await this.loadCustomCar(next.id);if(visual&&!silent)this.ui?.toast?.(`PSXSTYLE // ${next.label.toUpperCase()}`,'amber');}catch(error){console.error('PSX car switch',error);if(this.customCar.object){this.customCar.modelId=this.customCar.object.userData.psxCarId||previousId;this.state.settings.customCarModel=this.customCar.modelId;this.customCar.status='ready';if(persist)this.persist();this.syncCustomCarControls();}if(!silent)this.ui?.toast?.('PSXSTYLE // CAMBIO MODELLO FALLITO','red');}
+    const next=getPSXCarModel(modelId);if(next.id===this.customCar.modelId){this.syncCustomCarControls();return;}
+    const previousId=this.customCar.modelId;this.customCar.modelId=next.id;this.state.settings.customCarModel=next.id;this.state.settings.customCarVersion=1;
+    this._effectiveCarCache=null;if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());this.refreshPlayerHeadlights();this.refreshPlayerRearLights();
+    if(persist)this.persist();this.syncCustomCarControls();
+    try{const visual=await this.loadCustomCar(next.id);if(visual&&!silent)this.ui?.toast?.(`PSXSTYLE // ${next.label.toUpperCase()}`,'amber');}catch(error){console.error('PSX car switch',error);if(this.customCar.object){this.customCar.modelId=this.customCar.object.userData.psxCarId||previousId;this.state.settings.customCarModel=this.customCar.modelId;this.customCar.status='ready';this._effectiveCarCache=null;if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());this.refreshPlayerHeadlights();this.refreshPlayerRearLights();if(persist)this.persist();this.syncCustomCarControls();}if(!silent)this.ui?.toast?.('PSXSTYLE // CAMBIO MODELLO FALLITO','red');}
   }
   setNoclip(enabled){
     enabled=!!enabled;const input=document.getElementById('debug-noclip');if(input)input.checked=enabled;
@@ -1035,57 +1072,186 @@ class ShutokoNights {
     const q=this.state?.settings?.quality;if(['low','medium','high'].includes(q))return q;
     const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';
   }
+  scheduleResize(delay=140,{force=false}={}){
+    clearTimeout(this._resizeTimer);
+    this._resizeTimer=setTimeout(()=>{this._resizeTimer=null;this.resize({force});},Math.max(0,delay));
+  }
   applyRenderResolution(){
     const q=this.renderQuality(),qualityScale=this.isTouchDevice?{low:.4,medium:.5,high:.62}:{low:.55,medium:.75,high:1};
-    const scale=(qualityScale[q]||qualityScale.medium)*this._dynamicRenderScale;
+    const scale=(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
     const dpr=Math.min(window.devicePixelRatio||1,3);
-    let w=Math.round(innerWidth*dpr*scale),h=Math.round(innerHeight*dpr*scale);
+    const viewport=this._stableViewportSize||{width:innerWidth,height:innerHeight};
+    let w=Math.round(viewport.width*dpr*scale),h=Math.round(viewport.height*dpr*scale);
     // iPads have laptop-sized physical resolutions but a much smaller sustained
     // GPU/thermal budget. Cap them near 1.25 MP; desktop High remains native.
-    const maxPixels=this.performanceProfile.maxPixels;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    const maxPixels=!this.isTouchDevice&&q==='high'?Math.max(this.performanceProfile.maxPixels,8500000):this.performanceProfile.maxPixels;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     if(this.canvas.width!==w||this.canvas.height!==h)this.renderer.setSize(w,h,false);
-    this.camera.aspect=innerWidth/Math.max(1,innerHeight);this.camera.updateProjectionMatrix();
+    this.camera.aspect=viewport.width/Math.max(1,viewport.height);this.camera.far=q==='high'?1650:q==='medium'?1350:1100;this.camera.updateProjectionMatrix();
     this.canvas.style.imageRendering='auto';
   }
-  resize(){
+  resize({force=false}={}){
+    const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
+    const previous=this._stableViewportSize||current;
+    if(this.isTouchDevice&&!force){
+      const orientationChanged=(current.width>=current.height)!==(previous.width>=previous.height);
+      const widthChanged=Math.abs(current.width-previous.width)>Math.max(32,previous.width*.12);
+      const majorHeightChanged=Math.abs(current.height-previous.height)>Math.max(220,previous.height*.35);
+      if(!orientationChanged&&!widthChanged&&!majorHeightChanged)return false;
+    }
+    this._stableViewportSize=current;
     // Start below native on performance-target profiles, then let the real
     // frame-time governor move the internal resolution within safe bounds.
     const q=this.renderQuality();
     this.applyRenderResolution();
     this.map?.setQuality?.(q);
+    this.map?.setViewDistanceScale?.(this.effectiveViewDistanceScale());
     // Editor-imported textures are capped to a per-quality size so imported
     // 1000+ px images cannot blow VRAM on weak GPUs; cached textures re-upload
     // at the new cap when the player changes quality.
-    setTextureSizeBudget({low:128,medium:256,high:512}[q]||256);
+    setTextureSizeBudget({low:128,medium:256,high:1024}[q]||256);
+    return true;
   }
   // The old PSX pass (vertex snap, 31-level posterize, nearest-filter mush) is
   // gone. This pass only normalizes textures for the clean PS2 look: bilinear
   // filtering + mipmaps + a touch of anisotropy so signs stay legible.
-  applyRetroMaterials(scene){const maxAniso=this.renderer.capabilities.getMaxAnisotropy?.()||1;scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if(m.map){m.map.magFilter=THREE.LinearFilter;m.map.minFilter=THREE.LinearMipmapLinearFilter;m.map.generateMipmaps=true;m.map.anisotropy=Math.min(4,maxAniso);m.map.needsUpdate=true;}m.dithering=true;}});}
+  applyRetroMaterials(scene){const maxAniso=this.renderer.capabilities.getMaxAnisotropy?.()||1,targetAniso=this.renderQuality()==='high'?8:4;scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if(m.map){m.map.magFilter=THREE.LinearFilter;m.map.minFilter=THREE.LinearMipmapLinearFilter;m.map.generateMipmaps=true;m.map.anisotropy=Math.min(targetAniso,maxAniso);m.map.needsUpdate=true;}m.dithering=true;}});}
 
   createCarMesh(spec,player=false){
     // Physics/camera anchor only. The box-built fallback car was removed; the
     // PSX model loaded by loadCustomCar is the only vehicle geometry.
-    const g=new THREE.Group(),d=spec.dimensions||{},L=d.length||4.25;
+    const g=new THREE.Group();
     // One broad cone represents the overlapping pair of physical headlamps.
     // The two visible lamp meshes remain on the car model, but a second
     // SpotLight would duplicate almost the same per-fragment work.
-    if(player){const headlight=new THREE.SpotLight(0xffe4bd,1450,62,.5,.74,1.35);headlight.position.set(0,.72,-L*.49);headlight.target.position.set(0,.1,-30);g.add(headlight,headlight.target);headlight.userData.baseIntensity=headlight.intensity;this.playerHeadlights=[headlight];this._applyHeadlightState();}
+    if(player){this.playerHeadlights=[];this.attachPlayerHeadlights(g,spec);this.attachPlayerRearLights(g,spec);}
     g.userData.frontWheels=[];g.userData.visualMeshes=[];return g;
+  }
+  _playerCarModelTarget(){
+    const modelId=this.customCar?.modelId||this.state?.settings?.customCarModel||DEFAULT_PSX_CAR_ID;
+    return carModelTarget('player',getPSXCarModel(modelId).id);
+  }
+  attachPlayerHeadlights(anchor,spec=this.getEffectiveCar()){
+    if(!anchor)return null;
+    const headlights=carHeadlightSettings(this._playerCarModelTarget(),this.editorCarAssets);
+    const dimensions=spec.dimensions||spec.silhouette||{};
+    const length=spec.length||dimensions.length||4.35;
+    const z=-(length*.5-headlights.inset)+headlights.offsetZ;
+
+    // The beam is the exact Soft Custom Light implementation used by the world
+    // editor, rotated from its local -Y axis into the car's local -Z forward.
+    // Keeping one broad light preserves the existing single-SpotLight budget.
+    const beamRoot=createSoftSpotLight(headlights,{editor:false});
+    beamRoot.name='Player headlight beam';
+    beamRoot.position.set(headlights.offsetX,headlights.elevation+headlights.offsetY,z);
+    const aim=new THREE.Vector3(headlights.aimX,headlights.aimY,-headlights.aimDistance);
+    const direction=aim.sub(beamRoot.position).normalize();
+    if(direction.lengthSq()>0)beamRoot.quaternion.setFromUnitVectors(new THREE.Vector3(0,-1,0),direction);
+    const light=beamRoot.userData.localLightObject;
+    // Headlights are not part of the world's master lighting rig: Modeler
+    // brightness remains authoritative regardless of the ambient-light preset.
+    delete light.userData.gameSceneLight;delete light.userData.baseLighting;
+    light.userData.baseIntensity=headlights.enabled?headlights.intensity:0;
+    this.playerHeadlights=[light];
+    anchor.add(beamRoot);anchor.userData.headlightRoot=beamRoot;anchor.userData.headlightConfig=headlights;
+
+    if(headlights.enabled){
+      const lensGeometry=new THREE.BoxGeometry(headlights.width,headlights.height,headlights.depth);
+      const lensMaterial=new THREE.MeshBasicMaterial({color:headlights.color,toneMapped:false,fog:false,depthWrite:false});
+      const haloGeometry=new THREE.BoxGeometry(headlights.width*1.65,headlights.height*1.65,headlights.depth*1.3);
+      const haloMaterial=new THREE.MeshBasicMaterial({color:headlights.color,transparent:true,opacity:THREE.MathUtils.lerp(.12,.42,headlights.intensity/3000),blending:THREE.AdditiveBlending,toneMapped:false,fog:false,depthWrite:false});
+      const lenses=new THREE.InstancedMesh(lensGeometry,lensMaterial,2),halos=new THREE.InstancedMesh(haloGeometry,haloMaterial,2);
+      const matrix=new THREE.Matrix4(),position=new THREE.Vector3(),quaternion=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
+      for(let index=0;index<2;index++){
+        position.set(headlights.offsetX+(index?1:-1)*headlights.spacing*.5,headlights.elevation+headlights.offsetY,z);
+        matrix.compose(position,quaternion,scale);lenses.setMatrixAt(index,matrix);halos.setMatrixAt(index,matrix);
+      }
+      lenses.instanceMatrix.needsUpdate=halos.instanceMatrix.needsUpdate=true;
+      lenses.frustumCulled=halos.frustumCulled=false;lenses.renderOrder=halos.renderOrder=50;
+      const group=new THREE.Group();group.name='Player front lights';group.add(lenses,halos);
+      group.userData.ownedGeometries=[lensGeometry,haloGeometry];group.userData.ownedMaterials=[lensMaterial,haloMaterial];
+      anchor.add(group);anchor.userData.headlightLenses=group;
+    }
+    this._applyHeadlightState();
+    return beamRoot;
+  }
+  attachPlayerRearLights(anchor,spec=this.getEffectiveCar()){
+    if(!anchor)return null;
+    const target=this._playerCarModelTarget();
+    const rear=carRearLightSettings(target,this.editorCarAssets);
+    if(!rear.enabled)return null;
+    const dimensions=spec.dimensions||spec.silhouette||{};
+    const length=spec.length||dimensions.length||4.35;
+    const lensGeometry=new THREE.BoxGeometry(rear.width,rear.height,rear.depth);
+    const lensMaterial=new THREE.MeshBasicMaterial({color:rear.color,toneMapped:false,fog:false,depthWrite:false});
+    const haloGeometry=new THREE.BoxGeometry(rear.width*1.65,rear.height*1.65,rear.depth*1.3);
+    const haloMaterial=new THREE.MeshBasicMaterial({color:rear.color,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,toneMapped:false,fog:false,depthWrite:false});
+    const lenses=new THREE.InstancedMesh(lensGeometry,lensMaterial,2),halos=new THREE.InstancedMesh(haloGeometry,haloMaterial,2);
+    const matrix=new THREE.Matrix4(),position=new THREE.Vector3(),quaternion=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
+    const z=length*.5-rear.inset+rear.offsetZ;
+    for(let index=0;index<2;index++){
+      position.set(rear.offsetX+(index?1:-1)*rear.spacing*.5,rear.elevation+rear.offsetY,z);
+      matrix.compose(position,quaternion,scale);
+      lenses.setMatrixAt(index,matrix);halos.setMatrixAt(index,matrix);
+    }
+    lenses.instanceMatrix.needsUpdate=halos.instanceMatrix.needsUpdate=true;
+    lenses.frustumCulled=halos.frustumCulled=false;lenses.renderOrder=halos.renderOrder=50;
+    const group=new THREE.Group();group.name='Player rear lights · unlit';group.add(lenses,halos);
+    group.userData.ownedGeometries=[lensGeometry,haloGeometry];group.userData.ownedMaterials=[lensMaterial,haloMaterial];
+    anchor.add(group);anchor.userData.rearLights=group;
+    return group;
+  }
+  refreshPlayerRearLights(){
+    const anchor=this.playerMesh;if(!anchor)return null;
+    const old=anchor.userData.rearLights;
+    if(old){old.removeFromParent();for(const geometry of old.userData.ownedGeometries||[])geometry.dispose();for(const material of old.userData.ownedMaterials||[])material.dispose();delete anchor.userData.rearLights;}
+    return this.attachPlayerRearLights(anchor,this.getEffectiveCar());
+  }
+  refreshPlayerHeadlights(){
+    const anchor=this.playerMesh;if(!anchor)return null;
+    const oldRoot=anchor.userData.headlightRoot;
+    if(oldRoot){oldRoot.removeFromParent();delete anchor.userData.headlightRoot;}
+    const oldLenses=anchor.userData.headlightLenses;
+    if(oldLenses){oldLenses.removeFromParent();for(const geometry of oldLenses.userData.ownedGeometries||[])geometry.dispose();for(const material of oldLenses.userData.ownedMaterials||[])material.dispose();delete anchor.userData.headlightLenses;}
+    delete anchor.userData.headlightConfig;
+    this.playerHeadlights=[];
+    return this.attachPlayerHeadlights(anchor,this.getEffectiveCar());
   }
   // Toggle the player's headlights (L). We drive intensity to 0 rather than
   // hiding the lights: a SpotLight going invisible changes the scene's light
   // census and forces a full shader-program re-link (stutter). Intensity is a
   // plain uniform, so the census — and the prewarmed programs — stay valid.
-  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??1450):0;}
+  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??1450):0;if(this.playerMesh?.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=on&&this.playerMesh.userData.headlightConfig?.enabled!==false;}
   toggleHeadlights(){this.headlightsOn=this.headlightsOn===false;this.debugStats?.event('headlights_changed',{enabled:this.headlightsOn});this._applyHeadlightState();this.ui?.toast?.(this.headlightsOn?'HEADLIGHTS ON':'HEADLIGHTS OFF');this.audioClick?.();}
 
   getOwnedBase(){const saved=this.state.ownedCar||{},id=this.state.ownedCarId||saved.carId||saved.id,base=this.catalog.find(c=>c.id===id)||saved||this.fallbackCar();return{...base,...saved,id:base.id||id,carId:id,color:saved.color||base.colors?.[0]||base.color,engine:{...(base.engine||{}),...(saved.engine||{})}};}
   getPartsForOwned(){const id=this.state.ownedCarId;const list=typeof Data.getPartsForCar==='function'?Data.getPartsForCar(id):this.partCatalog;return(list||[]).filter(p=>!p.carIds||p.carIds.includes(id)||p.universal);}
   getEffectiveCar(){
     if(this._effectiveCarCache)return this._effectiveCarCache;
-    return(this._effectiveCarCache=this._buildEffectiveCar());
+    const spec=this._buildEffectiveCar();
+    const modelId=this.customCar?.modelId||this.state?.settings?.customCarModel||DEFAULT_PSX_CAR_ID;
+    const target=carModelTarget('player',getPSXCarModel(modelId).id);
+    const sourceDimensions=spec.dimensions||spec.silhouette||{};
+    const hitbox=carHitboxSettings(target,this.editorCarAssets,{
+      width:spec.width??sourceDimensions.width,
+      length:spec.length??sourceDimensions.length,
+      height:spec.height??sourceDimensions.height,
+    });
+    return(this._effectiveCarCache={
+      ...spec,
+      width:hitbox.width,
+      length:hitbox.length,
+      height:hitbox.height,
+      // Player visuals are mounted with a 180Â° yaw relative to physics, so
+      // Modeler-local X/Z offsets are inverted before entering the physical
+      // coordinate frame. This keeps the green preview and real collisions
+      // on the same side of the rendered car.
+      collisionOffsetX:-hitbox.offsetX,
+      collisionOffsetY:hitbox.offsetY,
+      collisionOffsetZ:-hitbox.offsetZ,
+      dimensions:{...(spec.dimensions||{}),width:hitbox.width,length:hitbox.length,height:hitbox.height},
+      silhouette:{...(spec.silhouette||{}),width:hitbox.width,length:hitbox.length,height:hitbox.height},
+    });
   }
   _buildEffectiveCar(){
     const base=this.getOwnedBase(),parts=this.getPartsForOwned().filter(p=>this.state.installedParts.includes(p.id));
@@ -1096,7 +1262,22 @@ class ShutokoNights {
     for(const p of parts){const m=p.modifiers||p.delta||{};if(m.powerMultiplier)s.power*=m.powerMultiplier;if(m.power)s.power+=m.power;if(m.horsepower)s.power+=m.horsepower;if(m.massDelta)s.mass+=m.massDelta;if(m.mass&&m.mass<0)s.mass+=m.mass;if(m.gripMultiplier)s.tireGrip*=m.gripMultiplier;if(m.tireGrip)s.tireGrip+=m.tireGrip;if(m.brakeMultiplier)s.brakeForce*=m.brakeMultiplier;if(m.brakeForce&&m.brakeForce<100)s.brakeForce*=m.brakeForce;if(m.suspensionStiffness)s.suspensionStiffness*=m.suspensionStiffness;if(m.gearRatioMultiplier)s.gearRatioMultiplier=(s.gearRatioMultiplier||1)*m.gearRatioMultiplier;if(m.turbo||m.turboStage)s.turbo=Math.max(s.turbo||0,m.turbo||m.turboStage);}
     s.horsepower=s.power;return s;
   }
-  refreshVehicle(){this._effectiveCarCache=null;const spec=this.getEffectiveCar();this.physics?.changeSpec?.(spec);this.physics?.setCarSpec?.(spec);this.audio?.setVehicle?.(spec);if(this.playerMesh){this.roadScene.remove(this.playerMesh);this.playerMesh=this.createCarMesh(spec,true);this.roadScene.add(this.playerMesh);this.applyRetroMaterials(this.playerMesh);}this.setPhysicsFuel(Math.min(this.state.fuel,spec.fuelCapacity||45));this.garage?.refreshCar(spec);this.attachCustomCarVisual();}
+  refreshVehicle(){
+    this._effectiveCarCache=null;const spec=this.getEffectiveCar();
+    this.physics?.changeSpec?.(spec);this.physics?.setCarSpec?.(spec);this.audio?.setVehicle?.(spec);
+    if(this.playerMesh){
+      for(const key of['rearLights','headlightLenses']){
+        const group=this.playerMesh.userData[key];
+        if(!group)continue;
+        for(const geometry of group.userData.ownedGeometries||[])geometry.dispose();
+        for(const material of group.userData.ownedMaterials||[])material.dispose();
+      }
+      this.roadScene.remove(this.playerMesh);this.playerMesh=this.createCarMesh(spec,true);
+      this.roadScene.add(this.playerMesh);this.applyRetroMaterials(this.playerMesh);
+    }
+    this.setPhysicsFuel(Math.min(this.state.fuel,spec.fuelCapacity||45));
+    this.garage?.refreshCar(spec);this.attachCustomCarVisual();
+  }
 
   getPhoneContext(){return{runScore:this.run.score,combo:this.run.combo,bestCombo:this.state.records.bestCombo,bestScore:this.state.records.bestScore,money:this.displayMoney(),towCost:Data.ECONOMY?.towCost||2500,settings:this.state.settings,adminUnlocked:this.admin.unlocked,admin:this.admin};}
   getPCContext(){const owned=this.getOwnedBase(),parts=this.getPartsForOwned(),fuelCan=Data.CONSUMABLES?.[0];return{money:this.displayMoney(),owned,stats:this.getEffectiveCar(),fuel:this.state.fuel,installed:this.state.installedParts,installedNames:parts.filter(p=>this.state.installedParts.includes(p.id)).map(p=>p.name),parts,deliveries:this.state.deliveries,auctions:this.state.auctions.map(a=>({...a,mileage:a.mileage??a.mileageKm,grade:a.grade??a.conditionGrade,effectivePower:a.effectivePower??a.engine?.powerHp,car:{...(a.car||this.catalog.find(c=>c.id===a.carId)||a),color:a.color||(a.car?.color)}})),tradeValue:this.tradeValue(),fuelCan,fuelCanPrice:fuelCan?.price||1200};}
@@ -1109,7 +1290,7 @@ class ShutokoNights {
   makeDeliveriesReady(){if(!this.garage?.enabled)return;const ready=this.availableDeliveries();const signature=ready.map(d=>d.id).join('|');if(signature!==this.deliverySignature){this.deliverySignature=signature;this.garage.syncDeliveries(ready);if(ready.length)this.ui.toast(`${ready.length} delivery box${ready.length>1?'es':''} ready`);}}
   finishInstall(d){const idx=this.state.deliveries.findIndex(x=>x.id===d.id||x.partId===d.partId);if(idx>=0)this.state.deliveries.splice(idx,1);if(d.type==='fuel'||String(d.partId).includes('fuel-can')){const cap=this.getEffectiveCar().fuelCapacity||45,liters=d.liters||10;this.state.fuel=Math.min(cap,this.state.fuel+liters);this.setPhysicsFuel(this.state.fuel);this.fuelWarned=false;this.ui.toast(`Fuel can poured // +${liters}L`,'amber');}else if(!this.state.installedParts.includes(d.partId)){this.state.installedParts.push(d.partId);this.ui.toast(`${d.name} installed // Stats updated`,'amber');this.refreshVehicle();}this.persist();this.deliverySignature='';this.garage.syncDeliveries(this.availableDeliveries());this.ui.refreshPC(this.getPCContext());}
 
-  changeSetting(k,v){const previous=this.state.settings[k];this.state.settings[k]=v;this.debugStats?.event('setting_changed',{key:k,from:previous,to:v});if(k==='volume'){this.audio?.setVolume?.(v);this.audio?.setMasterVolume?.(v);}if(k==='camera'){this.cameraMode=v;if(this.mode==='driving')this.snapDrivingCamera();}if(k==='resolution'||k==='quality')this.resize();this.persist();this.audioClick();}
+  changeSetting(k,v){const previous=this.state.settings[k];this.state.settings[k]=v;this.debugStats?.event('setting_changed',{key:k,from:previous,to:v});if(k==='volume'){this.audio?.setVolume?.(v);this.audio?.setMasterVolume?.(v);}if(k==='camera'){this.cameraMode=v;if(this.mode==='driving')this.snapDrivingCamera();}if(k==='resolution'||k==='quality')this.resize({force:true});this.persist();this.audioClick();}
   unlockAdmin(ok){if(!ok)return;this.admin.unlocked=true;this.persist();this.ui.toast('ADMIN MODE UNLOCKED','amber');}
   adminToggle(k,v){const prop={money:'infiniteMoney',lives:'infiniteLives',fuel:'infiniteFuel'}[k]||k;this.admin[prop]=v;this.persist();this.ui.toast(`${prop.replace(/([A-Z])/g,' $1').toUpperCase()} ${v?'ON':'OFF'}`,'amber');}
   adminAction(a){if(a==='money')this.state.money+=100000;else if(a==='garage'){this.ui.closePhone();this.enterGarage('admin');}else if(a==='pc'){this.ui.closePhone();if(this.mode!=='garage')this.enterGarage('admin');setTimeout(()=>this.ui.openPC(this.getPCContext()),this.mode==='garage'?40:560);}else if(a==='highway'){this.ui.closePhone();if(this.mode==='garage')this.exitGarage();else{this.mode='driving';this.placeAtSpawn();this.snapDrivingCamera();this.contactCooldown=1.2;}}else if(a==='deliverybay'){this.ui.closePhone();if(this.mode==='garage'){this.makeDeliveriesReady();this.garage.position.set(-7.35,this.garage.playerHeight,9);this.garage.yaw=Math.PI/2;this.garage.pitch=0;}}else if(a==='carbay'){this.ui.closePhone();if(this.mode==='garage'){this.garage.position.set(0,this.garage.playerHeight,3.65);this.garage.yaw=0;this.garage.pitch=-.08;}}else if(a==='fuel'){this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);this.fuelWarned=false;}else if(a==='lives')this.run.lives=3;else if(a==='parts'){this.state.installedParts=this.getPartsForOwned().map(p=>p.id);this.refreshVehicle();}else if(a==='delivery'){this.admin.instantDelivery=true;this.state.deliveries.forEach(d=>d.readyAt=0);this.makeDeliveriesReady();}else if(a==='boost'){this.physics.setSpeed?.(69.44);this.physics.setVelocity?.(69.44);if(!this.physics.setVelocity&&this.physics.velocity){const h=this.getVehicleState().heading||0;this.physics.velocity.set(Math.sin(h)*69.44,0,Math.cos(h)*69.44);}}this.persist();if(!['garage','pc','highway','deliverybay','carbay'].includes(a))this.ui.openPhoneApp('admin');this.ui.toast(`ADMIN // ${a.toUpperCase()}`,'amber');}

@@ -324,10 +324,12 @@ export class TrafficSystem {
     this._customModelDocument = null;
     this._customModelResolver = null;
     this._sharedMaterials = {
-      headlamp: new THREE.MeshBasicMaterial({ color: 0xfff0be, toneMapped: false }),
-      taillamp: new THREE.MeshBasicMaterial({ color: 0x8a1512, toneMapped: false }),
+      headlamp: new THREE.MeshBasicMaterial({ color: 0xffe4bd, toneMapped: false }),
+      taillamp: new THREE.MeshBasicMaterial({ color: 0xff1833, toneMapped: false, fog: false }),
       indicator: new THREE.MeshBasicMaterial({ color: 0xffa51f, toneMapped: false }),
     };
+    this._headlightMaterials = new Map();
+    this._rearLightMaterials = new Map();
     // Every authored traffic model is identical within its vehicle class. Draw
     // those repeated meshes through InstancedMesh batches instead of submitting
     // 3-7 draw calls for every car. The ordinary pooled groups remain as the
@@ -364,6 +366,9 @@ export class TrafficSystem {
       width: type.width,
       length: type.length,
       height: type.height,
+      offsetX: type.offsetX ?? 0,
+      offsetY: type.offsetY ?? 0,
+      offsetZ: type.offsetZ ?? 0,
       position: mesh.position,
       previousPosition: new THREE.Vector3(),
       velocity: new THREE.Vector3(),
@@ -453,15 +458,22 @@ export class TrafficSystem {
     });
     this._batchOwnedMaterials.push(bodyMaterial);
     const identity = new THREE.Matrix4();
-    return {
-      descriptors: [
-        this._batchDescriptor(type.id, geometries.body, bodyMaterial, identity, 'body', 'body'),
-        this._batchDescriptor(type.id, geometries.lamps, this._sharedMaterials.headlamp, identity, 'headlamp'),
-        this._batchDescriptor(type.id, geometries.brake, this._sharedMaterials.taillamp, identity, 'taillamp'),
-        this._batchDescriptor(type.id, geometries.blinkerL, this._sharedMaterials.indicator, identity, 'indicator-left'),
-        this._batchDescriptor(type.id, geometries.blinkerR, this._sharedMaterials.indicator, identity, 'indicator-right'),
-      ],
-    };
+    const descriptors = [
+      this._batchDescriptor(type.id, geometries.body, bodyMaterial, identity, 'body', 'body'),
+      this._batchDescriptor(type.id, geometries.blinkerL, this._sharedMaterials.indicator, identity, 'indicator-left'),
+      this._batchDescriptor(type.id, geometries.blinkerR, this._sharedMaterials.indicator, identity, 'indicator-right'),
+    ];
+    if (type.headlights?.enabled !== false) {
+      descriptors.splice(1, 0, this._batchDescriptor(
+        type.id, geometries.lamps, this._headlightMaterial(type), identity, 'headlamp',
+      ));
+    }
+    if (type.rearLights?.enabled !== false) {
+      descriptors.splice(type.headlights?.enabled !== false ? 2 : 1, 0, this._batchDescriptor(
+        type.id, geometries.brake, this._rearLightMaterial(type), identity, 'taillamp',
+      ));
+    }
+    return { descriptors };
   }
 
   _sameBatchMaterial(a, b) {
@@ -545,8 +557,12 @@ export class TrafficSystem {
       }
     });
     if (unsupported || !renderable.length) return null;
-    return {
-      descriptors: renderable.map((object) => {
+    // Front/rear lenses are generated from the per-vehicle inspector settings
+    // even for a custom body. This keeps their dimensions, placement and unlit
+    // material independent from authored body faces.
+    const descriptors = renderable
+      .filter((object) => !['headlamp', 'taillamp'].includes(object.userData?.hesiTrafficPartRole))
+      .map((object) => {
         const localMatrix = new THREE.Matrix4().multiplyMatrices(this._batchRootInverse, object.matrixWorld);
         const role = object.userData?.hesiTrafficPartRole || 'static';
         const compact = this._compactBatchGeometry(object.geometry, object.material);
@@ -556,8 +572,28 @@ export class TrafficSystem {
         descriptor.mesh.receiveShadow = object.receiveShadow;
         if (descriptor.brakeMesh) descriptor.brakeMesh.renderOrder = object.renderOrder;
         return descriptor;
-      }),
-    };
+      });
+    if (type.headlights?.enabled !== false) {
+      const geometry = this._typeGeometries[type.id]?.lamps || this._typeGeometries.car.lamps;
+      descriptors.push(this._batchDescriptor(
+        type.id,
+        geometry,
+        this._headlightMaterial(type),
+        new THREE.Matrix4(),
+        'headlamp',
+      ));
+    }
+    if (type.rearLights?.enabled !== false) {
+      const geometry = this._typeGeometries[type.id]?.brake || this._typeGeometries.car.brake;
+      descriptors.push(this._batchDescriptor(
+        type.id,
+        geometry,
+        this._rearLightMaterial(type),
+        new THREE.Matrix4(),
+        'taillamp',
+      ));
+    }
+    return { descriptors };
   }
 
   _rebuildRenderBatches() {
@@ -683,8 +719,11 @@ export class TrafficSystem {
     ud.customModel = null;
     ud.customModelType = null;
     if (ud.body) ud.body.visible = true;
-    if (ud.lamps) ud.lamps.visible = true;
-    for (const lamp of ud.generatedTaillamps || []) lamp.visible = true;
+    if (ud.lamps) {
+      ud.lamps.material = this._headlightMaterial(vehicle?.type);
+      ud.lamps.visible = vehicle?.type?.headlights?.enabled !== false;
+    }
+    for (const lamp of ud.generatedTaillamps || []) lamp.visible = vehicle?.type?.rearLights?.enabled !== false;
     for (const indicator of ud.generatedIndicators || []) {
       for (const mesh of indicator.meshes) mesh.visible = false;
     }
@@ -732,11 +771,15 @@ export class TrafficSystem {
     // Keep authored Modeler body materials unchanged. Their white base colour
     // is a neutral multiplier for photographic textures; forcing emissive on
     // it creates flat, fluorescent rectangles at distance.
-    if (customRoles.has('headlamp')) ud.lamps.visible = false;
-    if (customRoles.has('taillamp')) {
-      for (const lamp of ud.generatedTaillamps || []) lamp.visible = false;
-      ud.taillamps = customRoles.get('taillamp');
-      for (const lamp of ud.taillamps) lamp.userData.hesiTrafficTaillampMaterial = lamp.material;
+    for (const lamp of customRoles.get('headlamp') || []) lamp.visible = false;
+    ud.lamps.material = this._headlightMaterial(vehicle.type);
+    ud.lamps.visible = vehicle.type.headlights?.enabled !== false;
+    for (const lamp of customRoles.get('taillamp') || []) lamp.visible = false;
+    ud.taillamps = ud.generatedTaillamps || ud.taillamps;
+    for (const lamp of ud.taillamps) {
+      lamp.material = this._rearLightMaterial(vehicle.type);
+      lamp.userData.hesiTrafficTaillampMaterial = lamp.material;
+      lamp.visible = vehicle.type.rearLights?.enabled !== false;
     }
     ud.indicators = [
       { side: -1, role: 'indicator-left' },
@@ -863,26 +906,60 @@ export class TrafficSystem {
    * an identical column. Lane 0 is the fast lane by the median; the highest
    * index is the slow outer (left) lane where tir belong.
    */
-  _pickLaneForType(type, laneCount) {
+  _pickLaneForType(type, laneCount, routeId = null, direction = 1) {
     const count = Math.max(1, Math.floor(laneCount || 1));
     if (count <= 1) return 0;
     const maxIndex = count - 1;
     const target = (type.laneBias ?? 0.5) * maxIndex;
     const spread = Math.max(0.4, type.laneSpread ?? 0.6) * maxIndex;
-    let bestIndex = 0;
-    let bestWeight = -Infinity;
-    for (let i = 0; i < count; i += 1) {
-      const d = (i - target) / (spread || 1);
-      // Additive jitter: negligible next to a tight class's peak (tir almost
-      // always land outermost) but decisive when a wide class's lanes tie
-      // (cars spread across the carriageway instead of stacking one column).
-      const weight = Math.exp(-0.5 * d * d) + 0.18 * this.random();
-      if (weight > bestWeight) {
-        bestWeight = weight;
-        bestIndex = i;
+    const occupancy = Array(count).fill(0);
+    if (routeId != null) {
+      for (const vehicle of this.active) {
+        const ref = vehicle.laneRef;
+        const activeRoute = ref?.routeId ?? ref?.route?.id;
+        const activeDirection = ref?.direction ?? vehicle.laneSample?.direction ?? 1;
+        const laneIndex = ref?.laneIndex ?? ref?.index ?? vehicle.laneSample?.laneIndex;
+        if (activeRoute === routeId && Math.sign(activeDirection || 1) === Math.sign(direction || 1)
+          && Number.isFinite(laneIndex) && laneIndex >= 0 && laneIndex < count) {
+          occupancy[Math.floor(laneIndex)] += 1;
+        }
       }
     }
-    return bestIndex;
+    const minimum = Math.min(...occupancy);
+    const maximum = Math.max(...occupancy);
+    const total = occupancy.reduce((sum, value) => sum + value, 0);
+    // Once a corridor has enough cars to cover its lanes, temporarily restrict
+    // new spawns to the least occupied lane whenever one lane is empty or trails
+    // by two vehicles. This prevents a whole clear column persisting alongside
+    // a traffic wall, while the class weights below still decide which of tied
+    // under-filled lanes a truck, van or passenger car prefers.
+    const fillLeastOccupied = routeId != null
+      && ((minimum === 0 && total >= count - 1) || maximum - minimum >= 2);
+    const weights = [];
+    let totalWeight = 0;
+    for (let i = 0; i < count; i += 1) {
+      if (fillLeastOccupied && occupancy[i] !== minimum) {
+        weights.push(0);
+        continue;
+      }
+      const d = (i - target) / (spread || 1);
+      // Sample the Gaussian instead of always taking its maximum. The previous
+      // winner-takes-all loop made the same class choose the same lane almost
+      // every time; a probability floor keeps every lane usable and the
+      // occupancy term gently favours space even before hard balancing starts.
+      const classWeight = 0.18 + Math.exp(-0.5 * d * d);
+      const balanceWeight = 1 / (1 + occupancy[i] * 0.48);
+      const weight = classWeight * balanceWeight;
+      weights.push(weight);
+      totalWeight += weight;
+    }
+    if (totalWeight <= EPSILON) return Math.floor(this.random() * count);
+    let roll = this.random() * totalWeight;
+    for (let i = 0; i < weights.length; i += 1) {
+      roll -= weights[i];
+      if (roll <= 0) return i;
+    }
+    return count - 1;
   }
 
   _laneCountFor(vehicle) {
@@ -908,10 +985,14 @@ export class TrafficSystem {
     // fallbacks from becoming black silhouettes without making them glow.
     ud.body.material.emissive.set(color);
     ud.lamps.geometry = geoms.lamps;
+    ud.lamps.material = this._headlightMaterial(type);
+    ud.lamps.visible = type.headlights?.enabled !== false;
     const generatedTaillamps = ud.generatedTaillamps || ud.taillamps;
     const generatedIndicators = ud.generatedIndicators || ud.indicators;
     generatedTaillamps[0].geometry = geoms.brake;
-    generatedTaillamps[0].material = this._sharedMaterials.taillamp;
+    generatedTaillamps[0].material = this._rearLightMaterial(type);
+    generatedTaillamps[0].userData.hesiTrafficTaillampMaterial = generatedTaillamps[0].material;
+    generatedTaillamps[0].visible = type.rearLights?.enabled !== false;
     generatedIndicators[0].meshes[0].geometry = geoms.blinkerL;
     generatedIndicators[1].meshes[0].geometry = geoms.blinkerR;
     generatedIndicators[0].meshes[0].visible = false;
@@ -920,6 +1001,9 @@ export class TrafficSystem {
     vehicle.width = type.width;
     vehicle.length = type.length;
     vehicle.height = type.height;
+    vehicle.offsetX = type.offsetX ?? 0;
+    vehicle.offsetY = type.offsetY ?? 0;
+    vehicle.offsetZ = type.offsetZ ?? 0;
     this._syncVehicleCustomModel(vehicle);
   }
 
@@ -1033,6 +1117,9 @@ export class TrafficSystem {
       width: 1.78,
       length: 4.35,
       height: 1.45,
+      offsetX: 0,
+      offsetY: 0,
+      offsetZ: 0,
     });
     copyVector3(player.position, state.position ?? source.position);
     copyVector3(player.velocity, state.velocity ?? source.velocity);
@@ -1049,6 +1136,9 @@ export class TrafficSystem {
     player.width = finite(state.width ?? spec.width, 1.78);
     player.length = finite(state.length ?? spec.length, 4.35);
     player.height = finite(state.height ?? spec.height, 1.45);
+    player.offsetX = finite(state.collisionOffsetX ?? spec.collisionOffsetX, 0);
+    player.offsetY = finite(state.collisionOffsetY ?? spec.collisionOffsetY, 0);
+    player.offsetZ = finite(state.collisionOffsetZ ?? spec.collisionOffsetZ, 0);
     return player;
   }
 
@@ -1164,7 +1254,9 @@ export class TrafficSystem {
         for (let attempt = 0; attempt < 12; attempt += 1) {
           const direction = route?.bidirectional && this.random() < 0.18 ? -(road.direction ?? 1) : (road.direction ?? 1);
           // Bias the lane by class: tir to the outer (slow) lanes, cars anywhere.
-          const laneIndex = type ? this._pickLaneForType(type, laneCount) : Math.floor(this.random() * laneCount);
+          const laneIndex = type
+            ? this._pickLaneForType(type, laneCount, road.routeId, direction)
+            : Math.floor(this.random() * laneCount);
           const offset = THREE.MathUtils.lerp(this.options.minSpawnDistance, this.options.spawnRadius * 0.88, this.random()) * (this.random() < 0.42 ? -1 : 1);
           const laneRef = {
             routeId: road.routeId,
@@ -1743,6 +1835,28 @@ export class TrafficSystem {
     }
   }
 
+  _rearLightMaterial(type) {
+    const color = type?.rearLights?.color || '#ff1833';
+    if (color.toLowerCase() === '#ff1833') return this._sharedMaterials.taillamp;
+    let material = this._rearLightMaterials.get(color);
+    if (!material) {
+      material = new THREE.MeshBasicMaterial({ color, toneMapped: false, fog: false });
+      this._rearLightMaterials.set(color, material);
+    }
+    return material;
+  }
+
+  _headlightMaterial(type) {
+    const color = type?.headlights?.color || '#ffe4bd';
+    if (color.toLowerCase() === '#ffe4bd') return this._sharedMaterials.headlamp;
+    let material = this._headlightMaterials.get(color);
+    if (!material) {
+      material = new THREE.MeshBasicMaterial({ color, toneMapped: false });
+      this._headlightMaterials.set(color, material);
+    }
+    return material;
+  }
+
   _brakeMaterial() {
     if (!this._sharedMaterials.brake) {
       const brake = new THREE.MeshBasicMaterial({ color: 0xff2520, toneMapped: false });
@@ -1764,19 +1878,35 @@ export class TrafficSystem {
       vehicle.nearMissArmed = true;
       return;
     }
-    if (Math.abs(vehicle.position.y - player.position.y) > Math.max(2.4, (vehicle.height + player.height) * 0.65)) {
+    const trafficForward = vehicle.tangent;
+    const trafficRight = vehicle.right;
+    const trafficOffsetX = trafficRight.x * vehicle.offsetX + trafficForward.x * vehicle.offsetZ;
+    const trafficOffsetZ = trafficRight.z * vehicle.offsetX + trafficForward.z * vehicle.offsetZ;
+    const playerOffsetX = player.right.x * player.offsetX + player.forward.x * player.offsetZ;
+    const playerOffsetZ = player.right.z * player.offsetX + player.forward.z * player.offsetZ;
+    const trafficStartX = vehicle.previousPosition.x + trafficOffsetX;
+    const trafficStartY = vehicle.previousPosition.y + vehicle.offsetY;
+    const trafficStartZ = vehicle.previousPosition.z + trafficOffsetZ;
+    const trafficEndX = vehicle.position.x + trafficOffsetX;
+    const trafficEndY = vehicle.position.y + vehicle.offsetY;
+    const trafficEndZ = vehicle.position.z + trafficOffsetZ;
+    const playerStartX = player.previousPosition.x + playerOffsetX;
+    const playerStartY = player.previousPosition.y + player.offsetY;
+    const playerStartZ = player.previousPosition.z + playerOffsetZ;
+    const playerEndX = player.position.x + playerOffsetX;
+    const playerEndY = player.position.y + player.offsetY;
+    const playerEndZ = player.position.z + playerOffsetZ;
+    if (Math.abs(trafficEndY - playerEndY) > Math.max(2.4, (vehicle.height + player.height) * 0.65)) {
       vehicle.nearMissArmed = true;
       vehicle.playerContact = false;
       return;
     }
-    const trafficForward = vehicle.tangent;
-    const trafficRight = vehicle.right;
-    const startDx = player.previousPosition.x - vehicle.previousPosition.x;
-    const startDy = player.previousPosition.y - vehicle.previousPosition.y;
-    const startDz = player.previousPosition.z - vehicle.previousPosition.z;
-    const endDx = player.position.x - vehicle.position.x;
-    const endDy = player.position.y - vehicle.position.y;
-    const endDz = player.position.z - vehicle.position.z;
+    const startDx = playerStartX - trafficStartX;
+    const startDy = playerStartY - trafficStartY;
+    const startDz = playerStartZ - trafficStartZ;
+    const endDx = playerEndX - trafficEndX;
+    const endDy = playerEndY - trafficEndY;
+    const endDz = playerEndZ - trafficEndZ;
     const startX = startDx * trafficRight.x + startDy * trafficRight.y + startDz * trafficRight.z;
     const startZ = startDx * trafficForward.x + startDy * trafficForward.y + startDz * trafficForward.z;
     const endX = endDx * trafficRight.x + endDy * trafficRight.y + endDz * trafficRight.z;
@@ -1795,7 +1925,8 @@ export class TrafficSystem {
         const normal = trafficRight.clone().multiplyScalar(localNormal.x).addScaledVector(trafficForward, localNormal.z).normalize();
         const relativeVelocity = player.velocity.clone().sub(vehicle.velocity);
         const severity = Math.max(0.5, Math.abs(relativeVelocity.dot(normal)));
-        const contactPosition = player.previousPosition.clone().lerp(player.position, hit.time);
+        const contactPosition = new THREE.Vector3(playerStartX, playerStartY, playerStartZ)
+          .lerp(new THREE.Vector3(playerEndX, playerEndY, playerEndZ), hit.time);
         const event = {
           type: 'collision',
           vehicleId: vehicle.id,
@@ -1883,7 +2014,8 @@ export class TrafficSystem {
         side: closest.x < 0 ? -1 : 1,
         sideName: closest.x < 0 ? 'left' : 'right',
         points,
-        position: player.previousPosition.clone().lerp(player.position, closest.t),
+        position: new THREE.Vector3(playerStartX, playerStartY, playerStartZ)
+          .lerp(new THREE.Vector3(playerEndX, playerEndY, playerEndZ), closest.t),
       };
       this._events.push(event);
       vehicle.nearMissArmed = false;
@@ -1968,6 +2100,10 @@ export class TrafficSystem {
     for (const set of Object.values(this._typeGeometries)) {
       for (const geometry of Object.values(set)) geometry.dispose();
     }
+    for (const material of this._rearLightMaterials.values()) material.dispose();
+    this._rearLightMaterials.clear();
+    for (const material of this._headlightMaterials.values()) material.dispose();
+    this._headlightMaterials.clear();
     for (const material of Object.values(this._sharedMaterials)) material.dispose();
     this.pool.length = 0;
     this._disposed = true;

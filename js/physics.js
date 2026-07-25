@@ -167,6 +167,7 @@ function buildSpec(carSpec = {}) {
   const suspension = carSpec.suspension ?? {};
   const brakes = carSpec.brakes ?? {};
   const silhouette = carSpec.silhouette ?? carSpec.dimensions ?? {};
+  const collisionOffset = carSpec.collisionOffset ?? carSpec.hitboxOffset ?? {};
   const nestedPower = firstNumber(engine, ['powerHP', 'powerHp', 'horsepower', 'hp', 'power'], NaN);
   const rootPower = firstNumber(carSpec, ['powerHP', 'powerHp', 'horsepower', 'hp'], NaN);
   const genericPower = Number.isFinite(carSpec.power) ? carSpec.power : NaN;
@@ -206,6 +207,10 @@ function buildSpec(carSpec = {}) {
     trackWidth: firstNumber(carSpec, ['trackWidth', 'track'], 1.48),
     width: firstNumber(carSpec, ['width'], firstNumber(silhouette, ['width'], 1.72)),
     length: firstNumber(carSpec, ['length'], firstNumber(silhouette, ['length'], 4.25)),
+    height: firstNumber(carSpec, ['height'], firstNumber(silhouette, ['height'], 1.45)),
+    collisionOffsetX: firstNumber(carSpec, ['collisionOffsetX', 'hitboxOffsetX'], firstNumber(collisionOffset, ['x', 'offsetX'], 0)),
+    collisionOffsetY: firstNumber(carSpec, ['collisionOffsetY', 'hitboxOffsetY'], firstNumber(collisionOffset, ['y', 'offsetY'], 0)),
+    collisionOffsetZ: firstNumber(carSpec, ['collisionOffsetZ', 'hitboxOffsetZ'], firstNumber(collisionOffset, ['z', 'offsetZ'], 0)),
     cgHeight: firstNumber(carSpec, ['cgHeight', 'centerOfMassHeight'], 0.52),
     frontWeight: firstNumber(carSpec, ['frontWeight', 'frontWeightDistribution', 'weightDistributionFront'], 0.55),
     wheelRadius: firstNumber(carSpec, ['wheelRadius'], firstNumber(silhouette, ['wheelRadius'], 0.305)),
@@ -330,6 +335,9 @@ export class VehiclePhysics {
     this._postImpactTimer = 0;
     this._yawKickCooldown = 0;
     this._lastThrottle = 0;
+    this._collisionOffsetScratch = new THREE.Vector3();
+    this._collisionFromScratch = new THREE.Vector3();
+    this._collisionToScratch = new THREE.Vector3();
 
     this._state = {
       position: this.position,
@@ -352,6 +360,10 @@ export class VehiclePhysics {
       bodyPitch: 0,
       width: this.spec.width,
       length: this.spec.length,
+      height: this.spec.height,
+      collisionOffsetX: this.spec.collisionOffsetX,
+      collisionOffsetY: this.spec.collisionOffsetY,
+      collisionOffsetZ: this.spec.collisionOffsetZ,
       collisionRadius: Math.hypot(this.spec.width * 0.5, this.spec.length * 0.5),
       spec: this.spec,
     };
@@ -420,6 +432,10 @@ export class VehiclePhysics {
     this._state.spec = this.spec;
     this._state.width = this.spec.width;
     this._state.length = this.spec.length;
+    this._state.height = this.spec.height;
+    this._state.collisionOffsetX = this.spec.collisionOffsetX;
+    this._state.collisionOffsetY = this.spec.collisionOffsetY;
+    this._state.collisionOffsetZ = this.spec.collisionOffsetZ;
     this._state.collisionRadius = Math.hypot(this.spec.width * 0.5, this.spec.length * 0.5);
     this._refreshPublicState(0, 0);
     return this;
@@ -591,12 +607,33 @@ export class VehiclePhysics {
     const brakeDirection = Math.abs(u) > 0.25 ? Math.sign(u) : Math.sign(engine.driveForce || 1);
     const serviceBrakeInput = this.gear < 0 ? input.throttle : input.brake;
     const serviceBrake = serviceBrakeInput * this.spec.brakeForce;
-    let fxFront = driveFront - brakeDirection * serviceBrake * this.spec.brakeBias;
-    let fxRear = driveRear - brakeDirection * serviceBrake * (1 - this.spec.brakeBias);
+    const frontGripLimit = muFront * frontLoad;
+    const rearGripLimit = muRear * rearLoad;
+    // Road cars use ABS for the normal brake pedal. Previously the raw brake
+    // force could exceed both axles' grip by 50-100%, `_gripCircle` marked all
+    // four wheels as locked and removed most lateral authority. A tiny yaw
+    // disturbance then grew into a full lane-crossing slide even in a straight
+    // stop. Reserve enough of each friction circle for the current cornering
+    // load and cap only the service-brake component; the handbrake deliberately
+    // remains uncapped so it can still break the rear loose.
+    const absLongitudinalCapacity = (limit, lateralForce) => Math.sqrt(Math.max(
+      0,
+      limit * limit - Math.min(Math.abs(lateralForce), limit * 0.97) ** 2,
+    )) * 0.96;
+    const frontBrake = Math.min(
+      serviceBrake * this.spec.brakeBias,
+      absLongitudinalCapacity(frontGripLimit, fyFront),
+    );
+    const rearBrake = Math.min(
+      serviceBrake * (1 - this.spec.brakeBias),
+      absLongitudinalCapacity(rearGripLimit, fyRear),
+    );
+    let fxFront = driveFront - brakeDirection * frontBrake;
+    let fxRear = driveRear - brakeDirection * rearBrake;
     fxRear -= brakeDirection * input.handbrake * this.spec.brakeForce * 0.72;
 
-    const frontCircle = this._gripCircle(fxFront, fyFront, muFront * frontLoad, serviceBrakeInput * this.spec.brakeBias);
-    const rearCircle = this._gripCircle(fxRear, fyRear, muRear * rearLoad, serviceBrakeInput * (1 - this.spec.brakeBias) + input.handbrake * 0.7);
+    const frontCircle = this._gripCircle(fxFront, fyFront, frontGripLimit, 0);
+    const rearCircle = this._gripCircle(fxRear, fyRear, rearGripLimit, input.handbrake * 0.7);
     fxFront = frontCircle.x;
     fyFront = frontCircle.y;
     fxRear = rearCircle.x;
@@ -790,36 +827,73 @@ export class VehiclePhysics {
     return { x: forceX * scale, y: forceY * scale * (1 - lock * 0.52), saturation, lock, spin };
   }
 
+  _collisionWorldOffset(target = this._collisionOffsetScratch) {
+    const rightX = Math.cos(this.heading);
+    const rightZ = -Math.sin(this.heading);
+    const forwardX = Math.sin(this.heading);
+    const forwardZ = Math.cos(this.heading);
+    return target.set(
+      rightX * this.spec.collisionOffsetX + forwardX * this.spec.collisionOffsetZ,
+      this.spec.collisionOffsetY,
+      rightZ * this.spec.collisionOffsetX + forwardZ * this.spec.collisionOffsetZ,
+    );
+  }
+
   _resolveRoadBounds(roadInfo, from, to) {
     if (!roadInfo) return;
     let contact = null;
     const radius = Math.max(0.55, this.spec.width * 0.46);
+    const offset = this._collisionWorldOffset();
+    const collisionFrom = this._collisionFromScratch.copy(from).add(offset);
+    const collisionTo = this._collisionToScratch.copy(to).add(offset);
     try {
       if (typeof roadInfo.sweepVehicle === 'function') {
-        contact = roadInfo.sweepVehicle(from, to, radius, this._state);
+        contact = roadInfo.sweepVehicle(collisionFrom, collisionTo, radius, this._state);
       } else if (typeof roadInfo.resolveVehicle === 'function') {
-        contact = roadInfo.resolveVehicle(from, to, radius, this._state);
+        contact = roadInfo.resolveVehicle(collisionFrom, collisionTo, radius, this._state);
       } else if (typeof roadInfo.sweep === 'function') {
-        contact = roadInfo.sweep(from, to, radius, this._state);
+        contact = roadInfo.sweep(collisionFrom, collisionTo, radius, this._state);
       }
     } catch (error) {
       console.warn('Road collision adapter failed:', error);
     }
+    if (contact && !Array.isArray(contact)) {
+      const correction = contact.correctedPosition
+        ?? contact.resolvePosition
+        ?? (contact.positionIsCorrection ? contact.position : null);
+      if (correction) {
+        contact = {
+          ...contact,
+          correctedPosition: asVector3(correction).sub(offset),
+        };
+      }
+    }
     if (Array.isArray(contact)) {
-      for (const item of contact) this.resolveCollision(item);
+      for (const item of contact) {
+        const correction = item?.correctedPosition
+          ?? item?.resolvePosition
+          ?? (item?.positionIsCorrection ? item.position : null);
+        this.resolveCollision(correction
+          ? { ...item, correctedPosition: asVector3(correction).sub(offset) }
+          : item);
+      }
     } else if (contact && contact.hit !== false) {
       this.resolveCollision(contact);
     }
 
     const info = roadInfo.current ?? roadInfo;
     if (Number.isFinite(info.lateralOffset) && Number.isFinite(info.halfWidth)) {
+      const roadRight = asVector3(
+        info.right,
+        new THREE.Vector3(Math.cos(this.heading), 0, -Math.sin(this.heading)),
+      ).normalize();
+      const effectiveLateralOffset = info.lateralOffset + offset.dot(roadRight);
       const limit = Math.max(0, info.halfWidth - radius);
-      if (Math.abs(info.lateralOffset) > limit) {
-        const right = asVector3(info.right, new THREE.Vector3(Math.cos(this.heading), 0, -Math.sin(this.heading))).normalize();
-        const side = Math.sign(info.lateralOffset);
-        const penetration = Math.abs(info.lateralOffset) - limit;
-        this.position.addScaledVector(right, -side * penetration);
-        this.resolveCollision({ normal: right.multiplyScalar(-side), penetration, position: this.position, kind: 'wall' });
+      if (Math.abs(effectiveLateralOffset) > limit) {
+        const side = Math.sign(effectiveLateralOffset);
+        const penetration = Math.abs(effectiveLateralOffset) - limit;
+        this.position.addScaledVector(roadRight, -side * penetration);
+        this.resolveCollision({ normal: roadRight.multiplyScalar(-side), penetration, position: this.position, kind: 'wall' });
       }
     }
   }

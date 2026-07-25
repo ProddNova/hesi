@@ -12,16 +12,23 @@ import {
   weldedVertices,
 } from '/js/custom-assets.js';
 import {
+  CAR_HITBOX_SETTING_FIELDS,
+  CAR_HEADLIGHT_FIELDS,
   CAR_MODEL_GROUPS,
+  CAR_REAR_LIGHT_FIELDS,
   TRAFFIC_CAR_BY_ID,
-  TRAFFIC_CAR_SETTING_FIELDS,
+  TRAFFIC_BEHAVIOR_SETTING_FIELDS,
   carModelMeta,
   carModelTarget,
+  carHitboxSettings,
+  carHeadlightSettings,
+  carRearLightSettings,
   effectiveTrafficCarType,
   parseCarModelTarget,
   trafficCarDefinition,
   trafficCarSettings,
 } from '/js/car-models.js';
+import { createSoftSpotLight } from '/js/lighting-config.js';
 import { disposePSXCar, loadPSXCar } from '/js/psx-car-pack.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
 import { SurfaceStyleEditor } from '../world/surface-style-editor.js';
@@ -1630,6 +1637,8 @@ export class ModelerPanel {
         const details = [];
         if (saved?.assetId) details.push('custom model');
         if (Object.keys(saved?.settings || {}).length) details.push('custom behavior');
+        if (Object.keys(saved?.headlights || {}).length) details.push('custom headlights');
+        if (Object.keys(saved?.rearLights || {}).length) details.push('custom rear lights');
         row.append(
           element('b', '', car.label),
           element('small', '', details.length ? details.join(' · ') : car.description),
@@ -1686,19 +1695,16 @@ export class ModelerPanel {
     choose.addEventListener('click', () => this._chooseCarModel(this.carTarget));
     modelActions.append(edit, choose);
     if (replacement) {
-      const resetShape = button('Original shape', 'tool-button small danger', 'Remove only the custom 3D model and keep behavior settings');
+      const resetShape = button('Original shape', 'tool-button small danger', 'Remove only the custom 3D model and keep hitbox, behavior and light settings');
       resetShape.addEventListener('click', () => this._setCarModel(this.carTarget, null));
       modelActions.append(resetShape);
     }
     this.carInspector.append(modelActions);
 
-    if (parsed.scope === 'traffic') {
-      this.carInspector.append(element('h4', 'surface-group-title', 'Live traffic behavior'));
-      this.carInspector.append(element('p', 'modeler-help',
-        'Collision box, cruise range, acceleration, braking, spawn share and lane preference. Save & apply updates the current active pool without waiting for respawn.'));
-      const settings = { ...trafficCarSettings(TRAFFIC_CAR_BY_ID[parsed.id]), ...(saved?.settings || {}) };
+    const renderNumberFields = (fields, settings, sectionClass = 'modeler-car-settings') => {
       const grid = element('div', 'modeler-car-settings');
-      for (const field of TRAFFIC_CAR_SETTING_FIELDS) {
+      grid.classList.add(sectionClass);
+      for (const field of fields) {
         const row = element('label', 'modeler-field modeler-car-field');
         row.append(element('span', '', field.label));
         const control = element('div', 'modeler-car-value');
@@ -1717,7 +1723,86 @@ export class ModelerPanel {
           this.store.setCarModel(this.carTarget, { settings: { [field.key]: bounded } });
           this.dirtyChip.textContent = 'Unsaved changes';
           this._renderCarList();
-          if (field.key === 'width' || field.key === 'length' || field.key === 'height') this._buildCarPreview();
+          if (['width', 'length', 'height', 'offsetX', 'offsetY', 'offsetZ'].includes(field.key)) {
+            this._buildCarPreview({ focus: false });
+          }
+        });
+        control.append(input);
+        if (field.unit) control.append(element('small', '', field.unit));
+        row.append(control);
+        grid.append(row);
+      }
+      return grid;
+    };
+
+    this.carInspector.append(element('h4', 'surface-group-title', 'Collision hitbox'));
+    this.carInspector.append(element('p', 'modeler-help',
+      'The green wireframe is the real gameplay collision box. Size and X/Y/Z offset apply independently to the selected vehicle.'));
+    this.carInspector.append(renderNumberFields(
+      CAR_HITBOX_SETTING_FIELDS,
+      carHitboxSettings(this.carTarget, this.store.document),
+      'modeler-car-hitbox',
+    ));
+
+    this.carInspector.append(element('h4', 'surface-group-title', 'Front headlights'));
+    this.carInspector.append(element('p', 'modeler-help',
+      parsed.scope === 'player'
+        ? 'Visible lens size and placement plus the real road beam. Beam controls match Soft Custom Light: brightness, reach, pool radius, softness, falloff, colour temperature and cloudy shape.'
+        : 'Visible traffic-lens size, placement and colour. Beam settings are preserved for this car target; live traffic keeps mesh-only lights so dozens of cars do not add dozens of expensive SpotLights.'));
+    const headlights = carHeadlightSettings(this.carTarget, this.store.document);
+    const headlightEnabledRow = element('label', 'modeler-field modeler-car-field');
+    headlightEnabledRow.append(element('span', '', 'Headlights enabled'));
+    const headlightEnabled = document.createElement('input');
+    headlightEnabled.type = 'checkbox';
+    headlightEnabled.checked = headlights.enabled;
+    headlightEnabled.dataset.carHeadlight = 'enabled';
+    headlightEnabled.addEventListener('change', () => {
+      this.store.setCarModel(this.carTarget, { headlights: { enabled: headlightEnabled.checked } });
+      this.dirtyChip.textContent = 'Unsaved changes';
+      this._renderCarList();
+      this._buildCarPreview({ focus: false });
+    });
+    headlightEnabledRow.append(headlightEnabled);
+    this.carInspector.append(headlightEnabledRow);
+
+    const headlightColorRow = element('label', 'modeler-field modeler-car-field');
+    headlightColorRow.append(element('span', '', 'Light colour'));
+    const headlightColor = document.createElement('input');
+    headlightColor.type = 'color';
+    headlightColor.value = headlights.color;
+    headlightColor.dataset.carHeadlight = 'color';
+    headlightColor.addEventListener('input', () => {
+      this.store.setCarModel(this.carTarget, { headlights: { color: headlightColor.value } });
+      this.dirtyChip.textContent = 'Unsaved changes';
+      this._buildCarPreview({ focus: false });
+    });
+    headlightColorRow.append(headlightColor);
+    this.carInspector.append(headlightColorRow);
+
+    const appendHeadlightFields = (group, title) => {
+      this.carInspector.append(element('h5', 'surface-group-title modeler-car-subtitle', title));
+      const grid = element('div', `modeler-car-settings modeler-car-headlights modeler-car-headlights-${group}`);
+      for (const field of CAR_HEADLIGHT_FIELDS.filter((candidate) => candidate.group === group)) {
+        const row = element('label', 'modeler-field modeler-car-field');
+        row.append(element('span', '', field.label));
+        const control = element('div', 'modeler-car-value');
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = String(field.min);
+        input.max = String(field.max);
+        input.step = String(field.step);
+        input.value = String(Number(headlights[field.key].toFixed(4)));
+        input.dataset.carHeadlight = field.key;
+        input.addEventListener('change', () => {
+          const value = Number(input.value);
+          if (!Number.isFinite(value)) return;
+          const bounded = THREE.MathUtils.clamp(value, field.min, field.max);
+          const normalized = field.integer ? Math.round(bounded) : bounded;
+          input.value = String(normalized);
+          this.store.setCarModel(this.carTarget, { headlights: { [field.key]: normalized } });
+          this.dirtyChip.textContent = 'Unsaved changes';
+          this._renderCarList();
+          this._buildCarPreview({ focus: false });
         });
         control.append(input);
         if (field.unit) control.append(element('small', '', field.unit));
@@ -1725,16 +1810,93 @@ export class ModelerPanel {
         grid.append(row);
       }
       this.carInspector.append(grid);
+    };
+    appendHeadlightFields('lens', 'Lens size & position');
+    appendHeadlightFields('beam', 'Soft beam');
+    appendHeadlightFields('aim', 'Beam aim');
+
+    this.carInspector.append(element('h4', 'surface-group-title', 'Rear red lights'));
+    this.carInspector.append(element('p', 'modeler-help',
+      'Two bright unlit lenses: always readable in shadow, never a light source. Pair offset X/Y/Z moves both while preserving their spacing.'));
+    const rear = carRearLightSettings(this.carTarget, this.store.document);
+    const rearEnabledRow = element('label', 'modeler-field modeler-car-field');
+    rearEnabledRow.append(element('span', '', 'Visible rear lights'));
+    const rearEnabled = document.createElement('input');
+    rearEnabled.type = 'checkbox';
+    rearEnabled.checked = rear.enabled;
+    rearEnabled.dataset.carRearLight = 'enabled';
+    rearEnabled.addEventListener('change', () => {
+      this.store.setCarModel(this.carTarget, { rearLights: { enabled: rearEnabled.checked } });
+      this.dirtyChip.textContent = 'Unsaved changes';
+      this._renderCarList();
+      this._buildCarPreview({ focus: false });
+    });
+    rearEnabledRow.append(rearEnabled);
+    this.carInspector.append(rearEnabledRow);
+
+    const rearColorRow = element('label', 'modeler-field modeler-car-field');
+    rearColorRow.append(element('span', '', 'Lens red'));
+    const rearColor = document.createElement('input');
+    rearColor.type = 'color';
+    rearColor.value = rear.color;
+    rearColor.dataset.carRearLight = 'color';
+    rearColor.addEventListener('input', () => {
+      this.store.setCarModel(this.carTarget, { rearLights: { color: rearColor.value } });
+      this.dirtyChip.textContent = 'Unsaved changes';
+      this._buildCarPreview({ focus: false });
+    });
+    rearColorRow.append(rearColor);
+    this.carInspector.append(rearColorRow);
+
+    const rearGrid = element('div', 'modeler-car-settings modeler-car-rear-lights');
+    for (const field of CAR_REAR_LIGHT_FIELDS) {
+      const row = element('label', 'modeler-field modeler-car-field');
+      row.append(element('span', '', field.label));
+      const control = element('div', 'modeler-car-value');
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = String(field.min);
+      input.max = String(field.max);
+      input.step = String(field.step);
+      input.value = String(Number(rear[field.key].toFixed(4)));
+      input.dataset.carRearLight = field.key;
+      input.addEventListener('change', () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value)) return;
+        const bounded = THREE.MathUtils.clamp(value, field.min, field.max);
+        input.value = String(bounded);
+        this.store.setCarModel(this.carTarget, { rearLights: { [field.key]: bounded } });
+        this.dirtyChip.textContent = 'Unsaved changes';
+        this._renderCarList();
+        this._buildCarPreview({ focus: false });
+      });
+      control.append(input);
+      if (field.unit) control.append(element('small', '', field.unit));
+      row.append(control);
+      rearGrid.append(row);
+    }
+    this.carInspector.append(rearGrid);
+
+    if (parsed.scope === 'traffic') {
+      this.carInspector.append(element('h4', 'surface-group-title', 'Live traffic behavior'));
+      this.carInspector.append(element('p', 'modeler-help',
+        'Cruise range, acceleration, braking, spawn share and lane preference. Save & apply updates the current active pool without waiting for respawn.'));
+      const settings = { ...trafficCarSettings(TRAFFIC_CAR_BY_ID[parsed.id]), ...(saved?.settings || {}) };
+      this.carInspector.append(renderNumberFields(
+        TRAFFIC_BEHAVIOR_SETTING_FIELDS,
+        settings,
+        'modeler-car-behavior',
+      ));
     }
 
     if (saved) {
-      const resetAll = button('Reset car completely', 'tool-button small danger', 'Restore original model and all default traffic settings');
+      const resetAll = button('Reset car completely', 'tool-button small danger', 'Restore original model, hitbox, behavior and all lights');
       resetAll.addEventListener('click', () => {
         this.store.setCarModel(this.carTarget, null);
         this.dirtyChip.textContent = 'Unsaved changes';
         this._renderCarList();
         this._renderCarInspector();
-        this._buildCarPreview();
+        this._buildCarPreview({ focus: false });
       });
       this.carInspector.append(resetAll);
     }
@@ -1835,6 +1997,17 @@ export class ModelerPanel {
     if (this.carPreviewVisual?.userData?.psxCarId) disposePSXCar(this.carPreviewVisual);
     else this.carPreviewVisual?.removeFromParent?.();
     this.carPreviewVisual = null;
+    const helperGeometries = new Set();
+    const helperMaterials = new Set();
+    this.worldPreviewGroup.traverse((object) => {
+      if (!object.userData?.editorHelper) return;
+      if (object.geometry) helperGeometries.add(object.geometry);
+      for (const material of (Array.isArray(object.material) ? object.material : [object.material])) {
+        if (material) helperMaterials.add(material);
+      }
+    });
+    helperGeometries.forEach((geometry) => geometry.dispose());
+    helperMaterials.forEach((material) => material.dispose());
     this.worldPreviewGroup.clear();
   }
 
@@ -1852,7 +2025,132 @@ export class ModelerPanel {
     this.orbit.update();
   }
 
-  async _buildCarPreview() {
+  _addCarPreviewHelpers(parsed) {
+    const hitbox = carHitboxSettings(this.carTarget, this.store.document);
+    const collisionGeometry = new THREE.BoxGeometry(hitbox.width, hitbox.height, hitbox.length);
+    const collision = new THREE.LineSegments(
+      new THREE.EdgesGeometry(collisionGeometry),
+      new THREE.LineBasicMaterial({
+        color: 0x54ff80,
+        transparent: true,
+        opacity: 0.95,
+        depthTest: false,
+        toneMapped: false,
+      }),
+    );
+    collisionGeometry.dispose();
+    collision.name = 'Vehicle collision hitbox preview';
+    collision.position.set(
+      hitbox.offsetX,
+      hitbox.height * 0.5 + hitbox.offsetY,
+      hitbox.offsetZ,
+    );
+    collision.renderOrder = 100;
+    collision.userData.editorHelper = true;
+    this.worldPreviewGroup.add(collision);
+
+    const headlights = carHeadlightSettings(this.carTarget, this.store.document);
+    if (headlights.enabled) {
+      const frontSign = parsed.scope === 'traffic' ? 1 : -1;
+      const frontZ = frontSign * (hitbox.length * 0.5 - headlights.inset) + headlights.offsetZ;
+      const lensGeometry = new THREE.BoxGeometry(headlights.width, headlights.height, headlights.depth);
+      const lensMaterial = new THREE.MeshBasicMaterial({
+        color: headlights.color,
+        toneMapped: false,
+        fog: false,
+        depthWrite: false,
+      });
+      const haloGeometry = new THREE.BoxGeometry(
+        headlights.width * 1.55,
+        headlights.height * 1.55,
+        headlights.depth * 1.25,
+      );
+      const haloMaterial = new THREE.MeshBasicMaterial({
+        color: headlights.color,
+        transparent: true,
+        opacity: THREE.MathUtils.lerp(0.12, 0.42, headlights.intensity / 3000),
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        fog: false,
+        depthWrite: false,
+      });
+      for (const side of [-1, 1]) {
+        const lens = new THREE.Mesh(lensGeometry, lensMaterial);
+        const halo = new THREE.Mesh(haloGeometry, haloMaterial);
+        lens.position.set(
+          headlights.offsetX + side * headlights.spacing * 0.5,
+          headlights.elevation + headlights.offsetY,
+          frontZ,
+        );
+        halo.position.copy(lens.position);
+        lens.renderOrder = halo.renderOrder = 101;
+        lens.userData.editorHelper = halo.userData.editorHelper = true;
+        this.worldPreviewGroup.add(lens, halo);
+      }
+
+      // Use the very same cloudy SpotLight implementation as the Lights app.
+      // The helper's local -Y cone is aimed along the car's forward direction.
+      const beam = createSoftSpotLight(headlights, { editor: true });
+      beam.name = 'Vehicle headlight beam preview';
+      beam.position.set(
+        headlights.offsetX,
+        headlights.elevation + headlights.offsetY,
+        frontZ,
+      );
+      const aim = new THREE.Vector3(
+        headlights.aimX,
+        headlights.aimY,
+        frontSign * headlights.aimDistance,
+      );
+      const direction = aim.sub(beam.position).normalize();
+      if (direction.lengthSq() > 0) {
+        beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), direction);
+      }
+      beam.traverse((object) => {
+        object.userData.editorHelper = true;
+        if (object.isMesh) object.userData.previewDecoration = true;
+      });
+      this.worldPreviewGroup.add(beam);
+    }
+
+    const rear = carRearLightSettings(this.carTarget, this.store.document);
+    if (rear.enabled) {
+      const rearSign = parsed.scope === 'traffic' ? -1 : 1;
+      const rearZ = rearSign * (hitbox.length * 0.5 - rear.inset) + rear.offsetZ;
+      const geometry = new THREE.BoxGeometry(rear.width, rear.height, rear.depth);
+      const material = new THREE.MeshBasicMaterial({
+        color: rear.color,
+        toneMapped: false,
+        fog: false,
+        depthWrite: false,
+      });
+      const haloGeometry = new THREE.BoxGeometry(rear.width * 1.55, rear.height * 1.55, rear.depth * 1.25);
+      const haloMaterial = new THREE.MeshBasicMaterial({
+        color: rear.color,
+        transparent: true,
+        opacity: 0.34,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        fog: false,
+        depthWrite: false,
+      });
+      for (const side of [-1, 1]) {
+        const lens = new THREE.Mesh(geometry, material);
+        const halo = new THREE.Mesh(haloGeometry, haloMaterial);
+        lens.position.set(
+          rear.offsetX + side * rear.spacing * 0.5,
+          rear.elevation + rear.offsetY,
+          rearZ,
+        );
+        halo.position.copy(lens.position);
+        lens.renderOrder = halo.renderOrder = 101;
+        lens.userData.editorHelper = halo.userData.editorHelper = true;
+        this.worldPreviewGroup.add(lens, halo);
+      }
+    }
+  }
+
+  async _buildCarPreview({ focus = true } = {}) {
     const target = this.carTarget;
     const parsed = parseCarModelTarget(target);
     const meta = carModelMeta(target);
@@ -1885,8 +2183,9 @@ export class ModelerPanel {
       }
       this.carPreviewVisual = visual;
       this.worldPreviewGroup.add(visual);
+      this._addCarPreviewHelpers(parsed);
       visual.updateMatrixWorld(true);
-      this._focusPreview(this.worldPreviewGroup);
+      if (focus) this._focusPreview(this.worldPreviewGroup);
     } catch (error) {
       if (request === this.carPreviewRequest) this.onStatus(`Car preview unavailable · ${error.message}`);
     }

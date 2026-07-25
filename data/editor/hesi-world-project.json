@@ -4,9 +4,6 @@
     "name": "HESI Main World"
   },
   "entityOverrides": {
-    "barrier:wangan-1:0002": {
-      "visible": false
-    },
     "generated-prop-batch:6-n7-unknown-garage-transition-marker-10": {
       "transform": {
         "position": [
@@ -36,9 +33,9 @@
     "generated-prop-batch:6-n7-unknown-tatsumi-pa-deck-6": {
       "transform": {
         "position": [
-          3645.31152,
-          57.1103,
-          -4057.11476
+          3561.34378,
+          57.11021,
+          -4090.84122
         ],
         "rotation": [
           3.14159,
@@ -292,60 +289,6 @@
       "visible": false
     },
     "marking:wangan-1:0041": {
-      "visible": false
-    },
-    "marking:wangan-1:0042": {
-      "visible": false
-    },
-    "marking:wangan-1:0043": {
-      "visible": false
-    },
-    "marking:wangan-1:0044": {
-      "visible": false
-    },
-    "marking:wangan-1:0045": {
-      "visible": false
-    },
-    "marking:wangan-1:0058": {
-      "visible": false
-    },
-    "marking:wangan-1:0059": {
-      "visible": false
-    },
-    "marking:wangan-1:0060": {
-      "visible": false
-    },
-    "marking:wangan-1:0061": {
-      "visible": false
-    },
-    "marking:wangan-1:0062": {
-      "visible": false
-    },
-    "marking:wangan-1:0063": {
-      "visible": false
-    },
-    "marking:wangan-1:0064": {
-      "visible": false
-    },
-    "marking:wangan-1:0065": {
-      "visible": false
-    },
-    "marking:wangan-1:0066": {
-      "visible": false
-    },
-    "marking:wangan-1:0067": {
-      "visible": false
-    },
-    "marking:wangan-1:0068": {
-      "visible": false
-    },
-    "marking:wangan-1:0069": {
-      "visible": false
-    },
-    "marking:wangan-1:0070": {
-      "visible": false
-    },
-    "marking:wangan-1:0071": {
       "visible": false
     },
     "pillar:ramp-9:0004": {

@@ -89,7 +89,8 @@ export class CustomAssetStore {
 
   /**
    * Patches one car target. Passing null removes the complete override; an
-   * `assetId` of null keeps behavior settings while restoring generated shape.
+   * `assetId` of null keeps hitbox/behavior/light settings while restoring the
+   * generated shape.
    */
   setCarModel(target, patch) {
     if (!this.document.carModels) this.document.carModels = {};
@@ -98,8 +99,13 @@ export class CustomAssetStore {
       const previous = this.document.carModels[target] || {};
       const next = { ...previous, ...clone(patch) };
       if (patch.settings) next.settings = { ...(previous.settings || {}), ...clone(patch.settings) };
+      if (patch.headlights) next.headlights = { ...(previous.headlights || {}), ...clone(patch.headlights) };
+      if (patch.rearLights) next.rearLights = { ...(previous.rearLights || {}), ...clone(patch.rearLights) };
       if (next.assetId === undefined) delete next.assetId;
-      if (!next.assetId && !Object.keys(next.settings || {}).length) delete this.document.carModels[target];
+      if (!next.assetId && !Object.keys(next.settings || {}).length
+        && !Object.keys(next.headlights || {}).length && !Object.keys(next.rearLights || {}).length) {
+        delete this.document.carModels[target];
+      }
       else this.document.carModels[target] = next;
     }
     this.dirty = true;
@@ -134,7 +140,10 @@ export class CustomAssetStore {
     for (const [target, entry] of Object.entries(this.document.carModels || {})) {
       if (entry?.assetId !== id) continue;
       delete entry.assetId;
-      if (!Object.keys(entry.settings || {}).length) delete this.document.carModels[target];
+      if (!Object.keys(entry.settings || {}).length
+        && !Object.keys(entry.headlights || {}).length && !Object.keys(entry.rearLights || {}).length) {
+        delete this.document.carModels[target];
+      }
     }
     this.dirty = true;
     return true;
