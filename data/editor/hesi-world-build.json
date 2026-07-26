@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-24T21:33:30.794Z",
+  "generatedAt": "2026-07-26T13:28:35.701Z",
   "project": {
-    "draftSignature": "fnv1a32:94925c98",
+    "draftSignature": "fnv1a32:7fd0ab60",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -187,7 +187,7 @@
         0,
         0,
         1071.97693,
-        68.89671,
+        68.93752,
         -5225.73291,
         1
       ],
@@ -210,7 +210,7 @@
         0,
         0,
         1073.68604,
-        68.76106,
+        68.80915,
         -5223.75391,
         1
       ],
@@ -675,75 +675,6 @@
         1
       ],
       "mesh": "chunk 6,-7 box:lampSodium",
-      "op": "instance"
-    },
-    {
-      "index": 0,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3584.37915,
-        57.75208,
-        -4082.12012,
-        1
-      ],
-      "mesh": "chunk 5,-7 box:marking",
-      "op": "instance"
-    },
-    {
-      "index": 1,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3582.6936,
-        57.75208,
-        -4082.36035,
-        1
-      ],
-      "mesh": "chunk 5,-7 box:marking",
-      "op": "instance"
-    },
-    {
-      "index": 2,
-      "matrix": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3583.01343,
-        57.75208,
-        -4083.13696,
-        1
-      ],
-      "mesh": "chunk 5,-7 box:marking",
       "op": "instance"
     },
     {

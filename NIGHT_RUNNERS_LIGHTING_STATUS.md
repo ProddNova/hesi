@@ -327,3 +327,72 @@ Verified in the real browser build at a mobile viewport:
 - mobile probe: frame p50 `14.0 ms`, p95 `34.7 ms`, 43 active traffic vehicles;
 - editor entity stability and lighting/model tests pass; editor build indices
   retain only the same five pre-existing Tatsumi marking drifts.
+
+---
+
+# Round 5 — light pools now sit ON the asphalt (2026-07-26)
+
+Two user reports, one root cause:
+
+1. *"passing over the lit areas the shadows deepen, the light seems to vanish,
+   and there is a hard light/dark edge — an annoying line."*
+2. *"going downhill the light does not follow the asphalt; trying to follow the
+   profile it makes steps (gradoni) instead of tilting with the surface."*
+
+There are no shadow maps in this game (`renderer.shadowMap.enabled = false`), so
+the "shadow" was never a shadow. Each lamp's additive pool is a large flat quad
+(up to `19 × 55 m`) laid on the deck. It was oriented with `yawQuaternion`, which
+**flattens the tangent and throws the grade away**, plus a bank roll. On any
+graded road the quad therefore stayed horizontal while the deck pitched beneath
+it: one end sank under the asphalt and was depth-occluded, the other floated. A
+plane cutting a plane meets along a *straight line* — which is exactly the hard
+diagonal light/dark edge that was reported, and a run of such quads down a
+descent reads as light "steps".
+
+## Fix (all build-time; zero runtime cost)
+
+- **`surfaceQuaternion(tangent)`** (js/map.js) builds the decal basis from the
+  full 3D tangent, so a ground quad follows heading **and** grade. Used by the
+  lamp pool and the wet-asphalt streak; `bankQuat` still applies the roll.
+- **Per-lamp sag clearance.** A quad is a plane but the road also curves
+  *vertically*; through a sag the plane's tips still bury themselves. Two extra
+  curve samples per lamp measure the local sag and lift the decal just clear of
+  it (capped at `0.4 m`). A soft additive glow floating a few centimetres reads
+  as nothing; a hard black line reads as a bug.
+- **`_deckPoint` now gets `route`/`distance` for the decals.** Without them the
+  progressive-junction deck offset silently evaluated to `0`, so through a
+  merge/diverge transition the decals were pinned to the unadjusted centreline
+  while the asphalt had eased onto the host plane. Currently `0` everywhere a
+  lamp lands, so no visual change today — correctness hardening only. The
+  lamppost/lens instances deliberately keep their old positions so saved editor
+  edits (addressed by index, verified by matrix) cannot move.
+- **`anisotropy = 4`** on the shared `128 × 128` glow texture: these quads are
+  stretched ~3:1 and almost always seen at a grazing angle, the case isotropic
+  mipmapping handles worst. One small shared texture, negligible bandwidth.
+
+## Verified
+
+`node .devtests/pool-deck-fit-probe.mjs` (new, headless) samples a grid over all
+4089 pools and reports how much of each is buried under the deck:
+
+| buried by | before | after | reduction |
+| --- | --- | --- | --- |
+| any amount | 15287 samples (16.4%) | 2091 (2.2%) | 86% |
+| > 25 cm | 6564 | 218 | 96.7% |
+| > 50 cm | 3895 | 78 | 98.0% |
+| > 1 m | 1608 | 29 | 98.2% |
+
+Pools showing any hard edge: `59.0% → 22.3%`; what remains is overwhelmingly
+under 10 cm, i.e. below the visible threshold for a soft additive glow.
+
+- **No frame cost**: same scene, before vs after — draw calls `118 → 118`,
+  triangles `109714 → 109714`. Orientation is baked into the instance matrix, so
+  nothing new happens per frame. (The on-screen FPS readout moved *both* ways
+  between runs — 128→113 at one spot, 138→141 at another — i.e. software
+  rasteriser noise, not signal.)
+- `node .devtests/editor-build-ops-probe.mjs`: `99/104` on target, the same five
+  pre-existing Tatsumi drifts as before the change — no new index drift.
+- Two full game boots, `page errors: none`.
+- A/B screenshots on the steepest rescued ramps (`ramp_17 @ 378 m`, was buried
+  `3.55 m`, now `0.03 m`): the near lane goes from dark-with-an-abrupt-bright-
+  patch to a continuous warm ribbon flowing down the grade.

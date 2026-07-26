@@ -42,6 +42,9 @@ const FORWARD = new THREE.Vector3(0, 0, 1);
 const TMP_A = new THREE.Vector3();
 const TMP_B = new THREE.Vector3();
 const TMP_C = new THREE.Vector3();
+const TMP_SURF_F = new THREE.Vector3();
+const TMP_SURF_U = new THREE.Vector3();
+const TMP_SURF_R = new THREE.Vector3();
 const TMP_MAT = new THREE.Matrix4();
 const EPSILON = 1e-5;
 
@@ -291,6 +294,25 @@ function yawQuaternion(tangent, target = new THREE.Quaternion()) {
   if (flat.lengthSq() < EPSILON) return target.identity();
   flat.normalize();
   return target.setFromUnitVectors(FORWARD, flat);
+}
+
+// Orient a horizontal XZ quad (normal +Y, length +Z, width +X) onto the road
+// SURFACE, following heading AND grade. yawQuaternion flattens the tangent, so a
+// long ground decal on a slope stayed dead-horizontal: its ends dived under the
+// pitched deck (depth-clipped → a hard dark edge) or floated over it (a bright
+// shelf), and a run of them read as light "steps"/gradoni. Building the basis
+// from the full 3D tangent pitches the quad with the grade so it hugs the
+// asphalt. Lateral bank (roll) is applied by the caller about the same tangent.
+function surfaceQuaternion(tangent, target = new THREE.Quaternion()) {
+  const fwd = TMP_SURF_F.copy(tangent);
+  if (fwd.lengthSq() < EPSILON) return target.identity();
+  fwd.normalize();
+  // World up projected perpendicular to the tangent = the unbanked surface normal.
+  const up = TMP_SURF_U.copy(UP).addScaledVector(fwd, -UP.dot(fwd));
+  if (up.lengthSq() < EPSILON) return yawQuaternion(tangent, target); // ~vertical: no meaningful grade
+  up.normalize();
+  const right = TMP_SURF_R.crossVectors(up, fwd).normalize(); // X = Y × Z ⇒ right-handed basis
+  return target.setFromRotationMatrix(TMP_MAT.makeBasis(right, up, fwd));
 }
 
 function xzDistanceSq(a, b) {
@@ -941,6 +963,13 @@ export class HighwayMap {
     const texture = new THREE.CanvasTexture(canvas);
     texture.magFilter = THREE.LinearFilter;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
+    // These quads are stretched ~3:1 down the road and are nearly always seen at
+    // a grazing angle from the driver's eye — the exact case isotropic mipmapping
+    // handles worst, picking an over-blurred level and mushing the far half of
+    // every pool into a flat smear. A little anisotropy keeps the ribbon crisp
+    // into the distance. One shared 128x128 texture, so the bandwidth cost is
+    // negligible; the driver clamps the value to whatever the GPU supports.
+    texture.anisotropy = 4;
     this._ownedTextures.add(texture);
     this._glowTex = texture;
     return texture;
@@ -7042,12 +7071,48 @@ export class HighwayMap {
     const poolSodium = new THREE.Color(0xff8a2e);
     const tmpColor = new THREE.Color();
     const tmpAxis = new THREE.Vector3();
+    // A ground decal is a PLANE; the road also curves VERTICALLY. Orienting the
+    // quad to the local surface fixes constant grade, but through a sag (valley)
+    // the deck rises away at both ends and the plane's tips still bury themselves
+    // in the asphalt — depth-occluded, which is the same hard straight light/dark
+    // line as the flat-quad case. Probe the deck at both ends of the decal and
+    // return the extra lift that clears its own local sag. Two curve samples per
+    // lamp at BUILD time; the result is baked into the instance matrix, so there
+    // is no runtime cost at all. Capped: a soft additive glow floating a few
+    // centimetres reads as nothing, a hard black line reads as a bug.
+    const sagClearance = (centerFrame, tangent, atDistance, lateral, length) => {
+      const planeRise = tangent.y / Math.max(EPSILON, tangent.length());
+      const baseY = this._deckPoint(centerFrame, lateral, 0).y;
+      let sag = 0;
+      for (const end of [-0.5, 0.5]) {
+        const span = end * length;
+        const endDistance = atDistance + span;
+        if (endDistance < 0 || endDistance > route.length) continue;
+        const endCenter = this._sampleCenter(route, endDistance, 1);
+        const endFrame = {
+          position: endCenter.position, tangent: endCenter.baseTangent,
+          normal: horizontalNormal(endCenter.baseTangent), bank: this._bankAt(route, endDistance),
+          route, distance: endDistance,
+        };
+        sag = Math.max(sag, this._deckPoint(endFrame, lateral, 0).y - (baseY + planeRise * span));
+      }
+      return Math.min(0.4, sag);
+    };
     let lampSide = 1;
     for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
       const center = this._sampleCenter(route, distance, 1);
       const half = this._halfWidthAt(route, distance);
       if (this._isTunnel(route, distance)) continue;
       const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
+      // Same frame, but carrying the route/station _deckPoint needs to apply the
+      // progressive-junction deck offset. Without them that term silently
+      // evaluates to 0, so through a merge/diverge transition the light decals
+      // were pinned to the UNADJUSTED centreline while the asphalt beneath them
+      // had eased onto the host plane — the decal cut into the deck and left the
+      // same hard light/dark line. Only the ground decals use this: the lamppost
+      // and lens instances keep their original positions so saved editor edits,
+      // which address instances by index and verify by matrix, cannot move.
+      const deckFrame = { ...frame, route, distance };
       const side = route.bidirectional ? (lampSide *= -1) : 1;
       const base = this._deckPoint(frame, side * (half - 0.62), 0.01);
       if (this._barrierSuppressed(base, route)) continue;
@@ -7070,20 +7135,20 @@ export class HighwayMap {
       const poolLen = lampStep * (1.2 + jL * 0.2);
       const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
       const poolOffset = side * (half - poolWidth * 0.4) + (jW - 0.5) * 1.6;
-      // The pool is a big flat quad; the deck is banked. Tilt it to lie PARALLEL
-      // to the banked road so it hugs the asphalt instead of cutting through it —
-      // a dead-flat quad on a banked deck dips below the surface on one side and
-      // is depth-occluded, which showed up as a hard diagonal light/dark edge
-      // running down the road. _deckPoint raises height toward +normal by
-      // tan(bank)*lateral, and T×UP = +normal, so the deck's up-normal is
-      // UP*cos(bank) - N*sin(bank); rotating the quad about the tangent must use
-      // -bank to match it (a +bank rotation tilts it the wrong way and doubles
-      // the mismatch).
+      // The pool is a big flat quad; the deck is banked AND graded. Orient it to
+      // lie PARALLEL to the road surface so it hugs the asphalt instead of cutting
+      // through it — a dead-flat quad on a tilted deck dips below the surface on
+      // one side (depth-occluded → a hard diagonal light/dark edge) and floats
+      // over it on the other, and on a slope a run of them reads as light steps
+      // ("gradoni"). surfaceQuaternion follows heading + grade (pitch); bankQuat
+      // then rolls it about the tangent for lateral superelevation. _deckPoint
+      // raises height toward +normal by tan(bank)*lateral, matching a -bank roll
+      // (a +bank rotation tilts it the wrong way and doubles the mismatch).
       const bankQuat = new THREE.Quaternion().setFromAxisAngle(tmpAxis.copy(center.baseTangent).normalize(), -frame.bank);
-      const poolQuat = yawQuaternion(center.baseTangent)
+      const poolQuat = surfaceQuaternion(center.baseTangent)
         .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2))
         .premultiply(bankQuat);
-      const pool = this._deckPoint(frame, poolOffset, 0.14);
+      const pool = this._deckPoint(deckFrame, poolOffset, 0.14 + sagClearance(deckFrame, center.baseTangent, distance, poolOffset, poolLen));
       pool.addScaledVector(frame.tangent, (jY - 0.5) * 4);
       // Additive instance tint doubles as per-lamp brightness jitter;
       // brighter lamps read a touch whiter, dimmer ones more amber.
@@ -7094,9 +7159,10 @@ export class HighwayMap {
       // lamp spacing so it reads as a continuous reflective streak on wet
       // asphalt (Medium+; hidden on Low, where the pool carries continuity).
       const streakLen = lampStep * (1.04 + jW * 0.2);
-      const streak = this._deckPoint(frame, side * (half - 3.0), 0.17);
+      const streakLateral = side * (half - 3.0);
+      const streak = this._deckPoint(deckFrame, streakLateral, 0.17 + sagClearance(deckFrame, center.baseTangent, distance, streakLateral, streakLen));
       streak.addScaledVector(frame.tangent, (jL - 0.5) * 3);
-      this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), yawQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
+      this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), surfaceQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
     }
 
     // Emergency phone boxes on elevated open sections (green beacon + cabinet).
