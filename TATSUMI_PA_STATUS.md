@@ -193,3 +193,44 @@ before/after (0 drift); `editor-build-ops-probe` still reports only the 4
 pre-existing `chunk 6,-7 box:marking` drifts. The saved `Tokyo Bay` visibility
 hide was dropped from `hesi-world-build.json`/`hesi-world-project.json` so the
 bay shows.
+
+---
+
+## Interaction points — holographic disc (2026-07-27)
+
+Every interaction anchor in the game now uses one marker, `js/hologram-marker.js`
+(`createHologramMarker` / `animateHologramMarker` / `hologramBaseLift`), and the
+crystal prism is gone. The disc is a squat cylinder of light with **no thickness
+and no end caps** — the cylinder wall only, additive, brightest at its base and
+fading upward via baked vertex colours, closed by a hairline ring at the top so
+it keeps a silhouette at distance. It hovers (rise-only, so the base never sinks
+through the floor), breathes and flickers.
+
+Why it replaced the gem: the prism floated and said *look here*; a disc standing
+on the floor says *stand here*, which is what these anchors actually are.
+
+Users:
+- `GarageSystem` — exit (blue), market PC (yellow), bed (red, 0.84×).
+- `TatsumiPaSystem` — the lot's exit marker (blue).
+- `HighwayMap._buildZoneEntrances` — **new**: the PA gate forecourt gets a
+  car-scale disc (3×) at the zone-entrance trigger, so the way in is a thing you
+  aim at rather than a prompt that appears. It is a Group of additive meshes
+  pushed through `_addChunkMesh` + `animatedMarkers` (`userData.hologramMarker`),
+  never `_instance` — the bay is inside the Tatsumi clearing (hence
+  `tatsumiClearingSurface`) where instances are zero-scaled, and added meshes
+  cannot shift the (mesh, index) addresses saved editor edits use.
+
+**`hologramBaseLift()` is compatibility, not styling.** The marker group's origin
+is the anchor the world editor moves, and the markers the user has already moved
+were dragged while the visual was the prism (centre 1.35 m up, half-height 0.44):
+each was pulled DOWN until the gem's lowest point met the floor — that is why the
+garage anchors sit at y ≈ −0.87 / −0.65 / −0.72. The disc's base therefore
+inherits the prism's lowest point, and every saved placement keeps standing where
+it was put instead of sinking a metre into the floor. Code-driven placements
+(garage/PA defaults, the road gate) subtract the same lift so they touch the
+ground.
+
+QA: `node .devtests/hologram-marker-shots.mjs` → `HOLO-garage`, `HOLO-pa-gate`
+(+ `-drone`, the only angle the bay walls do not block) and `HOLO-pa-lot`.
+`tatsumi-pa-zone-probe` 10/10, `editor-build-ops-probe` unchanged at 96/101 on
+target with the same 5 pre-existing drifts.

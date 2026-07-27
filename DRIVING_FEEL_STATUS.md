@@ -312,3 +312,42 @@ replaced the old "the chase camera never shakes": the chase view is bit-exactly
 steady at a standstill, shakes when driving hard, is gentler than the cockpit,
 and moves the eye at under half the cockpit's rate. The pull-back bounds were
 retuned to the new formula.
+
+---
+
+## Round 4 (2026-07-27) — shake pace, pull-back thirded, both on sliders
+
+Two reports, both about the camera at speed: the shake "moves too fast, it
+should be more fluid", and the chase view still backs off too much.
+
+**Pace, not amplitude.** The shake's carrier was ~9 Hz with a ~14 Hz partial —
+a correct vibration frequency and the wrong *camera* frequency. At speed it
+buzzed, and a buzz on the eye reads as a fault rather than as a car working.
+New module constant `SHAKE_PACE = .55` scales the phase clock (`camShakeTime`),
+so every stroke is the same distance over nearly twice as many frames: ~5 Hz
+with an ~8 Hz partial. Amplitude is untouched. Measured on the probe with
+identical telemetry: **18.3 → 11.1 mm/frame** in the cockpit, 3.4 mm/frame in
+chase. `CHASE_SHAKE_RATE` went `.4 → .55` so the chase view, which multiplies
+on top of `SHAKE_PACE`, did not turn into sludge.
+
+**Pull-back thirded.** `CHASE_SPEED_PULLBACK` `.0028 → .00093`: **+0.19 m** at
+220 km/h, against +0.6 m before, +1.1 m in the `.005` build and +2.2 m in the
+original `.01`. The drift still exists — it is what sells speed — but the car no
+longer changes size on the Bayshore. One constant, both `updateCamera()` and
+`snapDrivingCamera()`.
+
+**Both are now dev-panel dials** (`0` → **IMMAGINE & LUCI**), because "how far"
+and "how often" are exactly what separates a working car from a broken camera
+and no single number tunes both:
+
+- `SHAKE CAMERA` — `admin.cameraShake`, slider `debug-shake-amount` (0…300%),
+  multiplies the shake *amplitude* target.
+- `VELOCITÀ SHAKE` — `admin.cameraShakePace`, slider `debug-shake-pace`
+  (0…300%), multiplies `SHAKE_PACE`, i.e. the *frequency*.
+
+Both persist in `admin` and follow the panel's live-drag / commit-on-release
+contract (`setVisualParam`), so dragging never re-renders the control.
+
+Verified: `node .devtests/driving-camera-probe.mjs` → **12/12**. The pull-back
+bounds moved to the new formula (> 0.1 m, < 0.35 m) and a new check pins the
+pace: the cockpit must move under 14 mm/frame, "a stroke rather than a buzz".

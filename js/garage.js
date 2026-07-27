@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createHologramMarker, animateHologramMarker } from './hologram-marker.js';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js';
 
 const V = (x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 
@@ -126,7 +126,7 @@ export class GarageSystem {
       // Follow the bed only until the user positions the prism themselves; an
       // explicit editor move is preserved (like refreshExitMarkers). markerPoint
       // reads the prism's actual position, so the sleep trigger follows the move.
-      if(!this.bedMarkers.userData.editorBuildTransformApplied)this.bedMarkers.position.set(p.x,0,p.z);
+      if(!this.bedMarkers.userData.editorBuildTransformApplied)this.bedMarkers.position.set(p.x,-hologramBaseLift(0.84),p.z);
       this.bedMarkers.visible=true;
     }else if(this.bedMarkers){
       this.bedPoint=null;
@@ -166,10 +166,14 @@ export class GarageSystem {
   animateBeacon(group,t){animateHologramMarker(group,t);}
   refreshExitMarkers(){
     const doorX=this.shutter?.position.x??0;
+    // -hologramBaseLift: the disc's base sits that far above its anchor (see
+    // js/hologram-marker.js), so a code-placed marker has to drop by the same
+    // amount to touch the floor. Editor-moved markers keep their saved anchor.
+    const floor=-hologramBaseLift();
     this.exitPoint=V(doorX,0,12.6);
-    if(this.exitMarkers&&!this.exitMarkers.userData.editorBuildTransformApplied)this.exitMarkers.position.set(doorX,0,12.4);
+    if(this.exitMarkers&&!this.exitMarkers.userData.editorBuildTransformApplied)this.exitMarkers.position.set(doorX,floor,12.4);
     const pc=this.pcPoint||V(7.5,0,-9.3);
-    if(this.pcMarkers&&!this.pcMarkers.userData.editorBuildTransformApplied)this.pcMarkers.position.set(pc.x,0,pc.z);
+    if(this.pcMarkers&&!this.pcMarkers.userData.editorBuildTransformApplied)this.pcMarkers.position.set(pc.x,floor,pc.z);
   }
   onBuildApplied(){this.refreshColliders();}
 

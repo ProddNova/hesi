@@ -108,24 +108,36 @@ const sample = await page.evaluate(() => {
     }
     return { distance, jitter, shake: game.camShake };
   };
-  return {
+  const hard = telemetry(200, 1, 0.2);
+  const out = {
     chaseStopped: run('chase', telemetry(0)),
     chaseFast: run('chase', telemetry(220, 1)),
-    chaseHard: run('chase', telemetry(200, 1, 0.2)),
+    chaseHard: run('chase', hard),
     cockpitStopped: run('cockpit', telemetry(0)),
-    cockpitHard: run('cockpit', telemetry(200, 1, 0.2)),
+    cockpitHard: run('cockpit', hard),
     hoodHard: run('hood', telemetry(200, 1, 0.2)),
   };
+  // The dev-panel dials, through the real setter the sliders call.
+  game.setVisualParam('shake', 0, false);
+  out.shakeOff = run('cockpit', hard);
+  game.setVisualParam('shake', 200, false);
+  out.shakeDouble = run('cockpit', hard);
+  game.setVisualParam('shake', 100, false);
+  game.setVisualParam('shakePace', 300, false);
+  out.paceTriple = run('cockpit', hard);
+  game.setVisualParam('shakePace', 100, false);
+  return out;
 });
 
 // ---------------------------------------------------------------- chase cam
-// The formula is 6.2 m + speed × 0.0028, so 220 km/h must add ~0.6 m, not the
-// 1.1 m of the .005 era or the 2.2 m of the original .01. The car is not on flat
-// ground, so compare the growth.
+// The formula is 6.2 m + speed × 0.00093, so 220 km/h must add ~0.2 m — a third
+// of the .0028 era, itself a quarter of the .005 one. The pull-back still has to
+// EXIST (it is what sells speed), it just must not resize the car. The car is
+// not on flat ground, so compare the growth.
 const growth = sample.chaseFast.distance - sample.chaseStopped.distance;
-check('the chase camera still backs off with speed', growth > 0.35, `+${growth.toFixed(2)} m at 220 km/h`);
-check('and the pull-back stays well under the old rates', growth < 1.0,
-  `+${growth.toFixed(2)} m (.005 gave +1.1 m, the original .01 gave +2.2 m)`);
+check('the chase camera still backs off with speed', growth > 0.1, `+${growth.toFixed(2)} m at 220 km/h`);
+check('and the pull-back stays well under the old rates', growth < 0.35,
+  `+${growth.toFixed(2)} m (.0028 gave +0.6 m, .005 gave +1.1 m, the original .01 gave +2.2 m)`);
 
 // ------------------------------------------------------------------- shake
 check('the chase view is dead steady at a standstill', sample.chaseStopped.jitter < 1e-6,
@@ -136,6 +148,10 @@ check('the cockpit shakes when driving hard', sample.cockpitHard.jitter > 1e-4,
   `${(sample.cockpitHard.jitter * 1000).toFixed(2)} mm/frame · shake ${sample.cockpitHard.shake.toFixed(3)}`);
 check('the shake stays small enough to read the road', sample.cockpitHard.jitter < 0.02,
   `${(sample.cockpitHard.jitter * 1000).toFixed(2)} mm/frame`);
+// SHAKE_PACE: the amplitude is unchanged, the carrier is slower, so the eye
+// moves the same distance over more frames. 18.3 mm/frame was the buzz.
+check('and it moves as a stroke rather than a buzz', sample.cockpitHard.jitter < 0.014,
+  `${(sample.cockpitHard.jitter * 1000).toFixed(2)} mm/frame (was 18.3 at the old pace)`);
 check('the hood camera shakes less than the cockpit',
   sample.hoodHard.shake > 0 && sample.hoodHard.shake < sample.cockpitHard.shake,
   `hood ${sample.hoodHard.shake.toFixed(3)} vs cockpit ${sample.cockpitHard.shake.toFixed(3)}`);
@@ -148,6 +164,19 @@ check('the chase shake is gentler than the cockpit', sample.chaseHard.shake < sa
   `chase ${sample.chaseHard.shake.toFixed(3)} vs cockpit ${sample.cockpitHard.shake.toFixed(3)}`);
 check('and moves the eye more slowly', sample.chaseHard.jitter < sample.cockpitHard.jitter * 0.5,
   `chase ${(sample.chaseHard.jitter * 1000).toFixed(2)} vs cockpit ${(sample.cockpitHard.jitter * 1000).toFixed(2)} mm/frame`);
+
+// ------------------------------------------------------------ shake sliders
+// Amplitude and pace are separate dials, so each must move its own axis: the
+// amplitude one changes how far the eye goes (and can switch the shake off
+// outright), the pace one changes how often WITHOUT touching the amplitude.
+check('the shake slider can switch the shake off', sample.shakeOff.shake === 0 && sample.shakeOff.jitter < 1e-6,
+  `shake ${sample.shakeOff.shake} · ${sample.shakeOff.jitter.toExponential(1)} m/frame`);
+check('and doubling it doubles the amplitude', Math.abs(sample.shakeDouble.shake / sample.cockpitHard.shake - 2) < 0.05,
+  `${sample.shakeDouble.shake.toFixed(3)} vs ${sample.cockpitHard.shake.toFixed(3)}`);
+check('the pace slider speeds the eye up without growing the amplitude',
+  sample.paceTriple.jitter > sample.cockpitHard.jitter * 1.8
+  && Math.abs(sample.paceTriple.shake - sample.cockpitHard.shake) < 0.01,
+  `${(sample.paceTriple.jitter * 1000).toFixed(2)} vs ${(sample.cockpitHard.jitter * 1000).toFixed(2)} mm/frame · shake ${sample.paceTriple.shake.toFixed(3)}`);
 
 check('no console errors during the run', errors.length === 0, errors.slice(0, 3).join(' | '));
 

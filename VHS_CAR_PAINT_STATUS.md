@@ -240,3 +240,24 @@ scales the live beam, and with VHS off + blur held open the pass stays active,
 keeps its buffer, still presents a real picture and does not shift exposure
 (0.5%). `.devtests/shots/vhs-speed-blur.png` shows the sharp centre / smeared
 edges.
+
+---
+
+## Round 3 (2026-07-27) — the two dials get headroom
+
+Both caps were tasteful and both were in the way. `MAX_VHS_AMOUNT = 4` and
+`MAX_MOTION_BLUR_LEVEL = 4` now live in `js/vhs-effect.js`; the sliders read
+`0…4×` and `0…400%` and every clamp on the path — the constructor, `setAmount`,
+`setVisualParam`, `updateSpeedBlur` — reads those constants instead of a
+hardcoded `2`.
+
+**The blur cap needed a second fix to mean anything.** `setSpeedBlur` clamped
+its argument to `MAX_SPEED_BLUR` (0.09), which is the smear at the *100%*
+setting — so above 100% the dial did nothing at all at top speed (level × ramp²
+× 0.09 was already at the ceiling by ~220 km/h) and only affected the ramp's
+lower half. The ceiling is now `MAX_SPEED_BLUR_CEILING = MAX_SPEED_BLUR ×
+MAX_MOTION_BLUR_LEVEL`, so the range of the dial and the range of the clamp are
+the same thing. `MAX_SPEED_BLUR` keeps its meaning as the authored 100% value.
+
+Above ~2× the frame is deliberately past tasteful; that is the point of the
+headroom, not a bug to be tuned back out.

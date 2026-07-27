@@ -5,8 +5,9 @@ import * as THREE from 'three';
  * the PA road gate.
  *
  * It replaces the spinning crystal prism with a projected disc — a squat
- * cylinder of light standing on the floor, brightest at its base and fading
- * upward, closed by a crisp bright ring at the top. That reads as something
+ * curtain of light standing on the floor with NO thickness and no end caps
+ * (just the cylinder wall), brightest at its base and fading upward, drawn
+ * closed by a hairline ring at the top. That reads as something
  * projected onto the ground at the exact spot the player has to stand on,
  * which a floating gem never did: the gem said "look here", the disc says
  * "stand here".
@@ -22,8 +23,10 @@ import * as THREE from 'three';
  * by build-order index, so the layer count and order must not change.
  */
 
-// Unit disc: radius 1, height 1, centred on its own origin. Shared by the body
-// and the halo — the halo is the same shape scaled up and turned inside out.
+// Unit disc: radius 1, height 1, centred on its own origin, and OPEN — no end
+// caps and no wall thickness, just the curtain of light itself. A capped
+// cylinder rendered as a solid slug of colour; open, you see the far wall
+// through the near one and it reads as a projection.
 const DISC_SEGMENTS = 36;
 let discGeometry = null;
 let rimGeometry = null;
@@ -36,7 +39,7 @@ const GRADIENT_TOP = 0.42;
 
 function unitDisc() {
   if (discGeometry) return discGeometry;
-  const geometry = new THREE.CylinderGeometry(1, 1, 1, DISC_SEGMENTS, 1, false);
+  const geometry = new THREE.CylinderGeometry(1, 1, 1, DISC_SEGMENTS, 1, true);
   const position = geometry.getAttribute('position');
   const colours = new Float32Array(position.count * 3);
   for (let i = 0; i < position.count; i++) {
@@ -52,7 +55,10 @@ function unitDisc() {
 
 function unitRim() {
   if (rimGeometry) return rimGeometry;
-  const geometry = new THREE.RingGeometry(0.78, 1.0, DISC_SEGMENTS);
+  // A hairline circle, not a lid: the annulus is thin enough to read as a drawn
+  // outline at any distance, so the top of the column closes without the marker
+  // gaining a solid surface.
+  const geometry = new THREE.RingGeometry(0.94, 1.0, DISC_SEGMENTS);
   geometry.rotateX(-Math.PI / 2);
   rimGeometry = geometry;
   return geometry;
@@ -62,8 +68,20 @@ function unitRim() {
 // pool of light on the floor rather than as a pillar.
 export const HOLOGRAM_RADIUS = 0.5;
 export const HOLOGRAM_HEIGHT = 0.62;
-// Base sits just clear of the floor; the bob never lets it clip through.
-export const HOLOGRAM_BASE_Y = 0.36;
+
+// Where the disc sits inside the marker group — and this is compatibility, not
+// taste. The group's origin is the anchor the world editor moves, and the
+// markers it has already moved were dragged while the visual was the old
+// crystal prism: a gem centred 1.35 m up, half-height 0.44. The user pulled
+// each one DOWN until that gem's lowest point touched the floor (the garage
+// anchors sit at y ≈ −0.87/−0.65/−0.72 for exactly that reason). So the disc's
+// base takes over the prism's lowest point, and every saved placement keeps
+// standing exactly where it was put instead of sinking a metre into the floor.
+const LEGACY_PRISM_Y = 1.35, LEGACY_PRISM_HALF_HEIGHT = 0.44;
+/** Height of the disc's base above the marker group's origin. */
+export function hologramBaseLift(scale = 1) {
+  return Math.max(0, LEGACY_PRISM_Y - LEGACY_PRISM_HALF_HEIGHT * scale);
+}
 
 /**
  * @param {number} color    outer halo tint (the marker's identity colour)
@@ -77,9 +95,9 @@ export function createHologramMarker(color, emissive, scale = 1) {
     color: emissive, vertexColors: true, transparent: true, opacity: .42,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
   }));
-  // The lid: a thin annulus at the top of the column, the one hard edge in the
-  // whole marker. Without it the disc has no silhouette and dissolves into the
-  // road at distance.
+  // The one hard edge in the marker: a hairline circle closing the top of the
+  // curtain. Without it the open cylinder has no silhouette and dissolves into
+  // the road at distance.
   const edges = new THREE.Mesh(unitRim(), new THREE.MeshBasicMaterial({
     color: emissive, transparent: true, opacity: .9,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
@@ -92,7 +110,8 @@ export function createHologramMarker(color, emissive, scale = 1) {
   halo.scale.set(1.2, 1.06, 1.2);
   const core = new THREE.Group();
   core.add(halo, body, edges);
-  const radius = HOLOGRAM_RADIUS * scale, height = HOLOGRAM_HEIGHT * scale, baseY = HOLOGRAM_BASE_Y * scale;
+  const radius = HOLOGRAM_RADIUS * scale, height = HOLOGRAM_HEIGHT * scale;
+  const baseY = hologramBaseLift(scale) + height / 2;
   core.scale.set(radius, height, radius);
   core.position.y = baseY;
   core.userData.baseY = baseY;
@@ -108,7 +127,9 @@ export function animateHologramMarker(group, t) {
   const { core, body, edges, halo } = group.userData || {}; if (!core) return;
   const radius = core.userData.baseRadius ?? HOLOGRAM_RADIUS;
   const height = core.userData.baseHeight ?? HOLOGRAM_HEIGHT;
-  core.position.y = core.userData.baseY + Math.sin(t * 1.7) * .05 * (radius / HOLOGRAM_RADIUS);
+  // Rise only, never sink: the base is on the floor, so a symmetric bob would
+  // push the bottom of the disc through it.
+  core.position.y = core.userData.baseY + (.5 + .5 * Math.sin(t * 1.7)) * .05 * (radius / HOLOGRAM_RADIUS);
   // Breathing: the column widens and shortens a hair, like a projection that
   // cannot quite hold focus. Small enough that it never reads as a bounce.
   const breathe = Math.sin(t * 2.1);
@@ -116,6 +137,6 @@ export function animateHologramMarker(group, t) {
   // Fast flicker over a slow drift, so it looks unstable rather than pulsed.
   const shimmer = .85 + Math.sin(t * 20) * .09 + Math.sin(t * 6.1) * .06;
   if (body) body.material.opacity = .42 * shimmer;
-  if (edges) { edges.material.opacity = .9 * shimmer; edges.rotation.y = t * .9; }
+  if (edges) edges.material.opacity = .9 * shimmer;
   if (halo) halo.material.opacity = .18 * (.7 + .3 * shimmer);
 }

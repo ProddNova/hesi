@@ -22,7 +22,7 @@ import { BUILDING_TYPES } from './building-types.js';
 import { buildProgressiveTransitions } from './progressive-merge.js';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js';
 // The shared interaction-point look (garage, PA lot, PA road gate).
-import { createHologramMarker, animateHologramMarker } from './hologram-marker.js';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -9195,6 +9195,7 @@ export class HighwayMap {
       const marker = createHologramMarker(0x2233dd, 0x2f52ff, 3);
       marker.name = 'Tatsumi PA entrance marker';
       marker.position.copy(stand);
+      marker.position.y -= hologramBaseLift(3);   // base on the deck, not above it
       marker.userData.tatsumiClearingSurface = true;
       marker.userData.hologramMarker = true;
       this._addChunkMesh(marker, stand);

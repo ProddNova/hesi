@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BARRIER_MATERIALS, BARRIER_STYLES } from './road-barrier-styles.js';
-import { createHologramMarker, animateHologramMarker } from './hologram-marker.js';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js';
 
 // Tatsumi No.1 PA — the walkable zone behind the lay-by gate.
 //
@@ -232,7 +232,9 @@ export class TatsumiPaSystem {
     const portal = this.exitPortal?.position || V(0, 0, PA_LOT.depth / 2 - 0.5);
     this.exitPoint = V(portal.x, 0, portal.z - 1.6);
     if (this.exitMarkers && !this.exitMarkers.userData.editorBuildTransformApplied) {
-      this.exitMarkers.position.set(this.exitPoint.x, 0, this.exitPoint.z);
+      // The disc's base stands hologramBaseLift() above its anchor, so a
+      // code-placed marker drops by that much to touch the asphalt.
+      this.exitMarkers.position.set(this.exitPoint.x, -hologramBaseLift(), this.exitPoint.z);
     }
   }
   onBuildApplied() { this.refreshColliders(); }

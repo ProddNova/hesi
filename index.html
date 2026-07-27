@@ -158,11 +158,13 @@
           <p class="debug-range-note">MIX SPAWN · <span id="debug-traffic-mix-note">auto 72% · furgoni 19% · tir 9%</span></p>
         </details>
         <details class="debug-traffic-panel">
-          <summary><span><b>IMMAGINE &amp; LUCI</b><small>Effetto VHS, blur velocità, fari player</small></span><em>TUNE</em></summary>
+          <summary><span><b>IMMAGINE &amp; LUCI</b><small>Effetto VHS, blur velocità, fari, shake camera</small></span><em>TUNE</em></summary>
           <label class="debug-range"><span>EFFETTO VHS <b id="debug-vhs-amount-val">1.00×</b></span><input id="debug-vhs-amount" type="range" min="0" max="4" step="0.05" value="1"></label>
           <label class="debug-range"><span>BLUR VELOCITÀ <b id="debug-motion-blur-val">100%</b></span><input id="debug-motion-blur" type="range" min="0" max="400" step="5" value="100"></label>
           <label class="debug-range"><span>LUMINOSITÀ FARI <b id="debug-headlight-val">100%</b></span><input id="debug-headlight" type="range" min="0" max="250" step="5" value="100"></label>
-          <p class="debug-range-note">VHS 0 = immagine pulita · BLUR sale oltre i 120 km/h · FARI moltiplica il valore del Car Modeler</p>
+          <label class="debug-range"><span>SHAKE CAMERA <b id="debug-shake-amount-val">100%</b></span><input id="debug-shake-amount" type="range" min="0" max="300" step="5" value="100"></label>
+          <label class="debug-range"><span>VELOCITÀ SHAKE <b id="debug-shake-pace-val">100%</b></span><input id="debug-shake-pace" type="range" min="0" max="300" step="5" value="100"></label>
+          <p class="debug-range-note">VHS 0 = immagine pulita · BLUR sale oltre i 120 km/h · FARI moltiplica il valore del Car Modeler · SHAKE = quanto si muove, VELOCITÀ SHAKE = quanto in fretta</p>
         </details>
         <div class="debug-custom-car">
           <label class="debug-select"><span>MODELLO AUTO PSXSTYLE</span><select id="debug-custom-car-model" aria-label="Modello auto PSXStyle"></select></label>

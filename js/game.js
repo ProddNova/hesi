@@ -93,7 +93,7 @@ class ShutokoNights {
     // On-foot mode: step out of the car anywhere (G), walk in first person, and
     // step back in when close. The car and world freeze while walking.
     this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
-    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,vhsAmount:1,motionBlur:1,headlightBrightness:1};
+    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,vhsAmount:1,motionBlur:1,headlightBrightness:1,cameraShake:1,cameraShakePace:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();this.setupCarModelHotReload();
     this.setupDebugMenu();
     this.setupDevMap();
@@ -708,7 +708,8 @@ class ShutokoNights {
     trafficRange('debug-traffic-intensity','density');trafficRange('debug-traffic-truck','truck');trafficRange('debug-traffic-van','van');trafficRange('debug-traffic-lanechange','lanechange');trafficRange('debug-traffic-speed','speed');this.syncTrafficControls();
     // Same live-drag / commit-on-release contract for the image and light dials.
     const visualRange=(id,key)=>{const el=document.getElementById(id);if(!el)return;el.addEventListener('input',e=>this.setVisualParam(key,e.target.value,false));el.addEventListener('change',e=>this.setVisualParam(key,e.target.value,true));};
-    visualRange('debug-vhs-amount','vhs');visualRange('debug-motion-blur','blur');visualRange('debug-headlight','headlight');this.syncVisualControls();
+    visualRange('debug-vhs-amount','vhs');visualRange('debug-motion-blur','blur');visualRange('debug-headlight','headlight');
+    visualRange('debug-shake-amount','shake');visualRange('debug-shake-pace','shakePace');this.syncVisualControls();
     document.getElementById('debug-close')?.addEventListener('click',()=>this.toggleDebugMenu(false));
     document.getElementById('debug-rec-toggle')?.addEventListener('click',()=>this.debugStats?.toggleRecording());
     document.getElementById('debug-rec-mark')?.addEventListener('click',()=>this.debugStats?.mark('debug menu'));
@@ -978,25 +979,33 @@ class ShutokoNights {
     set('debug-traffic-speed',speedPct,`${speedPct}%`);
     const note=document.getElementById('debug-traffic-mix-note');if(note)note.textContent=`auto ${carPct}% · furgoni ${vanPct}% · tir ${truckPct}%`;
   }
-  // Tape look, speed blur and headlight brightness. All three are stored in
-  // admin (so they survive a reload) and applied live; the blur value is a
-  // multiplier on the speed ramp rather than a fixed amount, because the effect
-  // is meant to arrive with velocity.
+  // Tape look, speed blur, headlight brightness and the camera shake. All are
+  // stored in admin (so they survive a reload) and applied live; the blur value
+  // is a multiplier on the speed ramp rather than a fixed amount, because the
+  // effect is meant to arrive with velocity. The shake is two independent
+  // dials on purpose — how FAR the eye moves and how OFTEN — because they are
+  // what separate "the car is working" from "the camera is broken", and no
+  // single number can be tuned to both.
   setVisualParam(key,value,commit=true){
     const v=+value;if(!Number.isFinite(v))return;const a=this.admin;
     if(key==='vhs'){a.vhsAmount=clamp(v,0,MAX_VHS_AMOUNT);this.vhs?.setAmount(a.vhsAmount);}
     else if(key==='blur'){a.motionBlur=clamp(v/100,0,MAX_MOTION_BLUR_LEVEL);}
     else if(key==='headlight'){a.headlightBrightness=clamp(v/100,0,2.5);this._applyHeadlightState();}
+    else if(key==='shake'){a.cameraShake=clamp(v/100,0,3);}
+    else if(key==='shakePace'){a.cameraShakePace=clamp(v/100,0,3);}
     else return;
-    this.syncVisualControls();if(commit){this.debugStats?.event('visual_tuning_changed',{key,value:v,runtime:{vhs:a.vhsAmount,motion_blur:a.motionBlur,headlight_brightness:a.headlightBrightness}});this.persist();}
+    this.syncVisualControls();if(commit){this.debugStats?.event('visual_tuning_changed',{key,value:v,runtime:{vhs:a.vhsAmount,motion_blur:a.motionBlur,headlight_brightness:a.headlightBrightness,camera_shake:a.cameraShake,camera_shake_pace:a.cameraShakePace}});this.persist();}
   }
   syncVisualControls(){
     const a=this.admin;
     const set=(id,val,label)=>{const el=document.getElementById(id);if(el&&document.activeElement!==el)el.value=String(val);const lab=document.getElementById(id+'-val');if(lab)lab.textContent=label;};
     const vhs=a.vhsAmount??1,blurPct=Math.round((a.motionBlur??1)*100),lightPct=Math.round((a.headlightBrightness??1)*100);
+    const shakePct=Math.round((a.cameraShake??1)*100),pacePct=Math.round((a.cameraShakePace??1)*100);
     set('debug-vhs-amount',vhs,vhs<=0?'OFF':`${vhs.toFixed(2)}×`);
     set('debug-motion-blur',blurPct,blurPct===0?'OFF':`${blurPct}%`);
     set('debug-headlight',lightPct,lightPct===0?'OFF':`${lightPct}%`);
+    set('debug-shake-amount',shakePct,shakePct===0?'OFF':`${shakePct}%`);
+    set('debug-shake-pace',pacePct,`${pacePct}%`);
   }
   // Radial smear from road speed. Zero outside driving so the garage, the PA and
   // the menus are always clean — and so the pass can release its buffer when the
@@ -1323,10 +1332,12 @@ class ShutokoNights {
     const effort=clamp((t.throttle||0)*.55+(t.slip||0)*1.1+(this.lastDriveInput?.handbrake?.3:0),0,1);
     // Cockpit sits lowest and rides hardest; the hood cam is a bonnet mount.
     const view=chase?CHASE_SHAKE_SCALE:(this.cameraMode==='cockpit'?1:.72);
-    const target=pace*(.42+.58*effort)*view;
+    // Dev-panel dials (IMMAGINE & LUCI): amplitude and pace, independently.
+    const gain=clamp(this.admin.cameraShake??1,0,3);
+    const target=pace*(.42+.58*effort)*view*gain;
     this.camShake=THREE.MathUtils.lerp(this.camShake||0,target,1-Math.exp(-dt*6));
     if(this.camShake<.002)return null;
-    this.camShakeTime=(this.camShakeTime||0)+dt*SHAKE_PACE*(chase?CHASE_SHAKE_RATE:1);
+    this.camShakeTime=(this.camShakeTime||0)+dt*SHAKE_PACE*clamp(this.admin.cameraShakePace??1,0,3)*(chase?CHASE_SHAKE_RATE:1);
     // ~5 Hz carrier with a ~8 Hz partial (the raw figures below are the old
     // ~9/14 Hz pair, scaled down by SHAKE_PACE): slow enough that each stroke
     // is a movement the eye can follow instead of a rattle, still incommensurate
