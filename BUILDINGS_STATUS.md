@@ -21,27 +21,29 @@ Three things were asked for and all three are in:
 the editor (`js/custom-assets.js`) read. A type declares its window grid and its
 size falls out of it, so windows never land half-cut at a corner or a roof:
 
-    width = cols * cellW * repeatX      depth = depthCols * cellW * repeatX
-    height = rows * cellH * repeatY
+    width = cols * cellW * repeatX * SCALE   depth = depthCols * cellW * repeatX * SCALE
+    height = rows * cellH * repeatY * SCALE
+
+Sizes below are the shipped ones at `BUILDING_SCALE = 1.5` (see §4).
 
 | # | Type | Material slot | w × h × d (m) |
 |---|------|---------------|---------------|
-| 1 | Shop row | `facadeShop` | 30.8 × 14.4 × 22 |
-| 2 | Apartment block | `facadeApartment` | 38.4 × 33 × 25.6 |
-| 3 | Dark block | `facadeDark` | 30.6 × 42.9 × 27.2 |
-| 4 | Office block | `facadeOffice` | 34 × 59.4 × 30.6 |
-| 5 | Hotel slab | `facadeHotel` | 25.2 × 84 × 22.4 |
-| 6 | Slim tower | `facadeSlim` | 19.8 × 104 × 19.8 |
-| 7 | Office tower | `facadeTower` | 39.6 × 126 × 36 |
-| 8 | Skyscraper | `facadeSky` | 48 × 201.6 × 44.8 |
-| 9 | Warehouse | `facadeIndustrial` | 60 × 20 × 36 |
-| 10 | Depot shed | `facadeDepot` | 88 × 13.5 × 44 |
-| 11 | Town house | `facadeTownHouse` | 12.8 × 9.9 × 12.8 |
-| 12 | Roadside retail | `facadeRetail` | 32.4 × 9.2 × 25.2 |
-| 13 | Tenement block | `facadeTenement` | 17 × 18.6 × 17 |
-| 14 | Works office | `facadeWorksOffice` | 21.6 × 13.6 × 14.4 |
-| 15 | Machine works | `facadeWorks` | 40 × 16.2 × 25 |
-| 16 | Cold store | `facadeColdStore` | 28 × 28.8 × 28 |
+| 1 | Shop row | `facadeShop` | 46.2 × 21.6 × 33 |
+| 2 | Apartment block | `facadeApartment` | 57.6 × 49.5 × 38.4 |
+| 3 | Dark block | `facadeDark` | 45.9 × 64.4 × 40.8 |
+| 4 | Office block | `facadeOffice` | 51 × 89.1 × 45.9 |
+| 5 | Hotel slab | `facadeHotel` | 37.8 × 126 × 33.6 |
+| 6 | Slim tower | `facadeSlim` | 29.7 × 156 × 29.7 |
+| 7 | Office tower | `facadeTower` | 59.4 × 189 × 54 |
+| 8 | Skyscraper | `facadeSky` | 72 × 302.4 × 67.2 |
+| 9 | Warehouse | `facadeIndustrial` | 90 × 30 × 54 |
+| 10 | Depot shed | `facadeDepot` | 132 × 20.3 × 66 |
+| 11 | Town house | `facadeTownHouse` | 19.2 × 14.9 × 19.2 |
+| 12 | Roadside retail | `facadeRetail` | 48.6 × 13.8 × 37.8 |
+| 13 | Tenement block | `facadeTenement` | 25.5 × 27.9 × 25.5 |
+| 14 | Works office | `facadeWorksOffice` | 32.4 × 20.4 × 21.6 |
+| 15 | Machine works | `facadeWorks` | 60 × 24.3 × 37.5 |
+| 16 | Cold store | `facadeColdStore` | 42 × 43.2 × 42 |
 
 11–16 are the small ones. Their footprints (radius 7–22 m against the big
 types' 17–49 m) are what lets them stand where `_canPlaceBuilding` refuses
@@ -232,3 +234,53 @@ and writes the document back untouched afterwards.
   fills. Adding a type here is free of the stream that everything else is
   placed on.
 - **The roof blinkers** — `blinker` in the catalogue.
+
+---
+
+## 4 · One size dial for the whole city (+25 %, 27 Jul 2026)
+
+`BUILDING_SCALE` in `js/building-types.js` scales every type together. It
+multiplies the **metres** a window bay and a floor occupy, never the bay
+**count**, so nothing about the catalogue's promise changes: one type is still
+one box, the facade grid is untouched, a texture still lands whole on a wall and
+a saved model is still fitted into one identical box on every copy. `radius` is
+derived from the scaled footprint, so neighbours and the road keep the same
+clearance in proportion.
+
+    BUILDING_SCALE = 1.5   // half again as big in every direction
+
+Asked for in two steps the same day: +25 %, then another +20 % on top.
+
+| | 1.0 | 1.25 | **1.5** |
+|---|-----|------|---------|
+| boxes placed | 4660 | 4447 | **3605** |
+| shapes per type | 1 | 1 | **1** |
+| c1 / r9 / r1 / k1 / wangan coverage | 99/95/97/86/44 % | 98/95/96/82/43 % | **96/93/91/76/39 %** |
+| worst fully bare stretch | 150 m | 150 m | **150 m** (50 m on c1/r1) |
+
+Fewer boxes at each step, because a bigger footprint keeps proportionally more
+ground clear and the rows compete for the same land through `_canPlaceBuilding`.
+The volume standing beside the road is up ~3.4× against 1.0, so the canyon reads
+tighter, not thinner — but 1.5 is where small gaps start to open (50 m holes on
+the c1 and r1, k1 down to 76 %). If those show, the fix is `CITY_DISTRICTS` /
+`CITY_INFILL` in `js/map.js`: lower `step` or `skip` on the near rows, not a
+smaller scale.
+
+### It does move four of the editor's saved edits
+
+Placement decisions changed, and `_buildCity` draws its districts and the wangan
+port dressing from **one** rng — so the port props downstream of the districts
+land on different draws. `node .devtests/editor-build-ops-probe.mjs`:
+
+At 1.25 that cost four hides: `chunk 6,-7 box:container [0]` and `box:crane
+[1..3]` went GONE — nothing of either type is generated within 200 m of those
+spots any more, so what the hides were there to remove is gone on its own.
+
+Against the build file as re-saved from the editor at 16:50, **1.5 reads
+96 / 100 on target with 0 GONE** and only the four long-standing `box:marking`
+drifts on the Tatsumi deck. Re-run `node .devtests/editor-build-ops-probe.mjs`
+after any further scale change — it is the check that says whether your saved
+hides still point at what you hid.
+
+Verified: `node .devtests/building-catalogue-probe.mjs` (16 types, **1 shape
+each**), `node .devtests/building-shots.mjs` (5 spots, no page errors).

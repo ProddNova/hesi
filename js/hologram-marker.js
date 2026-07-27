@@ -55,10 +55,11 @@ function unitDisc() {
 
 function unitRim() {
   if (rimGeometry) return rimGeometry;
-  // A hairline circle, not a lid: the annulus is thin enough to read as a drawn
-  // outline at any distance, so the top of the column closes without the marker
-  // gaining a solid surface.
-  const geometry = new THREE.RingGeometry(0.94, 1.0, DISC_SEGMENTS);
+  // The cut edge of the rolled sheet, not a lid: thin enough to read as the
+  // wall's own thickness, so the top closes without the marker gaining a
+  // surface. Any wider and it becomes a rim, which is the second thing that
+  // made the disc look like two nested tubes.
+  const geometry = new THREE.RingGeometry(0.972, 1.0, DISC_SEGMENTS);
   geometry.rotateX(-Math.PI / 2);
   rimGeometry = geometry;
   return geometry;
@@ -92,7 +93,7 @@ export function createHologramMarker(color, emissive, scale = 1) {
   const group = new THREE.Group();
   const disc = unitDisc();
   const body = new THREE.Mesh(disc, new THREE.MeshBasicMaterial({
-    color: emissive, vertexColors: true, transparent: true, opacity: .42,
+    color: emissive, vertexColors: true, transparent: true, opacity: .55,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
   }));
   // The one hard edge in the marker: a hairline circle closing the top of the
@@ -103,11 +104,15 @@ export function createHologramMarker(color, emissive, scale = 1) {
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
   }));
   edges.position.y = .5;
+  // Glow, NOT a second shell. At 1.2× it stood off the wall far enough to read
+  // as its own cylinder — the marker looked like two tubes, one inside the
+  // other. It now hugs the sheet (1.5% of the radius, ~7 mm at the default
+  // size) so all it does is soften the edge of the one wall there is.
   const halo = new THREE.Mesh(disc, new THREE.MeshBasicMaterial({
-    color, vertexColors: true, transparent: true, opacity: .18,
+    color, vertexColors: true, transparent: true, opacity: .14,
     blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false, toneMapped: false,
   }));
-  halo.scale.set(1.2, 1.06, 1.2);
+  halo.scale.set(1.015, 1.004, 1.015);
   const core = new THREE.Group();
   core.add(halo, body, edges);
   const radius = HOLOGRAM_RADIUS * scale, height = HOLOGRAM_HEIGHT * scale;
@@ -136,7 +141,7 @@ export function animateHologramMarker(group, t) {
   core.scale.set(radius * (1 + breathe * .022), height * (1 - breathe * .018), radius * (1 + breathe * .022));
   // Fast flicker over a slow drift, so it looks unstable rather than pulsed.
   const shimmer = .85 + Math.sin(t * 20) * .09 + Math.sin(t * 6.1) * .06;
-  if (body) body.material.opacity = .42 * shimmer;
+  if (body) body.material.opacity = .55 * shimmer;
   if (edges) edges.material.opacity = .9 * shimmer;
-  if (halo) halo.material.opacity = .18 * (.7 + .3 * shimmer);
+  if (halo) halo.material.opacity = .14 * (.7 + .3 * shimmer);
 }

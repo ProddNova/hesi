@@ -539833,6 +539833,70 @@
     "tex:0161": {
       "name": "metallic_blue.png",
       "url": "textures/metallic-blue-75f3d2f89f.png"
+    },
+    "tex:0162": {
+      "name": "building_low_large.png",
+      "url": "textures/building-low-large-fa25a53b52.png"
+    },
+    "tex:0163": {
+      "name": "low_block.png",
+      "url": "textures/low-block-e0d9ec7428.png"
+    },
+    "tex:0164": {
+      "name": "Block_normal.png",
+      "url": "textures/block-normal-b36ac656a5.png"
+    },
+    "tex:0165": {
+      "name": "block_building_mid.png",
+      "url": "textures/block-building-mid-a75e6d2086.png"
+    },
+    "tex:0166": {
+      "name": "tower_building.png",
+      "url": "textures/tower-building-840b3f75bc.png"
+    },
+    "tex:0167": {
+      "name": "block.png",
+      "url": "textures/block-1c198322f9.png"
+    },
+    "tex:0168": {
+      "name": "block_build_normal.png",
+      "url": "textures/block-build-normal-9cf17e4137.png"
+    },
+    "tex:0169": {
+      "name": "low_block.png",
+      "url": "textures/low-block-e0d9ec7428.png"
+    },
+    "tex:0170": {
+      "name": "low_block.png",
+      "url": "textures/low-block-e0d9ec7428.png"
+    },
+    "tex:0171": {
+      "name": "offices.png",
+      "url": "textures/offices-fdc694cdc0.png"
+    },
+    "tex:0172": {
+      "name": "block2.png",
+      "url": "textures/block2-525af27362.png"
+    },
+    "tex:0173": {
+      "name": "block3.png",
+      "url": "textures/block3-161b4c91de.png"
+    },
+    "tex:0174": {
+      "name": "low_shed.png",
+      "url": "textures/low-shed-4be2df6473.png"
+    },
+    "tex:0175": {
+      "name": "portual.png",
+      "url": "textures/portual-533839b216.png"
+    },
+    "tex:0176": {
+      "name": "low_shed.png",
+      "url": "textures/low-shed-fc95494c45.png"
+    },
+    "tex:0177": {
+      "name": "huge_slyscraper.png",
+      "url": "textures/huge-slyscraper-2d8b992fe6.png"
     }
   },
   "worldTextures": {
@@ -539850,71 +539914,67 @@
       "fit": "stretch"
     },
     "facadeShop": {
-      "texture": "tex:0115",
-      "brightness": 0.75
+      "texture": "tex:0163",
+      "brightness": 0.1
     },
     "facadeOffice": {
-      "texture": "tex:0116",
-      "brightness": 1.1
+      "texture": "tex:0171",
+      "brightness": 0.95
     },
     "facadeHotel": {
-      "texture": "tex:0127",
-      "brightness": 0.5
+      "texture": "tex:0177"
     },
     "facadeTower": {
-      "texture": "tex:0130",
-      "brightness": 0.55
+      "texture": "tex:0165",
+      "brightness": 0.1
     },
     "facadeSky": {
-      "texture": "tex:0131",
-      "brightness": 0.65
+      "texture": "tex:0171",
+      "brightness": 0.95
     },
     "towerWhite": {
-      "texture": "tex:0134"
+      "texture": "tex:0134",
+      "brightness": 0.15
     },
     "facadeApartment": {
-      "texture": "tex:0125",
-      "brightness": 0.85
+      "texture": "tex:0164",
+      "brightness": 0.1
     },
     "facadeIndustrial": {
-      "texture": "tex:0132",
-      "brightness": 1.2
+      "texture": "tex:0174",
+      "brightness": 0.1
     },
     "facadeDark": {
-      "texture": "tex:0126",
-      "brightness": 0.8
+      "texture": "tex:0165",
+      "brightness": 0.1
     },
     "facadeSlim": {
-      "texture": "tex:0128",
-      "brightness": 0.8
+      "texture": "tex:0166",
+      "brightness": 0.1
     },
     "facadeDepot": {
-      "texture": "tex:0133",
-      "brightness": 1.15
+      "texture": "tex:0176",
+      "brightness": 0.1
     },
     "facadeTownHouse": {
-      "texture": "tex:0115",
-      "brightness": 0.75
+      "texture": "tex:0173",
+      "brightness": 0.1
     },
     "facadeRetail": {
-      "texture": "tex:0115",
-      "brightness": 0.9
+      "texture": "tex:0162",
+      "brightness": 0.1
     },
     "facadeTenement": {
-      "texture": "tex:0125",
-      "brightness": 0.85
+      "texture": "tex:0172",
+      "brightness": 0.1
     },
     "facadeWorksOffice": {
-      "texture": "tex:0116",
-      "brightness": 1.1
+      "texture": "tex:0162",
+      "brightness": 0.1
     },
     "facadeWorks": {
-      "texture": "tex:0132",
-      "brightness": 1.2
-    },
-    "facadeColdStore": {
-      "texture": "tex:0133",
-      "brightness": 1
+      "texture": "tex:0175",
+      "brightness": 0.1
     },
     "concrete": {
       "texture": "tex:0134"
@@ -539932,6 +539992,10 @@
     },
     "barrierScreen": {
       "texture": "tex:0158"
+    },
+    "facadeColdStore": {
+      "texture": "tex:0167",
+      "brightness": 0.1
     }
   },
   "worldModels": {},

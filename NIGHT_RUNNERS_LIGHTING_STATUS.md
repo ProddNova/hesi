@@ -442,3 +442,60 @@ census must not change.
 Verified: `node .devtests/headlight-response-probe.mjs` → **8/8**, byte-identical
 across three consecutive runs (traffic off, adaptive render scale pinned and
 `timeScale` stopped, so only the beam changes between samples).
+
+# Round 7 — the ground murk (the "nube", 2026-07-27)
+
+**Asked for:** not just a dark floor. The reference frame has an *aura* rising
+off the ground that swallows the first few metres of everything standing in it —
+the blocks read as standing IN something, not on a black plate.
+
+Distance fog cannot do that: it grades a fragment by how far it is, not by how
+low it is. So `GROUND_MURK` (top of `js/map.js`) is a second, height-graded blend
+to a near-black colour, patched into every lit world material:
+
+    color: 0x02030a   bottom: -1 m   top: 26 m   strength: 0.92
+
+`groundMurk()` in `_createMaterials` hooks `onBeforeCompile` and rebuilds the
+world Y in the vertex shader (`instanceMatrix` first when `USE_INSTANCING` — most
+of this geometry is instanced, so `modelMatrix` alone is the chunk's transform,
+not the copy's), then mixes towards the murk colour **after** `<fog_fragment>`:
+a surface deep in the nube stays swallowed however far away it is, instead of
+being handed back by the haze. All the materials share one
+`customProgramCacheKey`, so they still share programs. The facades are
+`MeshBasicMaterial` and the mass is `MeshLambertMaterial` — the patch hooks the
+chunks both have, so it works on either.
+
+- The expressway decks sit at 30 m and up, so `top: 26` keeps the road, its
+  lamps, the pools and the traffic entirely out of it. This is a city-floor
+  effect, by construction.
+- Light sources are exempt (`MURK_EXEMPT`) so a fixture that ever does sit down
+  in it still burns through.
+- **Deeper nube** → raise `top`. **Thicker** → raise `strength` (1 = the base of
+  a building is pure murk). **A haze instead of a void** → lift `color`.
+
+## What this replaced
+
+Two earlier attempts at the same request are now redundant, and one is reverted:
+
+1. **Terrain.** `materials.ground` keeps `fog: false` and its near-black colour.
+   Measured then: against a pure-black ground the terrain's own lit colour was
+   worth ~0.2 luma of ~14 — `FogExp2` was what lifted the land, because a black
+   plate still comes back as the haze colour and the terrain is the one surface
+   seen for kilometres.
+2. **Tokyo Bay — reverted to its authored colour.** Tinting each material and
+   re-shooting settled that the navy field along the Bayshore, and the whole
+   ground plane at the K1, is the **water** plane and not the terrain (the
+   buildings there stand in it). It lies at y≈0, so the murk swallows it at any
+   camera height and any distance. Cutting its colour as well was a second dial
+   doing the first one's job, so `water` is back to `0x121e2a` / `0x0b131c`:
+   lower the murk strength and the sea comes back exactly as authored.
+3. **The saved `ground` surface override.** A textured slot's tint *replaces* the
+   generated colour (`applyWorldTextureOverrides`), so `brightness: 3` in
+   `data/editor/custom-assets.json` was what put the lamp splash back on the
+   land, and no colour in `js/map.js` could win against it. It was lowered to
+   0.3, and the editor re-saved the document back to 3 an hour later — which no
+   longer matters: at ground level the murk leaves 8 % of whatever that slot
+   resolves to. The look is code-side now and survives an editor save.
+
+Shots: `node .devtests/building-shots.mjs` → `.devtests/shots/buildings-murk2-*.png`
+(c1-canyon and k1-works are the ones that carry it).

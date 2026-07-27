@@ -12,8 +12,9 @@
  * Sizes are not free-hand numbers: a type declares its window grid and the
  * size falls out of it, so windows never land half-cut at a corner or a roof.
  *
- *    width  = cols  * cellW * repeatX      depth = depthCols * cellW * repeatX
- *    height = rows  * cellH * repeatY
+ *    width  = cols  * cellW * repeatX * SCALE
+ *    depth  = depthCols * cellW * repeatX * SCALE
+ *    height = rows  * cellH * repeatY * SCALE
  *
  * `cellW`/`cellH` are the metres one window bay / one floor occupies, `cols`
  * and `rows` are what the 256x256 facade texture holds, and `repeatX/repeatY`
@@ -40,11 +41,28 @@
  * models are what dresses them.
  */
 
+/**
+ * One dial for the size of the whole city: every type grows by the same factor,
+ * so the skyline keeps its proportions and one type stays one box.
+ *
+ * It scales the METRES a window bay and a floor occupy, never the bay COUNT, so
+ * the facade grid is untouched — a texture still lands whole on every wall and
+ * a saved model is still fitted into one identical box on every copy. Placement
+ * follows on its own: `radius` is derived from the scaled footprint, so
+ * neighbours and the road keep the same clearance in proportion.
+ *
+ * 1 = the sizes the grids below declare. 1.5 = half again as big in every
+ * direction (27 Jul 2026: +25 %, then another +20 % on top).
+ */
+export const BUILDING_SCALE = 1.5;
+
 /** Grid -> metres, so a size can never drift out of step with its facade. */
 function sized(entry) {
-  const width = entry.cols * entry.cellW * (entry.repeatX ?? 1);
-  const depth = entry.depthCols * entry.cellW * (entry.repeatX ?? 1);
-  const height = entry.rows * entry.cellH * (entry.repeatY ?? 1);
+  const cellW = entry.cellW * BUILDING_SCALE;
+  const cellH = entry.cellH * BUILDING_SCALE;
+  const width = entry.cols * cellW * (entry.repeatX ?? 1);
+  const depth = entry.depthCols * cellW * (entry.repeatX ?? 1);
+  const height = entry.rows * cellH * (entry.repeatY ?? 1);
   return Object.freeze({
     ...entry,
     repeatX: entry.repeatX ?? 1,

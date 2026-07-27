@@ -206,6 +206,12 @@ fading upward via baked vertex colours, closed by a hairline ring at the top so
 it keeps a silhouette at distance. It hovers (rise-only, so the base never sinks
 through the floor), breathes and flickers.
 
+**One wall, not two.** The first pass stood the glow layer off at 1.2× and made
+the top ring 6% of the radius, and the marker read as two nested tubes. The glow
+now hugs the sheet (1.015×, ~7 mm at the default size) and the ring is 2.8% —
+the cut edge of the sheet rather than a rim. There is exactly one surface in the
+silhouette; you see the far wall through the near one.
+
 Why it replaced the gem: the prism floated and said *look here*; a disc standing
 on the floor says *stand here*, which is what these anchors actually are.
 

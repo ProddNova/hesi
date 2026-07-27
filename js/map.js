@@ -154,6 +154,27 @@ const TERRAIN_BOTTOM_Y = -0.5;
 // the World editor's dial goes from matte (0) through the shipped look (1) to
 // wet (up to 3). Toned down from the pre-dial 0.34 / 0.2.
 const SURFACE_GLOSS_BASE = Object.freeze({ lightPool: 0.28, lightStreak: 0.12 });
+
+/**
+ * Ground murk — the dark "nube" that sits on the land and eats the bottom of
+ * whatever stands in it.
+ *
+ * A dark terrain alone is not the look: the reference frame has the ground
+ * dissolving UPWARD, swallowing the first few metres of every building so the
+ * blocks read as standing in something rather than on a black plate. Distance
+ * fog cannot do that — it grades by how far a fragment is, not by how low it is
+ * — so this is a second, height-graded blend towards `color`, injected into
+ * every lit world material (see `_createMaterials`).
+ *
+ * `bottom` is where it is at full strength, `top` where it is gone. The
+ * expressway decks sit at 30 m and up, so a top of 26 m keeps the road, its
+ * lamps and the traffic completely out of it: the murk is a city-floor effect.
+ *
+ *  - deeper nube: raise `top`
+ *  - thicker nube: raise `strength` (1 = the base of a building is pure murk)
+ *  - a haze instead of a void: lift `color`
+ */
+const GROUND_MURK = Object.freeze({ color: 0x02030a, bottom: -1, top: 26, strength: 0.92 });
 // Metres of bay per swell tile, and how fast the tile drifts across it (m/s,
 // two axes at different rates so the sea never reads as one sliding image).
 const WATER_TILE = 220;
@@ -814,6 +835,53 @@ export class HighwayMap {
       material.userData.streetLampLight = role;
       return material;
     };
+    // Height-graded blend to the murk colour, patched into whatever shader the
+    // material compiles (the facades are Basic, the mass is Lambert — this has
+    // to work on both, which is why it hooks the chunk both share). The world Y
+    // is rebuilt here rather than taken from a three chunk because most of this
+    // geometry is instanced, and `modelMatrix` alone is the chunk's transform,
+    // not the copy's.
+    const murk = new THREE.Color(GROUND_MURK.color);
+    const groundMurk = (material) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.hesiMurkColor = { value: murk };
+        shader.uniforms.hesiMurkBottom = { value: GROUND_MURK.bottom };
+        shader.uniforms.hesiMurkTop = { value: GROUND_MURK.top };
+        shader.uniforms.hesiMurkStrength = { value: GROUND_MURK.strength };
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying float vHesiMurkY;')
+          .replace('#include <project_vertex>', `#include <project_vertex>
+            vec4 hesiMurkWorld = vec4(transformed, 1.0);
+            #ifdef USE_INSTANCING
+              hesiMurkWorld = instanceMatrix * hesiMurkWorld;
+            #endif
+            vHesiMurkY = (modelMatrix * hesiMurkWorld).y;`);
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', `#include <common>
+            varying float vHesiMurkY;
+            uniform vec3 hesiMurkColor;
+            uniform float hesiMurkBottom;
+            uniform float hesiMurkTop;
+            uniform float hesiMurkStrength;`)
+          // After the fog, so the murk is the last word on what the city floor
+          // looks like: a surface deep in it stays swallowed however far away it
+          // is, instead of being handed back by the haze.
+          .replace('#include <fog_fragment>', `#include <fog_fragment>
+            float hesiMurk = smoothstep(hesiMurkTop, hesiMurkBottom, vHesiMurkY) * hesiMurkStrength;
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, hesiMurkColor, hesiMurk);`);
+      };
+      // Materials that share a program must share a cache key, and the patch is
+      // the same for all of them.
+      material.customProgramCacheKey = () => 'hesiGroundMurk';
+      return material;
+    };
+    // The light sources themselves stay out of it: they are the one thing that
+    // should still burn through the nube if a fixture ever sits down in it.
+    const MURK_EXEMPT = new Set([
+      'lampSodium', 'lampWhite', 'tunnelLampOrange', 'tunnelLampWhite', 'lightPool', 'lightStreak',
+      'redBlink', 'neon', 'reflector', 'exitGreen', 'matrix', 'cableLight', 'marker', 'billboardGlow',
+      'vending', 'konbini', 'canopy', 'chevron', 'signGreen', 'cushion',
+    ]);
     // One facade material per building type (js/building-types.js). The
     // material IS the type: repainting it in the editor repaints every copy of
     // that type, and nothing else.
@@ -824,7 +892,7 @@ export class HighwayMap {
         ? new THREE.MeshBasicMaterial({ map: texture, fog: true, toneMapped: false })
         : lambert(0x151a24);
     }
-    return {
+    const palette = {
       ...facades,
       road: lambert(0x14171f),
       roadAlt: lambert(0x171a23),
@@ -865,10 +933,27 @@ export class HighwayMap {
       // The swell tile (greyscale, see _waterTexture) only ever darkens the
       // base colour, so the bay stays a black-navy night sea — the ripples
       // read off the emissive floor, not off a brighter blue.
+      // Along the K1 and the Bayshore this plane — not the terrain — is the
+      // floor under the whole view, and it was what read as a navy field. It
+      // lies at y≈0, so GROUND_MURK swallows it at any camera height and at any
+      // distance: the sea is dark because it is IN the nube, not because its
+      // own colour was cut. Lower the murk strength and it comes back as
+      // authored.
       water: lambert(0x121e2a, {
         map: this._waterTexture(), emissive: 0x0b131c, emissiveMap: this._waterTexture(),
       }),
-      ground: lambert(0x080a11),
+      // The land is darkness. Practically nothing of the ground should read
+      // from the elevated road — only the deck, the lamps and the city stand in
+      // the night (the "tenebre" look).
+      //
+      // The terrain plate was never bright: measured against a pure-black
+      // ground, its own lit colour is worth ~0.2 of 14 luma. What made the land
+      // visible as a navy field is FOG — a black surface still takes the haze
+      // colour at distance, and the terrain is the one surface the camera sees
+      // kilometres of. So it is excluded from the fog and left near-black: the
+      // buildings, the road and the backdrop keep their aerial perspective, the
+      // ground under them falls away into void.
+      ground: lambert(0x03040a, { fog: false }),
       towerWhite: lambert(0xb8bcc4),
       cable: basic(0x9aa3ad),
       cableLight: basic(0xcfe6ff),
@@ -911,6 +996,10 @@ export class HighwayMap {
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
       }), 'streak'),
     };
+    for (const [name, material] of Object.entries(palette)) {
+      if (!MURK_EXEMPT.has(name)) groundMurk(material);
+    }
+    return palette;
   }
 
   /**
