@@ -16,6 +16,12 @@ import * as THREE from 'three';
  * tape, so every UV-warping artifact was removed. Each output pixel now samples
  * its own row.
  *
+ * The one thing that does gather neighbouring pixels is the speed blur, and it
+ * is not a tape artifact: it is a driving effect (`setSpeedBlur`), it samples
+ * only along the line back to the centre of the frame, and it is zero in the
+ * middle of the picture. Nothing is displaced — the sharp frame is still in
+ * there, with a short trail behind it toward the edges.
+ *
  * Colour management note, and the reason for the `isXRRenderTarget` flag below.
  * three.js normally renders into an offscreen target with LinearSRGB output and
  * tone mapping switched OFF, expecting an output pass to finish the job. That
@@ -48,6 +54,7 @@ uniform sampler2D tDiffuse;
 uniform vec2 uResolution;
 uniform float uTime;
 uniform float uAmount;
+uniform float uSpeedBlur;
 varying vec2 vUv;
 
 float tapeNoise(vec2 p){
@@ -67,12 +74,36 @@ void main(){
   // Static — it does not breathe with time, so straight edges stay straight.
   float edge = abs(uv.x - 0.5) * 2.0;
   float split = (0.0005 + 0.0014 * edge * edge) * uAmount;
-  gl_FragColor = vec4(
+  vec3 colour = vec3(
     texture2D(tDiffuse, vec2(clamp(uv.x + split, 0.0, 1.0), uv.y)).r,
     texture2D(tDiffuse, uv).g,
-    texture2D(tDiffuse, vec2(clamp(uv.x - split, 0.0, 1.0), uv.y)).b,
-    1.0
+    texture2D(tDiffuse, vec2(clamp(uv.x - split, 0.0, 1.0), uv.y)).b
   );
+
+  // Speed blur. Four taps pulled straight toward the centre of the frame, so
+  // the smear runs along the direction the world is actually flowing. It is
+  // held at zero in the middle of the picture and only opens up toward the
+  // edges: that keeps the road, the traffic ahead and the HUD-adjacent centre
+  // readable, and it is the reason this does NOT read as the tape wobble that
+  // was removed above — every sample still comes from the same radial line, so
+  // nothing bends. uSpeedBlur is a fraction of the distance to the centre, fed
+  // from road speed by the game.
+  if (uSpeedBlur > 0.0005) {
+    vec2 toCentre = uv - 0.5;
+    float reach = uSpeedBlur * smoothstep(0.10, 0.62, length(toCentre));
+    vec3 accumulated = colour;
+    float weight = 1.0;
+    for (int i = 1; i <= 4; i++) {
+      float k = float(i) / 4.0;
+      float w = 1.0 - 0.6 * k;
+      vec2 tap = clamp(uv - toCentre * (reach * k), vec2(0.0), vec2(1.0));
+      accumulated += texture2D(tDiffuse, tap).rgb * w;
+      weight += w;
+    }
+    colour = accumulated / weight;
+  }
+
+  gl_FragColor = vec4(colour, 1.0);
 
   // Everything below runs on the finished, display-encoded picture — the same
   // place in the chain where a tape would pick these artifacts up.
@@ -96,11 +127,25 @@ void main(){
 `;
 
 export const DEFAULT_VHS_AMOUNT = 1;
+// Ceiling of the tape dial. 1× is the authored look and 2× was the old cap;
+// the headroom above that is deliberately past "tasteful" — it is there for
+// people who want the picture visibly destroyed.
+export const MAX_VHS_AMOUNT = 4;
+// The tape look and the speed blur share this one pass, but they are separate
+// dials: the blur is a driving effect, so it stays available with the tape
+// switched off. MAX_SPEED_BLUR is the smear at the 100% setting — a hint of
+// motion, not a zoom blur — and MAX_SPEED_BLUR_CEILING is the hard ceiling the
+// dial can reach. The ceiling must track the dial's range: clamping both to the
+// same number is what made the slider do nothing above 100% at top speed.
+export const MAX_SPEED_BLUR = 0.09;
+export const MAX_MOTION_BLUR_LEVEL = 4;
+export const MAX_SPEED_BLUR_CEILING = MAX_SPEED_BLUR * MAX_MOTION_BLUR_LEVEL;
 
 export class VHSEffect {
   constructor(renderer, { enabled = true, amount = DEFAULT_VHS_AMOUNT, samples = 4 } = {}) {
     this.renderer = renderer;
     this.enabled = !!enabled;
+    this.amount = Math.max(0, Math.min(MAX_VHS_AMOUNT, Number(amount) || 0));
     this.supported = VHSEffect.isSupported(renderer);
     // Multisampling moves off the canvas and into the buffer: without it the
     // one-pixel lamp posts and rail lines the desktop profile relies on start
@@ -113,7 +158,8 @@ export class VHSEffect {
       tDiffuse: { value: null },
       uResolution: { value: new THREE.Vector2(1, 1) },
       uTime: { value: 0 },
-      uAmount: { value: amount },
+      uAmount: { value: this.enabled ? this.amount : 0 },
+      uSpeedBlur: { value: 0 },
     };
     this.material = new THREE.ShaderMaterial({
       name: 'vhsPresent',
@@ -142,15 +188,34 @@ export class VHSEffect {
     return !!renderer;
   }
 
-  active() { return this.enabled && this.supported; }
+  /**
+   * The pass runs for the tape look OR for the speed blur: with VHS switched
+   * off, a car doing 250 km/h still needs the buffer.
+   */
+  active() { return this.supported && (this.enabled || this.uniforms.uSpeedBlur.value > 0); }
 
-  setAmount(amount) { this.uniforms.uAmount.value = Math.max(0, Math.min(2, Number(amount) || 0)); }
+  setAmount(amount) {
+    this.amount = Math.max(0, Math.min(MAX_VHS_AMOUNT, Number(amount) || 0));
+    this.uniforms.uAmount.value = this.enabled ? this.amount : 0;
+  }
+
+  /** Radial smear, as a fraction of each pixel's distance to frame centre. */
+  setSpeedBlur(blur) {
+    const value = Math.max(0, Math.min(MAX_SPEED_BLUR_CEILING, Number(blur) || 0));
+    if (value === this.uniforms.uSpeedBlur.value) return;
+    const wasActive = this.active();
+    this.uniforms.uSpeedBlur.value = value;
+    // Falling back to a direct canvas render releases the buffer, exactly as
+    // switching the tape look off does.
+    if (wasActive && !this.active()) this._disposeTarget();
+  }
 
   setEnabled(enabled) {
     enabled = !!enabled && this.supported;
     if (enabled === this.enabled) return false;
     this.enabled = enabled;
-    if (!enabled) this._disposeTarget();
+    this.uniforms.uAmount.value = enabled ? this.amount : 0;
+    if (!this.active()) this._disposeTarget();
     return true;
   }
 

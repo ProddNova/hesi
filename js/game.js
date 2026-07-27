@@ -20,7 +20,7 @@ import {
   carRearLightSettings,
 } from './car-models.js';
 import { applyCarPaint } from './car-paint.js';
-import { VHSEffect } from './vhs-effect.js';
+import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js';
 import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js';
 import { GameUI } from './ui.js?v=20260726a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
@@ -36,9 +36,35 @@ const DEFAULT_CUSTOM_CAR_SCALE=1;
 // Extra metres the chase camera drops back per km/h of speed, on top of its
 // 6.2 m resting distance. It exists to sell speed, but at .01 the car had
 // shrunk into the middle of the frame by 250 km/h — exactly when the player
-// most needs to read its attitude. Halved to .005: 1.1 m of drift at 220
-// instead of 2.2, so the pull-back is still felt and the car stays close.
-const CHASE_SPEED_PULLBACK=.005;
+// most needs to read its attitude. .005 still drifted a full metre by 220, so
+// it is now .0028: ~0.6 m of drift there, felt but no longer a zoom-out.
+// .0028 was still read as too much drift, so it is a third of that: ~0.2 m by
+// 220 km/h — the car keeps its size on screen and the pull-back is a hint.
+const CHASE_SPEED_PULLBACK=.00093;
+// Chase-view share of the first-person cabin shake (see updateCameraShake).
+// From outside the car the same amplitude and rate read as a camera fault, so
+// the chase view gets a bit over half the movement at well under half the pace.
+const CHASE_SHAKE_SCALE=.58,CHASE_SHAKE_RATE=.55;
+// Global pace of the shake. The original ~9 Hz carrier was a correct vibration
+// frequency and the wrong CAMERA frequency: at speed it buzzed, and a buzz on
+// the eye reads as a fault rather than as a car working. Slowing the whole
+// thing (same amplitude, longer strokes) is what makes it flow.
+const SHAKE_PACE=.55;
+// Speed blur ramp: nothing below 120 km/h, full effect at 260.
+const BLUR_SPEED_FLOOR=120,BLUR_SPEED_CEIL=260;
+// Headlight beam calibration.
+//
+// The Car Modeler stores headlight brightness in candela and three.js applies
+// the physical falloff, but the night scene is exposed for a fill of roughly
+// 1.5 — so the authored values (650-1450 cd) land 4-6× above white on anything
+// facing the beam. A traffic car two lengths ahead clipped to solid white, and
+// because it clipped, halving the Modeler value changed nothing on screen: the
+// dial only moved the part of the range that was already off the top of it.
+// Scaling the beam back into the exposed range is what makes brightness read
+// again — on the traffic ahead, on rails and on signs. The road pool goes with
+// it (it is the same light at a grazing angle), so the dev-panel multiplier
+// below exists to trim the result by eye.
+const HEADLIGHT_BEAM_CALIBRATION=.26;
 
 class ShutokoNights {
   constructor(){
@@ -67,7 +93,7 @@ class ShutokoNights {
     // On-foot mode: step out of the car anywhere (G), walk in first person, and
     // step back in when close. The car and world freeze while walking.
     this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
-    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1};
+    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,vhsAmount:1,motionBlur:1,headlightBrightness:1};
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();this.setupCarModelHotReload();
     this.setupDebugMenu();
     this.setupDevMap();
@@ -77,7 +103,7 @@ class ShutokoNights {
     // The pass owns multisampling once it is on, so the canvas MSAA above stops
     // being the anti-aliaser. Phones keep it off: a half-float colour buffer is
     // a bandwidth cost their profile already budgets against.
-    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,samples:this.isTouchDevice?0:4});
+    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isTouchDevice?0:4});
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
     // the address bar settles. Reallocating WebGL's drawing buffer for each one
@@ -666,7 +692,7 @@ class ShutokoNights {
     t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo,playerGhost:this.ghostTimer>0});pf.traffic+=performance.now()-t0;
     this.handleTrafficEvents();this.updatePlayerMesh(dt);
     t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
-    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);if(this.shouldUpdateHUD())this.updateHUD(tel,this.currentRoadInfo||roadInfo);
+    const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateSpeedBlur(tel.speedKmh);this.updateAudio(tel,dt);if(this.shouldUpdateHUD())this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
   }
 
@@ -680,6 +706,9 @@ class ShutokoNights {
     // Live traffic test sliders: drag updates instantly (no persist), release commits.
     const trafficRange=(id,key)=>{const el=document.getElementById(id);if(!el)return;el.addEventListener('input',e=>this.setTrafficParam(key,e.target.value,false));el.addEventListener('change',e=>this.setTrafficParam(key,e.target.value,true));};
     trafficRange('debug-traffic-intensity','density');trafficRange('debug-traffic-truck','truck');trafficRange('debug-traffic-van','van');trafficRange('debug-traffic-lanechange','lanechange');trafficRange('debug-traffic-speed','speed');this.syncTrafficControls();
+    // Same live-drag / commit-on-release contract for the image and light dials.
+    const visualRange=(id,key)=>{const el=document.getElementById(id);if(!el)return;el.addEventListener('input',e=>this.setVisualParam(key,e.target.value,false));el.addEventListener('change',e=>this.setVisualParam(key,e.target.value,true));};
+    visualRange('debug-vhs-amount','vhs');visualRange('debug-motion-blur','blur');visualRange('debug-headlight','headlight');this.syncVisualControls();
     document.getElementById('debug-close')?.addEventListener('click',()=>this.toggleDebugMenu(false));
     document.getElementById('debug-rec-toggle')?.addEventListener('click',()=>this.debugStats?.toggleRecording());
     document.getElementById('debug-rec-mark')?.addEventListener('click',()=>this.debugStats?.mark('debug menu'));
@@ -687,7 +716,7 @@ class ShutokoNights {
     document.getElementById('debug-hitboxes-all')?.addEventListener('click',()=>{const inputs=[...document.querySelectorAll('[data-debug-hitbox]')],enable=inputs.some(input=>!input.checked);for(const input of inputs){input.checked=enable;this.setDebugHitbox(input.dataset.debugHitbox,enable);}});
   }
   toggleDebugMenu(force){
-    const open=typeof force==='boolean'?force:!this.debug.menuOpen;this.debug.menuOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.syncTrafficControls();this.syncCustomCarControls();}
+    const open=typeof force==='boolean'?force:!this.debug.menuOpen;this.debug.menuOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.syncTrafficControls();this.syncVisualControls();this.syncCustomCarControls();}
     this.keys={};this.pressed.clear();this.releaseTouchInput?.();if(open)document.exitPointerLock?.();else if(this.debug.noclip&&!this.isTouchDevice)this.requestDronePointerLock();
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
@@ -948,6 +977,35 @@ class ShutokoNights {
     set('debug-traffic-lanechange',lanePct,lanePct===0?'OFF':`${lanePct}%`);
     set('debug-traffic-speed',speedPct,`${speedPct}%`);
     const note=document.getElementById('debug-traffic-mix-note');if(note)note.textContent=`auto ${carPct}% · furgoni ${vanPct}% · tir ${truckPct}%`;
+  }
+  // Tape look, speed blur and headlight brightness. All three are stored in
+  // admin (so they survive a reload) and applied live; the blur value is a
+  // multiplier on the speed ramp rather than a fixed amount, because the effect
+  // is meant to arrive with velocity.
+  setVisualParam(key,value,commit=true){
+    const v=+value;if(!Number.isFinite(v))return;const a=this.admin;
+    if(key==='vhs'){a.vhsAmount=clamp(v,0,MAX_VHS_AMOUNT);this.vhs?.setAmount(a.vhsAmount);}
+    else if(key==='blur'){a.motionBlur=clamp(v/100,0,MAX_MOTION_BLUR_LEVEL);}
+    else if(key==='headlight'){a.headlightBrightness=clamp(v/100,0,2.5);this._applyHeadlightState();}
+    else return;
+    this.syncVisualControls();if(commit){this.debugStats?.event('visual_tuning_changed',{key,value:v,runtime:{vhs:a.vhsAmount,motion_blur:a.motionBlur,headlight_brightness:a.headlightBrightness}});this.persist();}
+  }
+  syncVisualControls(){
+    const a=this.admin;
+    const set=(id,val,label)=>{const el=document.getElementById(id);if(el&&document.activeElement!==el)el.value=String(val);const lab=document.getElementById(id+'-val');if(lab)lab.textContent=label;};
+    const vhs=a.vhsAmount??1,blurPct=Math.round((a.motionBlur??1)*100),lightPct=Math.round((a.headlightBrightness??1)*100);
+    set('debug-vhs-amount',vhs,vhs<=0?'OFF':`${vhs.toFixed(2)}×`);
+    set('debug-motion-blur',blurPct,blurPct===0?'OFF':`${blurPct}%`);
+    set('debug-headlight',lightPct,lightPct===0?'OFF':`${lightPct}%`);
+  }
+  // Radial smear from road speed. Zero outside driving so the garage, the PA and
+  // the menus are always clean — and so the pass can release its buffer when the
+  // tape look is switched off too.
+  updateSpeedBlur(speedKmh){
+    if(!this.vhs)return;
+    const level=this.mode==='driving'&&!this.debug.noclip?clamp(this.admin.motionBlur??1,0,MAX_MOTION_BLUR_LEVEL):0;
+    const ramp=clamp(((speedKmh||0)-BLUR_SPEED_FLOOR)/(BLUR_SPEED_CEIL-BLUR_SPEED_FLOOR),0,1);
+    this.vhs.setSpeedBlur(level*ramp*ramp*MAX_SPEED_BLUR);
   }
   syncCustomCarControls(){
     if(!this.customCar)return;const select=document.getElementById('debug-custom-car-model'),model=getPSXCarModel(this.customCar.modelId);if(select&&document.activeElement!==select)select.value=model.id;
@@ -1241,32 +1299,38 @@ class ShutokoNights {
     this.camera.fov=THREE.MathUtils.lerp(this.camera.fov,60+clamp(t.speedKmh/300,0,1)*17,1-Math.exp(-dt*4));this.camera.updateProjectionMatrix();
   }
   /**
-   * Cabin shake for the first-person views.
+   * Camera shake, in every view.
    *
-   * From behind the car the body already sells speed; from the driver's seat
-   * there is nothing between the player and a perfectly steady horizon, so the
-   * faster views feel oddly serene. This puts the eye back on a car: a couple
-   * of incommensurable sines (they never line up into a visible pulse) driving
-   * a centimetre of head movement, plus a fraction of that on the aim point so
-   * the view rotates a little instead of sliding.
+   * From the driver's seat there is nothing between the player and a perfectly
+   * steady horizon, so the faster views felt oddly serene. This puts the eye
+   * back on a car: a couple of incommensurable sines (they never line up into a
+   * visible pulse) driving a centimetre of head movement, plus a fraction of
+   * that on the aim point so the view rotates a little instead of sliding.
+   *
+   * The chase view runs the same thing at CHASE_SHAKE_SCALE amplitude and
+   * CHASE_SHAKE_RATE pace. Outside the car a fast rattle reads as a broken
+   * camera rather than as a car working, so the movement there is deliberately
+   * slower and longer — it should feel like a heavy chase rig struggling to
+   * hold the shot, not like the cockpit.
    *
    * It only shows up when the driving is actually hard — the amplitude scales
    * with speed and is then gated by throttle, slip and the handbrake, so
    * coasting at 200 on a straight stays calm while a boosted exit rattles.
-   * Returns null for the chase camera.
    */
   updateCameraShake(dt,t){
-    if(this.cameraMode==='chase'){this.camShake=0;return null;}
+    const chase=this.cameraMode==='chase';
     const pace=clamp(((t.speedKmh||0)-70)/120,0,1);
     const effort=clamp((t.throttle||0)*.55+(t.slip||0)*1.1+(this.lastDriveInput?.handbrake?.3:0),0,1);
     // Cockpit sits lowest and rides hardest; the hood cam is a bonnet mount.
-    const target=pace*(.42+.58*effort)*(this.cameraMode==='cockpit'?1:.72);
+    const view=chase?CHASE_SHAKE_SCALE:(this.cameraMode==='cockpit'?1:.72);
+    const target=pace*(.42+.58*effort)*view;
     this.camShake=THREE.MathUtils.lerp(this.camShake||0,target,1-Math.exp(-dt*6));
     if(this.camShake<.002)return null;
-    this.camShakeTime=(this.camShakeTime||0)+dt;
-    // ~9 Hz carrier with a ~14 Hz partial: fast enough to read as the car
-    // vibrating rather than the camera swaying, and still several frames per
-    // cycle at 60 fps so it never turns into strobing.
+    this.camShakeTime=(this.camShakeTime||0)+dt*SHAKE_PACE*(chase?CHASE_SHAKE_RATE:1);
+    // ~5 Hz carrier with a ~8 Hz partial (the raw figures below are the old
+    // ~9/14 Hz pair, scaled down by SHAKE_PACE): slow enough that each stroke
+    // is a movement the eye can follow instead of a rattle, still incommensurate
+    // so the two never line up into a visible pulse.
     const s=this.camShakeTime,amp=this.camShake;
     const x=(Math.sin(s*57.3)*.6+Math.sin(s*88.1+1.7)*.4)*amp;
     const y=(Math.sin(s*49.7+2.4)*.55+Math.sin(s*79.3+.6)*.45)*amp;
@@ -1284,7 +1348,7 @@ class ShutokoNights {
     const mm=this.map?.getMinimapData?.()||this.map?.minimapData||null,services=this.map?.getServiceAreas?.()||this.map?.serviceAreas||this.map?.services||[];if(mm)this.ui.drawMinimap(mm,{x:vec(s.position||s).x,z:vec(s.position||s).z,heading:s.heading||0},services);
   }
   updateAudio(t,dt){try{this.audio?.update?.({rpm:t.rpm,redlineRpm:t.redline,speedKmh:t.speedKmh,throttle:t.throttle,slip:t.slip,turbo:this.getEffectiveCar().turbo||0,running:t.fuel>0,fuel:t.fuelFraction});}catch(e){} }
-  render(){const scene=this.activeScene();if(scene===this.roadScene&&scene.matrixWorldAutoUpdate===false){const debugDynamic=this.debug.noclip||this.debug.hitboxes.roads||this.debug.hitboxes.walls||this.debug.hitboxes.vehicles||this.debug.hitboxes.services||this.debug.hitboxes.world||this.devMap?.isOpen?.();if(debugDynamic)scene.updateMatrixWorld(true);else{this.camera.updateMatrixWorld(true);this.playerMesh?.updateMatrixWorld?.(true);for(const marker of this.map?.animatedMarkers||[])marker.updateMatrixWorld(true);}}this.renderer.toneMappingExposure=scene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;const t0=performance.now();if(!this.vhs?.render(scene,this.camera,t0/1000))this.renderer.render(scene,this.camera);this.frameProf.render+=performance.now()-t0;}
+  render(){const scene=this.activeScene();if(scene===this.roadScene&&scene.matrixWorldAutoUpdate===false){const debugDynamic=this.debug.noclip||this.debug.hitboxes.roads||this.debug.hitboxes.walls||this.debug.hitboxes.vehicles||this.debug.hitboxes.services||this.debug.hitboxes.world||this.devMap?.isOpen?.();if(debugDynamic)scene.updateMatrixWorld(true);else{this.camera.updateMatrixWorld(true);this.playerMesh?.updateMatrixWorld?.(true);for(const marker of this.map?.animatedMarkers||[])marker.updateMatrixWorld(true);}}this.renderer.toneMappingExposure=scene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;if(this.mode!=='driving')this.vhs?.setSpeedBlur(0);const t0=performance.now();if(!this.vhs?.render(scene,this.camera,t0/1000))this.renderer.render(scene,this.camera);this.frameProf.render+=performance.now()-t0;}
   renderQuality(){
     const q=this.state?.settings?.quality;if(['low','medium','high'].includes(q))return q;
     const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';
@@ -1369,7 +1433,9 @@ class ShutokoNights {
     // Headlights are not part of the world's master lighting rig: Modeler
     // brightness remains authoritative regardless of the ambient-light preset.
     delete light.userData.gameSceneLight;delete light.userData.baseLighting;
-    light.userData.baseIntensity=headlights.enabled?headlights.intensity:0;
+    // Store the authored candela; the exposure calibration and the dev-panel
+    // multiplier are applied in _applyHeadlightState so both stay live.
+    light.userData.authoredIntensity=headlights.enabled?headlights.intensity:0;
     this.playerHeadlights=[light];
     anchor.add(beamRoot);anchor.userData.headlightRoot=beamRoot;anchor.userData.headlightConfig=headlights;
 
@@ -1439,7 +1505,16 @@ class ShutokoNights {
   // hiding the lights: a SpotLight going invisible changes the scene's light
   // census and forces a full shader-program re-link (stutter). Intensity is a
   // plain uniform, so the census — and the prewarmed programs — stay valid.
-  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?(l.userData.baseIntensity??1450):0;if(this.playerMesh?.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=on&&this.playerMesh.userData.headlightConfig?.enabled!==false;}
+  // Beam power actually put into the scene: the Modeler's candela, brought into
+  // the night scene's exposed range (see HEADLIGHT_BEAM_CALIBRATION) and then
+  // scaled by the dev-panel multiplier. Both factors are read here rather than
+  // baked at attach time so the slider is live and re-reading it never needs a
+  // light rebuild — a SpotLight being re-created mid-drive costs a shader relink.
+  _headlightBeamIntensity(light){
+    const authored=light?.userData.authoredIntensity??light?.userData.baseIntensity??1450;
+    return authored*HEADLIGHT_BEAM_CALIBRATION*clamp(this.admin?.headlightBrightness??1,0,2.5);
+  }
+  _applyHeadlightState(){const on=this.headlightsOn!==false;for(const l of this.playerHeadlights||[])l.intensity=on?this._headlightBeamIntensity(l):0;if(this.playerMesh?.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=on&&this.playerMesh.userData.headlightConfig?.enabled!==false;}
   toggleHeadlights(){this.headlightsOn=this.headlightsOn===false;this.debugStats?.event('headlights_changed',{enabled:this.headlightsOn});this._applyHeadlightState();this.ui?.toast?.(this.headlightsOn?'HEADLIGHTS ON':'HEADLIGHTS OFF');this.audioClick?.();}
 
   getOwnedBase(){const saved=this.state.ownedCar||{},id=this.state.ownedCarId||saved.carId||saved.id,base=this.catalog.find(c=>c.id===id)||saved||this.fallbackCar();return{...base,...saved,id:base.id||id,carId:id,color:saved.color||base.colors?.[0]||base.color,engine:{...(base.engine||{}),...(saved.engine||{})}};}

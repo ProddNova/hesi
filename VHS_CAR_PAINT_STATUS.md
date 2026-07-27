@@ -198,3 +198,45 @@ and removing it goes back to plain paint.
 
 Regression suites re-run clean: editor `npm test` 151 unit + 8 server,
 `node tools/hesi-editor/.devtests/ui-audit.mjs` ALL CLEAN.
+
+---
+
+## Round 2 (2026-07-27) — VHS level dial + speed blur
+
+Both live in the same pass and both are driven from the dev panel (`0` →
+**IMMAGINE & LUCI**). The tape look was previously all-or-nothing (`settings.vhs`
+on/off at a hardcoded amount of 1).
+
+**VHS level** — `admin.vhsAmount`, slider `debug-vhs-amount` (0…2×). Feeds
+`VHSEffect.setAmount()`. `setAmount` no longer writes the uniform directly: the
+amount is stored on the instance and the uniform is `enabled ? amount : 0`, so
+the on/off setting and the level are independent and neither loses the other's
+value.
+
+**Speed blur** — `admin.motionBlur`, slider `debug-motion-blur` (0…200%). Four
+taps pulled toward the centre of the frame, weighted down with distance:
+
+- The reach is `uSpeedBlur × smoothstep(0.10, 0.62, |uv − 0.5|)`, so it is **zero
+  in the middle of the picture** and only opens up at the edges. The car, the
+  road ahead and the traffic you are about to hit stay sharp; the rails and the
+  city smear past. That is also why this does not reintroduce the "onde" problem
+  that killed the old wobble: every tap is on the same radial line as the pixel
+  it belongs to, so nothing bends.
+- Speed ramp is `((kmh − 120) / 140)²` capped at `MAX_SPEED_BLUR = 0.09`, times
+  the slider. Nothing at all below 120 km/h.
+- `game.updateSpeedBlur()` is called from `updateDriving`, and `render()` forces
+  it to zero outside driving, so the garage, the PA and the menus are never
+  blurred.
+
+**The pass now runs for the blur alone.** `active()` is
+`supported && (enabled || uSpeedBlur > 0)`, and dropping the blur back to zero
+with the tape look off releases the buffer exactly as toggling VHS off does.
+This is the risky part — an offscreen buffer that resolves wrong renders every
+frame black (see the `RGBA8` note in section 1) — so the probe covers it.
+
+Verified: `node .devtests/vhs-car-paint-probe.mjs` → **20/20**. New checks: the
+level slider reaches both the instance and the uniform, the headlight multiplier
+scales the live beam, and with VHS off + blur held open the pass stays active,
+keeps its buffer, still presents a real picture and does not shift exposure
+(0.5%). `.devtests/shots/vhs-speed-blur.png` shows the sharp centre / smeared
+edges.

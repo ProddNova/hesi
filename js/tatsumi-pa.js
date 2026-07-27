@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BARRIER_MATERIALS, BARRIER_STYLES } from './road-barrier-styles.js';
+import { createHologramMarker, animateHologramMarker } from './hologram-marker.js';
 
 // Tatsumi No.1 PA — the walkable zone behind the lay-by gate.
 //
@@ -181,30 +182,12 @@ export class TatsumiPaSystem {
     this.refreshColliders();
   }
 
-  /** Crystal waypoint prism, identical in look to the garage beacons. */
+  /** Holographic disc waypoint, identical in look to the garage beacons. */
   makeBeacon(color, emissive, scale = 1) {
-    const group = new THREE.Group();
-    const gem = new THREE.OctahedronGeometry(1, 0);
-    const body = new THREE.Mesh(gem, new THREE.MeshBasicMaterial({ color: emissive, transparent: true, opacity: .3, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-    const edges = new THREE.Mesh(gem, new THREE.MeshBasicMaterial({ color: emissive, wireframe: true, transparent: true, opacity: .9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-    edges.scale.setScalar(1.014);
-    const halo = new THREE.Mesh(gem, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .16, blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false, toneMapped: false }));
-    halo.scale.setScalar(1.35);
-    const core = new THREE.Group();
-    core.add(halo, body, edges);
-    core.scale.set(.24 * scale, .44 * scale, .24 * scale);
-    core.position.y = 1.35; core.userData.baseY = 1.35;
-    group.add(core);
-    group.userData = { core, body, edges, halo };
-    return group;
+    return createHologramMarker(color, emissive, scale);
   }
   animateBeacon(group, t) {
-    const { core, body, edges, halo } = group.userData; if (!core) return;
-    core.rotation.y = t * 1.3; core.position.y = core.userData.baseY + Math.sin(t * 2) * .12;
-    const shimmer = .85 + Math.sin(t * 20) * .09 + Math.sin(t * 6.1) * .06;
-    if (body) body.material.opacity = .3 * shimmer;
-    if (edges) edges.material.opacity = .9 * shimmer;
-    if (halo) { halo.material.opacity = .16 * (.7 + .3 * shimmer); halo.rotation.y = -t * .9; }
+    animateHologramMarker(group, t);
   }
 
   // The plane is added whatever happens: a headless build (probes) must produce

@@ -3,10 +3,10 @@
  *
  * Two behaviours, both of which are invisible to every other test:
  *  1. the chase camera's speed-dependent pull-back — it must still grow with
- *     speed, but only half as far as it used to, so the car does not shrink
+ *     speed, but only a fraction of what it used to, so the car does not shrink
  *     into the middle of the frame on the Bayshore;
- *  2. the first-person cabin shake — nothing at a standstill, something while
- *     driving hard, and never in the chase view.
+ *  2. the camera shake — nothing at a standstill, something while driving hard,
+ *     and in the chase view a gentler, slower version of the cockpit's.
  *
  * The camera is driven directly with synthetic telemetry so the measurements
  * are deterministic rather than "however fast the car happened to be going".
@@ -111,6 +111,7 @@ const sample = await page.evaluate(() => {
   return {
     chaseStopped: run('chase', telemetry(0)),
     chaseFast: run('chase', telemetry(220, 1)),
+    chaseHard: run('chase', telemetry(200, 1, 0.2)),
     cockpitStopped: run('cockpit', telemetry(0)),
     cockpitHard: run('cockpit', telemetry(200, 1, 0.2)),
     hoodHard: run('hood', telemetry(200, 1, 0.2)),
@@ -118,14 +119,17 @@ const sample = await page.evaluate(() => {
 });
 
 // ---------------------------------------------------------------- chase cam
-// The formula is 6.2 m + speed × 0.005, so 220 km/h must add ~1.1 m, not the
-// ~2.2 m it used to. The car is not on flat ground, so compare the growth.
+// The formula is 6.2 m + speed × 0.0028, so 220 km/h must add ~0.6 m, not the
+// 1.1 m of the .005 era or the 2.2 m of the original .01. The car is not on flat
+// ground, so compare the growth.
 const growth = sample.chaseFast.distance - sample.chaseStopped.distance;
-check('the chase camera still backs off with speed', growth > 0.6, `+${growth.toFixed(2)} m at 220 km/h`);
-check('and backs off about half as far as before', growth < 1.6,
-  `+${growth.toFixed(2)} m (the old .01 formula gave +2.2 m)`);
+check('the chase camera still backs off with speed', growth > 0.35, `+${growth.toFixed(2)} m at 220 km/h`);
+check('and the pull-back stays well under the old rates', growth < 1.0,
+  `+${growth.toFixed(2)} m (.005 gave +1.1 m, the original .01 gave +2.2 m)`);
 
-// ------------------------------------------------------------- cabin shake
+// ------------------------------------------------------------------- shake
+check('the chase view is dead steady at a standstill', sample.chaseStopped.jitter < 1e-6,
+  `${sample.chaseStopped.jitter.toExponential(1)} m/frame · shake ${sample.chaseStopped.shake.toFixed(4)}`);
 check('the cockpit is dead steady at a standstill', sample.cockpitStopped.jitter < 1e-6,
   `${sample.cockpitStopped.jitter.toExponential(1)} m/frame · shake ${sample.cockpitStopped.shake.toFixed(4)}`);
 check('the cockpit shakes when driving hard', sample.cockpitHard.jitter > 1e-4,
@@ -135,8 +139,15 @@ check('the shake stays small enough to read the road', sample.cockpitHard.jitter
 check('the hood camera shakes less than the cockpit',
   sample.hoodHard.shake > 0 && sample.hoodHard.shake < sample.cockpitHard.shake,
   `hood ${sample.hoodHard.shake.toFixed(3)} vs cockpit ${sample.cockpitHard.shake.toFixed(3)}`);
-check('the chase camera never shakes', sample.chaseFast.shake === 0,
-  `shake ${sample.chaseFast.shake}`);
+// Same telemetry as cockpitHard, so amplitude and pace compare directly. The
+// jitter figure is the largest frame-to-frame eye movement, which carries both:
+// the chase view must move both less far and less often.
+check('the chase view shakes when driving hard', sample.chaseHard.shake > 0,
+  `shake ${sample.chaseHard.shake.toFixed(3)} · ${(sample.chaseHard.jitter * 1000).toFixed(2)} mm/frame`);
+check('the chase shake is gentler than the cockpit', sample.chaseHard.shake < sample.cockpitHard.shake,
+  `chase ${sample.chaseHard.shake.toFixed(3)} vs cockpit ${sample.cockpitHard.shake.toFixed(3)}`);
+check('and moves the eye more slowly', sample.chaseHard.jitter < sample.cockpitHard.jitter * 0.5,
+  `chase ${(sample.chaseHard.jitter * 1000).toFixed(2)} vs cockpit ${(sample.cockpitHard.jitter * 1000).toFixed(2)} mm/frame`);
 
 check('no console errors during the run', errors.length === 0, errors.slice(0, 3).join(' | '));
 

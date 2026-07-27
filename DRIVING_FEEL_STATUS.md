@@ -280,3 +280,35 @@ numbers are deterministic: the chase pull-back still grows with speed but by
 ~1.0 m rather than ~2.2 m; the cockpit is bit-exactly steady at a standstill,
 shakes while driving hard, and stays under 20 mm/frame; the hood camera shakes
 less than the cockpit; the chase camera never shakes at all.
+
+---
+
+## Round 4 (2026-07-27) — shake in the chase view, less pull-back
+
+**The chase view shakes now.** `updateCameraShake()` used to return `null` for
+`chase` outright. It no longer special-cases the view away; it scales it:
+
+```js
+const CHASE_SHAKE_SCALE=.58, CHASE_SHAKE_RATE=.4;   // js/game.js
+```
+
+Amplitude is 58% of the first-person figure and the phase advances at 40% of the
+rate (`camShakeTime += dt * CHASE_SHAKE_RATE`), so the two sines stay the same
+shape but the movement is longer and slower. That split is deliberate: from
+outside the car the cockpit's ~9 Hz rattle reads as a broken camera, while a slow
+float reads as a heavy chase rig struggling to hold the shot. Measured on the
+probe with identical telemetry: chase moves the eye **4.4 mm/frame** against the
+cockpit's **18.3 mm/frame**.
+
+Everything that gated the first-person shake still gates this one — it is off at
+a standstill and scales with speed × (throttle / slip / handbrake).
+
+**Pull-back trimmed again.** `CHASE_SPEED_PULLBACK` `.005 → .0028`, i.e. +0.57 m
+at 220 km/h instead of +1.1 m (and +2.2 m in the original `.01` build). Same
+constant still feeds both `updateCamera()` and `snapDrivingCamera()`.
+
+Verified: `node .devtests/driving-camera-probe.mjs` → **11/11**. Three checks
+replaced the old "the chase camera never shakes": the chase view is bit-exactly
+steady at a standstill, shakes when driving hard, is gentler than the cockpit,
+and moves the eye at under half the cockpit's rate. The pull-back bounds were
+retuned to the new formula.

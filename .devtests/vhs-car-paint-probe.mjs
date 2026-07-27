@@ -170,6 +170,66 @@ const backOn = await page.evaluate(() => ({
 check('toggling back on re-allocates a correctly sized buffer',
   backOn.active === true && String(backOn.size) === String(backOn.canvas), JSON.stringify(backOn));
 
+// ---- Dev-panel image & light dials --------------------------------------
+const dials = await page.evaluate(() => {
+  const game = window.shutoko;
+  game.setVisualParam('vhs', 0.4);
+  game.setVisualParam('blur', 150);
+  game.setVisualParam('headlight', 50);
+  const light = game.playerHeadlights?.[0] || null;
+  return {
+    amount: game.vhs.amount,
+    uAmount: game.vhs.uniforms.uAmount.value,
+    label: document.getElementById('debug-vhs-amount-val')?.textContent || null,
+    slider: document.getElementById('debug-headlight')?.value || null,
+    blur: game.admin.motionBlur,
+    headlight: game.admin.headlightBrightness,
+    authored: light?.userData.authoredIntensity ?? null,
+    beam: light?.intensity ?? null,
+  };
+});
+check('the VHS slider drives the pass', dials.amount === 0.4 && dials.uAmount === 0.4 && dials.label === '0.40×',
+  JSON.stringify({ amount: dials.amount, uAmount: dials.uAmount, label: dials.label }));
+// Halving the multiplier must halve the light actually in the scene — the whole
+// point of the calibration is that this dial is no longer lost above white.
+const expectedBeam = dials.authored * 0.26 * 0.5;
+check('the headlight slider scales the live beam',
+  dials.beam > 0 && Math.abs(dials.beam - expectedBeam) < 0.5 && dials.slider === '50',
+  `${dials.authored} cd → ${dials.beam?.toFixed(1)} (expected ${expectedBeam.toFixed(1)})`);
+
+// Speed blur must keep the offscreen pass alive on its own: with the tape look
+// switched off there is nothing else holding the buffer open, and a buffer that
+// resolves wrong renders every frame black (see the RGBA8 note in the module).
+await page.evaluate(() => {
+  const game = window.shutoko;
+  game.setVisualParam('vhs', 1);
+  game.setVisualParam('headlight', 100);
+  game.changeSetting('vhs', false);
+  // Hold the ramp open at its ceiling; the parked car reports 0 km/h.
+  game.updateSpeedBlur = () => game.vhs.setSpeedBlur(0.06);
+});
+await page.waitForTimeout(800);
+const blurState = await page.evaluate(() => ({
+  active: window.shutoko.vhs.active(), hasTarget: !!window.shutoko.vhs.target,
+  blur: window.shutoko.vhs.uniforms.uSpeedBlur.value, tape: window.shutoko.vhs.uniforms.uAmount.value,
+}));
+const blurred = await grabFrame();
+await page.screenshot({ path: join(SHOTS, 'vhs-speed-blur.png') });
+check('speed blur keeps the pass running with the tape look off',
+  blurState.active === true && blurState.hasTarget === true && blurState.blur > 0 && blurState.tape === 0,
+  JSON.stringify(blurState));
+check('the blurred frame is a real picture, not black',
+  blurred.mean > 2 && blurred.max > 40, `mean ${blurred.mean.toFixed(1)} max ${blurred.max.toFixed(0)}`);
+const blurShift = Math.abs(blurred.mean - withoutVhs.mean) / Math.max(1, withoutVhs.mean);
+check('speed blur does not shift exposure', blurShift < 0.08,
+  `${(blurShift * 100).toFixed(1)}% · ${withoutVhs.mean.toFixed(1)} → ${blurred.mean.toFixed(1)}`);
+await page.evaluate(() => {
+  delete window.shutoko.updateSpeedBlur;
+  window.shutoko.vhs.setSpeedBlur(0);
+  window.shutoko.changeSetting('vhs', true);
+});
+await page.waitForTimeout(800);
+
 // ---- Body paint ---------------------------------------------------------
 const before = await page.evaluate(() => {
   const materials = [];

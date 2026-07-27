@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createHologramMarker, animateHologramMarker } from './hologram-marker.js';
 
 const V = (x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 
@@ -83,9 +84,9 @@ export class GarageSystem {
     // carDisplay is the single showroom anchor used by both the playable game
     // and the world editor. The selected PSXStyle model is attached here.
     this.carDisplay=new THREE.Group();this.carDisplay.position.set(0,.05,0);this.carDisplay.rotation.y=-Math.PI/2;this.root.add(this.carDisplay);
-    // PS2-style waypoint beacons (Enchanted Arms look): a faceted crystal
-    // diamond that spins and bobs, ringed by 4 tiny diamonds of the same shape
-    // orbiting it. Blue over the garage door, yellow over the market PC.
+    // PS2-style waypoint beacons: a holographic disc projected on the floor
+    // (js/hologram-marker.js), hovering and flickering on the spot the player
+    // has to stand on. Blue over the garage door, yellow over the market PC.
     this.beacons=[];
     this.exitMarkers=this.makeBeacon(0x2233dd,0x2f52ff);this.root.add(this.exitMarkers);
     this.pcMarkers=this.makeBeacon(0xcf9a15,0xffc22c);this.root.add(this.pcMarkers);
@@ -155,37 +156,14 @@ export class GarageSystem {
     this.refreshExitMarkers();
     this.refreshBedMarker();
   }
-  // A single crystal-diamond waypoint marker, rendered as a PS2-style hologram
-  // instead of a solid painted gem: a translucent additive body that glows on
-  // its own, crisp faceted wireframe edges, and a soft outer rim halo. The three
-  // layers share one octahedron and blend additively, so the beacon reads as a
-  // projected blue/yellow hologram rather than one flat tint.
-  makeBeacon(color,emissive,scale=1){
-    const group=new THREE.Group();
-    const gem=new THREE.OctahedronGeometry(1,0);
-    const body=new THREE.Mesh(gem,new THREE.MeshBasicMaterial({color:emissive,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false}));
-    const edges=new THREE.Mesh(gem,new THREE.MeshBasicMaterial({color:emissive,wireframe:true,transparent:true,opacity:.9,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false}));
-    edges.scale.setScalar(1.014);
-    const halo=new THREE.Mesh(gem,new THREE.MeshBasicMaterial({color,transparent:true,opacity:.16,blending:THREE.AdditiveBlending,side:THREE.BackSide,depthWrite:false,toneMapped:false}));
-    halo.scale.setScalar(1.35);
-    const core=new THREE.Group();
-    core.add(halo,body,edges);
-    core.scale.set(.24*scale,.44*scale,.24*scale);          // default ~0.48 m wide, ~0.88 m tall
-    core.position.y=1.35;core.userData.baseY=1.35;
-    group.add(core);
-    group.userData={core,body,edges,halo};
-    return group;
-  }
-  animateBeacon(group,t){
-    const {core,body,edges,halo}=group.userData;if(!core)return;
-    core.rotation.y=t*1.3;core.position.y=core.userData.baseY+Math.sin(t*2)*.12;
-    // Holographic shimmer: a fast flicker layered over a slow drift so the gem
-    // looks like an unstable projection instead of a steady solid.
-    const shimmer=.85+Math.sin(t*20)*.09+Math.sin(t*6.1)*.06;
-    if(body)body.material.opacity=.3*shimmer;
-    if(edges)edges.material.opacity=.9*shimmer;
-    if(halo){halo.material.opacity=.16*(.7+.3*shimmer);halo.rotation.y=-t*.9;}
-  }
+  // A single waypoint marker: the holographic disc from js/hologram-marker.js,
+  // shared with the Tatsumi PA lot and the PA road gate so every interaction
+  // point in the game looks like the same projector. Blue over the garage door,
+  // yellow over the market PC, red over the bed. It replaced the floating
+  // crystal prism — a disc standing on the floor says "stand here", which is
+  // what these anchors actually mean.
+  makeBeacon(color,emissive,scale=1){return createHologramMarker(color,emissive,scale);}
+  animateBeacon(group,t){animateHologramMarker(group,t);}
   refreshExitMarkers(){
     const doorX=this.shutter?.position.x??0;
     this.exitPoint=V(doorX,0,12.6);

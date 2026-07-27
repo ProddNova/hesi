@@ -21,6 +21,8 @@ import {
 import { BUILDING_TYPES } from './building-types.js';
 import { buildProgressiveTransitions } from './progressive-merge.js';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js';
+// The shared interaction-point look (garage, PA lot, PA road gate).
+import { createHologramMarker, animateHologramMarker } from './hologram-marker.js';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -9181,6 +9183,22 @@ export class HighwayMap {
         tangent: frameAt(standS).tangent.clone(),
         radius: 9,
       });
+
+      // The interaction point itself, in the same holographic-disc language as
+      // every marker inside the garage and the PA lot (js/hologram-marker.js),
+      // scaled up to car size so it reads from the running lanes: the driver
+      // aims at the disc, and the E prompt appears when they are standing on
+      // it. A Group of additive meshes, never `_instance` — the bay is inside
+      // the Tatsumi clearing (hence the exemption flag) and instanced content
+      // there is zero-scaled, plus merged/added meshes cannot shift the
+      // (mesh, index) addresses saved editor edits are written against.
+      const marker = createHologramMarker(0x2233dd, 0x2f52ff, 3);
+      marker.name = 'Tatsumi PA entrance marker';
+      marker.position.copy(stand);
+      marker.userData.tatsumiClearingSurface = true;
+      marker.userData.hologramMarker = true;
+      this._addChunkMesh(marker, stand);
+      this.animatedMarkers.push(marker);
     }
   }
 
@@ -10572,6 +10590,10 @@ export class HighwayMap {
     }
     const pulse = 1 + Math.sin(timeSeconds * 3.2) * 0.12;
     for (const marker of this.animatedMarkers) {
+      if (marker.userData?.hologramMarker) {
+        animateHologramMarker(marker, timeSeconds);
+        continue;
+      }
       if (marker.__spin) {
         marker.rotation.y = timeSeconds * 0.4;
         continue;

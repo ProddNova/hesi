@@ -396,3 +396,49 @@ under 10 cm, i.e. below the visible threshold for a soft additive glow.
 - A/B screenshots on the steepest rescued ramps (`ramp_17 @ 378 m`, was buried
   `3.55 m`, now `0.03 m`): the near lane goes from dark-with-an-abrupt-bright-
   patch to a continuous warm ribbon flowing down the grade.
+
+---
+
+# Round 6 — the headlight brightness dial did nothing (2026-07-27)
+
+**Report:** the player's headlights light the traffic ahead the same way no
+matter what — lowering the brightness in the Car Modeler leaves the cars looking
+"as if the light were powerful".
+
+**It was not the traffic system.** Traffic bodies are ordinary Lambert surfaces
+and they do receive the beam; the problem is exposure. The beam is a nearly
+horizontal pencil (lamp ~0.6 m up, aimed at 0.1 m thirty metres out), so it
+barely grazes the road but lands square on whatever is in the lane ahead. At the
+authored 650 cd, with `decay 1.35` and a 31.75 m cutoff, a surface nine metres
+ahead receives several times the night scene's white point — the fill is ~1.5.
+It clips, and once it clips the dial only moves the part of the range that is
+already off the top of the picture.
+
+Measured on a car-rear stand-in nine metres up the lane (unlit it reads
+64/255):
+
+| beam | panel luma | what a 2× change buys |
+| --- | --- | --- |
+| 650 cd (authored) | 233.5 | 221.0 → 233.5 = **+5.4%** |
+| 169 cd (calibrated) | 200.9 | 170.0 → 200.9 = **+15.4%** |
+
+**Fix — two parts, both in `js/game.js`:**
+
+1. `HEADLIGHT_BEAM_CALIBRATION = .26` scales the authored candela into the
+   exposed range. The Modeler value is untouched on disk; the light gets
+   `authored × calibration × multiplier`. The authored figure is now kept in
+   `light.userData.authoredIntensity` and the effective value is computed in
+   `_headlightBeamIntensity()` on every apply, so nothing is baked at attach
+   time — the beam never has to be rebuilt to change brightness, which matters
+   because re-creating a SpotLight mid-drive forces a shader relink.
+2. A live **LUMINOSITÀ FARI** slider in the dev panel (`admin.headlightBrightness`,
+   0…250%) to trim the result by eye. The road wash is the same light at a
+   grazing angle, so it scales with the beam; this is the knob for putting it
+   back where you want it.
+
+Toggling headlights (`L`) still works by intensity, never `visible` — the light
+census must not change.
+
+Verified: `node .devtests/headlight-response-probe.mjs` → **8/8**, byte-identical
+across three consecutive runs (traffic off, adaptive render scale pinned and
+`timeScale` stopped, so only the beam changes between samples).
