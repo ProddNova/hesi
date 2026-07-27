@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as MapModule from './map.js?v=20260724f';
-import * as PhysicsModule from './physics.js?v=20260727a';
+import * as PhysicsModule from './physics.js?v=20260727b';
 import * as TrafficModule from './traffic.js?v=20260724g';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
@@ -19,7 +19,7 @@ import {
   carPaintSettings,
   carRearLightSettings,
 } from './car-models.js';
-import { applyCarPaint } from './car-paint.js';
+import { applyCarPaint, updateCarPaintLights } from './car-paint.js';
 import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js';
 import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js';
 import { GameUI } from './ui.js?v=20260726a';
@@ -690,7 +690,7 @@ class ShutokoNights {
     // expensive road query and caused the large "other" spikes in diagnostics.
     this.syncFuelFromPhysics();
     t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo,playerGhost:this.ghostTimer>0});pf.traffic+=performance.now()-t0;
-    this.handleTrafficEvents();this.updatePlayerMesh(dt);
+    this.handleTrafficEvents();this.updatePlayerMesh(dt);this.updatePlayerPaintLights();
     t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
     const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateSpeedBlur(tel.speedKmh);this.updateAudio(tel,dt);if(this.shouldUpdateHUD())this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
@@ -1059,7 +1059,13 @@ class ShutokoNights {
     // while the selected PSX model is the sole visible vehicle in both scenes.
     if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=this.customCar?.object?.parent===this.playerMesh,customInGarage=this.customCar?.object?.parent===this.garage?.carDisplay,customInPa=this.customCar?.object?.parent===this.tatsumiPa?.carDisplay,onRoadVisible=chase&&customOnRoad&&this.mode==='driving';if(this.garage?.carDisplay)this.garage.carDisplay.visible=!!customInGarage;if(this.tatsumiPa?.carDisplay)this.tatsumiPa.carDisplay.visible=!!customInPa;if(this.garage?.parkedGroup)this.garage.parkedGroup.visible=false;if(this.customCar?.object)this.customCar.object.visible=onRoadVisible||(this.mode==='garage'&&customInGarage)||(this.mode==='pa'&&customInPa);if(this.playerMesh.userData.rearLights)this.playerMesh.userData.rearLights.visible=onRoadVisible;if(this.playerMesh.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=onRoadVisible&&this.headlightsOn!==false&&this.playerMesh.userData.headlightConfig?.enabled!==false;
   }
-  attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=(this.mode==='garage'?this.garage?.carDisplay:this.mode==='pa'?this.tatsumiPa?.carDisplay:null)||this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);this.syncPlayerVisuals();}
+  attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=(this.mode==='garage'?this.garage?.carDisplay:this.mode==='pa'?this.tatsumiPa?.carDisplay:null)||this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);if(this.mode!=='driving')updateCarPaintLights(this.customCar.object,[]);this.syncPlayerVisuals();}
+  updatePlayerPaintLights(){
+    if(!this.customCar?.object||this.mode!=='driving')return 0;
+    this._playerPaintLights=this._playerPaintLights||[];
+    const lights=this.map?.nearestCarPaintLights?.(this.playerMesh?.position,70,2,this._playerPaintLights)||[];
+    return updateCarPaintLights(this.customCar.object,lights);
+  }
   ensureGarageCar(){
     this.attachCustomCarVisual();
     if(this.customCar.object)this.garage?.refreshColliders?.();
@@ -1096,8 +1102,8 @@ class ShutokoNights {
     this.customCar.loadPromise=promise;
     try{
       const visual=await promise;if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){this.disposeCarVisual(visual);return null;}
-      // Paint runs before the shader prewarm so the painted material — which
-      // may be Phong rather than Lambert — is the one that gets compiled.
+      // Paint runs before shader prewarm so the physical clear-coat material
+      // (or unchanged Lambert flat paint) is the one that gets compiled.
       applyCarPaint(visual,carPaintSettings(target,this.editorCarAssets),this.editorCarAssets?.textures);
       try{await this.renderer.compileAsync?.(visual,this.camera,this.activeScene());}catch(e){console.warn('PSX car shader prewarm',e);}
       if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){this.disposeCarVisual(visual);return null;}

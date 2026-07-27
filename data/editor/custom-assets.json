@@ -539982,7 +539982,8 @@
       "brightness": 2
     },
     "barrierScreen": {
-      "texture": "tex:0158"
+      "texture": "tex:0158",
+      "brightness": 0.6
     },
     "facadeColdStore": {
       "texture": "tex:0167",
@@ -540062,10 +540063,9 @@
         "temperature": 0.5
       },
       "paint": {
-        "color": "#1b3fa8",
-        "metallic": 1,
-        "gloss": 1,
-        "texture": "tex:0161",
+        "color": "#00b3ff",
+        "metallic": 0.5,
+        "gloss": 0,
         "wrapScale": 0.25,
         "wrapTint": 0
       }

@@ -12,7 +12,7 @@
  *   node .devtests/car-body-wrap-probe.mjs
  */
 import * as THREE from 'three';
-import { applyCarPaint } from '../js/car-paint.js';
+import { applyCarPaint, updateCarPaintLights } from '../js/car-paint.js';
 
 const checks = [];
 const check = (ok, label, detail = '') => {
@@ -76,6 +76,13 @@ const flankSpan = (mesh, side = -1) => {
   const car = buildCar();
   const painted = applyCarPaint(car, { color: '#1b3fa8', metallic: 0.8, gloss: 0.5 }, textures);
   check(painted === 2, 'plain paint still reaches every body part', `${painted} slot(s)`);
+  check(bodies(car).every((mesh) => mesh.material.isMeshPhysicalMaterial), 'metallic paint uses a physical clear-coat material');
+  check(bodies(car).every((mesh) => mesh.material.metalness > 0 && mesh.material.roughness < 0.25 && mesh.material.clearcoat > 0.5),
+    'metallic and gloss controls produce a reflective automotive finish');
+  const fixture = { position: new THREE.Vector3(2, 9, 1), color: new THREE.Color(0xff8a2e), range: 52, strength: 5.2 };
+  check(updateCarPaintLights(car, [fixture]) === 2, 'nearby road lights update every physical body coat');
+  check(bodies(car).every((mesh) => mesh.material.userData.hesiCarPaintLightUniforms.range0.value === 52),
+    'the road-light range reaches the player-only shader uniforms');
   check(bodies(car).every((mesh) => !mesh.material.map), 'plain paint attaches no image');
   check(bodies(car).every((mesh) => !mesh.geometry.getAttribute('uv1')), 'plain paint projects no wrap coordinates');
 }

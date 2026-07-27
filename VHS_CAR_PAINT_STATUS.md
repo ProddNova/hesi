@@ -93,10 +93,12 @@ merged draw calls survive. Textured body faces are skipped (a livery is never
 tinted).
 
 Flat paint stays `MeshLambertMaterial`. Any metallic/gloss switches to
-`MeshPhongMaterial` with flat shading: the highlight breaks across facets, which
-is what reads as *metallizzato* on a low-poly car under sodium lamps. Metallic
-also darkens the base coat and adds ~5 % self-illumination so a dark body does
-not go pure black between lamps.
+`MeshPhysicalMaterial` with smooth normals, a coloured base coat, metallic
+flake, low roughness, and a separate clear coat. A compact generated
+night/garage panorama supplies broad warm and cool reflections in every scene:
+without something to reflect, even a physically glossy material reads as matte.
+The paint no longer darkens the selected colour or fakes visibility with
+self-illumination.
 
 Applied in `game.loadCustomCar()` **before** `compileAsync`, so the painted
 material is the one prewarmed; and in `modeler-panel._buildCarPreview()` plus
@@ -169,23 +171,26 @@ the headlight lenses black. Clear it per face in Faces & textures.
 node .devtests/vhs-car-paint-probe.mjs
 ```
 
-15/15 — pass active on boot, buffer sized to the canvas, frame is a real
+23/23 — pass active on boot, buffer sized to the canvas, frame is a real
 picture, toggle off/on releases and re-allocates, artifacts visible
 (1.7/255 mean channel delta) but subtle (5.5 % exposure), **pure passthrough at
 `amount 0` (0.00 % delta — the guard against the offscreen buffer changing the
 look)**, the saved paint reaches the car at boot, every body slot becomes one
-metallic colour, glass/lamps/wheels untouched, no console errors.
+physical metallic/clear-coat material with an environment map, glass/lamps/
+wheels untouched, no console errors.
 
 ```bash
 node .devtests/car-body-wrap-probe.mjs
 ```
 
-22/22, headless (no browser) — builds a body deliberately cut into a front and
+26/26, headless (no browser) — builds a body deliberately cut into a front and
 a rear half plus a leftover per-face image, and asserts the wrap covers all of
 it with one shared projection: both halves get complementary slices that meet
 at the seam, all parts share one texture upload, glass is untouched, Image
 scale tiles, removing the image restores plain paint and drops the projection,
-and an id pointing at a deleted image degrades to plain paint.
+an id pointing at a deleted image degrades to plain paint, and metallic/gloss
+produce one physical clear-coat material on every body part. The final two
+checks prove nearby fixture data reaches every body coat's live shader uniforms.
 
 ```bash
 node tools/hesi-editor/.devtests/car-paint-panel-probe.mjs   # server on :8081
@@ -261,3 +266,33 @@ the same thing. `MAX_SPEED_BLUR` keeps its meaning as the authored 100% value.
 
 Above ~2× the frame is deliberately past tasteful; that is the point of the
 headroom, not a bug to be tuned back out.
+
+---
+
+## Round 4 (2026-07-27) — paint reflects the actual road lamps
+
+The first physical-paint pass had a correct clear coat but relied too heavily
+on one generic environment map, so at high settings the car read like a jewel
+while the street lamps appeared to slide past without affecting it. The road
+fixtures are emissive meshes plus baked additive pools, not Three.js lights,
+so a standard physical material could not receive them.
+
+`HighwayMap` now retains a compact chunked index of the real sodium, white, and
+tunnel fixture positions. Each driving frame queries only the current and
+adjacent 600 m chunks and returns the nearest two fixtures. Their world
+positions, live configured colours, ranges, and strengths feed two analytic
+direct lights injected into the player paint shader. They run through Three's
+physical `RE_Direct`, including the clear coat, but exist only on the player
+body: no PointLights and no extra per-fragment loop on the road, buildings, or
+traffic.
+
+The generic environment contribution was reduced from 2.15 to 1.05 at maximum,
+metalness from 0.42 to 0.28, and maximum-gloss roughness broadened to 0.10 /
+0.05 for base/clear coat. The car now keeps a restrained automotive finish
+between lamps and receives a visible warm highlight that moves across the roof,
+edges, and panels as each real fixture passes.
+
+Verified in Chromium: **23/23**, including two real sodium fixtures detected
+15.1 m and 30.9 m from the player and both 52 m ranges present on every body
+coat; no shader compile or console errors. Headless material/wrap probe:
+**26/26**.

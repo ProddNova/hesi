@@ -1,5 +1,32 @@
 # Driving feel
 
+## Round 5 (July 2026) — quicker high-speed direction changes
+
+Reported: at high speed the car turns, but changing from one direction to the
+other feels rubbery.
+
+The turn-in allowance used `abs(lateralAcceleration)` to decide whether the car
+was already loaded. During a fast left-right transition that is the wrong
+question: a full leftward load while the driver asks for right is not a
+completed right-hand corner, it is the old load that still needs to be unwound.
+Because the sign was discarded, the extra transient steering closed exactly
+during direction changes.
+
+The load is now measured in the direction of the current steering request.
+Opposite load counts as a full deficit, and `DIRECTION_CHANGE_BOOST` adds a
+short extra 0.8 allowance while that old load remains. It fades to zero at the
+load crossover, so steady cornering authority, the grip budget and the
+counter-steer window are unchanged.
+
+On the starter car's deterministic 220 km/h left-right test, the lateral load
+crosses to the requested side in **0.47 s instead of 0.52 s** and reaches
+**-0.70 g instead of -0.60 g** after 0.7 s. Peak drift remains 3.8°.
+
+`node .devtests/handling-probe.mjs` now includes the high-speed reversal and
+passes 18/18. `grip-test.mjs` remains 12/12 and `top-speed-probe.mjs` remains
+2/2 at 220.2 km/h and 6.45 s to 100 km/h. Module versions are
+`physics.js?v=20260727b`, `game.js?v=20260727b`, cache `v57`.
+
 ## Round 2 (July 2026) — the car slid, and could not be caught
 
 Reported: the car breaks away in ordinary corners, the slide cannot be

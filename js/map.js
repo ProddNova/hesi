@@ -154,6 +154,15 @@ const TERRAIN_BOTTOM_Y = -0.5;
 // the World editor's dial goes from matte (0) through the shipped look (1) to
 // wet (up to 3). Toned down from the pre-dial 0.34 / 0.2.
 const SURFACE_GLOSS_BASE = Object.freeze({ lightPool: 0.28, lightStreak: 0.12 });
+// These fixtures are emissive meshes with baked road pools, not real Three.js
+// lights. Keep a tiny spatial record so the player-car shader can reproduce
+// their direct highlight without adding PointLights to every world material.
+const CAR_PAINT_LIGHT_MATERIALS = Object.freeze({
+  lampSodium: Object.freeze({ range: 52, strength: 7.2 }),
+  lampWhite: Object.freeze({ range: 44, strength: 6.2 }),
+  tunnelLampOrange: Object.freeze({ range: 28, strength: 6.8 }),
+  tunnelLampWhite: Object.freeze({ range: 28, strength: 6 }),
+});
 
 /**
  * Ground murk — the dark "nube" that sits on the land and eats the bottom of
@@ -732,6 +741,7 @@ export class HighwayMap {
     this._chunks = new Map();
     this._chunkBuckets = new Map();   // key -> matName -> {positions, indices, colors|null}
     this._chunkInstances = new Map(); // key -> typeName -> records[]
+    this._carPaintLightChunks = new Map(); // key -> nearby emissive fixture records
     // Per-copy record of every building box (see _pushBuildingBox). Buildings
     // are merged quads, not instances, so this is the ONLY trace of where each
     // one stands — it is what lets a saved model replace every office block.
@@ -5460,6 +5470,46 @@ export class HighwayMap {
       color,
       suppressed,
     });
+    const materialName = type.slice(type.indexOf(':') + 1);
+    const paintLight = CAR_PAINT_LIGHT_MATERIALS[materialName];
+    if (paintLight && !suppressed) {
+      if (!this._carPaintLightChunks.has(key)) this._carPaintLightChunks.set(key, []);
+      this._carPaintLightChunks.get(key).push({
+        position: position.clone(),
+        materialName,
+        range: paintLight.range,
+        strength: paintLight.strength,
+        distanceSq: Infinity,
+      });
+    }
+  }
+
+  /**
+   * Up to `limit` real fixture positions around the player. The returned array
+   * may be reused by the caller; only the current and adjacent 600 m chunks are
+   * visited, so this remains constant-time on the full highway network.
+   */
+  nearestCarPaintLights(position, radius = 64, limit = 2, target = []) {
+    target.length = 0;
+    if (!position || limit < 1) return target;
+    const radiusSq = radius * radius;
+    const cx = Math.floor(position.x / CHUNK);
+    const cz = Math.floor(position.z / CHUNK);
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const records = this._carPaintLightChunks.get(`${cx + dx},${cz + dz}`) || [];
+        for (const record of records) {
+          const distanceSq = record.position.distanceToSquared(position);
+          if (distanceSq > radiusSq) continue;
+          record.distanceSq = distanceSq;
+          record.color = this.materials[record.materialName]?.color || null;
+          target.push(record);
+        }
+      }
+    }
+    target.sort((left, right) => left.distanceSq - right.distanceSq);
+    if (target.length > limit) target.length = limit;
+    return target;
   }
 
   /**

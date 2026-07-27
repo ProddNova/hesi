@@ -249,7 +249,7 @@ const savedPaint = await page.evaluate(() => window.shutoko.editorCarAssets
   ?.carModels?.[`player:${window.shutoko.customCar.modelId}`]?.paint || null);
 if (savedPaint) {
   check('the saved paint record reaches the car at boot',
-    bodyBefore.length > 0 && bodyBefore.every((entry) => entry.type === 'MeshPhongMaterial')
+    bodyBefore.length > 0 && bodyBefore.every((entry) => entry.type === 'MeshPhysicalMaterial')
       && new Set(bodyBefore.map((entry) => entry.color)).size === 1,
     `${JSON.stringify(savedPaint)} → ${JSON.stringify(bodyBefore)}`);
 }
@@ -259,7 +259,7 @@ const painted = await page.evaluate(async () => {
   const document_ = game.editorCarAssets || { version: 1, assets: {}, textures: {}, carModels: {} };
   document_.carModels = document_.carModels || {};
   const target = `player:${game.customCar.modelId}`;
-  document_.carModels[target] = { ...(document_.carModels[target] || {}), paint: { color: '#1b3fa8', metallic: 0.8, gloss: 0.55 } };
+  document_.carModels[target] = { ...(document_.carModels[target] || {}), paint: { color: '#1b3fa8', metallic: 1, gloss: 1 } };
   game.applyCarModelDocument(document_, { reloadPlayer: true });
   await new Promise((done) => setTimeout(done, 2500));
   const materials = [];
@@ -269,7 +269,10 @@ const painted = await page.evaluate(async () => {
         materials.push({
           name: material.name, type: material.type,
           color: `#${material.color?.getHexString?.() || ''}`,
-          specular: material.specular ? `#${material.specular.getHexString()}` : null,
+          metalness: material.metalness ?? null,
+          roughness: material.roughness ?? null,
+          clearcoat: material.clearcoat ?? null,
+          envMap: !!material.envMap,
         });
       }
     }
@@ -277,15 +280,40 @@ const painted = await page.evaluate(async () => {
   return materials;
 });
 const bodyAfter = painted.filter((entry) => /(^|:)psxbody$/i.test(entry.name));
-const allPhong = bodyAfter.length > 0 && bodyAfter.every((entry) => entry.type === 'MeshPhongMaterial');
+const allPhysical = bodyAfter.length > 0 && bodyAfter.every((entry) => entry.type === 'MeshPhysicalMaterial');
 const oneColor = new Set(bodyAfter.map((entry) => entry.color)).size === 1;
-check('every body slot became metallic paint', allPhong, JSON.stringify(bodyAfter.slice(0, 4)));
+check('every body slot became physical metallic paint', allPhysical, JSON.stringify(bodyAfter.slice(0, 4)));
+check('metallic paint has a glossy reflected clear coat',
+  bodyAfter.every((entry) => entry.metalness > 0 && entry.roughness < 0.25 && entry.clearcoat > 0.5 && entry.envMap),
+  JSON.stringify(bodyAfter.slice(0, 4)));
 check('the whole body is one colour (no half-painted car)', oneColor,
   [...new Set(bodyAfter.map((entry) => entry.color))].join(', '));
 const untouched = painted.filter((entry) => /glass|taillight|headlight|wheel|tire|trim/i.test(entry.name));
 check('glass, lamps and wheels keep their own materials',
-  untouched.length > 0 && untouched.every((entry) => entry.type !== 'MeshPhongMaterial'),
+  untouched.length > 0 && untouched.every((entry) => entry.type !== 'MeshPhysicalMaterial'),
   `${untouched.length} non-body slot(s) untouched`);
+
+const roadLightResponse = await page.evaluate(() => {
+  const game = window.shutoko;
+  const nearby = game.map.nearestCarPaintLights(game.playerMesh.position, 70, 2, []);
+  const activeRanges = [];
+  game.customCar.object.traverse((child) => {
+    for (const material of (Array.isArray(child.material) ? child.material : [child.material])) {
+      const state = material?.userData?.hesiCarPaintLightUniforms;
+      if (state) activeRanges.push([state.range0.value, state.range1.value]);
+    }
+  });
+  return {
+    nearby: nearby.map((light) => ({ materialName: light.materialName, distance: Math.sqrt(light.distanceSq) })),
+    activeRanges,
+  };
+});
+check('the map publishes the real fixtures nearest the player car',
+  roadLightResponse.nearby.length > 0 && roadLightResponse.nearby.every((light) => light.distance < 70),
+  JSON.stringify(roadLightResponse.nearby));
+check('nearby fixtures reach the player-only paint shader',
+  roadLightResponse.activeRanges.length > 0 && roadLightResponse.activeRanges.every((ranges) => ranges.some((range) => range > 0)),
+  JSON.stringify(roadLightResponse.activeRanges));
 
 await page.waitForTimeout(400);
 await page.screenshot({ path: join(SHOTS, 'car-paint-blue-metallic.png') });

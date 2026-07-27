@@ -140,7 +140,32 @@ const provokeSlide = (settings) => {
     `residual yaw ${car.getTelemetry().yawRate.toFixed(3)} rad/s, peak during settle ${settle.peakYaw.toFixed(2)}`);
 }
 
-// 4 · Body attitude stays in road-car territory rather than motorcycle lean.
+// 4 · High-speed direction change. Absolute lateral load must not fool the
+// turn-in logic: immediately after a left-to-right input the old load points
+// the wrong way, so it is a deficit to unwind, not a finished right-hand turn.
+{
+  const { car } = makeCar();
+  car.setSpeed(220 / 3.6);
+  drive(car, 0.7, { throttle: 0.45, steer: 1 });
+
+  let crossover = Infinity;
+  let peakDrift = 0;
+  for (let i = 0; i < 42; i += 1) {
+    car.update(1 / 60, { throttle: 0.45, steer: -1 }, ROAD, {});
+    const telemetry = car.getTelemetry();
+    if (!Number.isFinite(crossover) && telemetry.accelerationLateral < 0) crossover = (i + 1) / 60;
+    peakDrift = Math.max(peakDrift, drift(car));
+  }
+  const finalLateralG = car.getTelemetry().gLateral;
+  check('220 km/h direction change takes the new load promptly',
+    crossover <= 0.48 && finalLateralG < -0.65,
+    `${crossover.toFixed(2)} s to cross, ${finalLateralG.toFixed(2)} g opposite`);
+  check('220 km/h direction change stays composed',
+    peakDrift < 0.09 && Number.isFinite(car.state.speed),
+    `peak drift ${deg(peakDrift).toFixed(1)}°`);
+}
+
+// 5 · Body attitude stays in road-car territory rather than motorcycle lean.
 {
   const { car } = makeCar();
   car.setSpeed(90 / 3.6);
@@ -166,7 +191,7 @@ const provokeSlide = (settings) => {
   check('brake dive stays under 4 degrees', peakPitch < 0.07, `${deg(peakPitch).toFixed(1)}° under full braking`);
 }
 
-// 5 · The brake is not a steering aid. Feeding the transferred axle loads into
+// 6 · The brake is not a steering aid. Feeding the transferred axle loads into
 // the understeer gradient used to double the lock a held button was allowed at
 // speed, so touching the brake mid-corner snapped the wheel wide open — the
 // opposite of what the tires can do while they are already spending their
@@ -188,7 +213,7 @@ for (const kmh of [140, 200]) {
     `${deg(coasting).toFixed(2)}° coasting vs ${deg(braking).toFixed(2)}° braking`);
 }
 
-// 6 · Assists fully off must still integrate cleanly (no NaN, no launch).
+// 7 · Assists fully off must still integrate cleanly (no NaN, no launch).
 {
   const { car } = makeCar();
   car.setSpeed(140 / 3.6);

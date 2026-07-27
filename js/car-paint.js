@@ -30,6 +30,68 @@ const BODY_MATERIAL_NAME = /(^|:)(psxbody|body|carrozzeria)$/i;
 const WRAP_UV_ATTRIBUTE = 'uv1';
 const WRAP_UV_CHANNEL = 1;
 
+// A glossy material without something to reflect still reads as matte. This
+// compact night/garage environment keeps reflections broad and readable in
+// every scene without adding lights or a per-frame reflection probe.
+let fallbackPaintEnvironment = null;
+
+function paintEnvironmentFallback() {
+  if (fallbackPaintEnvironment || typeof document === 'undefined') return fallbackPaintEnvironment;
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+
+  const sky = context.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, '#05090f');
+  sky.addColorStop(0.36, '#13263b');
+  sky.addColorStop(0.54, '#372116');
+  sky.addColorStop(0.62, '#120b08');
+  sky.addColorStop(1, '#020304');
+  context.fillStyle = sky;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Long soft sources make the body curvature legible, like garage strip
+  // lights and the rows of sodium lamps on the highway.
+  const strips = [
+    [8, 45, 5, 47, 'rgba(255,185,100,.88)'],
+    [38, 31, 3, 62, 'rgba(180,220,255,.72)'],
+    [74, 49, 8, 38, 'rgba(255,137,54,.95)'],
+    [118, 25, 4, 67, 'rgba(235,247,255,.92)'],
+    [157, 43, 7, 46, 'rgba(255,164,72,.9)'],
+    [203, 29, 3, 64, 'rgba(180,220,255,.8)'],
+    [235, 48, 9, 39, 'rgba(255,132,46,.92)'],
+  ];
+  context.save();
+  context.globalCompositeOperation = 'screen';
+  context.shadowBlur = 8;
+  for (const [x, y, width, height, color] of strips) {
+    context.fillStyle = color;
+    context.shadowColor = color;
+    context.fillRect(x, y, width, height);
+  }
+  context.restore();
+
+  const horizon = context.createLinearGradient(0, 59, 0, 77);
+  horizon.addColorStop(0, 'rgba(255,184,96,0)');
+  horizon.addColorStop(0.5, 'rgba(255,184,96,.62)');
+  horizon.addColorStop(1, 'rgba(255,184,96,0)');
+  context.fillStyle = horizon;
+  context.fillRect(0, 59, canvas.width, 18);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.name = 'HESI car-paint reflection fallback';
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  fallbackPaintEnvironment = texture;
+  return texture;
+}
+
 export function isCarBodyMaterial(material, mesh = null) {
   if (!material) return false;
   if (mesh?.userData?.hesiTrafficPartRole === 'body') return true;
@@ -37,14 +99,115 @@ export function isCarBodyMaterial(material, mesh = null) {
 }
 
 /**
- * Builds the painted material. Flat shading is kept from the stock body so the
- * highlight breaks across facets — a low-poly car under sodium lamps reads as
- * metallic through the specular break-up, not through a reflection probe.
- *
- * With a wrap image the base colour is lifted toward white first: `map` is
- * multiplied by `color` in three.js, so a blue base coat would turn every
- * livery blue. `wrapTint` dials that back in on purpose for anyone who wants
- * the picture to take the paint colour.
+ * Connects every physical body coat under `root` to an optional panorama.
+ * Passing null restores the built-in night/garage reflection environment.
+ */
+export function applyCarPaintEnvironment(root, environment = null, intensity = 1) {
+  if (!root) return 0;
+  const texture = environment?.isTexture ? environment : paintEnvironmentFallback();
+  const level = THREE.MathUtils.clamp(Number(intensity) || 0, 0, 4);
+  // Do not let a deliberately dim visual skybox erase all paint reflections:
+  // camera exposure and reflection exposure are different photographic jobs.
+  const panoramaResponse = environment ? Math.max(0.55, Math.sqrt(level)) : 1;
+  let touched = 0;
+  const visited = new Set();
+  root.traverse((child) => {
+    if (!child.isMesh && !child.isInstancedMesh) return;
+    for (const material of (Array.isArray(child.material) ? child.material : [child.material])) {
+      if (!material?.userData?.hesiCarPaint || visited.has(material)) continue;
+      visited.add(material);
+      const nextIntensity = (material.userData.hesiCarPaintReflectionStrength || 1) * panoramaResponse;
+      const changed = material.envMap !== texture;
+      material.envMap = texture;
+      material.envMapIntensity = nextIntensity;
+      if (changed) material.needsUpdate = true;
+      touched += 1;
+    }
+  });
+  return touched;
+}
+
+function installRoadLightResponse(material) {
+  const state = {
+    position0: new THREE.Vector3(),
+    position1: new THREE.Vector3(),
+    color0: new THREE.Color(0x000000),
+    color1: new THREE.Color(0x000000),
+    range0: { value: 0 },
+    range1: { value: 0 },
+  };
+  material.userData.hesiCarPaintLightUniforms = state;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.hesiPaintLightPosition0 = { value: state.position0 };
+    shader.uniforms.hesiPaintLightPosition1 = { value: state.position1 };
+    shader.uniforms.hesiPaintLightColor0 = { value: state.color0 };
+    shader.uniforms.hesiPaintLightColor1 = { value: state.color1 };
+    shader.uniforms.hesiPaintLightRange0 = state.range0;
+    shader.uniforms.hesiPaintLightRange1 = state.range1;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <lights_pars_begin>', `#include <lights_pars_begin>
+        uniform vec3 hesiPaintLightPosition0;
+        uniform vec3 hesiPaintLightPosition1;
+        uniform vec3 hesiPaintLightColor0;
+        uniform vec3 hesiPaintLightColor1;
+        uniform float hesiPaintLightRange0;
+        uniform float hesiPaintLightRange1;`)
+      .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>
+        vec3 hesiPaintVector0 = (viewMatrix * vec4(hesiPaintLightPosition0, 1.0)).xyz - geometryPosition;
+        float hesiPaintDistance0 = length(hesiPaintVector0);
+        float hesiPaintFalloff0 = pow(saturate(1.0 - hesiPaintDistance0 / max(hesiPaintLightRange0, 0.001)), 2.0);
+        directLight.direction = normalize(hesiPaintVector0);
+        directLight.color = hesiPaintLightColor0 * hesiPaintFalloff0;
+        directLight.visible = hesiPaintFalloff0 > 0.0;
+        RE_Direct(directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight);
+
+        vec3 hesiPaintVector1 = (viewMatrix * vec4(hesiPaintLightPosition1, 1.0)).xyz - geometryPosition;
+        float hesiPaintDistance1 = length(hesiPaintVector1);
+        float hesiPaintFalloff1 = pow(saturate(1.0 - hesiPaintDistance1 / max(hesiPaintLightRange1, 0.001)), 2.0);
+        directLight.direction = normalize(hesiPaintVector1);
+        directLight.color = hesiPaintLightColor1 * hesiPaintFalloff1;
+        directLight.visible = hesiPaintFalloff1 > 0.0;
+        RE_Direct(directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight);`);
+  };
+  material.customProgramCacheKey = () => 'hesiCarPaintRoadLightsV1';
+}
+
+/**
+ * Updates the two cheap analytic road-light highlights embedded only in the
+ * player-car paint shader. World materials receive no extra lighting loop.
+ */
+export function updateCarPaintLights(root, lights = []) {
+  if (!root) return 0;
+  let touched = 0;
+  const materials = root.userData?.hesiCarPaintMaterials || [];
+  for (const material of materials) {
+    const state = material.userData.hesiCarPaintLightUniforms;
+    for (let index = 0; index < 2; index += 1) {
+      const light = lights[index] || null;
+      const position = index ? state.position1 : state.position0;
+      const color = index ? state.color1 : state.color0;
+      const range = index ? state.range1 : state.range0;
+      if (light?.position) {
+        position.copy(light.position);
+        color.copy(light.color?.isColor ? light.color : new THREE.Color(light.color || 0xffffff))
+          .multiplyScalar(Number(light.strength) || 1);
+        range.value = Math.max(0, Number(light.range) || 0);
+      } else {
+        position.set(0, 0, 0);
+        color.set(0x000000);
+        range.value = 0;
+      }
+    }
+    touched += 1;
+  }
+  return touched;
+}
+
+/**
+ * Builds real automotive paint: a coloured dielectric base, optional metallic
+ * flake, and a smooth clear coat. With a wrap image the base colour is lifted
+ * toward white first because three.js multiplies `map` by `color`; `wrapTint`
+ * deliberately adds the selected paint colour back.
  */
 function paintMaterial(paint, source = null, wrap = null) {
   const base = new THREE.Color(paint.color);
@@ -64,19 +227,26 @@ function paintMaterial(paint, source = null, wrap = null) {
   if (metallic <= 0.001 && gloss <= 0.001) {
     return new THREE.MeshLambertMaterial({ ...shared, color: diffuse });
   }
-  const highlight = Math.max(gloss, metallic);
-  const material = new THREE.MeshPhongMaterial({
+  const finish = Math.max(gloss, metallic * 0.85);
+  const reflectionStrength = THREE.MathUtils.lerp(0.4, 1.05, finish);
+  const material = new THREE.MeshPhysicalMaterial({
     ...shared,
-    // Flake darkens the base coat and moves the energy into the highlight.
-    color: diffuse.clone().multiplyScalar(THREE.MathUtils.lerp(1, 0.78, metallic)),
-    specular: base.clone()
-      .lerp(new THREE.Color(0xffffff), 0.45 + 0.45 * metallic)
-      .multiplyScalar(0.16 + 0.6 * highlight),
-    shininess: THREE.MathUtils.lerp(8, 96, Math.max(gloss, metallic * 0.7)),
+    flatShading: false,
+    color: diffuse,
+    // A car body is not bare metal: even full metallic paint keeps a coloured
+    // binder and a dielectric clear coat over the flakes.
+    metalness: metallic * 0.28,
+    roughness: THREE.MathUtils.lerp(0.4, 0.1, finish),
+    clearcoat: THREE.MathUtils.lerp(0.42, 1, Math.max(gloss, metallic * 0.45)),
+    clearcoatRoughness: THREE.MathUtils.lerp(0.24, 0.05, gloss),
+    specularIntensity: THREE.MathUtils.lerp(0.82, 1, finish),
+    specularColor: new THREE.Color(0xffffff),
+    envMap: paintEnvironmentFallback(),
+    envMapIntensity: reflectionStrength,
   });
-  // A whisper of self-illumination keeps a dark metallic body from going to
-  // pure black between lamps, without making the car a light source.
-  if (metallic > 0) material.emissive = base.clone().multiplyScalar(0.05 * metallic);
+  material.userData.hesiCarPaint = true;
+  material.userData.hesiCarPaintReflectionStrength = reflectionStrength;
+  installRoadLightResponse(material);
   return material;
 }
 
@@ -251,11 +421,14 @@ export function applyCarPaint(root, paint, textures = null) {
     if (changed) child.material = Array.isArray(child.material) ? next : next[0];
   }
   if (!painted) { clearWrapUVs(root); return 0; }
+  root.userData.hesiCarPaintMaterials = [...new Set(replaced.values())]
+    .filter((material) => material.userData.hesiCarPaintLightUniforms);
   const owned = root.userData.ownedMaterials || (root.userData.ownedMaterials = []);
   for (const material of replaced.values()) owned.push(material);
   // The originals are per-car instances built moments ago by the PSX loader or
   // the custom asset builder, so nothing outside this object still uses them.
   // The wrap texture itself is cached and shared, so it is never disposed here.
   for (const material of replaced.keys()) material.dispose();
+  applyCarPaintEnvironment(root);
   return painted;
 }

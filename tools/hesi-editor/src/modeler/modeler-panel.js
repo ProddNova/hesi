@@ -1964,7 +1964,7 @@ export class ModelerPanel {
     this.carInspector.append(element('h4', 'surface-group-title', 'Body paint'));
     this.carInspector.append(element('p', 'modeler-help',
       'Repaints the whole bodywork at once — every mesh part and every body material, in this preview and on the road. '
-      + 'Metallic flake darkens the base coat and puts the energy into a tighter highlight: that is what turns a flat blue into a metallic blue under the street lamps. '
+      + 'Metallic flake adds a reflective metallic base; Clear-coat gloss controls the smooth transparent lacquer above it. The finish reacts to broad night/garage reflections and to nearby road lamps while driving, like automotive paint rather than a flat colour. '
       + 'A body image is wrapped over the car as one piece instead of being fitted to each part, which is why it belongs here and not in "Faces & textures": '
       + 'the projection is taken from the whole body, so one copy covers a flank across every mesh part it happens to be split into.'));
 

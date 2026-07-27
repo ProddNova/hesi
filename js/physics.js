@@ -16,6 +16,10 @@ const STEER_GRIP_BUDGET = 0.94;
 // Extra lock allowed on the way into a corner, before the lateral grip the
 // steering asked for has actually arrived. Fades to nothing as the corner loads.
 const TURN_IN_BOOST = 0.55;
+// A direction change must first unwind the lateral load from the previous
+// corner. Give that short transition more authority than a turn from straight;
+// it disappears as soon as the old load is gone and never raises steady lock.
+const DIRECTION_CHANGE_BOOST = 0.8;
 // When the car counts as sliding, measured in multiples of the rear tires' own
 // peak slip angle rather than in degrees — a soft tire on a wet surface is away
 // at an angle a sticky one is still gripping at. Nothing below onset is touched,
@@ -660,8 +664,18 @@ export class VehiclePhysics {
     // lateral acceleration is still short of what was asked for. It closes
     // itself as the corner loads up and shuts off once the rear starts to slide,
     // so it sharpens the entry without raising the steady demand.
-    const lateralDeficit = clamp(1 - Math.abs(this._lateralAcceleration) / Math.max(1, budgetLateral), 0, 1);
-    const turnIn = 1 + TURN_IN_BOOST * lateralDeficit * (1 - slide);
+    // Compare the chassis load with the direction the driver is asking for,
+    // not just with its absolute magnitude. On a quick left-right transition
+    // the car can still be carrying a full leftward load while the wheel is
+    // already pointed right. Treating that as "fully loaded" withheld all
+    // turn-in authority at exactly the moment it was needed and made fast
+    // direction changes feel rubbery. Opposite load is now a full deficit, so
+    // the normal transient lock stays available until the new corner builds.
+    const requestedTurn = Math.sign(input.steer) * directionSign;
+    const directionalLoad = this._lateralAcceleration * requestedTurn;
+    const lateralDeficit = clamp(1 - directionalLoad / Math.max(1, budgetLateral), 0, 1);
+    const opposingLoad = clamp(-directionalLoad / Math.max(1, budgetLateral), 0, 1);
+    const turnIn = 1 + (TURN_IN_BOOST * lateralDeficit + DIRECTION_CHANGE_BOOST * opposingLoad) * (1 - slide);
     const steerCommand = Math.min(
       this.spec.maxSteer,
       budgetLateral * (this.spec.wheelbase / Math.max(4, u * u) + understeerGradient) * steerSensitivity * turnIn,
