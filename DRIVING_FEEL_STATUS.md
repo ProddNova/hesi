@@ -1,4 +1,115 @@
-# Driving feel — chase camera, cabin shake, top speed
+# Driving feel
+
+## Round 2 (July 2026) — the car slid, and could not be caught
+
+Reported: the car breaks away in ordinary corners, the slide cannot be
+recovered, weaving through traffic is hard, and the body sits at a silly angle
+when turning. Four separate causes in `js/physics.js`, all of them found by
+measuring rather than by feel.
+
+### 1 · A held turn asked for more grip than the car had
+
+The steering cap was `wheelbase × grip × g × 0.88 / u² + 0.024`. The trailing
+0.024 rad is a fixed allowance, so at 100 km/h it *doubled* the angle the first
+term had carefully computed. Worked through the understeer relation, holding the
+button demanded:
+
+| | old demand | new demand |
+| --- | --- | --- |
+| reference car (1120 kg, µ 1.00) | 100% of grip | 86% |
+| starter car (940 kg, µ 0.94, soft springs) | **119%** of grip | 86% |
+
+The reference car landed exactly on the limit, which is why the shipped grip
+test passed; the lighter, softer car the player actually drives was 19% past it.
+Every held corner was already a slide waiting for its trigger.
+
+`steerCommand` now solves the steady-state relation directly —
+`a_y × (L/u² + K/g)` at `STEER_GRIP_BUDGET` (0.86) of the tires' limit, with the
+car's own understeer gradient `K`. It is right for every spec instead of for one,
+and the 14% it leaves on the table is the margin the car spends on a bump, the
+throttle or a lane change taken mid-corner.
+
+### 2 · Counter-steer was capped at about 3 degrees
+
+The same cap applied symmetrically, so once the car was sideways the driver
+could ask for ~3° of opposite lock at 100 km/h against a 20° slide. The slide
+was unrecoverable by construction, not by difficulty.
+
+The budget is now measured from the **front axle's own velocity angle** rather
+than from the chassis centreline, so the window opens toward the counter-steer
+side by exactly the angle the slide is worth — up to full mechanical lock. It
+opens only once the rear is genuinely past its slip peak (`slide`, measured in
+multiples of the rear tires' own peak slip angle, so it scales with tire and
+surface). Opening it during merely hard cornering was tried and reverted: the
+car rotates into the turn, the window follows, and more lock becomes available —
+a divergence, not a driving aid.
+
+### 3 · The throttle was paying for the corner out of the lateral budget
+
+168 hp through a 940 kg rear axle asks for **2.4× the rear tires' grip in 1st
+and 1.4× in 2nd**. `_gripCircle` scaled the whole force vector down to fit,
+which took the excess out of the *lateral* force — squeeze the throttle
+mid-corner and the rear lost half its cornering grip in one frame with no
+warning. Drive force is now capped at what is left of the driven axle's friction
+circle (`TRACTION_HEADROOM` 1.18, so power-on rotation still exists), bypassed
+entirely by the handbrake. Straight-line acceleration is unchanged — the
+friction circle was already clipping it to the same number — so 0–100 is still
+6.45 s and top speed is still 220 km/h.
+
+### 4 · Tires broke away as a step, and nothing damped the spin
+
+* **Progressive saturation.** Linear cornering stiffness clipped by a friction
+  circle gives full grip on one frame and a scaled fraction on the next.
+  `saturate()` rolls the same stiffness into its own limit: within 2% of linear
+  to half the limit, 84% at the linear-limit slip, asymptotic beyond. Grip never
+  disappears past the peak, it only stops growing.
+* **Stability control** removes yaw the steering never asked for
+  (`STABILITY_YAW_GAIN`), asleep below the rear slip peak and stood down to 25%
+  under the handbrake.
+* **Counter-steer assist** dials in 55% of the slide-cancelling angle, because a
+  keyboard cannot modulate lock; cut to 15% when the driver is steering *into*
+  the slide on purpose.
+* **A sustainable-yaw bleed** replaces the flat ±2.2 rad/s clamp: past the yaw
+  rate the tires could hold at that speed, the surplus decays instead of being
+  clipped.
+
+All three are gated by `settings.drivingAssist` (default 1, saved and clamped in
+`save.js`). At 0 the car is handed back whole — the counter-steer *window* is
+physics and stays open either way.
+
+### 5 · Body roll was the load-transfer angle, not a body attitude
+
+`rollTarget` was `a_lat × cgHeight / (g × trackWidth)` clamped at 0.28 rad. That
+expression is how much weight moves across the track; using it as a lean angle
+gave **16° of roll and 8° of dive**. Now a proper suspension gradient —
+3.5°/g of roll, 1.6°/g of dive, divided by the suspension rate so upgrades lean
+less — measuring 2.8° and 1.7° at the limit.
+
+Note this is telemetry only today: nothing rotates the car mesh, `updatePlayerMesh()`
+sets `rotation.y` and nothing else. If the visible lean was the complaint, the
+lean to fix is the *drift* angle, which is items 1–4.
+
+### Verification
+
+```bash
+node .devtests/handling-probe.mjs
+```
+
+14/14 on the real starter car: full throttle and full lock at 80 km/h peaks at
+2.1° of drift instead of swapping ends; a handbrake slide provoked to 18° is
+caught back to 0° by blunt keyboard input; with assists off 36° of opposite lock
+is available and the slide stays bounded; a 130 km/h lane change moves 3.9 m in
+1.4 s at 3.7° of drift and settles to zero yaw; roll 2.8°, dive 1.7°.
+
+`node .devtests/grip-test.mjs` still 12/12, with more margin than before — rear
+saturation at 100 km/h fell from 0.98 to 0.88 while still pulling 0.83 g.
+`node .devtests/top-speed-probe.mjs` 2/2 unchanged. `node .devtests/e2e.mjs` is
+38/42, the same four pre-existing failures as before this work (two layout
+overlaps, an auction swap, and a touch-steer check that already failed).
+
+---
+
+## Round 1 — chase camera, cabin shake, top speed
 
 Three changes, July 2026, all about how fast the car feels and how well you can
 read it while it is moving.

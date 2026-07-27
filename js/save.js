@@ -55,6 +55,9 @@ export function createDefaultSettings() {
     renderScale: 1,
     trafficDensity: 1,
     steeringSensitivity: 1,
+    // Counter-steer help, stability control and traction control, together.
+    // 1 keeps a slide catchable on a keyboard; 0 hands the car back whole.
+    drivingAssist: 1,
     speedUnit: 'kmh',
     screenShake: true,
     showFps: false,
@@ -323,6 +326,7 @@ export function normalizeSave(input) {
   settings.renderScale = clamp(settings.renderScale, 0.5, 2);
   settings.trafficDensity = clamp(settings.trafficDensity, 0.35, 1.75);
   settings.steeringSensitivity = clamp(settings.steeringSensitivity, 0.5, 1.6);
+  settings.drivingAssist = clamp(settings.drivingAssist, 0, 1);
   settings.transmission = settings.transmission === 'manual' ? 'manual' : 'automatic';
   settings.camera = ['chase', 'hood', 'cockpit'].includes(settings.camera) ? settings.camera : 'chase';
   settings.renderResolution = ['240p', '360p', '480p', '720p'].includes(settings.renderResolution) ? settings.renderResolution : '480p';

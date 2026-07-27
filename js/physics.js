@@ -7,6 +7,28 @@ const EPSILON = 1e-6;
 
 const clamp = THREE.MathUtils.clamp;
 
+// --- Handling feel ---------------------------------------------------------
+// How much of the tires' lateral grip a held steering input may ask for in a
+// steady corner. Deliberately below 1: the remainder is the margin the car
+// spends on bumps, on the throttle and on a lane change taken mid-corner. At
+// 1.0 every held turn is already a slide waiting for its trigger.
+const STEER_GRIP_BUDGET = 0.86;
+// When the car counts as sliding, measured in multiples of the rear tires' own
+// peak slip angle rather than in degrees — a soft tire on a wet surface is away
+// at an angle a sticky one is still gripping at. Nothing below onset is touched,
+// so ordinary hard cornering never meets the assists.
+const SLIDE_ONSET = 1;
+const SLIDE_RANGE = 1.15;
+// Fraction of the slide-cancelling steering angle handed to the driver, and the
+// surplus yaw rate (per second) the stability control removes at full slide.
+const COUNTER_STEER_ASSIST = 0.55;
+const STABILITY_YAW_GAIN = 2.6;
+// Drive force allowed past what is left of the driven axle's friction circle.
+const TRACTION_HEADROOM = 1.18;
+// Body attitude gradients, in radians per g, at the stock suspension rate.
+const ROLL_GRADIENT = 0.061;
+const PITCH_GRADIENT = 0.028;
+
 function finite(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
@@ -26,6 +48,25 @@ function wrapAngle(angle) {
 function smoothstep01(value) {
   const t = clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * Progressive tire saturation.
+ *
+ * A linear cornering stiffness clipped by a friction circle breaks away as a
+ * step: full grip on one frame, a scaled-down fraction on the next, with
+ * nothing in between for the driver to read or to catch. This rolls the same
+ * stiffness over into its own limit instead — within 2% of linear up to half
+ * the limit, 84% of the limit at the slip angle where the linear model would
+ * have hit it, and asymptotic to the limit beyond that. Grip therefore never
+ * disappears past the peak, it only stops growing, which is what makes a slide
+ * both readable and recoverable.
+ */
+function saturate(force, limit) {
+  if (!(limit > EPSILON)) return 0;
+  const ratio = force / limit;
+  const shaped = ratio * ratio;
+  return force / Math.sqrt(Math.sqrt(1 + shaped * shaped));
 }
 
 function asVector3(value, fallback = null) {
@@ -550,31 +591,13 @@ export class VehiclePhysics {
 
     if (this.transmissionMode === 'automatic') this._automaticGearbox(input, u);
 
-    // Speed-sensitive steering sized to what the tires can actually use. The
-    // cap sits just UNDER the grip-limited Ackermann angle (0.88x) plus the
-    // steady-state slip allowance: a held button at 60 km/h now corners hard
-    // (~0.9 g) with full grip and zero drama, and breakaway needs lift-off,
-    // weight transfer or the handbrake rather than plain steering input.
-    const gripLimitedSteer = this.spec.wheelbase * this.spec.tireGrip * this._surfaceGrip * G * 0.88
-      / Math.max(1, u * u) + 0.024;
-    const speedSteerScale = THREE.MathUtils.lerp(1, 0.3, smoothstep01(speed / 50));
-    const steerAuthority = Math.min(this.spec.maxSteer * speedSteerScale, gripLimitedSteer, this.spec.maxSteer);
-    const targetSteering = input.steer * steerAuthority;
-    // Ramp to full authority over ~0.26 s so binary keyboard/touch input reads
-    // as a progressive turn-in instead of a step to the tires' limit.
-    const steerRate = Math.max(0.55, steerAuthority / 0.26) * dt;
-    this.steering += clamp(targetSteering - this.steering, -steerRate, steerRate);
-    if (Math.abs(input.steer) < 0.02) this.steering *= Math.exp(-dt * (5.5 + speed * 0.035));
-
     const a = this.spec.wheelbase * (1 - this.spec.frontWeight);
     const b = this.spec.wheelbase * this.spec.frontWeight;
     const effectiveU = Math.max(2.2, Math.abs(u));
     const directionSign = u < -0.25 ? -1 : 1;
-    const frontSlip = Math.atan2(v + a * this.yawRate, effectiveU) - this.steering * directionSign;
-    const rearSlip = Math.atan2(v - b * this.yawRate, effectiveU);
-    this._frontSlip = frontSlip;
-    this._rearSlip = rearSlip;
 
+    // Axle loads and available grip are resolved before the steering, because
+    // how far the wheel may be turned is a grip question, not a geometry one.
     const surface = this._readRoadSurface(roadInfo);
     this._surfaceGrip = surface.grip;
     const totalWeight = this.spec.mass * G;
@@ -591,24 +614,108 @@ export class VehiclePhysics {
     if (input.handbrake > 0) muRear *= THREE.MathUtils.lerp(1, 0.28, input.handbrake);
 
     const suspensionFactor = clamp(this.spec.suspensionStiffness, 0.55, 1.65);
-    const lowSpeedTireFactor = smoothstep01(speed / 2.2);
-    let fyFront = -this.spec.cornerStiffnessFront * suspensionFactor * frontSlip * lowSpeedTireFactor;
-    let fyRear = -this.spec.cornerStiffnessRear * suspensionFactor * rearSlip * lowSpeedTireFactor;
-
-    const engine = this._engineForces(input, u, dt, settings);
-    let driveFront = 0;
-    let driveRear = 0;
-    if (this.spec.drivetrain === 'FWD') driveFront = engine.driveForce;
-    else if (this.spec.drivetrain === 'AWD' || this.spec.drivetrain === '4WD') {
-      driveFront = engine.driveForce * 0.42;
-      driveRear = engine.driveForce * 0.58;
-    } else driveRear = engine.driveForce;
-
-    const brakeDirection = Math.abs(u) > 0.25 ? Math.sign(u) : Math.sign(engine.driveForce || 1);
-    const serviceBrakeInput = this.gear < 0 ? input.throttle : input.brake;
-    const serviceBrake = serviceBrakeInput * this.spec.brakeForce;
+    const cornerFront = this.spec.cornerStiffnessFront * suspensionFactor;
+    const cornerRear = this.spec.cornerStiffnessRear * suspensionFactor;
     const frontGripLimit = muFront * frontLoad;
     const rearGripLimit = muRear * rearLoad;
+    const assist = clamp(finite(settings.drivingAssist ?? settings.assist, 1), 0, 1);
+
+    // The rear slip angle does not depend on the steering, so it can be
+    // measured first and used to decide how much help the driver gets back.
+    const rearSlip = Math.atan2(v - b * this.yawRate, effectiveU);
+    const frontVelocityAngle = Math.atan2(v + a * this.yawRate, effectiveU);
+    const rearPeakSlip = Math.max(0.02, rearGripLimit / Math.max(1, cornerRear));
+    const slide = smoothstep01((Math.abs(rearSlip) / rearPeakSlip - SLIDE_ONSET) / SLIDE_RANGE);
+
+    // Steering, sized in grip rather than in degrees.
+    //
+    // `steerCommand` is the lock a held button may ask for: the angle a steady
+    // corner at STEER_GRIP_BUDGET of the tires' limit needs, understeer
+    // gradient included. It replaces a hand-tuned Ackermann fraction plus a
+    // flat 0.024 rad allowance, which happened to land exactly on the limit for
+    // one reference car and 20% PAST it for the lighter, softer starter car —
+    // holding a turn there was already asking for more grip than existed.
+    const understeerGradient = Math.max(0, frontLoad / cornerFront - rearLoad / cornerRear) / G;
+    const budgetLateral = this.spec.tireGrip * surface.grip * G * STEER_GRIP_BUDGET;
+    const steerSensitivity = clamp(finite(settings.steeringSensitivity, 1), 0.5, 1.6);
+    const steerCommand = Math.min(
+      this.spec.maxSteer,
+      budgetLateral * (this.spec.wheelbase / Math.max(4, u * u) + understeerGradient) * steerSensitivity,
+    );
+
+    // Once the rear is genuinely away, the budget is measured from where the
+    // front tires are actually travelling instead of from the chassis
+    // centreline, so the window opens by exactly the angle the slide is worth.
+    // This is the whole reason opposite lock is possible at all: the old
+    // symmetric cap allowed about 3 degrees of counter-steer at 100 km/h, so no
+    // slide could ever be caught and the car left the road every time it
+    // stepped out. It stays shut while the car is merely cornering hard —
+    // opening it there would let a held turn ask for ever more lock as the car
+    // rotated into it, which is a divergence, not a driving aid.
+    const tracking = clamp(frontVelocityAngle * directionSign, -this.spec.maxSteer, this.spec.maxSteer);
+    const counterReach = tracking * slide;
+    const upperLimit = Math.min(this.spec.maxSteer, Math.max(0, counterReach) + steerCommand);
+    const lowerLimit = Math.max(-this.spec.maxSteer, Math.min(0, counterReach) - steerCommand);
+    let targetSteering = input.steer >= 0 ? input.steer * upperLimit : -input.steer * lowerLimit;
+
+    // Counter-steer assist. A keyboard cannot feed in a precise opposite lock,
+    // so part of the angle that would cancel the slide is dialled in for you
+    // once the rear is genuinely away. Backed off to a token amount when the
+    // driver is steering into the slide on purpose, so drifting still works.
+    if (assist > 0 && slide > 0) {
+      const provoking = clamp(-input.steer * Math.sign(tracking || 1), 0, 1);
+      const help = tracking * slide * COUNTER_STEER_ASSIST * assist * (1 - provoking * 0.85);
+      targetSteering = clamp(targetSteering + help, lowerLimit, upperLimit);
+    }
+
+    // Turn-in still ramps over ~0.26 s so binary input reads as a progressive
+    // turn rather than a step; a large error (catching a slide) moves the wheel
+    // proportionally faster, the way a driver's hands would.
+    const steerRate = Math.max(0.55, steerCommand / 0.26, Math.abs(targetSteering - this.steering) * 4) * dt;
+    this.steering += clamp(targetSteering - this.steering, -steerRate, steerRate);
+    if (Math.abs(input.steer) < 0.02 && slide < 0.05) this.steering *= Math.exp(-dt * (5.5 + speed * 0.035));
+
+    const frontSlip = frontVelocityAngle - this.steering * directionSign;
+    this._frontSlip = frontSlip;
+    this._rearSlip = rearSlip;
+
+    const lowSpeedTireFactor = smoothstep01(speed / 2.2);
+    let fyFront = saturate(-cornerFront * frontSlip * lowSpeedTireFactor, frontGripLimit);
+    let fyRear = saturate(-cornerRear * rearSlip * lowSpeedTireFactor, rearGripLimit);
+
+    const engine = this._engineForces(input, u, dt, settings);
+    // Traction control. The starter car puts 168 hp through a 940 kg rear axle,
+    // which in the lower gears asks for more than twice the grip the rear tires
+    // have; the friction circle then pays for the excess out of the LATERAL
+    // budget, which is exactly why squeezing the throttle mid-corner used to
+    // snap the car sideways with no warning. Cap the drive force at what is
+    // actually left once the corner is paid for, with headroom so power-on
+    // rotation still exists. The handbrake bypasses it completely.
+    let driveForce = engine.driveForce;
+    if (assist > 0 && driveForce > 0 && input.handbrake < 0.1) {
+      const spare = (limit, lateral) => Math.sqrt(Math.max(
+        0,
+        limit * limit - Math.min(Math.abs(lateral), limit * 0.98) ** 2,
+      )) * TRACTION_HEADROOM;
+      let tractionLimit;
+      if (this.spec.drivetrain === 'FWD') tractionLimit = spare(frontGripLimit, fyFront);
+      else if (this.spec.drivetrain === 'AWD' || this.spec.drivetrain === '4WD') {
+        tractionLimit = Math.min(spare(frontGripLimit, fyFront) / 0.42, spare(rearGripLimit, fyRear) / 0.58);
+      } else tractionLimit = spare(rearGripLimit, fyRear);
+      driveForce = THREE.MathUtils.lerp(driveForce, Math.min(driveForce, tractionLimit), assist);
+    }
+    this._driveForce = driveForce;
+    let driveFront = 0;
+    let driveRear = 0;
+    if (this.spec.drivetrain === 'FWD') driveFront = driveForce;
+    else if (this.spec.drivetrain === 'AWD' || this.spec.drivetrain === '4WD') {
+      driveFront = driveForce * 0.42;
+      driveRear = driveForce * 0.58;
+    } else driveRear = driveForce;
+
+    const brakeDirection = Math.abs(u) > 0.25 ? Math.sign(u) : Math.sign(driveForce || 1);
+    const serviceBrakeInput = this.gear < 0 ? input.throttle : input.brake;
+    const serviceBrake = serviceBrakeInput * this.spec.brakeForce;
     // Road cars use ABS for the normal brake pedal. Previously the raw brake
     // force could exceed both axles' grip by 50-100%, `_gripCircle` marked all
     // four wheels as locked and removed most lateral authority. A tiny yaw
@@ -678,13 +785,36 @@ export class VehiclePhysics {
     if (surface.velocity) this.velocity.lerp(surface.velocity, clamp(surface.velocityInfluence * dt, 0, 1));
 
     const inertia = this.spec.mass * (a * a + b * b) * 0.72;
-    const yawMoment = a * frontBodyY - b * fyRear;
+    let yawMoment = a * frontBodyY - b * fyRear;
+    // Stability control: bleed off the yaw the steering never asked for. It is
+    // asleep during ordinary cornering (it only fades in past the rear tires'
+    // slip peak) and is mostly stood down under the handbrake, so a deliberate
+    // flick still rotates the car — it just stops a lift-off or a kerb turning
+    // into a spin the driver has no way to answer.
+    if (assist > 0 && slide > 0) {
+      const gripYawRate = this.spec.tireGrip * surface.grip * G / Math.max(4, Math.abs(u));
+      const referenceYaw = clamp(
+        u * this.steering * directionSign / Math.max(1, this.spec.wheelbase + understeerGradient * u * u),
+        -gripYawRate,
+        gripYawRate,
+      );
+      const authority = slide * assist * (input.handbrake > 0.1 ? 0.25 : 1);
+      yawMoment -= (this.yawRate - referenceYaw) * inertia * STABILITY_YAW_GAIN * authority;
+    }
     const yawAcceleration = yawMoment / Math.max(1, inertia);
     this.yawRate += yawAcceleration * dt;
     // Heavier yaw damping right after an impact so wall/traffic hits shed
     // rotation in well under a second instead of an endless pirouette.
     const impactDamping = this._postImpactTimer > 0 ? 2.6 : 0;
     this.yawRate *= Math.exp(-dt * (0.32 + impactDamping + (speed < 1.5 ? 5 : 0)));
+    // No car pirouettes at speed: the tires cannot hold the car on a radius
+    // that tight. Past that rate the surplus is bled away rather than clipped,
+    // so a big slide still looks like a slide instead of hitting a wall.
+    const sustainableYaw = this.spec.tireGrip * surface.grip * G / Math.max(5, speed) * 1.7 + 0.22;
+    if (Math.abs(this.yawRate) > sustainableYaw) {
+      const surplus = Math.abs(this.yawRate) - sustainableYaw;
+      this.yawRate = Math.sign(this.yawRate) * (sustainableYaw + surplus * Math.exp(-dt * 7));
+    }
     this.yawRate = clamp(this.yawRate, -2.2, 2.2);
     this.heading = wrapAngle(this.heading + this.yawRate * dt);
 
@@ -694,8 +824,13 @@ export class VehiclePhysics {
     this._applyRoadHeight(surface, dt);
     this._resolveRoadBounds(roadInfo, oldPosition, this.position);
 
-    const pitchTarget = clamp(-this._longitudinalAcceleration * this.spec.cgHeight / (G * this.spec.wheelbase), -0.15, 0.13);
-    const rollTarget = clamp(-this._lateralAcceleration * this.spec.cgHeight / (G * this.spec.trackWidth), -0.28, 0.28);
+    // Body attitude, as a suspension roll/pitch gradient rather than as the
+    // load-transfer angle the old targets used. That angle is how much weight
+    // moves across the track, not how far the shell leans: it reached 16
+    // degrees of roll and 8 of dive, where a firmish road car does about 3.5
+    // degrees per g of roll and 1.6 per g of dive. Stiffer suspension leans less.
+    const pitchTarget = clamp(-this._longitudinalAcceleration / G * PITCH_GRADIENT / suspensionFactor, -0.055, 0.05);
+    const rollTarget = clamp(-this._lateralAcceleration / G * ROLL_GRADIENT / suspensionFactor, -0.1, 0.1);
     const bodyResponse = 1 - Math.exp(-dt * (5 + suspensionFactor * 3));
     this.bodyPitch = THREE.MathUtils.lerp(this.bodyPitch, pitchTarget, bodyResponse);
     this.bodyRoll = THREE.MathUtils.lerp(this.bodyRoll, rollTarget, bodyResponse);

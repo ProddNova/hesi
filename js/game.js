@@ -645,7 +645,13 @@ class ShutokoNights {
     this.contactCooldown=Math.max(0,this.contactCooldown-dt);this.updateGhost(dt);if(this.crash.active){this.updateCrash(dt);return;}
     const state=this.getVehicleState(),pos=vec(state.position||state);
     const roadInfo=(this.roadAdapter?this.roadAdapter.getRoadInfo(pos):null)||this.map?.getRoadInfo?.(pos)||{};
-    const input=this.getInput();this.lastDriveInput=input;const settings={automatic:this.state.settings.gearbox!=='manual',gearbox:this.state.settings.gearbox,infiniteFuel:this.admin.infiniteFuel};
+    const input=this.getInput();this.lastDriveInput=input;
+    // steeringSensitivity has been saved and clamped since the first release but
+    // was never handed to the sim; it scales how much lock a held button asks
+    // for. drivingAssist (1 = full) gates the counter-steer help, the stability
+    // control and traction control together.
+    const settings={automatic:this.state.settings.gearbox!=='manual',gearbox:this.state.settings.gearbox,infiniteFuel:this.admin.infiniteFuel,
+      steeringSensitivity:this.state.settings.steeringSensitivity,drivingAssist:this.state.settings.drivingAssist};
     const pf=this.frameProf;let t0=performance.now();
     try{this.physics.update(dt,input,this.roadAdapter||roadInfo,settings);}catch(e){console.error('Physics update',e);this.mode='error';throw e;}
     pf.phys+=performance.now()-t0;
