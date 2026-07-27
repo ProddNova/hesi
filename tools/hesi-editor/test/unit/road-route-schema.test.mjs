@@ -48,6 +48,28 @@ test('runtime-generated routes persist separately and publish into production me
   assert.deepEqual(output.meta.editorRoadOverrides.syntheticRoutes.tatsumi_pa_exit.points, points);
 });
 
+test('synthetic overrides carry the generated base they were authored against', () => {
+  const base = production();
+  const generated = [[0, 30, 0], [10, 30, 8], [20, 30, 16], [30, 30, 24]];
+  const points = [[2, 30, 4], [8, 31, 12], [40, 33, 30]];
+  const overrides = mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{
+    id: 'tatsumi_pa_exit', synthetic: true, points, base: generated,
+  }], base);
+  assert.deepEqual(overrides.syntheticRoutes.tatsumi_pa_exit.base, generated);
+  const output = applyRoadRouteOverrides(base, overrides);
+  assert.deepEqual(output.meta.editorRoadOverrides.syntheticRoutes.tatsumi_pa_exit.base, generated);
+  // Re-serializing a stamped document keeps the stamp and stays deterministic.
+  const round = canonicalizeRoadRouteOverrides(JSON.parse(serializeRoadRouteOverrides(overrides, { production: base })), { production: base });
+  assert.deepEqual(round.syntheticRoutes.tatsumi_pa_exit.base, generated);
+
+  // A later save that carries no stamp must not inherit the previous one:
+  // claiming a base the editor never saw would let a stale override pass.
+  const unstamped = mergeRoadRouteUpdates(overrides, [{
+    id: 'tatsumi_pa_exit', synthetic: true, points: [[1, 30, 1], [9, 30, 9]],
+  }], base);
+  assert.equal(unstamped.syntheticRoutes.tatsumi_pa_exit.base, undefined);
+});
+
 test('road route schema rejects malformed, duplicate, and unknown updates readably', () => {
   assert.throws(() => mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{ id: 'missing', points: [[0, 0, 0], [1, 0, 1]] }], production()), /unknown production route/);
   assert.throws(() => mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{ id: '../bad', synthetic: true, points: [[0, 0, 0], [1, 0, 1]] }], production()), /invalid id/);

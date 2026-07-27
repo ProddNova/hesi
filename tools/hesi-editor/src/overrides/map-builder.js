@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BUILD_SCHEMA_VERSION, buildDraftSignature, validateBuildDocument } from './build-schema.js';
+import { isChildIndexedScene } from '../scenes/scene-registry.js';
 import { normalizeSkyboxConfig } from '../../../../js/skybox-config.js';
 import {
   LOCAL_LIGHT_ASSET_ID,
@@ -107,11 +108,13 @@ function highwayOperations({ adapter, registry, assetRegistry, projectDocument }
   return operations;
 }
 
-function garageOperations({ registry, assetRegistry, projectDocument }) {
+// Child-indexed scenes (the garage interior, the Tatsumi PA lot): every entity
+// is a direct child of the scene root, addressed by its build-order index.
+function childIndexedOperations({ registry, assetRegistry, projectDocument }) {
   const operations = [];
   for (const [id, override] of Object.entries(projectDocument.entityOverrides)) {
     const entity = registry.getById(id);
-    const childIndex = entity?.metadata?.garageChildIndex;
+    const childIndex = entity?.metadata?.childIndex ?? entity?.metadata?.garageChildIndex;
     if (!Number.isInteger(childIndex)) continue;
     operations.push({
       op: 'garage-object',
@@ -162,8 +165,8 @@ function placedOperations({ assetRegistry, projectDocument }) {
 }
 
 export function buildSceneDocument({ sceneId, adapter, registry, assetRegistry, projectDocument, projectPath }) {
-  const operations = sceneId === 'garage'
-    ? garageOperations({ registry, assetRegistry, projectDocument })
+  const operations = isChildIndexedScene(sceneId)
+    ? childIndexedOperations({ registry, assetRegistry, projectDocument })
     : highwayOperations({ adapter, registry, assetRegistry, projectDocument });
   const document = {
     version: BUILD_SCHEMA_VERSION,

@@ -22,6 +22,7 @@ export const BUILD_SCHEMA_VERSION = 1;
 export const BUILD_PATHS = Object.freeze({
   highway: 'data/editor/hesi-world-build.json',
   garage: 'data/editor/garage-build.json',
+  tatsumi_pa: 'data/editor/tatsumi-pa-build.json',
 });
 
 export const BUILD_PRIMITIVES = Object.freeze(['box', 'cylinder', 'sphere']);
@@ -77,7 +78,9 @@ const OPERATION_VALIDATORS = {
     if (!Number.isInteger(op.nameIndex) || op.nameIndex < 0) errors.push(`${path}.nameIndex must be a non-negative integer`);
     validateTransformFields(op, path, errors);
   },
-  // Transform/hide a direct child of the garage root, addressed by build index.
+  // Transform/hide a direct child of a child-indexed scene root (the garage
+  // interior, the Tatsumi PA lot), addressed by build index. The name is
+  // historical — renaming it would invalidate every saved build.
   'garage-object'(op, path, errors) {
     if (!Number.isInteger(op.childIndex) || op.childIndex < 0) errors.push(`${path}.childIndex must be a non-negative integer`);
     validateTransformFields(op, path, errors);

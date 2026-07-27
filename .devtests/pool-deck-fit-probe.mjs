@@ -49,7 +49,9 @@ const lampNoise = (seed) => {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
 
-const map = new HighwayMap(null, {});
+const map = process.env.HESI_NO_LAYBY
+  ? new (class extends HighwayMap { _laybyExtraAt() { return 0; } _buildLaybyDressing() {} })(null, {})
+  : new HighwayMap(null, {});
 
 const BINS = [0.02, 0.05, 0.1, 0.25, 0.5, 1, Infinity];
 const blank = () => ({ samples: 0, clipped: 0, worst: 0, sumClip: 0, poolsWithClip: 0, worstAt: null, hist: BINS.map(() => 0) });
@@ -70,8 +72,11 @@ function deckYAt(route, worldPoint, hintIndex, expectDistance = null, maxSlip = 
     position: c.position, tangent: c.baseTangent, normal: horizNormal(c.baseTangent),
     bank: map._bankAt(route, projection.distance), route, distance: projection.distance,
   };
-  // Off the paved edge there is no asphalt to clip against.
-  const half = map._halfWidthAt(route, projection.distance);
+  // Off the paved edge there is no asphalt to clip against. A lay-by's bulge
+  // IS paved, so it has to count — otherwise every sample over a bay is
+  // discarded as "no asphalt" and the widest part goes unaudited.
+  const side = projection.signedLateral >= 0 ? 1 : -1;
+  const half = map._edgeHalfAt(route, projection.distance, side);
   if (Math.abs(projection.signedLateral) > half) return null;
   return map._deckPoint(frame, projection.signedLateral, 0).y;
 }
@@ -93,15 +98,19 @@ for (const route of map.routes.values()) {
     // `frame` = what the decals now use (carries the progressive deck offset).
     const frame = { ...rawFrame, route, distance };
     const side = route.bidirectional ? (lampSide *= -1) : 1;
-    const base = map._deckPoint(rawFrame, side * (half - 0.62), 0.01);
-    if (map._barrierSuppressed(base, route)) continue;
+    // Pole/pool laterals are measured from the DRAWN edge, which an emergency
+    // lay-by pushes outward — mirror _queueRouteDetails exactly or this audit
+    // silently measures pools where they used to be.
+    const edgeHalf = map._edgeHalfAt(route, distance, side);
+    const base = map._deckPoint(rawFrame, side * (edgeHalf - 0.62), 0.01);
+    if (map._barrierSuppressed(base, route, !!map._laybyAt(route, distance, side))) continue;
 
     const jL = lampNoise(distance);
     const jW = lampNoise(distance * 1.7 + 41);
     const jY = lampNoise(distance * 2.3 + 7);
     const poolLen = lampStep * (1.2 + jL * 0.2);
     const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
-    const poolOffset = side * (half - poolWidth * 0.4) + (jW - 0.5) * 1.6;
+    const poolOffset = side * (edgeHalf - poolWidth * 0.4) + (jW - 0.5) * 1.6;
     const tangentN = center.baseTangent.clone().normalize();
     const bankQuat = new THREE.Quaternion().setFromAxisAngle(tangentN, -frame.bank);
     const yawJitter = new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2);

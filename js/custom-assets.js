@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js';
+import { BARRIER_MATERIALS } from './road-barrier-styles.js';
 import {
   CAR_HITBOX_SETTING_FIELDS,
   CAR_HEADLIGHT_FIELDS,
+  CAR_PAINT_FIELDS,
   CAR_REAR_LIGHT_FIELDS,
   TRAFFIC_CAR_SETTING_FIELDS,
   isCarModelTarget,
@@ -87,6 +89,19 @@ export const WORLD_SURFACES = Object.freeze({
   fence: { label: 'Safety fence', description: 'Wire safety fencing behind the barrier line', group: 'Barriers & rails', kind: 'surface', worldTiled: true, preview: 'wall' },
   concrete: { label: 'Concrete (pillars & lamp posts)', description: 'Support columns, walls — and the lamp-post masts, which share this material', group: 'Barriers & rails', kind: 'surface', worldTiled: true, assetId: 'hesi:box:concrete', preview: 'pillar' },
   concreteDark: { label: 'Dark concrete', description: 'Darker support columns and deck undersides', group: 'Barriers & rails', kind: 'surface', worldTiled: true, assetId: 'hesi:box:concreteDark', preview: 'pillar' },
+  // Styled road-edge barriers (js/road-barrier-styles.js, authored per road /
+  // side / chainage in the editor's Barriers app). Each style's visible body
+  // gets its own slot so retexturing a screen wall leaves the default parapet,
+  // the pillars and the guardrails alone. Kerbs and capping beams intentionally
+  // stay on `concrete` / `railMetal` above.
+  ...Object.fromEntries(Object.entries(BARRIER_MATERIALS).map(([name, spec]) => [name, {
+    label: spec.label,
+    description: spec.description,
+    group: 'Barriers & rails',
+    kind: 'surface',
+    worldTiled: true,
+    preview: 'wall',
+  }])),
 
   tunnelWall: { label: 'Tunnel wall', description: 'Tunnel interior walls', group: 'Tunnels', kind: 'surface', worldTiled: true, preview: 'wall' },
   tunnelDark: { label: 'Tunnel ceiling', description: 'Dark tunnel ceiling and deep interior', group: 'Tunnels', kind: 'surface', worldTiled: true, preview: 'wall' },
@@ -489,6 +504,7 @@ export function customAssetsDocumentErrors(document) {
   const playerSettingFields = new Map(CAR_HITBOX_SETTING_FIELDS.map((field) => [field.key, field]));
   const headlightFields = new Map(CAR_HEADLIGHT_FIELDS.map((field) => [field.key, field]));
   const rearLightFields = new Map(CAR_REAR_LIGHT_FIELDS.map((field) => [field.key, field]));
+  const paintFields = new Map(CAR_PAINT_FIELDS.map((field) => [field.key, field]));
   for (const [target, entry] of Object.entries(document.carModels || {})) {
     const path = `carModels.${target}`;
     if (!isCarModelTarget(target)) { errors.push(`unknown car model target: ${target}`); continue; }
@@ -551,6 +567,29 @@ export function customAssetsDocumentErrors(document) {
       if (!field) { errors.push(`${path}.rearLights.${key} is unknown`); continue; }
       if (!Number.isFinite(value) || value < field.min || value > field.max) {
         errors.push(`${path}.rearLights.${key} must be between ${field.min} and ${field.max}`);
+      }
+    }
+    if (entry.paint !== undefined && !isRecord(entry.paint)) {
+      errors.push(`${path}.paint must be an object`);
+      continue;
+    }
+    for (const [key, value] of Object.entries(entry.paint || {})) {
+      if (key === 'color') {
+        if (!/^#[0-9a-f]{6}$/i.test(String(value))) errors.push(`${path}.paint.color must be #rrggbb`);
+        continue;
+      }
+      if (key === 'texture') {
+        // null is how the Modeler removes a body wrap without clearing paint.
+        if (value === null) continue;
+        if (typeof value !== 'string' || !document.textures[value]) {
+          errors.push(`${path}.paint.texture references missing texture ${value}`);
+        }
+        continue;
+      }
+      const field = paintFields.get(key);
+      if (!field) { errors.push(`${path}.paint.${key} is unknown`); continue; }
+      if (!Number.isFinite(value) || value < field.min || value > field.max) {
+        errors.push(`${path}.paint.${key} must be between ${field.min} and ${field.max}`);
       }
     }
   }

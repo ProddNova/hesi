@@ -1,6 +1,6 @@
 /**
  * TATSUMI PA FLOW PROBE — proves the compact empty deck is the live player
- * garage/spawn and that BOTH ramp_8 connectors (entry + exit) are
+ * garage and that BOTH ramp_8 connectors (entry + exit) are
  * continuously drivable with one authoritative height profile, without
  * re-enabling anything else:
  *
@@ -10,10 +10,8 @@
  *     real-world dressing style (dressing === 'tatsumi', not the generic
  *     recipe and not the bare dressingMinimal platform).
  *  2. SPAWN — initialSpawn (boot, garage exit, tow and crash recovery all
- *     route through game.js placeAtSpawn) is anchored to tatsumi_pa on the
- *     drivable deck, above collision, aligned with the deck axis toward the
- *     exit end, clear of the deck edges, and outside both the 13 m ENTER
- *     transition radius and the 18 m proximity-prompt radius.
+ *     route through game.js placeAtSpawn) uses the requested 3832, -3779
+ *     coordinates on ramp_8, above collision and aligned with traffic.
  *  3. ACCESS CONTINUITY + ONE HEIGHT AUTHORITY — along the entry and the
  *     exit, the centreline and both wheel-track offsets resolve to drivable
  *     collision every 0.5 m with no step, the collision profile never
@@ -90,17 +88,14 @@ check(map.garagePosition.equals(entrance), 'map.garagePosition detached from the
 
 // --- 2. spawn ------------------------------------------------------------------
 const spawn = map.initialSpawn;
-check(spawn.serviceAreaId === 'tatsumi_pa', `spawn anchored to ${spawn.serviceAreaId}`);
-const spawnInfo = map.getRoadInfo(spawn.position.clone());
-check(!!spawnInfo?.inServiceArea && !!spawnInfo?.drivable, 'spawn not on the drivable deck');
+check(spawn.routeId === 'ramp_8', `spawn route is ${spawn.routeId}`);
+check(Math.abs(spawn.position.x - 3832) < 1e-6 && Math.abs(spawn.position.z + 3779) < 1e-6,
+  `spawn X/Z is ${spawn.position.x.toFixed(3)}, ${spawn.position.z.toFixed(3)}`);
+const spawnInfo = map.getRoadInfo(spawn.position.clone(), spawn.routeId);
+check(spawnInfo?.routeId === 'ramp_8' && !!spawnInfo?.drivable, 'spawn not on the drivable ramp_8 surface');
 check(spawn.position.y > spawnInfo.height && spawn.position.y - spawnInfo.height < 1.5,
   `spawn height ${spawn.position.y.toFixed(2)} vs collision ${spawnInfo?.height?.toFixed(2)}`);
-check(spawn.tangent.dot(area.tangent) > 0.99, 'spawn not facing along the deck toward the exit end');
-const spawnLocal = local(spawn.position);
-check(Math.abs(spawnLocal.u) < area.length * 0.5 - 6 && Math.abs(spawnLocal.v) < area.width * 0.5 - 4,
-  `spawn too close to the deck edge (u ${spawnLocal.u.toFixed(1)}, v ${spawnLocal.v.toFixed(1)})`);
-const spawnToRing = Math.hypot(entrance.x - spawn.position.x, entrance.z - spawn.position.z);
-check(spawnToRing > 18, `spawn ${spawnToRing.toFixed(1)} m from the ENTER trigger (prompt radius is 18)`);
+check(spawn.tangent.dot(spawnInfo.tangent) > 0.999, 'spawn not facing along ramp_8 traffic');
 
 // --- 3. access continuity + one height authority --------------------------------
 const connectors = [
@@ -322,6 +317,6 @@ check(twinGarage?.id === 'shibaura_pa', `paAccessLanes twin garage is ${twinGara
 check(!!twinGarage?.accessRouteId && twin.routes.has(twinGarage.accessRouteId),
   'paAccessLanes twin lost the Shibaura garage connector');
 
-console.log(`\ndeck ${area.width.toFixed(1)}x${area.length.toFixed(1)} | spawn u=${spawnLocal.u.toFixed(1)} v=${spawnLocal.v.toFixed(1)} (ring ${spawnToRing.toFixed(1)} m) | entry ${map.routes.get(area.entryRouteId)?.length.toFixed(0)} m, exit ${map.routes.get(area.exitRouteId)?.length.toFixed(0)} m`);
+console.log(`\ndeck ${area.width.toFixed(1)}x${area.length.toFixed(1)} | spawn ${spawn.position.x.toFixed(0)}, ${spawn.position.z.toFixed(0)} on ${spawn.routeId} | entry ${map.routes.get(area.entryRouteId)?.length.toFixed(0)} m, exit ${map.routes.get(area.exitRouteId)?.length.toFixed(0)} m`);
 if (failures) { console.log(`TATSUMI PA FLOW PROBE: FAIL (${failures})`); process.exit(1); }
 console.log('TATSUMI PA FLOW PROBE: PASS');

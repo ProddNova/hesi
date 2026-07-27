@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "project": {
+    "name": "HESI Tatsumi PA"
+  },
+  "entityOverrides": {
+    "tatsumi-pa-part:0006": {
+      "visible": false
+    },
+    "tatsumi-pa-part:0007": {
+      "visible": false
+    },
+    "tatsumi-pa-part:0008": {
+      "visible": false
+    },
+    "tatsumi-pa-part:0009": {
+      "visible": false
+    },
+    "tatsumi-pa-part:0010": {
+      "visible": false
+    },
+    "tatsumi-pa-part:0011": {
+      "visible": false
+    }
+  },
+  "placedObjects": [],
+  "groups": [],
+  "environment": {},
+  "editorState": {}
+}

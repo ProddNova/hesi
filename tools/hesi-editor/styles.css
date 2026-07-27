@@ -842,6 +842,7 @@ input, select { accent-color: var(--accent); }
 }
 .modeler-face-pick:hover { background: var(--hover); }
 .modeler-face-thumb { width: 26px; height: 26px; object-fit: cover; border: 1px solid var(--line); border-radius: 2px; image-rendering: pixelated; }
+.modeler-face-color { flex: 0 0 auto; width: 28px; height: 22px; padding: 0; background: none; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; }
 .modeler-face-none { color: var(--text-faint); flex: 1; }
 .modeler-face-regions {
   padding: 1px 4px;
@@ -927,6 +928,8 @@ input, select { accent-color: var(--accent); }
   flex: 0 0 auto !important;
   font-variant-numeric: tabular-nums;
 }
+.modeler-car-value input[type="range"] { width: 96px; accent-color: var(--accent); }
+.modeler-car-field input[type="color"] { width: 46px; height: 22px; padding: 0; background: none; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; }
 .modeler-car-value small {
   max-width: 86px;
   color: var(--text-faint);
@@ -1101,3 +1104,25 @@ input, select { accent-color: var(--accent); }
   .lights-local{grid-column:1}
   .lights-local-fields{grid-template-columns:repeat(2,minmax(105px,1fr))}
 }
+
+/* Barriers app: road picker, span rows, resolved-edge summary. Rows wrap
+   rather than overflow — the bottom panel is resizable and can get narrow. */
+.barriers-panel{display:flex;flex-direction:column;gap:8px;min-width:0}
+.barriers-help{margin:0;color:var(--text-muted);font-size:11px;line-height:1.45}
+.barriers-help.pending{color:var(--accent)}
+.barriers-picker-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.barriers-picker-row input[type=search]{flex:1 1 180px;min-width:0}
+.barriers-picker-row select{flex:2 1 260px;min-width:0}
+.barriers-spans{display:flex;flex-direction:column;gap:6px}
+.barriers-span-row{display:flex;flex-wrap:wrap;align-items:center;gap:5px;min-width:0;padding:6px 7px;border:1px solid var(--line-soft);border-radius:4px;background:var(--surface)}
+.barriers-span-row select{flex:0 1 auto;min-width:0}
+.barriers-span-row input[type=number]{flex:0 0 76px;min-width:0}
+.barriers-span-row input.barriers-span-height{flex:0 0 62px}
+.barriers-span-add{border-style:dashed}
+.barriers-span-order{flex:0 0 20px;color:var(--text-muted);font:600 11px var(--font);text-align:center}
+.barriers-span-arrow{color:var(--text-muted);font-size:11px}
+.barriers-resolved-side{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:5px;min-width:0}
+.barriers-resolved-side b{flex:0 0 44px;font-size:11px}
+.barriers-resolved-side>span{color:var(--text-muted);font-size:11px}
+.barriers-chip{padding:2px 7px;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface-raised);color:var(--text);font-size:10px;white-space:nowrap}
+.barriers-actions{margin-top:2px}

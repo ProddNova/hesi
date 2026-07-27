@@ -22,7 +22,22 @@ export const SCENES = Object.freeze({
     buildPath: 'data/editor/garage-build.json',
     projectName: 'HESI Garage Interior',
   }),
+  tatsumi_pa: Object.freeze({
+    id: 'tatsumi_pa',
+    label: 'Tatsumi PA',
+    description: 'Tatsumi No.1 PA walkable lot behind the lay-by gate (js/tatsumi-pa.js)',
+    projectPath: 'data/editor/tatsumi-pa-project.json',
+    buildPath: 'data/editor/tatsumi-pa-build.json',
+    projectName: 'HESI Tatsumi PA',
+  }),
 });
+
+/** Scenes whose entities are direct root children addressed by build index. */
+export const CHILD_INDEXED_SCENE_IDS = Object.freeze(['garage', 'tatsumi_pa']);
+
+export function isChildIndexedScene(id) {
+  return CHILD_INDEXED_SCENE_IDS.includes(id);
+}
 
 export const DEFAULT_SCENE_ID = 'highway';
 

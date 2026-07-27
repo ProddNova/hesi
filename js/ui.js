@@ -249,13 +249,15 @@ export class GameUI {
         ${this.setting('CAMERA',`<select id="set-camera"><option value="chase">Chase</option><option value="hood">Hood</option><option value="cockpit">Cockpit</option></select>`)}
         ${this.setting('GEARBOX',`<select id="set-gearbox"><option value="auto">Automatic</option><option value="manual">Manual</option></select>`)}
         ${this.setting('RENDER QUALITY',`<select id="set-quality"><option value="low">Low · performance</option><option value="medium">Medium · default</option><option value="high">High · native res</option></select>`)}
+        ${this.setting('VHS FILTER',`<select id="set-vhs"><option value="on">On · tape look</option><option value="off">Off · clean</option></select>`)}
         <button id="phone-newgame">WIPE SAVE / NEW GAME</button></div>`;
-      this.$('set-camera').value=s.camera||'chase';this.$('set-gearbox').value=s.gearbox||'auto';this.$('set-quality').value=['low','medium','high'].includes(s.quality)?s.quality:'medium';
+      this.$('set-camera').value=s.camera||'chase';this.$('set-gearbox').value=s.gearbox||'auto';this.$('set-quality').value=['low','medium','high'].includes(s.quality)?s.quality:'medium';this.$('set-vhs').value=s.vhs===false?'off':'on';
       ['volume','camera','gearbox','quality'].forEach(k=>this.$(`set-${k}`).onchange=e=>this.cb.setting?.(k,k==='volume'?+e.target.value:e.target.value));
+      this.$('set-vhs').onchange=e=>this.cb.setting?.('vhs',e.target.value==='on');
       this.$('phone-newgame').onclick=()=>{if(confirm('Erase all progress?'))this.cb.newGame?.();};
     } else if(app==='admin') this.renderAdmin(root,c);
     else {
-      root.innerHTML='<div class="app-view"><h2>CONTROLS</h2><p>Keyboard driver manual</p><div class="phone-card"><small>DRIVING</small><b>WASD / ARROWS</b><p>Shift/E up · Ctrl/Q down<br>Space handbrake · C camera<br>F phone · R recover</p></div><div class="phone-card"><small>GARAGE</small><b>WASD + MOUSE</b><p>E interact / carry / install<br>Esc releases pointer</p></div></div>';
+      root.innerHTML='<div class="app-view"><h2>CONTROLS</h2><p>Keyboard driver manual</p><div class="phone-card"><small>DRIVING</small><b>WASD / ARROWS</b><p>Shift/E up · Ctrl/Q down<br>Space handbrake · C camera<br>F phone · R recover<br>Z copy exact XYZ</p></div><div class="phone-card"><small>GARAGE</small><b>WASD + MOUSE</b><p>E interact / carry / install<br>Esc releases pointer</p></div></div>';
     }
     this.cb.uiClick?.();
   }

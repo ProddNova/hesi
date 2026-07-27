@@ -6,6 +6,7 @@ import * as Data from './data.js';
 import * as SaveModule from './save.js';
 import * as AudioModule from './audio.js';
 import { GarageSystem } from './garage.js?v=20260723b';
+import { TatsumiPaSystem } from './tatsumi-pa.js?v=20260726a';
 import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=20260724a';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
@@ -15,10 +16,13 @@ import {
   carHitboxSettings,
   carModelEntry,
   carModelTarget,
+  carPaintSettings,
   carRearLightSettings,
 } from './car-models.js';
+import { applyCarPaint } from './car-paint.js';
+import { VHSEffect } from './vhs-effect.js';
 import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js';
-import { GameUI } from './ui.js?v=20260713a';
+import { GameUI } from './ui.js?v=20260726a';
 import { DeveloperMap } from './dev-map.js?v=20260716a';
 import { DebugStats } from './debug-stats.js?v=20260724b';
 import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=20260723b';
@@ -29,6 +33,12 @@ const TrafficSystem = TrafficModule.TrafficSystem || TrafficModule.default;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const vec=p=>p?.isVector3?p:new THREE.Vector3(p?.x||0,p?.y||0,p?.z||0);
 const DEFAULT_CUSTOM_CAR_SCALE=1;
+// Extra metres the chase camera drops back per km/h of speed, on top of its
+// 6.2 m resting distance. It exists to sell speed, but at .01 the car had
+// shrunk into the middle of the frame by 250 km/h — exactly when the player
+// most needs to read its attitude. Halved to .005: 1.1 m of drift at 220
+// instead of 2.2, so the pull-back is still felt and the car stays close.
+const CHASE_SPEED_PULLBACK=.005;
 
 class ShutokoNights {
   constructor(){
@@ -43,7 +53,7 @@ class ShutokoNights {
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
     this.camera=new THREE.PerspectiveCamera(64,16/9,.3,1250);
-    this.roadScene=new THREE.Scene();this.garageScene=new THREE.Scene();
+    this.roadScene=new THREE.Scene();this.garageScene=new THREE.Scene();this.paScene=new THREE.Scene();
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;
     this._lastPresentedAt=0;this._nextHudUpdate=0;this._dynamicRenderScale=this.performanceProfile.initialRenderScale;
     this._performanceGovernor={emaMs:0,samples:0,lastAdjustAt:performance.now(),lastIncreaseAt:performance.now()};
@@ -51,7 +61,7 @@ class ShutokoNights {
     // and consumed by DebugStats so long frames name their cause in the log.
     this.frameProf={phys:0,traffic:0,map:0,render:0,persist:0,other:0,total:0};
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
-    this.lastService=null;this.contactCooldown=0;this.ghostTimer=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();
+    this.lastService=null;this.contactCooldown=0;this.ghostTimer=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();this.camShake=0;this.camShakeTime=0;
     this.mobileFPS={startedAt:performance.now(),frames:0};
     this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
     // On-foot mode: step out of the car anywhere (G), walk in first person, and
@@ -64,6 +74,10 @@ class ShutokoNights {
     this.setupDebugStats();
     this._stableViewportSize={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
     this._resizeTimer=null;
+    // The pass owns multisampling once it is on, so the canvas MSAA above stops
+    // being the anti-aliaser. Phones keep it off: a half-float colour buffer is
+    // a bandwidth cost their profile already budgets against.
+    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,samples:this.isTouchDevice?0:4});
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
     // the address bar settles. Reallocating WebGL's drawing buffer for each one
@@ -114,7 +128,7 @@ class ShutokoNights {
     if(!Array.isArray(this.partCatalog)&&typeof this.partCatalog==='object')this.partCatalog=Object.values(this.partCatalog).flat();
     const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar();
     const starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};
-    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium',customCar:true,customCarScale:DEFAULT_CUSTOM_CAR_SCALE,customCarModel:DEFAULT_PSX_CAR_ID,customCarVersion:1},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
+    const defaults={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium',customCar:true,customCarScale:DEFAULT_CUSTOM_CAR_SCALE,customCarModel:DEFAULT_PSX_CAR_ID,customCarVersion:1,vhs:true},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
     this.state=this.normalizeState(raw||defaults,defaults);
     if(this.catalog.length>1&&!this.state.auctions.length)this.state.auctions=this.generateAuctions(this.state.auctionSeed);
     this.customCar={enabled:true,scale:DEFAULT_CUSTOM_CAR_SCALE,modelId:this.state.settings.customCarModel,object:null,loadPromise:null,loadingModelId:null,status:'idle',requestId:0,abortController:null};
@@ -159,6 +173,12 @@ class ShutokoNights {
     // fixtures made lamps visibly switch on while still leaving distant traffic
     // outside the pool. The fixed fill above lights every vehicle at any range.
     this.garageScene.add(tag(new THREE.HemisphereLight(0x7f91a6,0x17100c,1.7)));
+    // The PA lot is outdoors on the Tatsumi deck, so it gets the ROAD's night
+    // mix (cool sky bounce + warm sodium fill) rather than the garage's
+    // interior key — its own scene, so the Lights app can tune it separately.
+    this.paScene.add(tag(new THREE.HemisphereLight(0x4b5a72,0x140f0c,1.9)));
+    this.paScene.add(tag(new THREE.AmbientLight(0x5b4a42,.72)));
+    const paMoon=tag(new THREE.DirectionalLight(0x9aa6c4,.6));paMoon.position.set(-120,220,-80);this.paScene.add(paMoon);
   }
   buildWorld(){
     const mapBuildStarted=performance.now();
@@ -187,10 +207,18 @@ class ShutokoNights {
       prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),installProgress:(l,p)=>this.ui.installProgress(l,p),uiClick:()=>this.audioClick(),instantDelivery:()=>this.admin.instantDelivery
     });
     this.garage.root.visible=false;this.roadScene.add(this.camera);
+    // The Tatsumi PA zone behind the lay-by gate. Same contract as the garage:
+    // its own scene, built once at boot and hidden until the player takes the
+    // gate (js/tatsumi-pa.js).
+    this.tatsumiPa=new TatsumiPaSystem(this.paScene,this.camera,this.canvas,{
+      isOverlayOpen:()=>this.ui?.pcOpen||this.ui?.phoneOpen,exitPa:()=>this.exitTatsumiPa(),
+      prompt:(t,v)=>this.ui.prompt(t,v),toast:t=>this.ui.toast(t),uiClick:()=>this.audioClick(),
+    });
+    this.tatsumiPa.root.visible=false;
     // World-editor builds (data/editor/*-build.json): replay saved map edits on
-    // the freshly generated highway and garage. No build files -> no-op.
-    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root,roadScene:this.roadScene,garageScene:this.garageScene}).then(r=>{if(r.customAssets)this.applyCarModelDocument(r.customAssets,{reloadPlayer:true});if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.prewarmGpuResources();this.freezeRoadSceneMatrices();});
-    this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);
+    // the freshly generated highway, garage and PA. No build files -> no-op.
+    applyEditorBuilds({map:this.map,garageRoot:this.garage?.root,paRoot:this.tatsumiPa?.root,roadScene:this.roadScene,garageScene:this.garageScene,paScene:this.paScene}).then(r=>{if(r.customAssets)this.applyCarModelDocument(r.customAssets,{reloadPlayer:true});if(r.applied||r.skipped)console.log(`[editor] map edits applied: ${r.applied}, skipped: ${r.skipped}`);}).catch(e=>console.warn('Editor build apply',e)).finally(()=>{this.garage?.onBuildApplied?.();this.tatsumiPa?.onBuildApplied?.();this.prewarmGpuResources();this.freezeRoadSceneMatrices();});
+    this.applyRetroMaterials(this.roadScene);this.applyRetroMaterials(this.garageScene);this.applyRetroMaterials(this.paScene);
     // The selected PSX car is the only player-car visual. It starts loading
     // beside the lightweight player anchor and moves with that anchor on road.
   }
@@ -220,19 +248,21 @@ class ShutokoNights {
         if((o.isMesh||o.isInstancedMesh||o.isLine||o.isPoints)&&o.frustumCulled){restore.push([o,'frustumCulled',true]);o.frustumCulled=false;}
       });
       // Render one frame straight to the canvas: every draw call executes,
-      // uploading buffers/textures and compiling programs. It must be the
-      // canvas, not an offscreen target — three.js hardcodes linear output
-      // color space for non-XR render targets and the output color space is
-      // part of the program cache key, so an offscreen prewarm compiles
-      // throwaway variants and leaves the real sRGB compiles to happen
-      // mid-drive. The frame itself is harmless: it is the normal boot view
-      // with distant chunks also visible, behind the boot overlay.
+      // uploading buffers/textures and compiling programs. Output color space
+      // and tone mapping are part of the program cache key, so prewarming in
+      // one and drawing in another would compile throwaway variants and leave
+      // the real compiles to happen mid-drive. The VHS pass keeps both
+      // matched to the canvas on purpose (see js/vhs-effect.js), so this one
+      // prewarm covers frames with the pass on or off. The frame itself is
+      // harmless: it is the normal boot view with distant chunks also visible,
+      // behind the boot overlay.
       // Traffic's lazily created brake-lamp material shares its program with
       // the always-present tail-lamp material, so it needs no special case.
       // One frame covers the road's single, stable lighting state. Static lamp
       // pools are ordinary instanced meshes, so chunk streaming never changes
       // the renderer's light census or forces shader programs to re-link.
       this.renderer.toneMappingExposure=this.roadScene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;this.renderer.render(this.roadScene,this.camera);
+      this.vhs?.prewarm();
       this.performanceMetrics={...(this.performanceMetrics||{}),prewarmMs:performance.now()-t0,prewarmed:{geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures,programs:this.renderer.info.programs.length}};
     }catch(e){console.warn('GPU prewarm',e);}
     finally{for(const [object,key,value] of restore)object[key]=value;}
@@ -257,6 +287,11 @@ class ShutokoNights {
       // While the developer map is open it owns input (it handles Escape via a
       // capture-phase listener); swallow the rest so no gameplay key leaks through.
       if(this.devMap?.isOpen())return;
+      if(e.code==='KeyZ'&&!typing&&!e.repeat&&this.started
+        && (this.debug.noclip||this.mode==='driving'||this.mode==='walk')
+        && !this.ui.pcOpen&&!this.ui.phoneOpen&&!this.debug.menuOpen){
+        e.preventDefault();this.copyPlayerCoordinates();return;
+      }
       if(block.has(e.code))e.preventDefault();if(!this.keys[e.code])this.pressed.add(e.code);this.keys[e.code]=true;
       this.audio?.unlock?.();this.audio?.resume?.();
       if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
@@ -313,8 +348,9 @@ class ShutokoNights {
       look?.addEventListener('pointermove',e=>{if(e.pointerId!==pointer||!isActive())return;e.preventDefault();const movementX=e.clientX-lastX,movementY=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;onMove(movementX,movementY);});
       const end=e=>{if(e.pointerId===pointer)pointer=null;};look?.addEventListener('pointerup',end);look?.addEventListener('pointercancel',end);look?.addEventListener('lostpointercapture',end);
     };
-    bindLook(document.getElementById('touch-look'),()=>this.mode==='garage'||this.mode==='walk',(x,y)=>{
+    bindLook(document.getElementById('touch-look'),()=>this.mode==='garage'||this.mode==='pa'||this.mode==='walk',(x,y)=>{
       if(this.mode==='garage')this.garage?.onMouse?.({movementX:x*1.35,movementY:y*1.35});
+      else if(this.mode==='pa')this.tatsumiPa?.onMouse?.({movementX:x*1.35,movementY:y*1.35});
       else if(this.mode==='walk'&&this.walk.active){this.walk.yaw-=x*.004;this.walk.pitch=clamp(this.walk.pitch-y*.004,-1.35,1.25);}
     });
     bindLook(document.getElementById('touch-drone-look'),()=>this.debug.noclip&&!this.debug.menuOpen,(x,y)=>{this.debug.yaw-=x*.004;this.debug.pitch=clamp(this.debug.pitch-y*.004,-Math.PI*.49,Math.PI*.49);});
@@ -323,11 +359,45 @@ class ShutokoNights {
     window.addEventListener('pagehide',()=>this.persist());
   }
 
+  async copyPlayerCoordinates(){
+    let source=null;
+    if(this.debug?.noclip)source=this.debug.position;
+    else if(this.mode==='walk'&&this.walk?.active)source=this.walk.position;
+    else if(this.mode==='driving'){const state=this.getVehicleState();source=state?.position||state;}
+    const position=source?vec(source):null;
+    if(!position||![position.x,position.y,position.z].every(Number.isFinite)){
+      this.ui?.toast?.('COORDINATE COPY FAILED','red');
+      return {copied:false,text:null};
+    }
+
+    // Number#toString keeps the shortest lossless decimal representation:
+    // unlike the rounded HUD readout, copying never discards player precision.
+    const text=`X: ${position.x.toString()}, Y: ${position.y.toString()}, Z: ${position.z.toString()}`;
+    let copied=false;
+    try{
+      if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);copied=true;}
+    }catch(e){}
+    if(!copied){
+      const input=document.createElement('textarea');
+      input.value=text;input.setAttribute('readonly','');input.style.position='fixed';input.style.opacity='0';
+      document.body.append(input);input.select();
+      try{copied=!!document.execCommand?.('copy');}catch(e){}
+      input.remove();
+    }
+    this.ui?.toast?.(
+      copied
+        ? `COORDINATES COPIED // X ${position.x.toFixed(3)} · Y ${position.y.toFixed(3)} · Z ${position.z.toFixed(3)}`
+        : 'COORDINATE COPY FAILED',
+      copied?'amber':'red',
+    );
+    return {copied,text,position:{x:position.x,y:position.y,z:position.z}};
+  }
+
   toggleHUD(){const visible=this.ui.toggleHUD();if(visible)this.ui.toast('HUD ON','amber');}
 
   syncTouchUI(){
     const root=document.getElementById('touch-controls');if(!root)return;const blocked=this.ui?.phoneOpen||this.ui?.pcOpen||this.debug.menuOpen||!document.getElementById('run-over')?.classList.contains('hidden')||!document.getElementById('pause-help')?.classList.contains('hidden');
-    document.body.dataset.gameMode=this.mode;document.body.classList.toggle('noclip-active',!!this.debug.noclip);document.body.classList.toggle('controls-blocked',!!blocked);root.classList.toggle('hidden',!this.started||!['driving','garage','walk'].includes(this.mode));
+    document.body.dataset.gameMode=this.mode;document.body.classList.toggle('noclip-active',!!this.debug.noclip);document.body.classList.toggle('controls-blocked',!!blocked);root.classList.toggle('hidden',!this.started||!['driving','garage','pa','walk'].includes(this.mode));
     const vehicleButton=root.querySelector('[data-action="vehicle"]');if(vehicleButton){const walking=this.mode==='walk';vehicleButton.textContent=walking?'ENTER CAR':'EXIT CAR';vehicleButton.setAttribute('aria-label',walking?'Enter vehicle':'Exit vehicle');}
     if(blocked)this.releaseTouchInput?.();
   }
@@ -335,7 +405,7 @@ class ShutokoNights {
   start(){this.audio?.unlock?.();this.ui.hideBoot();this.started=true;this.enterGarage('start');}
   newGame(){
     this.ui?.closePhone?.();this.ui?.closePC?.();try{localStorage.removeItem(this.runtimeSaveKey);this.saver?.newGame?.();}catch(e){}
-    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium',customCar:true,customCarScale:DEFAULT_CUSTOM_CAR_SCALE,customCarModel:DEFAULT_PSX_CAR_ID,customCarVersion:1},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
+    const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium',customCar:true,customCarScale:DEFAULT_CUSTOM_CAR_SCALE,customCarModel:DEFAULT_PSX_CAR_ID,customCarVersion:1,vhs:true},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
     this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.customCar.enabled=true;this.customCar.scale=DEFAULT_CUSTOM_CAR_SCALE;this.customCar.modelId=DEFAULT_PSX_CAR_ID;this.clearCustomCarObject({abort:true});this.syncCustomCarControls();this.admin={...this.state.admin,timeScale:1};this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
   }
 
@@ -353,6 +423,53 @@ class ShutokoNights {
   exitGarage(){
     this.debugStats?.event('garage_exit_requested');this.bankScore('GARAGE');this.ui.fade(true);setTimeout(()=>{this.mode='driving';this.debugStats?.event('highway_entered',{from:'garage'});this.ghostTimer=0;this.garage.leave();this.attachCustomCarVisual();this.garage.root.visible=false;this.releaseGarageTextures();this.roadScene.add(this.camera);this.playerMesh.visible=true;this.placeAtSpawn();this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='garage';this.contactCooldown=1.2;this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');if(this.p4CaptureView)this.applyP4CaptureView(this.p4CaptureView);},480);
   }
+  // The scene the camera is currently in. Three of them: the highway, the
+  // garage interior and the Tatsumi PA lot.
+  activeScene(){return this.mode==='garage'?this.garageScene:(this.mode==='pa'?this.paScene:this.roadScene);}
+  // ---- Tatsumi PA zone ----------------------------------------------------
+  // Entered from the gate at the deep end of the ramp_8 lay-by, on foot, with
+  // the car left standing where the player parked it: exiting drops them back
+  // into it rather than at the boot spawn (unlike the garage, which is a
+  // service stop and re-spawns).
+  enterTatsumiPa(){
+    this.debugStats?.event('tatsumi_pa_requested',{from_mode:this.mode});
+    const s=this.getVehicleState(),p=vec(s.position||s);
+    this.paReturn={position:p.clone(),heading:s.heading??s.yaw??0};
+    this.ui.fade(true);setTimeout(()=>{
+      this.mode='pa';this.debugStats?.event('tatsumi_pa_entered');this.crash.active=false;this.ghostTimer=0;
+      this.playerMesh.visible=false;this.tatsumiPa.root.visible=true;this.paScene.add(this.camera);
+      this.tatsumiPa.enter();this.ensurePaCar();this.applyRetroMaterials(this.tatsumiPa.carDisplay);
+      this.ui.showHUD(true);this.ui.prompt('',false);this.ui.fade(false);
+      this.ui.toast('辰巳PA // Tatsumi No.1 Parking Area','amber');
+    },480);
+  }
+  exitTatsumiPa(){
+    this.debugStats?.event('tatsumi_pa_exit_requested');this.bankScore('TATSUMI PA');this.ui.fade(true);
+    setTimeout(()=>{
+      this.mode='driving';this.debugStats?.event('highway_entered',{from:'pa'});this.ghostTimer=0;
+      this.tatsumiPa.leave();this.attachCustomCarVisual();this.tatsumiPa.root.visible=false;
+      this.releaseSceneTextures(this.paScene);this.roadScene.add(this.camera);this.playerMesh.visible=true;
+      // Back into the car exactly where it was left standing in the bay.
+      if(this.paReturn)this.placeVehicle(this.paReturn.position,this.paReturn.heading);else this.placeAtSpawn();
+      this.updatePlayerMesh();this.snapDrivingCamera();this.lastService='tatsumi_pa';this.contactCooldown=1.2;
+      this.ui.fade(false);this.ui.toast('Tatsumi PA // Drive safe','amber');
+    },480);
+  }
+  placeVehicle(position,heading=0){
+    const p=vec(position);
+    if(this.physics.setPosition)this.physics.setPosition(p.x,p.y,p.z,heading);
+    else if(this.physics.reset)this.physics.reset(p,heading);
+    else{this.physics.state.position.copy(p);this.physics.state.heading=heading;}
+  }
+  updateTatsumiPa(dt){
+    this.tatsumiPa.update(dt,this.getWalkInput());
+    if(this.shouldUpdateHUD())this.ui.updateHUD({speedKmh:0,rpm:0,gearLabel:'N',redline:7000,fuelFraction:this.state.fuel/(this.getEffectiveCar().fuelCapacity||45)},this.run,{money:this.displayMoney(),routeName:'TATSUMI PA',areaName:'PARKING AREA'});
+  }
+  ensurePaCar(){
+    this.attachCustomCarVisual();
+    if(this.customCar.object)this.tatsumiPa?.refreshColliders?.();
+    else this.loadCustomCar().then(()=>this.tatsumiPa?.refreshColliders?.()).catch(e=>console.warn('PSX PA car load',e));
+  }
   // Sleeping in the garage bed banks the run, saves, and drops back to the
   // main menu (boot screen) where Continue / New Game live. Mirrors the scene
   // teardown exitGarage does, but stops the game instead of driving.
@@ -360,7 +477,8 @@ class ShutokoNights {
     this.bankScore?.('SLEEP');this.ui.fade(true);
     setTimeout(()=>{
       if(this.mode==='garage')this.garage.leave();
-      this.garage.root.visible=false;this.playerMesh.visible=false;
+      if(this.mode==='pa')this.tatsumiPa.leave();
+      this.garage.root.visible=false;this.tatsumiPa.root.visible=false;this.playerMesh.visible=false;
       this.roadScene.add(this.camera);
       this.ui.closePhone?.();this.ui.closePC?.();
       this.ui.showHUD(false);this.ui.prompt('',false);
@@ -375,11 +493,12 @@ class ShutokoNights {
   // VRAM for the whole drive. Dropping the GPU copies here (JS images stay
   // cached) keeps long drives free of that pressure on weak GPUs; three.js
   // re-uploads them automatically on the next garage render.
-  releaseGarageTextures(){
-    const collect=scene=>{const set=new Set();scene.traverse(o=>{for(const m of(Array.isArray(o.material)?o.material:o.material?[o.material]:[]))for(const key of ['map','emissiveMap','alphaMap','lightMap','aoMap'])if(m[key])set.add(m[key]);});return set;};
+  releaseSceneTextures(scene){
+    const collect=target=>{const set=new Set();target.traverse(o=>{for(const m of(Array.isArray(o.material)?o.material:o.material?[o.material]:[]))for(const key of ['map','emissiveMap','alphaMap','lightMap','aoMap'])if(m[key])set.add(m[key]);});return set;};
     const keep=collect(this.roadScene);
-    for(const t of collect(this.garageScene))if(!keep.has(t))t.dispose();
+    for(const t of collect(scene))if(!keep.has(t))t.dispose();
   }
+  releaseGarageTextures(){this.releaseSceneTextures(this.garageScene);}
 
   getInput(){
     const throttle=this.keys.KeyW||this.keys.ArrowUp,brake=this.keys.KeyS||this.keys.ArrowDown,left=this.keys.KeyA||this.keys.ArrowLeft,right=this.keys.KeyD||this.keys.ArrowRight;
@@ -415,7 +534,7 @@ class ShutokoNights {
     // Developer map freezes gameplay (vehicle + drone stay put) while it is open.
     // Freezing is preferable to letting the car/camera drift on stuck input.
     if(this.devMap?.isOpen()){this.render();this.finishFrameProf(frameStart);this.pressed.clear();return;}
-    if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='walk')this.updateWalk(dt);else if(this.mode==='boot')this.updateBoot();
+    if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='pa')this.updateTatsumiPa(dt);else if(this.mode==='walk')this.updateWalk(dt);else if(this.mode==='boot')this.updateBoot();
     this.updateDebugHitboxes(dt);
     this.render();this.finishFrameProf(frameStart);this.pressed.clear();
   }
@@ -593,7 +712,7 @@ class ShutokoNights {
     try{this.debugStats=new DebugStats({renderer:this.renderer,toast:(t,c)=>this.ui?.toast?.(t,c),getSnapshot:()=>this.getDebugStatsSnapshot(),getMetadata:()=>this.getDebugStatsMetadata()});}catch(e){console.error('Debug stats init',e);this.debugStats=null;}
   }
   getDebugStatsSnapshot(){
-    const scene=this.mode==='garage'?this.garageScene:this.roadScene;
+    const scene=this.activeScene();
     let chunksVisible=0;const chunksTotal=this.map?._chunks?.size??0;
     if(this.map?._chunks)for(const c of this.map._chunks.values())if(c.group.visible)chunksVisible+=1;
     let x=0,y=0,z=0,heading=0,speedKmh=0,rpm=0,gear=null,slip=0,surfaceGrip=null,route=null,routeName=null,area=null;
@@ -606,7 +725,7 @@ class ShutokoNights {
         if(this.mode==='driving'){physicsTelemetry=t;speedKmh=t.speedKmh||0;rpm=t.rpm||0;gear=t.gear??null;slip=t.slip||0;surfaceGrip=t.surfaceGrip??null;}
         fuel=t.fuel??this.state.fuel??null;fuelPct=t.fuelFraction==null?null:t.fuelFraction*100;
       }
-      const road=this.mode==='garage'
+      const road=(this.mode==='garage'||this.mode==='pa')
         ? {}
         : ((this.debug.noclip||this.mode==='walk')?this.map?.getRoadInfo?.(new THREE.Vector3(x,y,z)):null)||this.currentRoadInfo||{};
       route=road.routeId||road.route?.id||null;routeName=road.routeName||road.route?.name||route;
@@ -865,9 +984,9 @@ class ShutokoNights {
   syncPlayerVisuals(){
     // There is no procedural fallback: the player anchor contains lights only,
     // while the selected PSX model is the sole visible vehicle in both scenes.
-    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=this.customCar?.object?.parent===this.playerMesh,customInGarage=this.customCar?.object?.parent===this.garage?.carDisplay,onRoadVisible=chase&&customOnRoad&&this.mode==='driving';if(this.garage?.carDisplay)this.garage.carDisplay.visible=!!customInGarage;if(this.garage?.parkedGroup)this.garage.parkedGroup.visible=false;if(this.customCar?.object)this.customCar.object.visible=onRoadVisible||(this.mode==='garage'&&customInGarage);if(this.playerMesh.userData.rearLights)this.playerMesh.userData.rearLights.visible=onRoadVisible;if(this.playerMesh.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=onRoadVisible&&this.headlightsOn!==false&&this.playerMesh.userData.headlightConfig?.enabled!==false;
+    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=this.customCar?.object?.parent===this.playerMesh,customInGarage=this.customCar?.object?.parent===this.garage?.carDisplay,customInPa=this.customCar?.object?.parent===this.tatsumiPa?.carDisplay,onRoadVisible=chase&&customOnRoad&&this.mode==='driving';if(this.garage?.carDisplay)this.garage.carDisplay.visible=!!customInGarage;if(this.tatsumiPa?.carDisplay)this.tatsumiPa.carDisplay.visible=!!customInPa;if(this.garage?.parkedGroup)this.garage.parkedGroup.visible=false;if(this.customCar?.object)this.customCar.object.visible=onRoadVisible||(this.mode==='garage'&&customInGarage)||(this.mode==='pa'&&customInPa);if(this.playerMesh.userData.rearLights)this.playerMesh.userData.rearLights.visible=onRoadVisible;if(this.playerMesh.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=onRoadVisible&&this.headlightsOn!==false&&this.playerMesh.userData.headlightConfig?.enabled!==false;
   }
-  attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=(this.mode==='garage'?this.garage?.carDisplay:null)||this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);this.syncPlayerVisuals();}
+  attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=(this.mode==='garage'?this.garage?.carDisplay:this.mode==='pa'?this.tatsumiPa?.carDisplay:null)||this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);this.syncPlayerVisuals();}
   ensureGarageCar(){
     this.attachCustomCarVisual();
     if(this.customCar.object)this.garage?.refreshColliders?.();
@@ -904,7 +1023,10 @@ class ShutokoNights {
     this.customCar.loadPromise=promise;
     try{
       const visual=await promise;if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){this.disposeCarVisual(visual);return null;}
-      try{await this.renderer.compileAsync?.(visual,this.camera,this.mode==='garage'?this.garageScene:this.roadScene);}catch(e){console.warn('PSX car shader prewarm',e);}
+      // Paint runs before the shader prewarm so the painted material — which
+      // may be Phong rather than Lambert — is the one that gets compiled.
+      applyCarPaint(visual,carPaintSettings(target,this.editorCarAssets),this.editorCarAssets?.textures);
+      try{await this.renderer.compileAsync?.(visual,this.camera,this.activeScene());}catch(e){console.warn('PSX car shader prewarm',e);}
       if(requestId!==this.customCar.requestId||modelId!==this.customCar.modelId){this.disposeCarVisual(visual);return null;}
       const previous=this.customCar.object;this.customCar.object=visual;visual.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);this.customCar.status='ready';this.attachCustomCarVisual();if(previous)this.disposeCarVisual(previous);this.garage?.refreshColliders?.();this.syncCustomCarControls();
       this.syncPlayerVisuals();return visual;
@@ -1046,6 +1168,13 @@ class ShutokoNights {
       if((area.garage||area.hasGarage||String(area.id).includes('garage'))&&t.speedKmh<12){interactAvailable=true;this.ui.prompt('<kbd>E</kbd> ENTER WANGAN WORKS GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}
     }else{if(this.lastService&&(!area||dist>(area.radius||30)+15))this.lastService=null;if(!this.ui.pcOpen)this.ui.prompt('',false);}
     if(!prox){let g=false;try{g=this.map?.checkGarageTransition?.(p,t.speedKmh);}catch(e){}if(g&&t.speedKmh<12){interactAvailable=true;this.ui.prompt('<kbd>E</kbd> ENTER GARAGE',true);if(this.take('KeyE'))this.enterGarage('service');}}
+    // Walkable zones off the road (the Tatsumi PA gate at the end of the
+    // lay-by). Checked after the service-area prompts so a garage gate the car
+    // is already standing on keeps priority over a zone gate further away.
+    if(!interactAvailable&&t.speedKmh<12){
+      let zone=null;try{zone=this.map?.getZoneTransition?.(p);}catch(e){}
+      if(zone){interactAvailable=true;this.ui.prompt(`<kbd>E</kbd> ENTER ${(zone.label||'ZONE').toUpperCase()}`,true);if(this.take('KeyE'))this.enterTatsumiPa();}
+    }
     document.body.classList.toggle('interact-available',interactAvailable);
   }
   bankScore(name){if(this.run.score<1)return;const earned=Data.calculateScorePayout(this.run.score);this.debugStats?.event('score_banked',{location:name,score:this.run.score,earned,combo:this.run.combo,near_misses:this.run.nearMisses});this.state.money+=earned;this.state.records.bestScore=Math.max(this.state.records.bestScore||0,Math.floor(this.run.score));this.state.records.totalBanked=(this.state.records.totalBanked||0)+earned;this.ui.toast(`${name.toUpperCase()} // ${Math.floor(this.run.score).toLocaleString()} BANKED = ¥${earned.toLocaleString()}`,'amber');this.run.score=0;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;this.persist();}
@@ -1056,17 +1185,53 @@ class ShutokoNights {
     this.syncPlayerVisuals();
     if(this.cameraMode==='hood'){desired=p.clone().addScaledVector(f,1.65).add(new THREE.Vector3(0,1.02,0));look=p.clone().addScaledVector(f,12).add(new THREE.Vector3(0,.9,0));}
     else if(this.cameraMode==='cockpit'){desired=p.clone().addScaledVector(f,.55).add(new THREE.Vector3(0,1.12,0));look=p.clone().addScaledVector(f,11).add(new THREE.Vector3(0,.9,0));}
-    else{const lag=6.2+t.speedKmh*.01,road=this.currentRoadInfo;desired=p.clone().addScaledVector(f,-lag).add(new THREE.Vector3(0,road?.tunnel?1.95:2.7,0));look=p.clone().addScaledVector(f,3.5+t.speedKmh*.014).add(new THREE.Vector3(0,.62,0));}
+    else{const lag=6.2+t.speedKmh*CHASE_SPEED_PULLBACK,road=this.currentRoadInfo;desired=p.clone().addScaledVector(f,-lag).add(new THREE.Vector3(0,road?.tunnel?1.95:2.7,0));look=p.clone().addScaledVector(f,3.5+t.speedKmh*.014).add(new THREE.Vector3(0,.62,0));}
     const a=1-Math.exp(-dt*(this.cameraMode==='chase'?8.5:18));this.camPos.lerp(desired,a);this.camLook.lerp(look,a);
     const maxPositionLag=this.cameraMode==='chase'?2.6:.7,maxLookLag=this.cameraMode==='chase'?3:1.2;
     if(this.camPos.distanceToSquared(desired)>maxPositionLag*maxPositionLag)this.camPos.sub(desired).setLength(maxPositionLag).add(desired);
     if(this.camLook.distanceToSquared(look)>maxLookLag*maxLookLag)this.camLook.sub(look).setLength(maxLookLag).add(look);
-    this.camera.position.copy(this.camPos);this.camera.up.set(0,1,0);this.camera.lookAt(this.camLook);this.camera.fov=THREE.MathUtils.lerp(this.camera.fov,60+clamp(t.speedKmh/300,0,1)*17,1-Math.exp(-dt*4));this.camera.updateProjectionMatrix();
+    const shake=this.updateCameraShake(dt,t);
+    this.camera.position.copy(this.camPos);this.camera.up.set(0,1,0);
+    if(shake){const right=new THREE.Vector3().crossVectors(f,this.camera.up);this.camera.position.addScaledVector(right,shake.x).addScaledVector(this.camera.up,shake.y);this.camera.lookAt(this.camLook.clone().addScaledVector(right,shake.lookX).addScaledVector(this.camera.up,shake.lookY));}
+    else this.camera.lookAt(this.camLook);
+    this.camera.fov=THREE.MathUtils.lerp(this.camera.fov,60+clamp(t.speedKmh/300,0,1)*17,1-Math.exp(-dt*4));this.camera.updateProjectionMatrix();
+  }
+  /**
+   * Cabin shake for the first-person views.
+   *
+   * From behind the car the body already sells speed; from the driver's seat
+   * there is nothing between the player and a perfectly steady horizon, so the
+   * faster views feel oddly serene. This puts the eye back on a car: a couple
+   * of incommensurable sines (they never line up into a visible pulse) driving
+   * a centimetre of head movement, plus a fraction of that on the aim point so
+   * the view rotates a little instead of sliding.
+   *
+   * It only shows up when the driving is actually hard — the amplitude scales
+   * with speed and is then gated by throttle, slip and the handbrake, so
+   * coasting at 200 on a straight stays calm while a boosted exit rattles.
+   * Returns null for the chase camera.
+   */
+  updateCameraShake(dt,t){
+    if(this.cameraMode==='chase'){this.camShake=0;return null;}
+    const pace=clamp(((t.speedKmh||0)-70)/120,0,1);
+    const effort=clamp((t.throttle||0)*.55+(t.slip||0)*1.1+(this.lastDriveInput?.handbrake?.3:0),0,1);
+    // Cockpit sits lowest and rides hardest; the hood cam is a bonnet mount.
+    const target=pace*(.42+.58*effort)*(this.cameraMode==='cockpit'?1:.72);
+    this.camShake=THREE.MathUtils.lerp(this.camShake||0,target,1-Math.exp(-dt*6));
+    if(this.camShake<.002)return null;
+    this.camShakeTime=(this.camShakeTime||0)+dt;
+    // ~9 Hz carrier with a ~14 Hz partial: fast enough to read as the car
+    // vibrating rather than the camera swaying, and still several frames per
+    // cycle at 60 fps so it never turns into strobing.
+    const s=this.camShakeTime,amp=this.camShake;
+    const x=(Math.sin(s*57.3)*.6+Math.sin(s*88.1+1.7)*.4)*amp;
+    const y=(Math.sin(s*49.7+2.4)*.55+Math.sin(s*79.3+.6)*.45)*amp;
+    return{x:x*.018,y:y*.014,lookX:x*.05,lookY:y*.04};
   }
   snapDrivingCamera(){const s=this.getVehicleState(),p=vec(s.position||s),h=s.heading??s.yaw??0,f=new THREE.Vector3(Math.sin(h),0,Math.cos(h)),road=this.map?.getRoadInfo?.(p),speed=this.getTelemetry().speedKmh||0;this.currentRoadInfo=road;
     if(this.cameraMode==='hood'){this.camPos.copy(p).addScaledVector(f,1.65).add(new THREE.Vector3(0,1.02,0));this.camLook.copy(p).addScaledVector(f,12).add(new THREE.Vector3(0,.9,0));}
     else if(this.cameraMode==='cockpit'){this.camPos.copy(p).addScaledVector(f,.55).add(new THREE.Vector3(0,1.12,0));this.camLook.copy(p).addScaledVector(f,11).add(new THREE.Vector3(0,.9,0));}
-    else{const lag=6.2+speed*.01;this.camPos.copy(p).addScaledVector(f,-lag).add(new THREE.Vector3(0,road?.tunnel?1.95:2.7,0));this.camLook.copy(p).addScaledVector(f,3.5+speed*.014).add(new THREE.Vector3(0,.62,0));}
+    else{const lag=6.2+speed*CHASE_SPEED_PULLBACK;this.camPos.copy(p).addScaledVector(f,-lag).add(new THREE.Vector3(0,road?.tunnel?1.95:2.7,0));this.camLook.copy(p).addScaledVector(f,3.5+speed*.014).add(new THREE.Vector3(0,.62,0));}
     this.syncPlayerVisuals();this.camera.position.copy(this.camPos);this.camera.up.set(0,1,0);this.camera.fov=64;this.camera.lookAt(this.camLook);this.camera.updateProjectionMatrix();}
   cycleCamera(){const modes=['chase','hood','cockpit'],previous=this.cameraMode;this.cameraMode=modes[(modes.indexOf(this.cameraMode)+1)%modes.length];this.debugStats?.event('camera_changed',{from:previous,to:this.cameraMode});this.state.settings.camera=this.cameraMode;this.snapDrivingCamera();this.ui.toast(`CAMERA // ${this.cameraMode.toUpperCase()}`);this.persist();}
   recover(){const s=this.getVehicleState(),p=vec(s.position||s);const info=this.map?.getRoadInfo?.(p)||{};const target=vec(info.center||info.position||p);target.y=(info.height??target.y)+.6;const h=info.heading??s.heading??0;this.debugStats?.event('recovery',{from:{x:p.x,y:p.y,z:p.z},to:{x:target.x,y:target.y,z:target.z},score_penalty:Math.min(1000,this.run.score)});if(this.physics.setPosition)this.physics.setPosition(target.x,target.y,target.z,h);else this.physics.reset?.(target,h);this.run.score=Math.max(0,this.run.score-1000);this.run.combo=1;this.ui.toast('RECOVERED // −1,000 SCORE','red');}
@@ -1075,7 +1240,7 @@ class ShutokoNights {
     const mm=this.map?.getMinimapData?.()||this.map?.minimapData||null,services=this.map?.getServiceAreas?.()||this.map?.serviceAreas||this.map?.services||[];if(mm)this.ui.drawMinimap(mm,{x:vec(s.position||s).x,z:vec(s.position||s).z,heading:s.heading||0},services);
   }
   updateAudio(t,dt){try{this.audio?.update?.({rpm:t.rpm,redlineRpm:t.redline,speedKmh:t.speedKmh,throttle:t.throttle,slip:t.slip,turbo:this.getEffectiveCar().turbo||0,running:t.fuel>0,fuel:t.fuelFraction});}catch(e){} }
-  render(){const scene=this.mode==='garage'?this.garageScene:this.roadScene;if(scene===this.roadScene&&scene.matrixWorldAutoUpdate===false){const debugDynamic=this.debug.noclip||this.debug.hitboxes.roads||this.debug.hitboxes.walls||this.debug.hitboxes.vehicles||this.debug.hitboxes.services||this.debug.hitboxes.world||this.devMap?.isOpen?.();if(debugDynamic)scene.updateMatrixWorld(true);else{this.camera.updateMatrixWorld(true);this.playerMesh?.updateMatrixWorld?.(true);for(const marker of this.map?.animatedMarkers||[])marker.updateMatrixWorld(true);}}this.renderer.toneMappingExposure=scene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;const t0=performance.now();this.renderer.render(scene,this.camera);this.frameProf.render+=performance.now()-t0;}
+  render(){const scene=this.activeScene();if(scene===this.roadScene&&scene.matrixWorldAutoUpdate===false){const debugDynamic=this.debug.noclip||this.debug.hitboxes.roads||this.debug.hitboxes.walls||this.debug.hitboxes.vehicles||this.debug.hitboxes.services||this.debug.hitboxes.world||this.devMap?.isOpen?.();if(debugDynamic)scene.updateMatrixWorld(true);else{this.camera.updateMatrixWorld(true);this.playerMesh?.updateMatrixWorld?.(true);for(const marker of this.map?.animatedMarkers||[])marker.updateMatrixWorld(true);}}this.renderer.toneMappingExposure=scene.userData?.hesiLightingConfig?.exposure??DEFAULT_LIGHTING.exposure;const t0=performance.now();if(!this.vhs?.render(scene,this.camera,t0/1000))this.renderer.render(scene,this.camera);this.frameProf.render+=performance.now()-t0;}
   renderQuality(){
     const q=this.state?.settings?.quality;if(['low','medium','high'].includes(q))return q;
     const legacy=+this.state?.settings?.resolution||480;return legacy<=320?'low':legacy>=640?'high':'medium';
@@ -1095,6 +1260,7 @@ class ShutokoNights {
     const maxPixels=!this.isTouchDevice&&q==='high'?Math.max(this.performanceProfile.maxPixels,8500000):this.performanceProfile.maxPixels;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     if(this.canvas.width!==w||this.canvas.height!==h)this.renderer.setSize(w,h,false);
+    this.vhs?.setSize(w,h);
     this.camera.aspect=viewport.width/Math.max(1,viewport.height);this.camera.far=q==='high'?1650:q==='medium'?1350:1100;this.camera.updateProjectionMatrix();
     this.canvas.style.imageRendering='auto';
   }
@@ -1298,10 +1464,19 @@ class ShutokoNights {
   makeDeliveriesReady(){if(!this.garage?.enabled)return;const ready=this.availableDeliveries();const signature=ready.map(d=>d.id).join('|');if(signature!==this.deliverySignature){this.deliverySignature=signature;this.garage.syncDeliveries(ready);if(ready.length)this.ui.toast(`${ready.length} delivery box${ready.length>1?'es':''} ready`);}}
   finishInstall(d){const idx=this.state.deliveries.findIndex(x=>x.id===d.id||x.partId===d.partId);if(idx>=0)this.state.deliveries.splice(idx,1);if(d.type==='fuel'||String(d.partId).includes('fuel-can')){const cap=this.getEffectiveCar().fuelCapacity||45,liters=d.liters||10;this.state.fuel=Math.min(cap,this.state.fuel+liters);this.setPhysicsFuel(this.state.fuel);this.fuelWarned=false;this.ui.toast(`Fuel can poured // +${liters}L`,'amber');}else if(!this.state.installedParts.includes(d.partId)){this.state.installedParts.push(d.partId);this.ui.toast(`${d.name} installed // Stats updated`,'amber');this.refreshVehicle();}this.persist();this.deliverySignature='';this.garage.syncDeliveries(this.availableDeliveries());this.ui.refreshPC(this.getPCContext());}
 
-  changeSetting(k,v){const previous=this.state.settings[k];this.state.settings[k]=v;this.debugStats?.event('setting_changed',{key:k,from:previous,to:v});if(k==='volume'){this.audio?.setVolume?.(v);this.audio?.setMasterVolume?.(v);}if(k==='camera'){this.cameraMode=v;if(this.mode==='driving')this.snapDrivingCamera();}if(k==='resolution'||k==='quality')this.resize({force:true});this.persist();this.audioClick();}
+  changeSetting(k,v){const previous=this.state.settings[k];this.state.settings[k]=v;this.debugStats?.event('setting_changed',{key:k,from:previous,to:v});if(k==='volume'){this.audio?.setVolume?.(v);this.audio?.setMasterVolume?.(v);}if(k==='camera'){this.cameraMode=v;if(this.mode==='driving')this.snapDrivingCamera();}if(k==='resolution'||k==='quality')this.resize({force:true});if(k==='vhs')this.setVHS(v);this.persist();this.audioClick();}
+  // The pass presents the same pixels the canvas path would, so toggling it
+  // costs one buffer allocation and nothing else — no material re-compiles.
+  setVHS(enabled){
+    if(!this.vhs)return;
+    if(!this.vhs.setEnabled(enabled))return;
+    this.vhs.setSize(this.canvas.width,this.canvas.height);
+    this.vhs.prewarm();
+    this.ui?.toast?.(this.vhs.active()?'VHS // ON':'VHS // OFF','amber');
+  }
   unlockAdmin(ok){if(!ok)return;this.admin.unlocked=true;this.persist();this.ui.toast('ADMIN MODE UNLOCKED','amber');}
   adminToggle(k,v){const prop={money:'infiniteMoney',lives:'infiniteLives',fuel:'infiniteFuel'}[k]||k;this.admin[prop]=v;this.persist();this.ui.toast(`${prop.replace(/([A-Z])/g,' $1').toUpperCase()} ${v?'ON':'OFF'}`,'amber');}
-  adminAction(a){if(a==='money')this.state.money+=100000;else if(a==='garage'){this.ui.closePhone();this.enterGarage('admin');}else if(a==='pc'){this.ui.closePhone();if(this.mode!=='garage')this.enterGarage('admin');setTimeout(()=>this.ui.openPC(this.getPCContext()),this.mode==='garage'?40:560);}else if(a==='highway'){this.ui.closePhone();if(this.mode==='garage')this.exitGarage();else{this.mode='driving';this.placeAtSpawn();this.snapDrivingCamera();this.contactCooldown=1.2;}}else if(a==='deliverybay'){this.ui.closePhone();if(this.mode==='garage'){this.makeDeliveriesReady();this.garage.position.set(-7.35,this.garage.playerHeight,9);this.garage.yaw=Math.PI/2;this.garage.pitch=0;}}else if(a==='carbay'){this.ui.closePhone();if(this.mode==='garage'){this.garage.position.set(0,this.garage.playerHeight,3.65);this.garage.yaw=0;this.garage.pitch=-.08;}}else if(a==='fuel'){this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);this.fuelWarned=false;}else if(a==='lives')this.run.lives=3;else if(a==='parts'){this.state.installedParts=this.getPartsForOwned().map(p=>p.id);this.refreshVehicle();}else if(a==='delivery'){this.admin.instantDelivery=true;this.state.deliveries.forEach(d=>d.readyAt=0);this.makeDeliveriesReady();}else if(a==='boost'){this.physics.setSpeed?.(69.44);this.physics.setVelocity?.(69.44);if(!this.physics.setVelocity&&this.physics.velocity){const h=this.getVehicleState().heading||0;this.physics.velocity.set(Math.sin(h)*69.44,0,Math.cos(h)*69.44);}}this.persist();if(!['garage','pc','highway','deliverybay','carbay'].includes(a))this.ui.openPhoneApp('admin');this.ui.toast(`ADMIN // ${a.toUpperCase()}`,'amber');}
+  adminAction(a){if(a==='money')this.state.money+=100000;else if(a==='garage'){this.ui.closePhone();this.enterGarage('admin');}else if(a==='pc'){this.ui.closePhone();if(this.mode!=='garage')this.enterGarage('admin');setTimeout(()=>this.ui.openPC(this.getPCContext()),this.mode==='garage'?40:560);}else if(a==='highway'){this.ui.closePhone();if(this.mode==='garage')this.exitGarage();else if(this.mode==='pa')this.exitTatsumiPa();else{this.mode='driving';this.placeAtSpawn();this.snapDrivingCamera();this.contactCooldown=1.2;}}else if(a==='deliverybay'){this.ui.closePhone();if(this.mode==='garage'){this.makeDeliveriesReady();this.garage.position.set(-7.35,this.garage.playerHeight,9);this.garage.yaw=Math.PI/2;this.garage.pitch=0;}}else if(a==='carbay'){this.ui.closePhone();if(this.mode==='garage'){this.garage.position.set(0,this.garage.playerHeight,3.65);this.garage.yaw=0;this.garage.pitch=-.08;}}else if(a==='fuel'){this.setPhysicsFuel(this.getEffectiveCar().fuelCapacity||45);this.fuelWarned=false;}else if(a==='lives')this.run.lives=3;else if(a==='parts'){this.state.installedParts=this.getPartsForOwned().map(p=>p.id);this.refreshVehicle();}else if(a==='delivery'){this.admin.instantDelivery=true;this.state.deliveries.forEach(d=>d.readyAt=0);this.makeDeliveriesReady();}else if(a==='boost'){this.physics.setSpeed?.(69.44);this.physics.setVelocity?.(69.44);if(!this.physics.setVelocity&&this.physics.velocity){const h=this.getVehicleState().heading||0;this.physics.velocity.set(Math.sin(h)*69.44,0,Math.cos(h)*69.44);}}this.persist();if(!['garage','pc','highway','deliverybay','carbay'].includes(a))this.ui.openPhoneApp('admin');this.ui.toast(`ADMIN // ${a.toUpperCase()}`,'amber');}
   tow(){const cost=Data.ECONOMY?.towCost||2500;
     // Never refuse the tow: a broke player out of fuel on the expressway
     // would otherwise be soft-locked. Take whatever they can pay.

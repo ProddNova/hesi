@@ -18,6 +18,7 @@ import { applySceneLighting, createSoftSpotLight } from './lighting-config.js';
 const BUILD_URLS = Object.freeze({
   highway: 'data/editor/hesi-world-build.json',
   garage: 'data/editor/garage-build.json',
+  tatsumi_pa: 'data/editor/tatsumi-pa-build.json',
 });
 
 const PRIMITIVE_GEOMETRY = {
@@ -232,11 +233,16 @@ export function applyHighwayBuild(map, build, customAssets = null) {
   return summary;
 }
 
+/**
+ * Replays a build for a scene whose root children are addressed by build-order
+ * index — the garage interior and the Tatsumi PA lot. Must run right after the
+ * scene's build() and before deliveries/cars mutate the root, or the indices
+ * address the wrong objects. (The op is still named `garage-object`: it is the
+ * child-index op, and renaming it would invalidate every saved build.)
+ */
 export function applyGarageBuild(garageRoot, build, customAssets = null) {
   const summary = { applied: 0, skipped: 0 };
   if (!garageRoot || !build) return summary;
-  // Garage children are addressed by build-order index, so this must run right
-  // after GarageSystem.build() and before deliveries/cars mutate the root.
   const children = [...garageRoot.children];
   for (const op of build.operations) {
     if (op.op === 'garage-object') {
@@ -302,7 +308,7 @@ export function applyBuildSkybox(scene, build, customAssets = null) {
   return renderer.set(config, customAssets?.textures || {});
 }
 
-export async function applyEditorBuilds({ map = null, garageRoot = null, roadScene = null, garageScene = null } = {}) {
+export async function applyEditorBuilds({ map = null, garageRoot = null, paRoot = null, roadScene = null, garageScene = null, paScene = null } = {}) {
   const summary = { applied: 0, skipped: 0, scenes: [] };
   const merge = (scene, partial) => {
     summary.applied += partial.applied;
@@ -311,10 +317,11 @@ export async function applyEditorBuilds({ map = null, garageRoot = null, roadSce
   };
   // All three documents are small (textures live in separate image files that
   // stream in asynchronously), so fetch them in parallel and apply at once.
-  const [customAssets, highwayBuild, garageBuild] = await Promise.all([
+  const [customAssets, highwayBuild, garageBuild, paBuild] = await Promise.all([
     fetchCustomAssetsDocument(),
     map ? fetchBuild('highway') : null,
     garageRoot ? fetchBuild('garage') : null,
+    paRoot ? fetchBuild('tatsumi_pa') : null,
   ]);
   summary.customAssets = customAssets;
   if (map) {
@@ -349,6 +356,13 @@ export async function applyEditorBuilds({ map = null, garageRoot = null, roadSce
     if (garageBuild) merge('garage', applyGarageBuild(garageRoot, garageBuild, customAssets));
     if (garageScene && garageBuild?.environment?.lighting && applySceneLighting(garageScene, garageBuild.environment.lighting)) {
       summary.scenes.push({ scene: 'garage-lighting', applied: 1, skipped: 0 });
+    }
+  }
+  if (paRoot) {
+    if (applyBuildSkybox(paScene, paBuild, customAssets)) merge('tatsumi-pa-skybox', { applied: 1, skipped: 0 });
+    if (paBuild) merge('tatsumi_pa', applyGarageBuild(paRoot, paBuild, customAssets));
+    if (paScene && paBuild?.environment?.lighting && applySceneLighting(paScene, paBuild.environment.lighting)) {
+      summary.scenes.push({ scene: 'tatsumi-pa-lighting', applied: 1, skipped: 0 });
     }
   }
   return summary;

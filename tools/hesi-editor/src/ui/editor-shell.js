@@ -9,6 +9,12 @@ import {
   normalizeLighting,
   normalizeLocalLight,
 } from '/js/lighting-config.js';
+import {
+  BARRIER_HEIGHT_SCALE_RANGE,
+  BARRIER_STYLES,
+  DEFAULT_BARRIER_STYLE_ID,
+  flattenBarrierSpans,
+} from '/js/road-barrier-styles.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -62,8 +68,10 @@ export function createEditorShell(root) {
   const brandScene = element('small', 'brand-scene', '');
   brand.append(brandScene);
 
-  // Scene switcher: the editor edits one scene at a time (highway map or the
-  // garage interior); switching reloads the page with the scene's own project.
+  // Scene selector: the editor edits one scene at a time (the highway map, the
+  // garage interior, the Tatsumi PA lot); switching reloads the page with that
+  // scene's own project. One segment per registered scene, so adding a scene to
+  // scene-registry.js is all it takes to make it selectable here.
   const sceneSwitch = element('div', 'segmented scene-switch');
   sceneSwitch.setAttribute('role', 'radiogroup');
   sceneSwitch.setAttribute('aria-label', 'Editable scene');
@@ -154,6 +162,7 @@ export function createEditorShell(root) {
       button('Surfaces', 'open-world-textures', { title: 'Repaint the repeated surfaces and repeated objects of the world: asphalt, tunnels, barriers, buildings, containers, lamps — one material, every copy' }),
       button('Skybox', 'open-skybox', { title: 'Add and manage an unreachable photographic sky around the scene' }),
       button('Lights', 'open-lights', { title: 'Tune the in-game night lighting: colour, warmth and intensity for the road and the garage' }),
+      button('Barriers', 'open-barriers', { title: 'Choose the lateral barrier along each road edge — per side, over any stretch of road' }),
     ),
     element('span', 'toolbar-divider'),
     toolGroup('Transform',
@@ -403,17 +412,19 @@ export function createEditorShell(root) {
   const projectTab = element('button', 'tab-button', 'Project');
   const skyboxTab = element('button', 'tab-button', 'Skybox');
   const lightsTab = element('button', 'tab-button', 'Lights');
+  const barriersTab = element('button', 'tab-button', 'Barriers');
   const worldTab = element('button', 'tab-button', 'World');
   const helpTab = element('button', 'tab-button', 'Help');
-  assetsTab.type = editTab.type = projectTab.type = skyboxTab.type = lightsTab.type = worldTab.type = helpTab.type = 'button';
+  assetsTab.type = editTab.type = projectTab.type = skyboxTab.type = lightsTab.type = barriersTab.type = worldTab.type = helpTab.type = 'button';
   assetsTab.dataset.tab = 'assets';
   editTab.dataset.tab = 'edit';
   projectTab.dataset.tab = 'project';
   skyboxTab.dataset.tab = 'skybox';
   lightsTab.dataset.tab = 'lights';
+  barriersTab.dataset.tab = 'barriers';
   worldTab.dataset.tab = 'world';
   helpTab.dataset.tab = 'help';
-  tabs.append(assetsTab, editTab, skyboxTab, lightsTab, projectTab, worldTab, helpTab);
+  tabs.append(assetsTab, editTab, skyboxTab, lightsTab, barriersTab, projectTab, worldTab, helpTab);
   const bottomCaption = element('small', '', 'Loading metadata');
   bottomHeader.append(tabs, bottomCaption);
   const bottomContent = element('div', 'panel-content');
@@ -460,6 +471,18 @@ export function createEditorShell(root) {
   let skyboxState = { configured: false, config: normalizeSkyboxConfig({ enabled: false }), texture: null };
   let lightingState = normalizeLighting(DEFAULT_LIGHTING);
   let surfaceGlossState = 1;
+  // Lateral barrier authoring. `routes` is the live route catalogue from the
+  // adapter (id + length), `document` is the canonical barrier document, and
+  // `dirty` tracks edits not yet written to data/road-barriers.*.
+  let barrierState = {
+    loaded: false,
+    dirty: false,
+    saving: false,
+    document: { version: 1, routes: {} },
+    routes: [],
+    selectedRouteId: null,
+    filter: '',
+  };
   let entitySelectHandler = () => {};
   let inspectLockedHandler = () => {};
   let actionHandler = () => {};
@@ -1014,12 +1037,275 @@ export function createEditorShell(root) {
     return panel;
   };
 
+  /**
+   * Barriers panel — per road, per side, per chainage span.
+   *
+   * A span does NOT have to match a route segment: it is a plain metre range
+   * along the route, so a 30 m patch inside a 1.2 km ramp is one row. Rows are
+   * applied top to bottom and later rows repaint earlier ones, which is what
+   * makes "full-length coat, then patches" the natural authoring order — the
+   * resolved result per side is shown underneath so the paint order is never
+   * guesswork.
+   */
+  const renderBarriers = () => {
+    const panel = element('div', 'barriers-panel');
+    const intro = element('section', 'skybox-card skybox-intro');
+    const introCopy = element('div');
+    introCopy.append(
+      element('h3', '', 'Road edge barriers'),
+      element('p', '', 'Pick a road, then add spans. Each span covers one side (or both) over a metre range along that road — spans are independent of road segments, so a short patch inside a long run is fine. Later rows repaint earlier ones.'),
+    );
+    intro.append(introCopy);
+    panel.append(intro);
+
+    if (currentScene?.id !== 'highway') {
+      panel.append(element('p', 'barriers-help', 'Barriers belong to the highway scene. Switch scene to edit them.'));
+      return panel;
+    }
+
+    const routes = barrierState.routes;
+    const authoredIds = new Set(Object.keys(barrierState.document.routes || {}));
+    const selectedId = barrierState.selectedRouteId
+      && routes.some((route) => route.id === barrierState.selectedRouteId)
+      ? barrierState.selectedRouteId
+      : null;
+    const selectedRoute = routes.find((route) => route.id === selectedId) || null;
+
+    // --- road picker -------------------------------------------------------
+    const picker = element('section', 'skybox-card barriers-picker');
+    picker.append(element('h3', '', 'Road'));
+    const pickerRow = element('div', 'barriers-picker-row');
+    const filter = document.createElement('input');
+    filter.type = 'search';
+    filter.placeholder = 'Filter roads (e.g. ramp_8, wangan)';
+    filter.value = barrierState.filter;
+    filter.dataset.testid = 'barrier-filter';
+    filter.setAttribute('aria-label', 'Filter roads');
+    const select = document.createElement('select');
+    select.dataset.testid = 'barrier-route';
+    select.setAttribute('aria-label', 'Road');
+    const needle = barrierState.filter.trim().toLowerCase();
+    const visible = routes.filter((route) => !needle
+      || route.id.toLowerCase().includes(needle)
+      || (route.label || '').toLowerCase().includes(needle));
+    select.add(new Option(visible.length ? 'Choose a road…' : 'No road matches the filter', ''));
+    for (const route of visible) {
+      const spans = barrierState.document.routes?.[route.id]?.length || 0;
+      const suffix = spans ? ` · ${spans} span${spans === 1 ? '' : 's'}` : '';
+      select.add(new Option(`${route.label || route.id} · ${formatMeters(route.length)}${suffix}`, route.id, false, route.id === selectedId));
+    }
+    // A road authored but no longer present in the generated network must stay
+    // reachable so its stale spans can be deleted.
+    for (const id of authoredIds) {
+      if (!routes.some((route) => route.id === id)) select.add(new Option(`${id} · missing from this world`, id, false, id === selectedId));
+    }
+    filter.addEventListener('input', () => triggerAction('barrier-filter', { filter: filter.value }));
+    select.addEventListener('change', () => triggerAction('barrier-route-select', { routeId: select.value || null }));
+    pickerRow.append(filter, select);
+    const useSelected = button('Use road selected in viewport', 'barrier-use-selected', { title: 'Target whichever road is currently selected for centreline editing' });
+    useSelected.addEventListener('click', () => triggerAction('barrier-use-selected'));
+    pickerRow.append(useSelected);
+    picker.append(pickerRow);
+    panel.append(picker);
+
+    if (!selectedId) {
+      panel.append(element('p', 'barriers-help', barrierState.loaded
+        ? `${authoredIds.size} road${authoredIds.size === 1 ? '' : 's'} currently carry custom barriers. Choose a road above to edit it.`
+        : 'Loading saved barriers…'));
+      return panel;
+    }
+
+    const routeLength = Number.isFinite(selectedRoute?.length) ? selectedRoute.length : null;
+    const spans = barrierState.document.routes?.[selectedId] || [];
+
+    // --- authored spans ----------------------------------------------------
+    const list = element('section', 'skybox-card barriers-spans');
+    list.append(element('h3', '', `Spans on ${selectedRoute?.label || selectedId}`));
+    list.append(element('p', 'barriers-help', routeLength === null
+      ? 'This road is not in the current world; its spans can only be removed.'
+      : `Chainage runs 0 → ${formatMeters(routeLength)} from the start of the one-way carriageway. Leave "to" empty for "to the end".`));
+
+    const styleHeightLabel = (styleId, scale = 1) => {
+      const base = BARRIER_STYLES[styleId]?.approximateHeight;
+      return Number.isFinite(base) && base > 0 ? `about ${(base * scale).toFixed(2)} m tall` : 'no height';
+    };
+
+    const styleOptions = (host, value, onChange, testid) => {
+      const node = document.createElement('select');
+      if (testid) node.dataset.testid = testid;
+      node.setAttribute('aria-label', 'Barrier style');
+      for (const style of Object.values(BARRIER_STYLES)) {
+        const option = new Option(style.label, style.id, false, style.id === value);
+        option.title = style.description;
+        node.add(option);
+      }
+      node.addEventListener('change', () => onChange(node.value));
+      host.append(node);
+      return node;
+    };
+
+    const sideOptions = (host, value, onChange, testid) => {
+      const node = document.createElement('select');
+      if (testid) node.dataset.testid = testid;
+      node.setAttribute('aria-label', 'Side');
+      for (const [id, label] of [['both', 'Both sides'], ['left', 'Left side'], ['right', 'Right side']]) {
+        node.add(new Option(label, id, false, id === value));
+      }
+      node.addEventListener('change', () => onChange(node.value));
+      host.append(node);
+      return node;
+    };
+
+    if (!spans.length) {
+      list.append(element('p', 'barriers-help', 'No spans yet — this road uses the default parapet on both sides.'));
+    }
+    spans.forEach((span, index) => {
+      const row = element('div', 'barriers-span-row');
+      row.dataset.testid = `barrier-span-${index}`;
+      row.append(element('span', 'barriers-span-order', String(index + 1)));
+      sideOptions(row, span.side, (side) => triggerAction('barrier-span-update', { index, patch: { side } }));
+      const from = document.createElement('input');
+      from.type = 'number';
+      from.min = '0';
+      from.step = '1';
+      from.value = String(span.start);
+      from.setAttribute('aria-label', 'From (m)');
+      from.addEventListener('change', () => triggerAction('barrier-span-update', { index, patch: { start: Number(from.value) } }));
+      const to = document.createElement('input');
+      to.type = 'number';
+      to.min = '0';
+      to.step = '1';
+      to.value = span.end === null ? '' : String(span.end);
+      to.placeholder = 'end';
+      to.setAttribute('aria-label', 'To (m), empty = end of road');
+      to.addEventListener('change', () => triggerAction('barrier-span-update', {
+        index,
+        patch: { end: to.value.trim() === '' ? null : Number(to.value) },
+      }));
+      row.append(from, element('span', 'barriers-span-arrow', '→'), to);
+      styleOptions(row, span.style, (style) => triggerAction('barrier-span-update', { index, patch: { style } }));
+      const scale = span.heightScale ?? 1;
+      const height = document.createElement('input');
+      height.type = 'number';
+      height.min = String(BARRIER_HEIGHT_SCALE_RANGE.min);
+      height.max = String(BARRIER_HEIGHT_SCALE_RANGE.max);
+      height.step = '0.05';
+      height.value = String(scale);
+      height.className = 'barriers-span-height';
+      height.title = `Height multiplier (${BARRIER_HEIGHT_SCALE_RANGE.min}–${BARRIER_HEIGHT_SCALE_RANGE.max}) · ${styleHeightLabel(span.style, scale)}`;
+      height.setAttribute('aria-label', 'Height multiplier');
+      height.addEventListener('change', () => triggerAction('barrier-span-update', { index, patch: { heightScale: Number(height.value) } }));
+      row.append(element('span', 'barriers-span-arrow', '×h'), height);
+      const up = button('↑', 'barrier-span-up', { title: 'Apply this span earlier (later rows repaint it)' });
+      up.disabled = index === 0;
+      up.addEventListener('click', () => triggerAction('barrier-span-move', { index, delta: -1 }));
+      const down = button('↓', 'barrier-span-down', { title: 'Apply this span later (it repaints earlier rows)' });
+      down.disabled = index === spans.length - 1;
+      down.addEventListener('click', () => triggerAction('barrier-span-move', { index, delta: 1 }));
+      const remove = button('Remove', 'barrier-span-remove', { title: 'Delete this span' });
+      remove.classList.add('danger');
+      remove.addEventListener('click', () => triggerAction('barrier-span-remove', { index }));
+      row.append(up, down, remove);
+      list.append(row);
+    });
+
+    // --- add span ----------------------------------------------------------
+    const add = element('div', 'barriers-span-row barriers-span-add');
+    add.append(element('span', 'barriers-span-order', '+'));
+    let newSide = 'both';
+    let newStyle = 'shutokoTall';
+    sideOptions(add, newSide, (side) => { newSide = side; }, 'barrier-new-side');
+    const newFrom = document.createElement('input');
+    newFrom.type = 'number';
+    newFrom.min = '0';
+    newFrom.step = '1';
+    newFrom.value = '0';
+    newFrom.dataset.testid = 'barrier-new-start';
+    newFrom.setAttribute('aria-label', 'New span from (m)');
+    const newTo = document.createElement('input');
+    newTo.type = 'number';
+    newTo.min = '0';
+    newTo.step = '1';
+    newTo.placeholder = 'end';
+    newTo.dataset.testid = 'barrier-new-end';
+    newTo.setAttribute('aria-label', 'New span to (m), empty = end of road');
+    add.append(newFrom, element('span', 'barriers-span-arrow', '→'), newTo);
+    styleOptions(add, newStyle, (style) => { newStyle = style; }, 'barrier-new-style');
+    const newHeight = document.createElement('input');
+    newHeight.type = 'number';
+    newHeight.min = String(BARRIER_HEIGHT_SCALE_RANGE.min);
+    newHeight.max = String(BARRIER_HEIGHT_SCALE_RANGE.max);
+    newHeight.step = '0.05';
+    newHeight.value = '1';
+    newHeight.className = 'barriers-span-height';
+    newHeight.dataset.testid = 'barrier-new-height';
+    newHeight.title = `Height multiplier (${BARRIER_HEIGHT_SCALE_RANGE.min}–${BARRIER_HEIGHT_SCALE_RANGE.max}) · 1 = the style's own height`;
+    newHeight.setAttribute('aria-label', 'New span height multiplier');
+    add.append(element('span', 'barriers-span-arrow', '×h'), newHeight);
+    const addButton = button('Add span', 'barrier-span-add', { title: 'Append a span; it repaints everything above it' });
+    addButton.classList.add('accent');
+    addButton.addEventListener('click', () => triggerAction('barrier-span-add', {
+      span: {
+        side: newSide,
+        start: Number(newFrom.value) || 0,
+        end: newTo.value.trim() === '' ? null : Number(newTo.value),
+        style: newStyle,
+        heightScale: Number(newHeight.value) || 1,
+      },
+    }));
+    add.append(addButton);
+    list.append(add);
+    panel.append(list);
+
+    // --- resolved result ---------------------------------------------------
+    const resolved = element('section', 'skybox-card barriers-resolved');
+    resolved.append(element('h3', '', 'Resolved edge'));
+    const flattened = flattenBarrierSpans(barrierState.document, selectedId, routeLength ?? Infinity);
+    for (const [sideLabel, sign] of [['Left', -1], ['Right', 1]]) {
+      const line = element('div', 'barriers-resolved-side');
+      line.append(element('b', '', sideLabel));
+      const painted = flattened[sign];
+      if (!painted.length) {
+        line.append(element('span', '', `${BARRIER_STYLES[DEFAULT_BARRIER_STYLE_ID].label} for the whole road`));
+      } else {
+        for (const entry of painted) {
+          const chip = element('span', 'barriers-chip', `${Math.round(entry.start)}–${Number.isFinite(entry.end) ? Math.round(entry.end) : '∞'} m · ${BARRIER_STYLES[entry.style]?.label || entry.style}`);
+          chip.title = styleHeightLabel(entry.style, entry.heightScale ?? 1);
+          line.append(chip);
+        }
+      }
+      resolved.append(line);
+    }
+    resolved.append(element('p', 'barriers-help', 'Left/right are relative to the direction of travel. Gaps fall back to the default parapet.'));
+    panel.append(resolved);
+
+    // --- save --------------------------------------------------------------
+    const actions = element('div', 'project-actions barriers-actions');
+    const save = button(barrierState.saving ? 'Saving…' : 'Save barriers', 'barrier-save', {
+      title: 'Write data/road-barriers.json + .js — the playable game picks these up on its next boot',
+    });
+    save.classList.add('accent');
+    save.disabled = barrierState.saving;
+    save.addEventListener('click', () => triggerAction('barrier-save'));
+    const reload = button('Reload editor preview', 'barrier-reload', {
+      title: 'Barrier geometry is baked while the world is generated, so the editor viewport needs a reload to show saved changes',
+    });
+    reload.addEventListener('click', () => triggerAction('barrier-reload'));
+    actions.append(save, reload);
+    panel.append(actions);
+    panel.append(element('p', `barriers-help${barrierState.dirty ? ' pending' : ''}`, barrierState.dirty
+      ? 'Unsaved barrier changes — Save barriers writes them, then Reload to see them in the viewport.'
+      : 'Barrier styles are saved separately from the project draft; Apply to Game is not required.'));
+    return panel;
+  };
+
   const renderBottom = () => {
     assetsTab.classList.toggle('active', currentTab === 'assets');
     editTab.classList.toggle('active', currentTab === 'edit');
     projectTab.classList.toggle('active', currentTab === 'project');
     skyboxTab.classList.toggle('active', currentTab === 'skybox');
     lightsTab.classList.toggle('active', currentTab === 'lights');
+    barriersTab.classList.toggle('active', currentTab === 'barriers');
     worldTab.classList.toggle('active', currentTab === 'world');
     helpTab.classList.toggle('active', currentTab === 'help');
     bottomContent.innerHTML = '';
@@ -1033,6 +1319,10 @@ export function createEditorShell(root) {
     }
     if (currentTab === 'lights') {
       bottomContent.append(renderLights());
+      return;
+    }
+    if (currentTab === 'barriers') {
+      bottomContent.append(renderBarriers());
       return;
     }
     if (currentTab === 'project') {
@@ -1441,6 +1731,7 @@ export function createEditorShell(root) {
       'Use the X/Y/Z arrows on a selected point to edit its elevation and plan position.',
       'Right-click (or double-click) the road to add a point there.',
       'Right-click a point, or press Del, to remove it.',
+      'Esc keeps the edited road on screen as a draft surface. The merged chunk asphalt still shows the old alignment until Apply to Game rebuilds the world.',
     ]) hints.append(element('li', '', hint));
     roadPanel.append(hints);
 
@@ -1704,7 +1995,7 @@ export function createEditorShell(root) {
       if (currentTab === 'project') renderBottom();
     },
     showTab(tab) {
-      if (!['assets', 'edit', 'skybox', 'lights', 'project', 'world', 'help'].includes(tab)) return false;
+      if (!['assets', 'edit', 'skybox', 'lights', 'barriers', 'project', 'world', 'help'].includes(tab)) return false;
       currentTab = tab;
       renderBottom();
       return true;
@@ -1803,6 +2094,11 @@ export function createEditorShell(root) {
       roadState = state?.active ? state : null;
       renderRoadPanel();
     },
+    setBarrierState(state, { render = true } = {}) {
+      barrierState = { ...barrierState, ...state };
+      if (render && currentTab === 'barriers') renderBottom();
+    },
+    getBarrierState() { return barrierState; },
     refreshInspector() { renderInspector(); },
     setNavigation({ mode, speed, speedPreset, pointerLocked }) {
       const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);

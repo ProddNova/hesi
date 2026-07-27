@@ -43,6 +43,7 @@ export class RoadEditController {
     this.route = null;
     this.runtimeRoute = null;
     this.synthetic = false;
+    this.syntheticBases = new Map();
     this.yOffset = 0;
     this.activeHandle = null;
     this.drag = null;
@@ -50,6 +51,12 @@ export class RoadEditController {
     this._gizmoFinishCommit = null;
     this.dirty = new Set();
     this.dirtyRoutes = new Map();
+    // Every route edited since the world was generated, and the draft surfaces
+    // left behind for them. Unlike `dirty` these survive Save Draft: saving
+    // does not regenerate the baked asphalt, so the overlay has to stay until
+    // the world itself is rebuilt.
+    this.editedRoutes = new Set();
+    this.overlays = new Map();
     this.raycaster = new THREE.Raycaster();
     this.raycaster.params.Line.threshold = 6;
     this.pointer = new THREE.Vector2();
@@ -312,10 +319,14 @@ export class RoadEditController {
   get dirtyRouteIds() { return [...this.dirty]; }
 
   dirtyRouteUpdates() {
-    return [...this.dirtyRoutes.values()].map(({ route, synthetic }) => ({
+    return [...this.dirtyRoutes.values()].map(({ route, synthetic, base }) => ({
       id: route.id,
       points: structuredClone(route.points),
-      ...(synthetic ? { synthetic: true } : {}),
+      // Stamp synthetic saves with the generated polyline this edit was drawn
+      // on top of. Without it HighwayMap cannot tell a deliberate reshape of a
+      // PA connector from an override left over from an older lot fit, and
+      // discards the edit on the next load (see _syntheticOverrideIsStale).
+      ...(synthetic ? { synthetic: true, ...(base ? { base: structuredClone(base) } : {}) } : {}),
     }));
   }
 
@@ -436,7 +447,11 @@ export class RoadEditController {
 
   _markDirty(route, synthetic = this.synthetic) {
     this.dirty.add(route.id);
-    this.dirtyRoutes.set(route.id, { route, synthetic });
+    this.editedRoutes.add(route.id);
+    // The stamp is looked up per route id rather than read off the active
+    // route, so an undo replayed after selecting a different road still
+    // records the base its own edit was authored against.
+    this.dirtyRoutes.set(route.id, { route, synthetic, base: synthetic ? this.syntheticBases.get(route.id) || null : null });
     this.onDirty(route.id, true);
   }
 
@@ -581,6 +596,12 @@ export class RoadEditController {
       ? runtimeSynthetic
       : (this.activeEntity?.metadata?.runtimeSynthetic === true || !sourceRoute);
     const useSourceRoute = Boolean(sourceRoute && !this.synthetic);
+    // HighwayMap keeps the polyline it generated this connector from, before
+    // any published override replaced its points. Saving it alongside the edit
+    // is what proves the edit was authored against the current world.
+    if (this.synthetic && Array.isArray(this.runtimeRoute?.generatedPoints)) {
+      this.syntheticBases.set(routeId, structuredClone(this.runtimeRoute.generatedPoints));
+    }
     this.yOffset = useSourceRoute ? (this.adapter?.map?.roadNetworkYOffset || 0) : 0;
     this.route = useSourceRoute ? sourceRoute : {
       id: this.runtimeRoute.id,
@@ -600,13 +621,17 @@ export class RoadEditController {
     this.finishActiveDrag({ commit: false });
     clearInterval(this._refreshTimer);
     this._refreshTimer = null;
+    const editedRouteId = this.route && this.editedRoutes.has(this.route.id) ? this.route.id : null;
     this.activeEntity = null;
     this.route = null;
     this.runtimeRoute = null;
     this.synthetic = false;
     this.yOffset = 0;
     this.activeHandle = null;
-    this._clearHelpers();
+    this._clearHelpers({ retainAs: editedRouteId });
+    if (editedRouteId && !this._disposed) {
+      this.onStatus('Road edit kept on screen as a draft surface · the baked asphalt still shows the old alignment until Apply to Game rebuilds the world');
+    }
     this.onState(null);
   }
 
@@ -621,6 +646,9 @@ export class RoadEditController {
 
   _buildHelpers() {
     this._clearHelpers();
+    // The live helpers draw this route's draft themselves; a leftover overlay
+    // would only z-fight with them.
+    this._disposeOverlay(this.route.id);
     const group = new THREE.Group();
     group.name = `road-edit:${this.route.id}`;
     group.userData.editorHelper = true;
@@ -646,25 +674,54 @@ export class RoadEditController {
     this._refreshHandles({ force: true });
   }
 
-  _clearHelpers() {
+  /**
+   * Tears the live edit helpers down. With `retainAs` the draft surface,
+   * markings and centreline stay in the scene as that route's overlay instead:
+   * the world's baked asphalt is only regenerated when the editor reloads, so
+   * dropping the draft on Esc would make a committed edit look like it never
+   * happened.
+   */
+  _clearHelpers({ retainAs = null } = {}) {
     this.gizmo.detach();
     this.gizmo.visible = false;
-    this.group?.removeFromParent();
-    if (this.line) {
-      this.line.geometry.dispose();
-      this.line.material.dispose();
-    }
-    this.previewMesh?.geometry.dispose();
-    if (this.previewMarkings) {
-      for (const marking of this.previewMarkings.children) marking.geometry?.dispose();
-      this.previewMarkings.clear();
+    this.gizmoAnchor.removeFromParent();
+    for (const mesh of this.handles) mesh.removeFromParent();
+    this.handles = [];
+    this._handleKey = '';
+    if (retainAs && this.group) {
+      this._disposeOverlay(retainAs);
+      this.group.name = `road-edit-draft:${retainAs}`;
+      this.overlays.set(retainAs, {
+        group: this.group, line: this.line, previewMesh: this.previewMesh, previewMarkings: this.previewMarkings,
+      });
+    } else {
+      this.group?.removeFromParent();
+      this._disposeHelperObjects(this.line, this.previewMesh, this.previewMarkings);
     }
     this.group = null;
     this.line = null;
     this.previewMesh = null;
     this.previewMarkings = null;
-    this.handles = [];
-    this._handleKey = '';
+  }
+
+  _disposeHelperObjects(line, previewMesh, previewMarkings) {
+    if (line) {
+      line.geometry.dispose();
+      line.material.dispose();
+    }
+    previewMesh?.geometry.dispose();
+    if (previewMarkings) {
+      for (const marking of previewMarkings.children) marking.geometry?.dispose();
+      previewMarkings.clear();
+    }
+  }
+
+  _disposeOverlay(routeId) {
+    const overlay = this.overlays.get(routeId);
+    if (!overlay) return;
+    this.overlays.delete(routeId);
+    overlay.group.removeFromParent();
+    this._disposeHelperObjects(overlay.line, overlay.previewMesh, overlay.previewMarkings);
   }
 
   _refreshHelpers() {
@@ -835,6 +892,7 @@ export class RoadEditController {
     if (this._disposed) return;
     this._disposed = true;
     this._deactivate();
+    for (const routeId of [...this.overlays.keys()]) this._disposeOverlay(routeId);
     this._handleGeometry.dispose();
     this._handleMaterial.dispose();
     this._activeHandleMaterial.dispose();

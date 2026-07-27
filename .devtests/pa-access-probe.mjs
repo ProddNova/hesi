@@ -17,7 +17,7 @@
  *  4. NO MINIMAP GEOMETRY — the minimap carries no service-kind polyline.
  *  5. NO JUNCTION ARTEFACTS — no junction mouth/zone has a service-kind
  *     branch (rail openings and marking zones can't reference the lanes).
- *  6. GARAGE PRESERVED — initial spawn sits on a registered mainline lane;
+ *  6. GARAGE PRESERVED — initial spawn sits at 3832, -3779 on ramp_8;
  *     the garage entrance trigger sits ON the host carriageway's deck and
  *     getGarageTransition fires there; the minimap garage marker agrees.
  *  7. REVERSIBLE — the paAccessLanes:true twin restores all four access
@@ -105,8 +105,8 @@ check(serviceWalls === 0, `${serviceWalls} wall segments belong to access routes
 
 // --- 6. garage flow preserved -------------------------------------------------
 // The active garage lives on the Tatsumi deck while access lanes are
-// disabled: the ENTER trigger and the spawn both sit on the drivable lot
-// surface instead of a mainline shoulder.
+// disabled; its ENTER trigger stays on the lot while initialSpawn sits at
+// the requested ramp_8 coordinates.
 const garageArea = map.serviceAreas.find((area) => area.hasGarage);
 check(!!garageArea, 'garage service area missing');
 check(garageArea?.id === 'tatsumi_pa', `active garage is ${garageArea?.id}`);
@@ -125,9 +125,12 @@ if (garageArea) {
     && Math.hypot(minimap.garage.x - garageArea.garageEntrance.x, minimap.garage.z - garageArea.garageEntrance.z) < 1,
   'minimap garage marker does not sit on the entrance trigger');
   const spawn = map.initialSpawn;
-  check(spawn.serviceAreaId === 'tatsumi_pa', `initial spawn anchored to ${spawn.serviceAreaId}`);
-  const spawnInfo = map.getRoadInfo(spawn.position.clone());
-  check(!!spawnInfo?.inServiceArea && !!spawnInfo?.drivable, 'initial spawn not on the drivable deck');
+  check(spawn.routeId === 'ramp_8', `initial spawn route is ${spawn.routeId}`);
+  check(Math.abs(spawn.position.x - 3832) < 1e-6 && Math.abs(spawn.position.z + 3779) < 1e-6,
+    `initial spawn X/Z is ${spawn.position.x.toFixed(3)}, ${spawn.position.z.toFixed(3)}`);
+  const spawnInfo = map.getRoadInfo(spawn.position.clone(), spawn.routeId);
+  check(spawnInfo?.routeId === 'ramp_8' && !!spawnInfo?.drivable,
+    'initial spawn not on the drivable ramp_8 surface');
 }
 
 // --- 7. reversibility ----------------------------------------------------------

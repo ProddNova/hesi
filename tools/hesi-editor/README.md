@@ -94,9 +94,35 @@ While editing, the realistic local asphalt preview and analytic collision curve
 update immediately, including during a point drag. The original merged chunk
 asphalt may remain visible beside a large experimental deviation; markings,
 barriers, and chunk meshes become definitive only after **Apply to Game**.
-Runtime-generated access lanes such as `tatsumi_pa_entry` and
-`tatsumi_pa_exit` are saved separately and published as validated synthetic
-route metadata.
+Deselecting (Esc) therefore does **not** drop the draft surface: it stays in the
+scene for every road edited this session, because the baked asphalt underneath
+it still shows the pre-edit alignment until the world is regenerated.
+
+Runtime-generated access lanes such as `tatsumi_pa_entry` and `tatsumi_pa_exit`
+are saved separately and published as validated synthetic route metadata. They
+do not exist in `data/routes-smoothed.json`; the map generates them from the
+live lot fit on every load, so each saved override also records `base` — the
+generated polyline the edit was drawn on top of (`route.generatedPoints`).
+HighwayMap applies a stamped override verbatim while its base still matches
+what the world generates, and falls back to a conservative "does this still
+reach the lot" heuristic only for unstamped or mismatched ones. That is what
+lets you move a connector's terminus, or trim its on-deck end, without the edit
+being discarded at the next load. If the lot itself is re-fitted the stamp stops
+matching, the override is skipped with a console warning, and the edit has to be
+redone against the new geometry.
+
+Override files written before the stamp existed have no `base` and are still
+subject to the old heuristic. To adopt one as authored against the current
+world:
+
+```
+node tools/hesi-editor/stamp-road-overrides.mjs             # report only
+node tools/hesi-editor/stamp-road-overrides.mjs --write --publish
+```
+
+Check the listed edits are yours first — stamping an override left over from an
+older lot fit is exactly what the guard exists to prevent. Both the draft and
+the published files are backed up to `*.bak`.
 
 The road editor changes the existing smoothed centreline in full XYZ: route IDs,
 endpoints, and junction connectivity are protected. It does
@@ -105,6 +131,57 @@ does not recalculate distance-based metadata. Keep edits local and away from
 junction boundaries. If the normal raw-route smoothing pipeline later
 regenerates `data/routes-smoothed.*`, press **Apply to Game** again to reapply
 the saved editor source.
+
+## Road edge barriers
+
+Open **Barriers** from the toolbar or the bottom-panel tab. Pick a road, then
+add spans: each span sets the barrier style on one side (or both) over a metre
+range of that road's chainage. Spans are independent of route segments, so a
+short patch inside a long run is a single row, and the two sides of a road can
+carry completely different styles.
+
+Each row also has a `×h` height multiplier (0.4–3): the same style, taller or
+shorter, without a code change. It scales the wall's height and its collision
+but not its footprint, so a taller wall does not lean further into the road.
+
+Rows are applied top to bottom and **later rows repaint earlier ones**, so the
+natural order is "full-length coat first, then patches"; the *Resolved edge*
+summary underneath shows the result per side. Anything left uncovered falls
+back to the default parapet. The viewport draws the authored spans as coloured
+ladders along the road edge while you type.
+
+**Save barriers** writes `data/road-barriers.json` and the generated
+`data/road-barriers.js` that `js/map.js` imports. There is no draft/publish
+split and **Apply to Game is not involved** — barrier styles are pure look with
+their own files. Barrier geometry is baked while the world is generated, so
+press **Reload editor preview** (or just reload the page) to see a saved change
+in the viewport; the playable game picks it up on its next boot.
+
+Collision follows the style, so a taller wall is a taller solid wall. The
+`No barrier` style removes the visual only — the edge stays solid.
+
+Each style is drawn as **one continuous piece** (kerb, wall face, top, outer
+face), and its UVs are baked: the image runs along the road by world distance
+and stands full height on the wall, so a painted texture tiles continuously
+across segment joints and does not step on a graded ramp.
+
+### Which Surfaces entry is which
+
+**One style = one paintable slot** — kerb, panels, posts and capping beam of a
+style all sit on that style's own surface.
+
+- **Concrete barriers** — the *default low parapet*, i.e. the muretti along
+  every road in the map. This is the one to paint for "the normal barriers".
+- **Guardrails** — the steel handrail on top of that parapet.
+- **Concrete (pillars & lamp posts)** — pillars, lamp masts, central median.
+- **Tall screen wall** — the whole tall wall (Ramp 8).
+- **Sound wall** / **Jersey barrier (road edge)** / **Open guardrail beam** —
+  the whole corresponding style.
+- **Anti-throw screen** — only the mesh screen and its posts; that style's base
+  is the normal parapet on purpose, so it follows *Concrete barriers*.
+
+The style catalogue lives in `js/road-barrier-styles.js`; see
+`ROAD_BARRIERS_STATUS.md` for the full list and the data format.
 
 ## Photographic skybox
 

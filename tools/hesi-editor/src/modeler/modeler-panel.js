@@ -15,6 +15,7 @@ import {
   CAR_HITBOX_SETTING_FIELDS,
   CAR_HEADLIGHT_FIELDS,
   CAR_MODEL_GROUPS,
+  CAR_PAINT_FIELDS,
   CAR_REAR_LIGHT_FIELDS,
   TRAFFIC_CAR_BY_ID,
   TRAFFIC_BEHAVIOR_SETTING_FIELDS,
@@ -22,12 +23,15 @@ import {
   carModelTarget,
   carHitboxSettings,
   carHeadlightSettings,
+  carPaintSettings,
   carRearLightSettings,
+  defaultCarPaint,
   effectiveTrafficCarType,
   parseCarModelTarget,
   trafficCarDefinition,
   trafficCarSettings,
 } from '/js/car-models.js';
+import { applyCarPaint } from '/js/car-paint.js';
 import { createSoftSpotLight } from '/js/lighting-config.js';
 import { disposePSXCar, loadPSXCar } from '/js/psx-car-pack.js';
 import { assetPartResolver, bakeAssetPartComponents, refreshCustomAsset } from '../world/custom-asset-integration.js';
@@ -936,6 +940,13 @@ export class ModelerPanel {
       colorInput.addEventListener('change', () => this._recordHistory());
       colorRow.append(element('span', '', 'Base colour'), colorInput);
       this.inspector.append(colorRow);
+      // Imported models arrive with a colour on every face, which silently
+      // wins over this picker. Say so instead of letting it look broken.
+      const overriding = partFaceNames(part).filter((name) => part.faces?.[name]?.color || part.faces?.[name]?.texture);
+      if (overriding.length) {
+        this.inspector.append(element('p', 'modeler-help',
+          `${overriding.length} face${overriding.length === 1 ? '' : 's'} of this part carry their own colour or image and ignore the base colour — change them in "Faces & textures" below. For a car, use Body paint in the Cars tab: it repaints every part at once.`));
+      }
       if (['cylinder', 'cone', 'sphere'].includes(part.kind)) {
         const segmentsRow = element('label', 'modeler-field');
         const segmentsInput = document.createElement('input');
@@ -1038,6 +1049,23 @@ export class ModelerPanel {
       } else {
         row.append(element('small', 'modeler-face-none', style.color ? `colour ${style.color}` : 'no texture'));
       }
+      // A face that carries its own colour beats the part's base colour, so a
+      // face imported with one (every material of a converted car model) makes
+      // the "Base colour" picker look dead. Give each face its own picker.
+      const faceColor = document.createElement('input');
+      faceColor.type = 'color';
+      faceColor.className = 'modeler-face-color';
+      faceColor.value = style.color || part.color || '#9aa7b5';
+      faceColor.title = `Colour of the "${faceName}" surface — it overrides the part's base colour`;
+      faceColor.setAttribute('aria-label', `Colour of face ${faceName}`);
+      faceColor.addEventListener('input', () => {
+        part.faces = part.faces || {};
+        part.faces[faceName] = { ...(part.faces[faceName] || {}), color: faceColor.value };
+        this._markDirty({ history: false });
+        this._rebuildObject();
+      });
+      faceColor.addEventListener('change', () => { this._recordHistory(); this._renderInspector(); });
+      row.append(faceColor);
       const attach = button('Image…', 'tool-button small', `Attach an uploaded or new image to the ${faceName} face`);
       attach.addEventListener('click', () => this._assignTextureToFace(part, faceName));
       row.append(attach);
@@ -1296,12 +1324,19 @@ export class ModelerPanel {
       }
     }
     for (const slot of Object.keys(WORLD_SURFACES)) if (this.store.worldTexture(slot) === textureId) usage += 1;
+    // Car body wraps hold the id too, and a dangling one fails validation on
+    // save — so they are counted here and cleared below.
+    const wrapped = Object.entries(this.store.document.carModels || {})
+      .filter(([, entry]) => entry?.paint?.texture === textureId)
+      .map(([carTarget]) => carTarget);
+    usage += wrapped.length;
     const name = record.name || textureId;
     const message = usage
-      ? `Delete texture "${name}"? It is used on ${usage} face/world surface${usage === 1 ? '' : 's'} — they go back to their plain colour.`
+      ? `Delete texture "${name}"? It is used on ${usage} face/world surface/car bod${usage === 1 ? 'y' : 'ies'} — they go back to their plain colour.`
       : `Delete texture "${name}" from the library?`;
     if (!window.confirm(message)) return;
     this.store.deleteTexture(textureId);
+    for (const carTarget of wrapped) this.store.setCarModel(carTarget, { paint: { texture: null } });
     // The open (possibly unsaved) definition is a clone — strip it too.
     let touchedDefinition = false;
     for (const part of this.definition?.parts || []) {
@@ -1314,6 +1349,7 @@ export class ModelerPanel {
     this._renderTextures();
     this._renderWorldTextures();
     this._renderInspector();
+    if (this.library === 'cars') { this._renderCarInspector(); this._repaintCarPreview(); }
     this.onTexturesChanged();
     this.onWorldTexturesChanged();
     this.onStatus(`Deleted texture "${name}" · Save Object/textures to persist`);
@@ -1735,6 +1771,8 @@ export class ModelerPanel {
       return grid;
     };
 
+    this._renderCarPaintSection();
+
     this.carInspector.append(element('h4', 'surface-group-title', 'Collision hitbox'));
     this.carInspector.append(element('p', 'modeler-help',
       'The green wireframe is the real gameplay collision box. Size and X/Y/Z offset apply independently to the selected vehicle.'));
@@ -1903,6 +1941,130 @@ export class ModelerPanel {
 
     this.carInspector.append(element('p', 'modeler-car-live-note',
       'LIVE APPLY · Open the game with the button above. Saving broadcasts the new document and rebuilds cars already on the road.'));
+  }
+
+  /**
+   * Body paint for the whole car.
+   *
+   * A car body is never one material: the PSX pack shares `psxBody` across
+   * several OBJ groups, and a Modeler replacement splits it over as many mesh
+   * parts as the document vertex limit needs. Colouring it from the per-part
+   * "Base colour" picker therefore repaints a fraction of the car at a time —
+   * this section is the one control that reaches all of them, in the editor
+   * preview and in the game alike.
+   */
+  _renderCarPaintSection() {
+    const target = this.carTarget;
+    // Player only: the live traffic fleet is deliberately one high-visibility
+    // colour driven by its own emissive floor, so it has no paint record.
+    if (parseCarModelTarget(target)?.scope !== 'player') return;
+    const saved = carPaintSettings(target, this.store.document);
+    const paint = saved || defaultCarPaint(target);
+    const wrap = paint.texture ? this.store.getTexture(paint.texture) : null;
+    this.carInspector.append(element('h4', 'surface-group-title', 'Body paint'));
+    this.carInspector.append(element('p', 'modeler-help',
+      'Repaints the whole bodywork at once — every mesh part and every body material, in this preview and on the road. '
+      + 'Metallic flake darkens the base coat and puts the energy into a tighter highlight: that is what turns a flat blue into a metallic blue under the street lamps. '
+      + 'A body image is wrapped over the car as one piece instead of being fitted to each part, which is why it belongs here and not in "Faces & textures": '
+      + 'the projection is taken from the whole body, so one copy covers a flank across every mesh part it happens to be split into.'));
+
+    const colorRow = element('label', 'modeler-field modeler-car-field');
+    colorRow.append(element('span', '', 'Paint colour'));
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = paint.color;
+    color.dataset.carPaint = 'color';
+    color.addEventListener('input', () => {
+      this.store.setCarModel(target, { paint: { color: color.value } });
+      this.dirtyChip.textContent = 'Unsaved changes';
+      this._repaintCarPreview();
+    });
+    colorRow.append(color);
+    this.carInspector.append(colorRow);
+
+    const imageRow = element('div', 'modeler-field modeler-car-field');
+    imageRow.append(element('span', '', 'Body image'));
+    const imageControl = element('div', 'modeler-car-value');
+    if (wrap) {
+      const thumb = element('img', 'modeler-face-thumb');
+      thumb.src = textureSourceUrl(wrap);
+      thumb.alt = wrap.name || paint.texture;
+      thumb.title = wrap.name || paint.texture;
+      imageControl.append(thumb);
+    } else {
+      imageControl.append(element('small', 'modeler-face-none', 'plain paint'));
+    }
+    const chooseImage = button(wrap ? 'Change…' : 'Add image…', 'tool-button small', 'Wrap one image over the whole bodywork');
+    chooseImage.dataset.testid = 'car-paint-image';
+    chooseImage.addEventListener('click', () => {
+      this._chooseTexture('Image across the whole car body', (textureId) => {
+        this.store.setCarModel(target, { paint: { color: color.value, texture: textureId } });
+        this.dirtyChip.textContent = 'Unsaved changes';
+        this._renderCarInspector();
+        this._repaintCarPreview();
+        this.onStatus('Body image wrapped over the car · Image scale sets how many copies fit across it');
+      });
+    });
+    imageControl.append(chooseImage);
+    if (wrap) {
+      const clearImage = button('Remove image', 'tool-button small', 'Go back to plain paint, keeping the colour and finish');
+      clearImage.addEventListener('click', () => {
+        this.store.setCarModel(target, { paint: { color: color.value, texture: null } });
+        this.dirtyChip.textContent = 'Unsaved changes';
+        this._renderCarInspector();
+        this._repaintCarPreview();
+      });
+      imageControl.append(clearImage);
+    }
+    imageRow.append(imageControl);
+    this.carInspector.append(imageRow);
+
+    for (const field of CAR_PAINT_FIELDS) {
+      // The wrap controls would do nothing without an image to wrap.
+      if (field.textureOnly && !wrap) continue;
+      const row = element('label', 'modeler-field modeler-car-field');
+      row.append(element('span', '', field.label));
+      const control = element('div', 'modeler-car-value');
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(field.min);
+      input.max = String(field.max);
+      input.step = String(field.step);
+      input.value = String(paint[field.key]);
+      input.dataset.carPaint = field.key;
+      const readout = element('small', '', paint[field.key].toFixed(2));
+      // Live on `input`, and deliberately without re-rendering this panel:
+      // a re-render tears out the very slider under the pointer mid-drag.
+      input.addEventListener('input', () => {
+        const value = THREE.MathUtils.clamp(Number(input.value) || 0, field.min, field.max);
+        readout.textContent = value.toFixed(2);
+        this.store.setCarModel(target, { paint: { color: color.value, [field.key]: value } });
+        this.dirtyChip.textContent = 'Unsaved changes';
+        this._repaintCarPreview();
+      });
+      control.append(input, readout);
+      if (field.unit) control.append(element('small', '', field.unit));
+      row.append(control);
+      this.carInspector.append(row);
+    }
+
+    if (saved) {
+      const reset = button('Remove paint', 'tool-button small', 'Go back to the stock body colour and material');
+      reset.addEventListener('click', () => {
+        this.store.setCarModel(target, { paint: null });
+        this.dirtyChip.textContent = 'Unsaved changes';
+        this._renderCarList();
+        this._renderCarInspector();
+        this._buildCarPreview({ focus: false });
+      });
+      this.carInspector.append(reset);
+    }
+  }
+
+  /** Repaints the preview in place — a full rebuild would re-parse the OBJ. */
+  _repaintCarPreview() {
+    if (!this.carPreviewVisual) return;
+    applyCarPaint(this.carPreviewVisual, carPaintSettings(this.carTarget, this.store.document), this.store.texturesById());
   }
 
   async _editCarAsModel() {
@@ -2181,6 +2343,7 @@ export class ModelerPanel {
         if (visual?.userData?.psxCarId) disposePSXCar(visual);
         return;
       }
+      applyCarPaint(visual, carPaintSettings(target, this.store.document), this.store.texturesById());
       this.carPreviewVisual = visual;
       this.worldPreviewGroup.add(visual);
       this._addCarPreviewHelpers(parsed);

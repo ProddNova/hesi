@@ -4,6 +4,15 @@
     "name": "HESI Main World"
   },
   "entityOverrides": {
+    "generated-prop-batch:6-n7-concrete-chunk-6-7-concrete-34": {
+      "visible": false
+    },
+    "generated-prop-batch:6-n7-exitgreen-chunk-6-7-exitgreen-35": {
+      "visible": false
+    },
+    "generated-prop-batch:6-n7-matrix-chunk-6-7-matrix-36": {
+      "visible": false
+    },
     "generated-prop-batch:6-n7-unknown-garage-transition-marker-10": {
       "transform": {
         "position": [
@@ -27,6 +36,9 @@
     "generated-prop-batch:6-n7-unknown-sign-pa-tatsumi-no-1-pa-8": {
       "visible": false
     },
+    "generated-prop-batch:6-n7-unknown-sign-pa-tatsumi-pa-13": {
+      "visible": false
+    },
     "generated-prop-batch:6-n7-unknown-sign-toilet-7": {
       "visible": false
     },
@@ -47,7 +59,8 @@
           1,
           1.06786
         ]
-      }
+      },
+      "visible": false
     },
     "lamp:ramp-2:0011": {
       "visible": false
@@ -423,11 +436,11 @@
     "lighting": {
       "ambientIntensity": 0.72,
       "directIntensity": 0.82,
-      "exposure": 1.12,
+      "exposure": 0.65,
       "intensity": 0.9,
-      "streetLampColor": "#fed795",
+      "streetLampColor": "#fe692a",
       "streetLampIntensity": 1.8,
-      "streetLampTemperature": -0.55,
+      "streetLampTemperature": -1,
       "temperature": -0.08,
       "tint": "#ffffff"
     }

@@ -14,6 +14,9 @@ import { WorldProjectState } from './overrides/world-project-state.js';
 import { AssetRegistry } from './world/asset-registry.js';
 import { ProjectPersistence } from './overrides/project-persistence.js';
 import { createRoutePersistence } from './overrides/route-persistence.js';
+import { createBarrierPersistence } from './overrides/barrier-persistence.js';
+import { BarrierOverlay } from './world/barrier-overlay.js';
+import { canonicalizeBarrierDocument } from '/js/road-barrier-styles.js';
 import { getScene, sceneFromSearch } from './scenes/scene-registry.js';
 import { CustomAssetStore } from './world/custom-asset-store.js';
 import { assembleDefinitionFromEntities, assetPartResolver, registerCustomAssets } from './world/custom-asset-integration.js';
@@ -50,6 +53,14 @@ export async function createEditorApp(root) {
   let placement = null;
   let roadEdit = null;
   let routePersistence = null;
+  let barrierPersistence = null;
+  let barrierOverlay = null;
+  // Authored lateral barriers. Held here (not in the project draft) because
+  // they are baked at world-generation time and saved to their own files —
+  // Apply to Game is not involved.
+  let barrierDocument = { version: 1, routes: {} };
+  let barrierSelectedRouteId = null;
+  let barrierDirty = false;
   let customAssetStore = null;
   let modeler = null;
   let surfaces = null;
@@ -259,6 +270,10 @@ export async function createEditorApp(root) {
     shell.showTab('lights');
     shell.setStatus(`Lights · editing ${scene.id === 'highway' ? 'Street' : 'Garage'} only · press L in the viewport to preview Game lighting`);
   });
+  shell.onToolbar('open-barriers', () => {
+    shell.showTab('barriers');
+    shell.setStatus('Barriers · pick a road, add spans per side, Save barriers, then Reload to preview');
+  });
   shell.onToolbar('transform-translate', () => transformManager?.setMode('translate'));
   shell.onToolbar('transform-rotate', () => transformManager?.setMode('rotate'));
   shell.onToolbar('transform-scale', () => transformManager?.setMode('scale'));
@@ -272,7 +287,119 @@ export async function createEditorApp(root) {
   shell.onPreset(applyPreset);
   shell.onEntitySelect((id, { additive = false } = {}) => selection?.select(id, { source: 'hierarchy', additive }));
   shell.onInspectLocked((enabled) => selection?.setInspectLocked(enabled));
+  // --- lateral barriers ----------------------------------------------------
+  // The route catalogue the Barriers panel picks from: every generated route,
+  // with the length its chainage spans are measured against.
+  const barrierRouteCatalogue = () => {
+    const routes = adapter?.map?.routes;
+    if (!routes) return [];
+    return [...routes.values()]
+      .map((route) => ({
+        id: route.id,
+        label: route.name || route.id,
+        length: Number.isFinite(route.length) ? route.length : null,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  };
+
+  const syncBarrierState = ({ render = true } = {}) => {
+    shell.setBarrierState({
+      loaded: true,
+      dirty: barrierDirty,
+      document: barrierDocument,
+      routes: barrierRouteCatalogue(),
+      selectedRouteId: barrierSelectedRouteId,
+    }, { render });
+    barrierOverlay?.update(adapter?.map, barrierDocument, barrierSelectedRouteId);
+  };
+
+  // Every mutation goes through here: it re-canonicalizes, so an impossible
+  // span (end before start, unknown style) is rejected with a status message
+  // instead of being written to disk.
+  const mutateBarriers = (mutate, statusMessage) => {
+    const next = structuredClone(barrierDocument);
+    if (!next.routes) next.routes = {};
+    try {
+      mutate(next);
+      barrierDocument = canonicalizeBarrierDocument(next);
+    } catch (error) {
+      shell.setStatus(`Barrier edit rejected · ${error.message}`);
+      return;
+    }
+    barrierDirty = true;
+    syncBarrierState();
+    if (statusMessage) shell.setStatus(statusMessage);
+  };
+
+  const barrierSpansOf = (document, routeId) => {
+    if (!Array.isArray(document.routes[routeId])) document.routes[routeId] = [];
+    return document.routes[routeId];
+  };
+
   shell.onAction((action, detail) => {
+    const barrierActions = {
+      'barrier-filter': () => shell.setBarrierState({ filter: detail?.filter || '' }, { render: false }),
+      'barrier-route-select': () => {
+        barrierSelectedRouteId = detail?.routeId || null;
+        syncBarrierState();
+      },
+      'barrier-use-selected': () => {
+        const routeId = roadEdit?.route?.id || null;
+        if (!routeId) { shell.setStatus('Select a road in the viewport first (its centreline points appear when it is selected)'); return; }
+        barrierSelectedRouteId = routeId;
+        syncBarrierState();
+        shell.setStatus(`Barriers · editing ${routeId}`);
+      },
+      'barrier-span-add': () => {
+        if (!barrierSelectedRouteId) return;
+        mutateBarriers((document) => {
+          barrierSpansOf(document, barrierSelectedRouteId).push({ ...detail.span });
+        }, `Added a ${detail?.span?.style} span on ${barrierSelectedRouteId} · Save barriers to write it`);
+      },
+      'barrier-span-update': () => {
+        if (!barrierSelectedRouteId) return;
+        mutateBarriers((document) => {
+          const spans = barrierSpansOf(document, barrierSelectedRouteId);
+          const span = spans[detail.index];
+          if (!span) throw new Error(`No span ${detail.index + 1} on ${barrierSelectedRouteId}`);
+          Object.assign(span, detail.patch);
+        });
+      },
+      'barrier-span-remove': () => {
+        if (!barrierSelectedRouteId) return;
+        mutateBarriers((document) => {
+          const spans = barrierSpansOf(document, barrierSelectedRouteId);
+          spans.splice(detail.index, 1);
+          if (!spans.length) delete document.routes[barrierSelectedRouteId];
+        }, 'Span removed · Save barriers to write it');
+      },
+      'barrier-span-move': () => {
+        if (!barrierSelectedRouteId) return;
+        mutateBarriers((document) => {
+          const spans = barrierSpansOf(document, barrierSelectedRouteId);
+          const target = detail.index + detail.delta;
+          if (target < 0 || target >= spans.length) return;
+          const [moved] = spans.splice(detail.index, 1);
+          spans.splice(target, 0, moved);
+        });
+      },
+      'barrier-save': () => {
+        if (!barrierPersistence) return;
+        shell.setBarrierState({ saving: true });
+        barrierPersistence.save(barrierDocument)
+          .then(() => { barrierDirty = false; })
+          .catch((error) => shell.setStatus(`Saving barriers failed · ${error.message}`))
+          .finally(() => {
+            shell.setBarrierState({ saving: false });
+            syncBarrierState();
+          });
+      },
+      'barrier-reload': () => {
+        if (barrierDirty && !window.confirm('You have unsaved barrier changes. Reload and lose them?')) return;
+        window.location.reload();
+      },
+    };
+    if (barrierActions[action]) { barrierActions[action](); return; }
     const viewActions = {
       'lighting-mode': () => {
         viewport.setLightingMode(detail);
@@ -362,7 +489,7 @@ export async function createEditorApp(root) {
           return;
         }
         history.execute({
-          label: detail?.label || `Tune ${scene.id === 'highway' ? 'street' : 'garage'} global light`,
+          label: detail?.label || `Tune ${scene.id === 'highway' ? 'street' : scene.label.toLowerCase()} global light`,
           redo: () => apply(after),
           undo: () => apply(before),
         });
@@ -653,6 +780,19 @@ export async function createEditorApp(root) {
       },
       onState: (state) => shell.setRoadEdit(state),
     });
+    // Lateral barrier styles: their own files, no draft/publish split. The
+    // world has already generated with whatever was saved, so this only feeds
+    // the authoring panel and its overlay.
+    if (scene.id === 'highway') {
+      barrierPersistence = createBarrierPersistence({ onStatus: (message) => shell.setStatus(message) });
+      barrierOverlay = new BarrierOverlay({ viewport });
+      barrierPersistence.load().then((document) => {
+        if (disposed) return;
+        barrierDocument = document;
+        barrierDirty = false;
+        syncBarrierState({ render: false });
+      });
+    }
     // Initial snap-state synchronisation: the gizmo and shell were created
     // after the grid-snap state existed, so push the current state once.
     transformManager.setSnaps(gridSnap.gizmoSnaps());
@@ -742,8 +882,8 @@ export async function createEditorApp(root) {
     const reselectId = params.get('select');
     if (reselectId) selection.select(reselectId, { source: 'rebuild' });
     shell.setLoading(false);
-    shell.setStatus(adapter.strategy === 'garage'
-      ? `Garage interior ready · ${adapter.entities.length} editable parts`
+    shell.setStatus(adapter.strategy === 'garage' || adapter.strategy === 'tatsumi_pa'
+      ? `${adapter.label} ready · ${adapter.entities.length} editable parts`
       : (adapter.isRealWorld
         ? `Real HESI map ready · ${adapter.metadata.routeCount} routes · ${adapter.metadata.chunkCount} chunks`
         : adapter.warning));
@@ -764,6 +904,7 @@ export async function createEditorApp(root) {
     modeler?.dispose();
     placement?.dispose();
     roadEdit?.dispose();
+    barrierOverlay?.dispose();
     collisionOverlay.dispose();
     editActions?.exitIsolation();
     persistence?.dispose();
@@ -804,6 +945,8 @@ export async function createEditorApp(root) {
     get placement() { return placement; },
     get roadEdit() { return roadEdit; },
     get routePersistence() { return routePersistence; },
+    get barrierPersistence() { return barrierPersistence; },
+    get barrierDocument() { return barrierDocument; },
     get modeler() { return modeler; },
     get customAssetStore() { return customAssetStore; },
     get skyboxController() { return skyboxController; },

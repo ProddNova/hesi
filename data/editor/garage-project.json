@@ -1545,7 +1545,7 @@
         "intensity": 650,
         "irregularity": 0.78,
         "radius": 30,
-        "range": 14,
+        "range": 11.75,
         "seed": 40,
         "softness": 0.78,
         "temperature": 0.85
@@ -1581,8 +1581,8 @@
         "decay": 2.3,
         "intensity": 1500,
         "irregularity": 0.78,
-        "radius": 17,
-        "range": 14,
+        "radius": 30,
+        "range": 10.5,
         "seed": 44,
         "softness": 1,
         "temperature": 1
@@ -1687,7 +1687,13 @@
   "groups": [],
   "environment": {
     "lighting": {
+      "ambientIntensity": 1,
+      "directIntensity": 1,
+      "exposure": 1.08,
       "intensity": 0.35,
+      "streetLampColor": "#ff8a2e",
+      "streetLampIntensity": 1,
+      "streetLampTemperature": 0,
       "temperature": 1,
       "tint": "#ffffff"
     }

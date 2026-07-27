@@ -4,6 +4,20 @@ import * as THREE from 'three';
 // XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
 // any extractor run).
 import ROUTE_DATA from '../data/routes-smoothed.js';
+// Per-route / per-side / per-chainage lateral barrier styles, authored in the
+// world editor's Barriers app (see js/road-barrier-styles.js for the catalogue
+// and the addressing rules). Routes absent from this document render the
+// shipped parapet exactly as before.
+import ROAD_BARRIER_DATA from '../data/road-barriers.js';
+import {
+  BARRIER_MATERIALS,
+  BARRIER_MATERIAL_NAMES,
+  DEFAULT_BARRIER_STYLE_ID,
+  barrierSpanAt,
+  barrierStyle,
+  canonicalizeBarrierDocument,
+  flattenBarrierSpans,
+} from './road-barrier-styles.js';
 import { BUILDING_TYPES } from './building-types.js';
 import { buildProgressiveTransitions } from './progressive-merge.js';
 import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js';
@@ -37,6 +51,9 @@ import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js'
  *    be disabled.
  */
 
+/** The shipped edge profile, resolved once (see `_buildRouteGeometry`). */
+const BARRIER_PARAPET_STYLE = barrierStyle(DEFAULT_BARRIER_STYLE_ID);
+
 const UP = new THREE.Vector3(0, 1, 0);
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const TMP_A = new THREE.Vector3();
@@ -61,6 +78,48 @@ const SERVICE_DASH_PERIOD = 14;
 // Denser broken line marking a merge/exit boundary through junction zones.
 const ZONE_DASH_LENGTH = 3.0;
 const ZONE_DASH_PERIOD = 6;
+// ------------------------------------------------------------------
+// Emergency lay-bys (非常駐車帯 / piazzole di sosta d'emergenza)
+//
+// A lay-by is a purely ONE-SIDED local widening of the paved surface. The
+// through lanes, their markings and the traffic lanes all derive from
+// route.halfWidth / _halfWidthAt and are deliberately untouched, so the
+// solid edge line runs straight past the bay exactly like the real thing.
+// The drawn deck edge, fascia, parapet, handrail, edge furniture, wall
+// segments and the physics corridor all derive from _surfaceEdgeLateral /
+// the corridor envelope, which _laybyExtraAt extends — so one entry in
+// this table buys the whole feature: asphalt bulge, guardrail bulge, and a
+// drivable, collidable bay to stop in.
+//
+// side: +1 is the driver's left (the shoulder side on a left-hand-traffic
+// carriageway), -1 the right. Stations are route chainage in metres;
+// taperIn/taperOut are contained inside [start, end], and `extra` is the
+// metres of extra pavement beyond the normal shoulder edge at the plateau.
+//
+// A taper of 0 means a SQUARE END on that side: the pavement (and the wall
+// standing on it) starts or stops dead on a line square across the bay instead
+// of flaring, which is what turns a pull-off into a walled parking pocket. See
+// _laybySquareEndStations for how the step is kept at 90 degrees.
+const LAYBYS = Object.freeze([
+  // Ramp 8 above the Tatsumi interchange — the first bay the player meets
+  // driving away from the boot spawn, and the way into the Tatsumi PA zone.
+  // 10 m of extra pavement is a full pull-off apron, not just a shoulder
+  // widening. The bay opens SQUARE (the wall carrying the PA gate is the first
+  // transverse edge you meet) and closes with a 45 m flare back onto the
+  // shoulder — ~1:3, gentle enough to drive out of at speed. That leaves a
+  // 105 m flat bay, 550-655. Traffic runs up-chainage on this ramp, so `start`
+  // is the end the driver reaches first.
+  // `paZone` marks the bay as the road-side door of a walkable zone: the square
+  // end gets a painted forecourt and a lit gate in the closing wall, and the
+  // map publishes the trigger the game turns into "ENTER TATSUMI PA".
+  { routeId: 'ramp_8', side: 1, start: 550, end: 700, taperIn: 0, taperOut: 45, extra: 10, paZone: 'tatsumi_pa' },
+]);
+
+// Chainage of the square-end step. The deck edge jumps the full `extra` across
+// this span, so it must be short enough to read as a 90-degree corner and long
+// enough to survive frame-distance rounding.
+const LAYBY_SQUARE_END_STEP = 0.05;
+
 const CHUNK = 600;
 // Exponential night fog has already reduced the world to a few percent of its
 // original contrast at these distances. Keeping another full ring of 600 m
@@ -249,6 +308,12 @@ export const PLANAR_UV_SURFACE_MATERIAL_NAMES = Object.freeze([
 // look. applyWallSurfaceUVs fills v across each face's own height and tiles u
 // by world distance along the wall. Both sets are the `worldTiled` slots in
 // js/custom-assets.js, so the editor tiles them by metres-per-tile.
+// NOTE the styled-barrier slots (js/road-barrier-styles.js) are deliberately
+// NOT in this list. This projection re-fits the image to each connected
+// component's own foot and top, and merged quads share no vertices, so on a
+// graded ramp every segment re-anchored the picture to its own lowest corner
+// — the visible "staircase". Styled barriers bake exact UVs instead (u =
+// world chainage, v authored per profile point); see _emitStyledBarrierSegment.
 export const WALL_UV_SURFACE_MATERIAL_NAMES = Object.freeze([
   'barrier', 'railMetal', 'fence', 'concrete', 'concreteDark',
   'tunnelWall', 'tunnelDark', 'portal',
@@ -593,6 +658,9 @@ export class HighwayMap {
     this.connections = new Map(); // legacy per-route view of edges
     this.junctions = [];
     this.serviceAreas = [];
+    this.laybys = [];
+    // Road-side doors into walkable zones (see _buildZoneEntrances).
+    this.zoneEntrances = [];
     this.wallSegments = [];
     this.progressiveTransitions = [];
     this.progressiveCandidateClassifications = [];
@@ -621,6 +689,12 @@ export class HighwayMap {
     this._disposed = false;
     this.roadNetworkYOffset = ROAD_NETWORK_Y_OFFSET;
 
+    // Lateral barrier styles. `options.roadBarriers` lets the editor preview
+    // and headless probes drive an unsaved document; a malformed one degrades
+    // to the shipped parapet everywhere instead of failing world construction.
+    this.roadBarriers = this._normalizeRoadBarriers(this.options.roadBarriers ?? ROAD_BARRIER_DATA);
+    this._barrierSpanCache = new Map();
+
     // Spatial index: cell key -> [{route, sampleIndex}]
     this._grid = new Map();
     this._gridCell = 260;
@@ -647,6 +721,7 @@ export class HighwayMap {
     this._defineServiceAreas();
     this._applyEditorSyntheticRouteOverrides();
     this._finalizeNetwork();
+    this._defineLaybys();
     this._buildWorld();
     if (this.options.progressiveCorridorDebug) this._buildProgressiveCorridorDebugOverlay();
     if (this.options.progressiveMergeHandoffDebug) this._buildP2HandoffDebugOverlay();
@@ -672,19 +747,21 @@ export class HighwayMap {
     this.trafficLanes = this.getTrafficLanes();
 
     const garageArea = this.serviceAreas.find((area) => area.hasGarage);
-    // Spawn (boot + garage exit) on the Tatsumi PA deck, facing the ramp_8
-    // exit. Falls back to the legacy beside-the-garage mainline spawn when
-    // the deck prototype could not be placed.
-    const tatsumiArea = this.serviceAreas.find((area) => area.id === 'tatsumi_pa' && area.futureAnchors?.spawn);
-    if (tatsumiArea) {
-      const anchor = tatsumiArea.futureAnchors.spawn;
-      const tangent = tatsumiArea.tangent.clone();
+    // Boot, garage exit, tow and crash recovery all use this fixed Ramp 8
+    // location. Derive elevation and heading from the live route so the
+    // requested X/Z coordinates stay exact while the car follows the road.
+    const spawnRoute = this.routes.get('ramp_8');
+    if (spawnRoute) {
+      const requestedPosition = vec(3832, 0, -3779);
+      const projection = this._projectToRoute(spawnRoute, requestedPosition);
+      requestedPosition.y = projection.point.y;
+      const roadInfo = this.getRoadInfo(requestedPosition, spawnRoute.id);
+      const tangent = (roadInfo?.tangent || projection.tangent).clone();
       const normal = horizontalNormal(tangent, new THREE.Vector3());
-      const position = anchor.position.clone();
-      position.y += 0.65;
+      const position = vec(3832, (roadInfo?.height ?? projection.point.y) + 0.65, -3779);
       const quaternion = yawQuaternion(tangent, new THREE.Quaternion());
       this.initialSpawn = {
-        routeId: tatsumiArea.exitRouteId || null,
+        routeId: spawnRoute.id,
         position,
         point: position,
         center: position.clone(),
@@ -696,9 +773,9 @@ export class HighwayMap {
         up: UP.clone(),
         quaternion,
         rotation: quaternion,
-        heading: anchor.heading,
-        serviceAreaId: tatsumiArea.id,
-        label: 'Tatsumi PA deck',
+        heading: roadInfo?.heading ?? Math.atan2(tangent.x, tangent.z),
+        serviceAreaId: null,
+        label: 'Ramp 8 spawn (3832, -3779)',
       };
     } else {
       const mainRoute = this.routes.get(garageArea.routeId);
@@ -756,6 +833,11 @@ export class HighwayMap {
       concreteDark: lambert(0x272a31),
       barrier: lambert(0x9096a0, { side: THREE.DoubleSide, emissive: 0x2e3138 }),
       railMetal: lambert(0xaab2bc, { side: THREE.DoubleSide, emissive: 0x23262c }),
+      // One slot per styled barrier body, so the editor's Surfaces app can
+      // retexture a screen wall without touching pillars or default parapets.
+      ...Object.fromEntries(Object.entries(BARRIER_MATERIALS).map(([name, spec]) => [
+        name, lambert(spec.color, { side: THREE.DoubleSide, emissive: spec.emissive }),
+      ])),
       tunnelWall: lambert(0x2c2f36, { side: THREE.DoubleSide }),
       tunnelDark: lambert(0x191c22, { side: THREE.DoubleSide }),
       portal: lambert(0x3a3d44),
@@ -1441,6 +1523,12 @@ export class HighwayMap {
       destinations: [],
       ...config,
       points,
+      // Runtime-generated routes keep the polyline they were generated from.
+      // A published editor override records the same polyline as its `base`,
+      // which is how _syntheticOverrideIsStale can tell a deliberate fresh
+      // edit (base matches: the user drew it on THIS geometry) from an old
+      // override captured against a differently fitted deck (base differs).
+      generatedPoints: config.synthetic ? points.map((point) => point.toArray()) : null,
       curve,
       length,
       lanes,
@@ -1527,7 +1615,7 @@ export class HighwayMap {
     const overrides = ROUTE_DATA.meta?.editorRoadOverrides?.syntheticRoutes;
     if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return;
     for (const [routeId, entry] of Object.entries(overrides)) {
-      if (this._syntheticOverrideIsStale(routeId, entry?.points)) {
+      if (this._syntheticOverrideIsStale(routeId, entry?.points, entry?.base)) {
         console.warn(`Shutoko map: stale synthetic route override skipped (no longer reaches its lot): ${routeId}`);
         continue;
       }
@@ -1547,9 +1635,18 @@ export class HighwayMap {
    * the old footprint). Compare against the runtime-built connector, allowing
    * an intentional endpoint trim along its curve; fall back to the lot
    * rectangle when no runtime connector exists.
+   *
+   * `base` short-circuits all of that. The editor stamps every saved override
+   * with the generated polyline it was drawn on top of, so when that stamp
+   * still matches the freshly generated connector the edit was authored
+   * against exactly this deck fit and the user's control points — endpoints
+   * included — are authoritative. Only unstamped (legacy) overrides, and
+   * stamped ones whose base no longer matches, fall through to the geometric
+   * heuristic below.
    */
-  _syntheticOverrideIsStale(routeId, pointArrays) {
+  _syntheticOverrideIsStale(routeId, pointArrays, base = null) {
     if (!Array.isArray(pointArrays) || pointArrays.length < 2) return false;
+    if (this._matchesGeneratedBase(this.routes.get(routeId), base)) return false;
     const area = this.serviceAreas.find(
       (candidate) => candidate.entryRouteId === routeId || candidate.exitRouteId === routeId,
     );
@@ -1576,6 +1673,22 @@ export class HighwayMap {
     return Math.abs(du) > area.length * 0.5 - 0.5
       || Math.abs(dv) > area.width * 0.5 - 0.5
       || Math.abs(terminus[1] - area.elevation) > 1.5;
+  }
+
+  /**
+   * True when `base` is the polyline this synthetic route was generated from.
+   * The tolerance only has to absorb the override file's 5-decimal rounding;
+   * any real change to the generated geometry moves points by metres.
+   */
+  _matchesGeneratedBase(route, base) {
+    const generated = route?.generatedPoints;
+    if (!Array.isArray(base) || !Array.isArray(generated) || base.length !== generated.length) return false;
+    return base.every((point, index) => Array.isArray(point)
+      && point.length === 3
+      && point.every(Number.isFinite)
+      && Math.abs(point[0] - generated[index][0]) <= 1e-3
+      && Math.abs(point[1] - generated[index][1]) <= 1e-3
+      && Math.abs(point[2] - generated[index][2]) <= 1e-3);
   }
 
   _polylineLength(points, closed) {
@@ -2541,6 +2654,130 @@ export class HighwayMap {
     return half;
   }
 
+  /**
+   * Register the LAYBYS table onto its routes. Runs after the editor's
+   * synthetic route overrides, so the stations are clamped against the
+   * length the deck is actually going to be built from.
+   */
+  _defineLaybys() {
+    for (const def of LAYBYS) {
+      const route = this.routes.get(def.routeId);
+      if (!route) continue;
+      const start = clamp(def.start, 0, route.length);
+      const end = clamp(def.end, start, route.length);
+      const span = end - start;
+      if (span < 6) continue;
+      // A short route (or a clamped span) must not end up with overlapping
+      // tapers and no plateau: scale both ramps down to fit, keeping ~25% of
+      // the span as flat bay.
+      const wanted = Math.max(EPSILON, def.taperIn + def.taperOut);
+      const fit = Math.min(1, span * 0.75 / wanted);
+      // A taper authored as 0 stays 0 — that is the square end, not a taper
+      // that got rounded away.
+      const taper = (value) => (value > 0 ? Math.max(1, value * fit) : 0);
+      const layby = {
+        id: `layby:${route.id}:${Math.round(start)}`,
+        route,
+        side: def.side >= 0 ? 1 : -1,
+        start,
+        end,
+        taperIn: taper(def.taperIn),
+        taperOut: taper(def.taperOut),
+        extra: def.extra,
+        paZone: def.paZone || null,
+      };
+      // Bounding sphere for the cheap reject in _laybyOwnsPoint, which runs on
+      // the physics path. Centred on the bay, big enough to contain the whole
+      // span and its widened edge.
+      layby.bounds = this._sampleCenter(route, (start + end) * 0.5, 1).position.clone();
+      layby.boundsRadius = span * 0.5 + route.halfWidth + def.extra + 8;
+      if (!route.laybys) route.laybys = [];
+      route.laybys.push(layby);
+      this.laybys.push(layby);
+    }
+  }
+
+  /**
+   * TRUE where a lay-by's own asphalt covers this point.
+   *
+   * A bay deep enough to reach past a neighbouring service-area footprint gets
+   * claimed by that lot's rectangle, which then answers for it: getRoadInfo
+   * reports the PA instead of the carriageway, and the collision bounds become
+   * the lot's instead of the bay's. Authored road surface outranks a lot
+   * rectangle, so the physics entry points ask this first. Only ever consulted
+   * once a lot has already matched, and the sphere test rejects almost every
+   * call before any projection runs.
+   */
+  _laybyOwnsPoint(position, margin = 0) {
+    for (const layby of this.laybys) {
+      if (position.distanceToSquared(layby.bounds) > layby.boundsRadius ** 2) continue;
+      const route = layby.route;
+      const projection = this._projectToRoute(route, position);
+      if (projection.distance < layby.start || projection.distance > layby.end) continue;
+      const extra = this._laybyExtraAt(route, projection.distance, layby.side);
+      if (extra <= 0) continue;
+      const half = this._halfWidthAt(route, projection.distance);
+      const lateral = projection.signedLateral * layby.side;
+      if (lateral < -half - margin || lateral > half + extra + margin) continue;
+      const bank = this._bankAt(route, projection.distance);
+      const deckY = projection.point.y + Math.tan(bank) * projection.signedLateral;
+      if (Math.abs(position.y - deckY) > 4) continue;
+      return layby;
+    }
+    return null;
+  }
+
+  /**
+   * Extra paved metres beyond the normal edge on `side` at this station —
+   * the lay-by bulge. A tapered end is smoothstepped, so the deck edge (and
+   * the parapet standing on it) leaves the through-lane edge tangentially: a
+   * built taper, not a crease. A taper of 0 holds the full width right up to
+   * the station and drops to nothing at it — the square end. Returns 0
+   * everywhere else, which is why the rest of the network comes out unchanged.
+   */
+  _laybyExtraAt(route, distance, side) {
+    const laybys = route?.laybys;
+    if (!laybys) return 0;
+    let extra = 0;
+    for (const layby of laybys) {
+      if (layby.side !== side) continue;
+      if (distance <= layby.start || distance >= layby.end) continue;
+      const inT = layby.taperIn > 0 ? clamp((distance - layby.start) / layby.taperIn, 0, 1) : 1;
+      const outT = layby.taperOut > 0 ? clamp((layby.end - distance) / layby.taperOut, 0, 1) : 1;
+      const t = Math.min(inT, outT);
+      extra = Math.max(extra, layby.extra * t * t * (3 - 2 * t));
+    }
+    return extra;
+  }
+
+  /**
+   * Stations a square-ended lay-by needs as real render frames.
+   *
+   * The frame refiner is adaptive but bottoms out at `minSegment` (1.5 m), so
+   * left to itself it would chamfer a 90-degree end into a 1.5 m diagonal.
+   * Forcing a frame pair LAYBY_SQUARE_END_STEP apart around the square station
+   * puts the whole lateral jump inside one 5 cm segment instead: a square
+   * corner in the asphalt, and one wall panel closing the bay across it.
+   * Either end can be the square one, so both are checked.
+   */
+  _laybySquareEndStations(route) {
+    const stations = [];
+    for (const layby of route?.laybys || []) {
+      if (layby.taperIn === 0) stations.push(layby.start, layby.start + LAYBY_SQUARE_END_STEP);
+      if (layby.taperOut === 0) stations.push(layby.end - LAYBY_SQUARE_END_STEP, layby.end);
+    }
+    return stations;
+  }
+
+  /** The lay-by covering this station on `side`, if any (dressing/probes). */
+  _laybyAt(route, distance, side = null) {
+    for (const layby of route?.laybys || []) {
+      if (side !== null && layby.side !== side) continue;
+      if (distance >= layby.start && distance <= layby.end) return layby;
+    }
+    return null;
+  }
+
   /** Active one-sided progressive envelope for a host route station. */
   _progressiveEnvelopeAt(route, distance) {
     const transitions = route._progressiveTransitionsAsHost;
@@ -2560,7 +2797,17 @@ export class HighwayMap {
     if (progressive && progressive.transition.sideSign === side) {
       return progressive.envelope.outerLateral - side * inset;
     }
-    return side * (frame.half - inset);
+    return side * (frame.half + this._laybyExtraAt(frame.route, frame.distance, side) - inset);
+  }
+
+  /**
+   * Paved-edge half-width on `side` for edge-mounted furniture (lampposts,
+   * barrier reflectors, chevron boards, SOS cabinets). These follow the drawn
+   * edge, not the through-lane edge, so a lay-by carries its parapet
+   * furniture outward with it instead of leaving posts standing in the bay.
+   */
+  _edgeHalfAt(route, distance, side) {
+    return this._halfWidthAt(route, distance) + this._laybyExtraAt(route, distance, side);
   }
 
   _endIsOpen(route, whichEnd) {
@@ -3326,7 +3573,7 @@ export class HighwayMap {
         else if (mode === 'on') { visible = true; cause = 'zone-on'; }
         else {
           const probe = this._deckPoint(frame, this._surfaceEdgeLateral(frame, side, 0.42), 0.02);
-          visible = !this._barrierSuppressed(probe, route);
+          visible = !this._barrierSuppressed(probe, route, !!this._laybyAt(route, frame.distance, side));
           cause = visible ? 'probe-on' : 'probe-off';
         }
         barrierVisible[side][i] = visible;
@@ -3955,8 +4202,12 @@ export class HighwayMap {
       }
       const baseHalf = this._halfWidthAt(route, projection.distance);
       const progressive = this._progressiveEnvelopeAt(route, projection.distance);
-      const lateralMin = progressive?.envelope.lateralMin ?? -baseHalf;
-      const lateralMax = progressive?.envelope.lateralMax ?? baseHalf;
+      // A lay-by is asphalt the car may legitimately stand on, so it belongs
+      // in the corridor envelope exactly like the widening it is.
+      const lateralMin = progressive?.envelope.lateralMin
+        ?? -(baseHalf + this._laybyExtraAt(route, projection.distance, -1));
+      const lateralMax = progressive?.envelope.lateralMax
+        ?? (baseHalf + this._laybyExtraAt(route, projection.distance, 1));
       const half = Math.max(Math.abs(lateralMin), Math.abs(lateralMax));
       if (projection.signedLateral < lateralMin - lateralMargin - 14
         || projection.signedLateral > lateralMax + lateralMargin + 14) continue;
@@ -4082,11 +4333,16 @@ export class HighwayMap {
       if (lateral > maximum) return maximum - lateral;
       return 0;
     }
-    const outer = Math.max(0.4, corridor.half - inset);
+    // The paved edge can be asymmetric (an emergency lay-by widens exactly
+    // one shoulder), so each side is clamped against its own envelope. With
+    // no widening active both reduce to the plain half-width limit.
+    const maximum = Math.max(0.4, (corridor.lateralMax ?? corridor.half) - inset);
+    const minimum = Math.min(-0.4, (corridor.lateralMin ?? -corridor.half) + inset);
     if (route.bidirectional) {
       const inner = route.medianWidth * 0.5 + Math.max(0.35, radius) * 0.72;
       const side = lateral >= 0 ? 1 : -1;
       const abs = Math.abs(lateral);
+      const outer = side > 0 ? maximum : -minimum;
       if (abs > outer) return side * outer - lateral;
       if (abs < inner) {
         // Inside the median strip: push out to the nearer carriageway.
@@ -4094,8 +4350,8 @@ export class HighwayMap {
       }
       return 0;
     }
-    if (lateral > outer) return outer - lateral;
-    if (lateral < -outer) return -outer - lateral;
+    if (lateral > maximum) return maximum - lateral;
+    if (lateral < minimum) return minimum - lateral;
     return 0;
   }
 
@@ -4126,7 +4382,7 @@ export class HighwayMap {
 
   getRoadInfo(position, hint = null) {
     const lot = this._lotAt(position, 0);
-    if (lot) return this._lotRoadInfo(position, lot);
+    if (lot && !this._laybyOwnsPoint(position)) return this._lotRoadInfo(position, lot);
 
     const corridors = this._corridorsAt(position, 8);
     let best = null;
@@ -4339,7 +4595,7 @@ export class HighwayMap {
   }
 
   isPointDrivable(position, margin = 0) {
-    if (this._lotAt(position, margin)) return true;
+    if (this._lotAt(position, margin) && !this._laybyOwnsPoint(position, margin)) return true;
     const corridors = this._corridorsAt(position, margin);
     for (const corridor of corridors) {
       if (this._lateralCorrection(corridor, corridor.projection.signedLateral, -margin) === 0
@@ -4351,7 +4607,7 @@ export class HighwayMap {
   /** Legacy-shaped bounds for the best corridor. Walls are never disabled. */
   getWallCollisionBounds(position, vehicleRadius = 0) {
     const lot = this._lotAt(position, vehicleRadius + 6);
-    if (lot) {
+    if (lot && !this._laybyOwnsPoint(position, vehicleRadius)) {
       const { area, longitudinal, lateral } = lot;
       return {
         type: 'service-area',
@@ -5063,7 +5319,8 @@ export class HighwayMap {
     bucket.indices.push(start, start + 1, start + 2);
   }
 
-  _pushBox(bucket, center, size, quaternion = null) {
+  /** `uv` (optional) is applied to every face — see _pushQuad for the layout. */
+  _pushBox(bucket, center, size, quaternion = null, uv = null) {
     const hx = size.x * 0.5;
     const hy = size.y * 0.5;
     const hz = size.z * 0.5;
@@ -5078,7 +5335,7 @@ export class HighwayMap {
     const faces = [
       [0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3],
     ];
-    for (const [a, b, c, d] of faces) this._pushQuad(bucket, corners[a], corners[b], corners[c], corners[d]);
+    for (const [a, b, c, d] of faces) this._pushQuad(bucket, corners[a], corners[b], corners[c], corners[d], uv);
   }
 
   _insideTatsumiClearing(position, padding = 0) {
@@ -5313,6 +5570,11 @@ export class HighwayMap {
     // ground the two above left over, so everything they placed — and every
     // instance index the editor saved against it — stays exactly where it is.
     this._buildInfill();
+    // After every other instancing pass on purpose: the lay-by furniture only
+    // ever APPENDS to its instance buckets, so no index the editor saved
+    // against the props above can move (see _buildInfill's note).
+    this._buildLaybyDressing();
+    this._buildZoneEntrances();
     this._buildTerrain();
     this._finalizeChunks();
     // Built last and outside the index-sensitive chunk buckets.
@@ -5483,14 +5745,24 @@ export class HighwayMap {
     const frames = route.renderFrames;
     frames.length = 0;
     const segmentCount = Math.max(3, Math.ceil(route.length / step));
+    // Uniform stations, plus the handful the geometry cannot be allowed to
+    // approximate (a lay-by's square end). Merged, sorted and deduped, so a
+    // route with no forced station walks exactly the uniform ladder it always
+    // did — the wrap station stays last on a closed route.
+    const uniform = [];
+    for (let i = 0; i <= segmentCount; i += 1) uniform.push(route.length * i / segmentCount);
+    const forced = this._laybySquareEndStations(route).filter((d) => d > 0 && d < route.length);
+    const stations = [];
+    for (const distance of forced.length ? [...uniform, ...forced].sort((a, b) => a - b) : uniform) {
+      if (!stations.length || distance - stations[stations.length - 1] > 1e-3) stations.push(distance);
+    }
     let previous = null;
-    for (let i = 0; i <= segmentCount; i += 1) {
-      const distance = route.length * i / segmentCount;
-      const isWrap = route.closed && i === segmentCount;
-      const frame = this._frameAt(route, isWrap ? 0 : distance);
+    for (let i = 0; i < stations.length; i += 1) {
+      const isWrap = route.closed && i === stations.length - 1;
+      const frame = this._frameAt(route, isWrap ? 0 : stations[i]);
       if (isWrap) frame.distance = route.length;
       if (previous) this._refineFrameSpan(route, previous, frame, coarseLimits, frames, 7);
-      if (!isWrap && i < segmentCount + (route.closed ? 0 : 1)) frames.push(frame);
+      if (!isWrap) frames.push(frame);
       previous = frame;
     }
 
@@ -5545,8 +5817,10 @@ export class HighwayMap {
     const progressive = frame.route
       ? this._progressiveEnvelopeAt(frame.route, frame.distance)
       : null;
-    const lower = progressive?.envelope.lateralMin ?? -frame.half;
-    const upper = progressive?.envelope.lateralMax ?? frame.half;
+    const lower = progressive?.envelope.lateralMin
+      ?? -(frame.half + this._laybyExtraAt(frame.route, frame.distance, -1));
+    const upper = progressive?.envelope.lateralMax
+      ?? (frame.half + this._laybyExtraAt(frame.route, frame.distance, 1));
     return Math.min(
       lateral - lower - 0.3 - halfWidth,
       upper - lateral - 0.3 - halfWidth,
@@ -6032,7 +6306,15 @@ export class HighwayMap {
    * Ramps/service lanes yield to mainlines where the corridors coincide.
    * Purely visual: collision (the corridor union) is untouched.
    */
-  _barrierSuppressed(point, route) {
+  /**
+   * `ignoreLot` is for a lay-by's own outer edge. The lot test below exists to
+   * keep rails out of a PA gate, but a lay-by bulging past a service-area
+   * footprint is a deliberate widening of an elevated carriageway: its outer
+   * edge always needs its parapet and its edge furniture, and dropping either
+   * would both open a rail hole and (for the furniture) delete `_instance`
+   * calls mid-bucket, shifting every index the editor saved after them.
+   */
+  _barrierSuppressed(point, route, ignoreLot = false) {
     const yields = route.kind === 'ramp' || route.kind === 'service';
     const candidates = this._candidateRoutes(point);
     for (const { route: other, index, distSq } of candidates.values()) {
@@ -6067,7 +6349,7 @@ export class HighwayMap {
       if (Math.abs(abs - (half - 0.42)) < 1.0
         && this.routeOrder.indexOf(other.id) < this.routeOrder.indexOf(route.id)) return true;
     }
-    if (this._lotAt(point, 1.5)) return true;
+    if (!ignoreLot && this._lotAt(point, 1.5)) return true;
     return false;
   }
 
@@ -6244,9 +6526,144 @@ export class HighwayMap {
     };
   }
 
+  /**
+   * Accepts the shipped barrier document (or an editor-supplied draft) and
+   * degrades to "no overrides" on anything malformed: a broken authoring file
+   * must never take the whole world down, it just renders the shipped parapet.
+   */
+  _normalizeRoadBarriers(document) {
+    try {
+      return canonicalizeBarrierDocument(document);
+    } catch (error) {
+      console.warn('[map] road barrier document rejected; using default parapets', error);
+      return { version: 1, routes: {} };
+    }
+  }
+
+  /**
+   * Per-side barrier spans for one route, flattened once (later authored spans
+   * repaint earlier ones) and cached — `_buildRouteGeometry` resolves a style
+   * for every surface frame on both sides.
+   */
+  _barrierSpansFor(route) {
+    let flattened = this._barrierSpanCache.get(route.id);
+    if (!flattened) {
+      flattened = flattenBarrierSpans(this.roadBarriers, route.id, route.length ?? Infinity);
+      this._barrierSpanCache.set(route.id, flattened);
+    }
+    return flattened;
+  }
+
+  /** True when this route has no authored spans at all (the common case). */
+  _routeUsesDefaultBarriers(route) {
+    const spans = this._barrierSpansFor(route);
+    return !spans[1].length && !spans[-1].length;
+  }
+
+  /**
+   * Resolved style plus its per-span height multiplier at one chainage.
+   * `heightScale` is the authoring dial that makes "the same wall, taller"
+   * a data edit instead of a new catalogue entry.
+   */
+  _barrierStyleAt(spans, side, distance) {
+    const span = barrierSpanAt(spans, side, distance);
+    return { style: barrierStyle(span?.style ?? DEFAULT_BARRIER_STYLE_ID), heightScale: span?.heightScale ?? 1 };
+  }
+
+  /**
+   * Sweeps one styled barrier cross-section between two surface frames.
+   *
+   * Insets and heights come from the style (see js/road-barrier-styles.js) and
+   * are scaled by the terminal factors fA/fB, so a styled run ramps down to
+   * deck level at a junction mouth exactly like the default parapet does.
+   */
+  _emitStyledBarrierSegment(style, a, b, side, fA, fB, mid, heightScale = 1) {
+    const sheets = style.sheets;
+    if (!sheets?.length) return;
+    // Insets are NOT scaled: a taller wall stands in the same footprint, it
+    // does not lean further into the carriageway.
+    const point = (frame, factor, inset, height) => this._deckPoint(
+      frame,
+      this._surfaceEdgeLateral(frame, side, inset * factor),
+      height * heightScale * factor,
+    );
+    // Baked UVs. `u` is world chainage, so the run tiles continuously across
+    // every segment joint; `v` is authored per profile point, so the picture
+    // keeps the same vertical anchor whatever the grade or the terminal taper
+    // does to the geometry. Both are in tile units, exactly like the projection
+    // in applyWallSurfaceUVs, so the Surfaces app's metres-per-tile still works.
+    const uA = a.distance / ROAD_TEXTURE_TILE_METERS;
+    // A lay-by's square end steps the drawn edge sideways by its full depth
+    // over 5 cm of chainage: the panel that closes the bay is metres long but
+    // has almost no chainage span, so plain chainage-based u would squash a
+    // whole tile onto it. Where the edge sweeps far further than the route
+    // advances, measure u along the panel itself. Ordinary segments (including
+    // the outside of a curve, which sweeps a little longer than the
+    // centreline) stay on chainage and keep their shipped UVs.
+    const along = Math.max(b.distance - a.distance, 0);
+    const footA = point(a, fA, 0, 0);
+    const footB = point(b, fB, 0, 0);
+    const swept = Math.hypot(footB.x - footA.x, footB.z - footA.z);
+    const uB = swept > along * 1.5 + 0.25
+      ? uA + swept / ROAD_TEXTURE_TILE_METERS
+      : b.distance / ROAD_TEXTURE_TILE_METERS;
+    const vTop = style.approximateHeight || 1;
+    for (const sheet of sheets) {
+      const bucket = this._bucket(mid, sheet.material);
+      for (let i = 0; i < sheet.points.length - 1; i += 1) {
+        const [inset0, height0, v0] = sheet.points[i];
+        const [inset1, height1, v1] = sheet.points[i + 1];
+        const lowA = point(a, fA, inset0, height0);
+        const lowB = point(b, fB, inset0, height0);
+        const highA = point(a, fA, inset1, height1);
+        const highB = point(b, fB, inset1, height1);
+        const vLow = v0 ?? (height0 / vTop);
+        const vHigh = v1 ?? (height1 / vTop);
+        if (side > 0) this._pushQuad(bucket, lowA, lowB, highB, highA, [uA, vLow, uB, vHigh]);
+        else this._pushQuad(bucket, lowB, lowA, highA, highB, [uB, vLow, uA, vHigh]);
+      }
+    }
+  }
+
+  /**
+   * Repeating posts for a styled barrier. One post is emitted per spacing
+   * boundary crossed by this segment, as merged box geometry — never an
+   * instance, so post-carrying styles cannot shift the (mesh, index) addresses
+   * the editor's saved build operations use.
+   */
+  _emitStyledBarrierPosts(style, a, b, side, factor, mid, heightScale = 1) {
+    const posts = style.posts;
+    if (!posts || factor < 0.98) return;
+    const spacing = posts.spacing;
+    if (!(spacing > 0)) return;
+    if (Math.floor(a.distance / spacing) === Math.floor(b.distance / spacing)) return;
+    const base = posts.base * heightScale;
+    const height = posts.height * heightScale;
+    const centre = this._deckPoint(
+      a,
+      this._surfaceEdgeLateral(a, side, posts.inset),
+      base + height * 0.5,
+    );
+    // Baked UVs like the sheets: the post occupies its own slice of the run's
+    // u, and v fills its height, so it stays in register with the wall beside
+    // it instead of squashing a whole tile onto a 12 cm face.
+    this._pushBox(
+      this._bucket(mid, posts.material),
+      centre,
+      vec(posts.width, height, posts.depth),
+      yawQuaternion(a.tangent),
+      [
+        (a.distance - posts.depth * 0.5) / ROAD_TEXTURE_TILE_METERS, base / (style.approximateHeight || 1),
+        (a.distance + posts.depth * 0.5) / ROAD_TEXTURE_TILE_METERS, (base + height) / (style.approximateHeight || 1),
+      ],
+    );
+  }
+
   _buildRouteGeometry(route) {
     const roadMaterialName = this._roadMaterialName(route);
     const barrierHeight = route.kind === 'service' ? 0.9 : 1.15;
+    const barrierSpans = this._barrierSpansFor(route);
+    const defaultBarriers = this._routeUsesDefaultBarriers(route);
     const medianHeight = 1.0;
 
     // Rail visibility per surface frame per side. Inside a junction zone
@@ -6368,6 +6785,19 @@ export class HighwayMap {
         }
         const fA = railFactor(side, segmentIndex);
         const fB = railFactor(side, nextIndex);
+        // Authored style for this exact chainage. `parapet` (and every route
+        // with no override at all) keeps the original code path below, so the
+        // shipped silhouette is untouched wherever nobody has edited anything.
+        const resolved = defaultBarriers
+          ? { style: BARRIER_PARAPET_STYLE, heightScale: 1 }
+          : this._barrierStyleAt(barrierSpans, side, a.distance);
+        const style = resolved.style;
+        if (!style.native) {
+          if (barrierRun[side]) barrierRun[side] = false;
+          this._emitStyledBarrierSegment(style, a, b, side, fA, fB, mid, resolved.heightScale);
+          this._emitStyledBarrierPosts(style, a, b, side, Math.min(fA, fB), mid, resolved.heightScale);
+          continue;
+        }
         if (!barrierRun[side]) {
           this._emitBarrierEndCap(bucketBarrier, a, side, fA);
           barrierRun[side] = true;
@@ -6470,11 +6900,22 @@ export class HighwayMap {
         const emittedBarrier = this._railZoneMode(route, side, a.distance) !== 'off'
           && this._railZoneMode(route, side, b.distance) !== 'off';
         if (transitionManagedWall && !emittedBarrier) continue;
+        // A taller authored style is a taller solid wall: collision follows the
+        // visual so a screen wall cannot be jumped and an open guardrail still
+        // stops the car. `none` keeps the shipped height — it removes the
+        // VISUAL only, never the solid edge.
+        let styleHeight = null;
+        if (!defaultBarriers) {
+          const resolvedWall = this._barrierStyleAt(barrierSpans, side, a.distance);
+          if (resolvedWall.style.collisionHeight !== null) {
+            styleHeight = resolvedWall.style.collisionHeight * resolvedWall.heightScale;
+          }
+        }
         this.wallSegments.push({
           routeId: route.id, type: 'outer', side,
           start: this._deckPoint(a, this._surfaceEdgeLateral(a, side, 0.42), 0.02),
           end: this._deckPoint(b, this._surfaceEdgeLateral(b, side, 0.42), 0.02),
-          height: barrierHeight,
+          height: styleHeight ?? barrierHeight,
           distanceStart: a.distance, distanceEnd: b.distance,
           progressiveTransitionId: transitionManagedWall
             ? (progressiveHostTransitions[0]?.id || progressiveBranchTransitions[0]?.id)
@@ -7114,8 +7555,12 @@ export class HighwayMap {
       // which address instances by index and verify by matrix, cannot move.
       const deckFrame = { ...frame, route, distance };
       const side = route.bidirectional ? (lampSide *= -1) : 1;
-      const base = this._deckPoint(frame, side * (half - 0.62), 0.01);
-      if (this._barrierSuppressed(base, route)) continue;
+      // Pole and lens ride the DRAWN edge (a lay-by carries them outward with
+      // its parapet); the pools below stay sized/offset off the through-lane
+      // half-width, so the light ribbon over the running lanes is unchanged.
+      const edgeHalf = this._edgeHalfAt(route, distance, side);
+      const base = this._deckPoint(frame, side * (edgeHalf - 0.62), 0.01);
+      if (this._barrierSuppressed(base, route, !!this._laybyAt(route, distance, side))) continue;
       // local +X of the lamp geometry maps to -normal under yawQuaternion;
       // mirror with a half turn for the other edge so the arm reaches the road
       const quaternion = yawQuaternion(center.baseTangent);
@@ -7132,9 +7577,16 @@ export class HighwayMap {
       // overlap into one continuous ribbon (no dark gaps); width reaches across
       // the near lanes; offset pushes its body over the road toward the
       // centreline instead of only lighting the pole base.
+      // Pool SIZE stays keyed to the through-lane half-width (the ribbon over
+      // the running lanes is what it exists for), but its offset is measured
+      // from the DRAWN edge like the pole it belongs to: a lamp carried 10 m
+      // out onto a lay-by parapet would otherwise leave its own pool behind on
+      // the lanes — a bright patch with no lamp over it, and a lamp with no
+      // light under it. The pool's overhang past the deck edge is unchanged
+      // either way (it is +0.1x its width in both cases).
       const poolLen = lampStep * (1.2 + jL * 0.2);
       const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
-      const poolOffset = side * (half - poolWidth * 0.4) + (jW - 0.5) * 1.6;
+      const poolOffset = side * (edgeHalf - poolWidth * 0.4) + (jW - 0.5) * 1.6;
       // The pool is a big flat quad; the deck is banked AND graded. Orient it to
       // lie PARALLEL to the road surface so it hugs the asphalt instead of cutting
       // through it — a dead-flat quad on a tilted deck dips below the surface on
@@ -7159,7 +7611,7 @@ export class HighwayMap {
       // lamp spacing so it reads as a continuous reflective streak on wet
       // asphalt (Medium+; hidden on Low, where the pool carries continuity).
       const streakLen = lampStep * (1.04 + jW * 0.2);
-      const streakLateral = side * (half - 3.0);
+      const streakLateral = side * (edgeHalf - 3.0);
       const streak = this._deckPoint(deckFrame, streakLateral, 0.17 + sagClearance(deckFrame, center.baseTangent, distance, streakLateral, streakLen));
       streak.addScaledVector(frame.tangent, (jL - 0.5) * 3);
       this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), surfaceQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
@@ -7170,10 +7622,9 @@ export class HighwayMap {
       for (let distance = 240; distance < route.length; distance += 430) {
         if (this._isTunnel(route, distance) || this._isBridge(route, distance)) continue;
         const center = this._sampleCenter(route, distance, 1);
-        const half = this._halfWidthAt(route, distance);
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
-        const base = this._deckPoint(frame, half - 1.05, 0.02);
-        if (this._barrierSuppressed(base, route)) continue;
+        const base = this._deckPoint(frame, this._edgeHalfAt(route, distance, 1) - 1.05, 0.02);
+        if (this._barrierSuppressed(base, route, !!this._laybyAt(route, distance, 1))) continue;
         const quaternion = yawQuaternion(center.baseTangent);
         const cabinet = base.clone(); cabinet.y += 0.62;
         this._instance(cabinet, vec(0.56, 1.24, 0.5), quaternion, 0x2c3440, 'box:parkedBody');
@@ -7188,10 +7639,11 @@ export class HighwayMap {
         const center = this._sampleCenter(route, distance, 1);
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
         const quaternion = yawQuaternion(center.baseTangent);
-        const half = this._halfWidthAt(route, distance);
         for (const side of [-1, 1]) {
-          const position = this._deckPoint(frame, side * (half - 0.18), 0.97);
-          if (this._barrierSuppressed(position, route)) continue;
+          // Reflectors are mounted ON the parapet, so they follow the drawn
+          // edge around a lay-by instead of floating out in the bay.
+          const position = this._deckPoint(frame, side * (this._edgeHalfAt(route, distance, side) - 0.18), 0.97);
+          if (this._barrierSuppressed(position, route, !!this._laybyAt(route, distance, side))) continue;
           this._instance(position, vec(0.12, 0.13, 0.3), quaternion, side > 0 ? 0xffb45b : 0xe7efff, 'box:reflector');
         }
       }
@@ -7292,10 +7744,11 @@ export class HighwayMap {
         if (Math.abs(bank) < 0.052 || this._isTunnel(route, distance)) continue;
         const center = this._sampleCenter(route, distance, 1);
         const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank };
-        const half = this._halfWidthAt(route, distance);
         const side = bank > 0 ? -1 : 1;
+        // Post-mounted above the parapet: follows the drawn edge (lay-by).
+        const half = this._edgeHalfAt(route, distance, side);
         const position = this._deckPoint(frame, side * (half - 0.3), 2.05);
-        if (this._barrierSuppressed(position, route)) continue;
+        if (this._barrierSuppressed(position, route, !!this._laybyAt(route, distance, side))) continue;
         for (const facing of [1, -1]) {
           const board = position.clone().addScaledVector(center.baseTangent, facing * -0.04);
           this._instance(board, vec(1.55, 1.05, 1), yawQuaternion(TMP_C.copy(center.baseTangent).multiplyScalar(facing)), null, 'plane:chevron');
@@ -8540,6 +8993,219 @@ export class HighwayMap {
         }
       }
     }
+  }
+
+  /**
+   * Furniture for every registered lay-by: the SOS phone the bay exists for,
+   * and the blue 非常駐車帯 board that announces it on the approach.
+   *
+   * Everything here is placed at the very end of the build (see _buildWorld),
+   * so each `_instance` call only appends to its bucket and every instance
+   * index the editor saved against the passes above still addresses the same
+   * prop. The bay ASPHALT is not built here at all — it falls out of the
+   * widened deck edge in _buildRouteGeometry.
+   */
+  _buildLaybyDressing() {
+    for (const route of this.routes.values()) {
+      for (const layby of route.laybys || []) {
+        const side = layby.side;
+        const bayFrom = layby.start + layby.taperIn;
+        const bayTo = layby.end - layby.taperOut;
+        const mid = (bayFrom + bayTo) * 0.5;
+        const frameAt = (distance) => {
+          const center = this._sampleCenter(route, distance, 1);
+          return {
+            position: center.position,
+            tangent: center.baseTangent,
+            normal: horizontalNormal(center.baseTangent),
+            bank: this._bankAt(route, distance),
+            route,
+            distance,
+          };
+        };
+        // SOS cabinet + beacon, tucked against the parapet at the back of the
+        // bay so a stopped car still has the full bay depth in front of it.
+        const sosFrame = frameAt(mid);
+        const sosLateral = side * (this._edgeHalfAt(route, mid, side) - 0.85);
+        const sosBase = this._deckPoint(sosFrame, sosLateral, 0.02);
+        const sosQuat = yawQuaternion(sosFrame.tangent);
+        const cabinet = sosBase.clone(); cabinet.y += 0.66;
+        this._instance(cabinet, vec(0.6, 1.3, 0.52), sosQuat, 0x2c3440, 'box:parkedBody');
+        const beacon = sosBase.clone(); beacon.y += 1.5;
+        this._instance(beacon, vec(0.36, 0.36, 0.36), sosQuat, null, 'box:exitGreen');
+
+        // Marker posts down the outer edge: the cheap white delineators that
+        // make a bay read as a bay in headlights.
+        for (let distance = bayFrom + 3; distance <= bayTo - 2; distance += 7) {
+          const frame = frameAt(distance);
+          const post = this._deckPoint(frame, side * (this._edgeHalfAt(route, distance, side) - 0.4), 0.46);
+          this._instance(post, vec(0.11, 0.9, 0.11), yawQuaternion(frame.tangent), 0xe8eef6, 'box:concrete');
+        }
+
+        // Approach board, facing the oncoming driver (signs face
+        // -oneWayDirection · tangent, like every other board on the network).
+        if (typeof document !== 'undefined') {
+          const signDistance = clamp(layby.start - 26, 0, route.length);
+          const signFrame = frameAt(signDistance);
+          // Board size/setback follow the chevron boards' convention: small,
+          // post-mounted just inboard of the parapet so it clears the lane.
+          const signLateral = side * (this._edgeHalfAt(route, signDistance, side) - 0.35);
+          const board = this._makeSignMesh('非常駐車帯|EMERGENCY PARKING', '#123a72', 1.8, 0.9);
+          const boardPosition = this._deckPoint(signFrame, signLateral, 2.15);
+          board.position.copy(boardPosition);
+          board.quaternion.copy(yawQuaternion(
+            TMP_C.copy(signFrame.tangent).multiplyScalar(-(route.oneWayDirection || 1)),
+          ));
+          this._addChunkMesh(board, boardPosition);
+          const postBase = this._deckPoint(signFrame, signLateral, 1.2);
+          this._instance(postBase, vec(0.12, 1.4, 0.12), yawQuaternion(signFrame.tangent), null, 'box:concrete');
+        }
+      }
+    }
+  }
+
+  /**
+   * The road-side door of a walkable zone, on the square end of a lay-by: a
+   * painted forecourt and a lit gate standing against the wall that closes the
+   * bay. Publishes `zoneEntrances`, which the game polls exactly like the
+   * garage entrance.
+   *
+   * The gate occupies only the OUTER part of the bay's width. The square end
+   * is the one the driver reaches first, so the strip next to the running lanes
+   * has to stay clear: you pass the wall's nose, swing in behind it, and pull
+   * up alongside the gate — you never have to drive through the frame.
+   *
+   * Everything here is MERGED chunk geometry — never `_instance` — for two
+   * reasons. The bay lies inside the Tatsumi clearing rectangle, which
+   * zero-scales every instance placed in it (see `_instance`), and merged quads
+   * can never shift the (mesh, index) addresses saved editor edits are written
+   * against.
+   */
+  _buildZoneEntrances() {
+    for (const layby of this.laybys) {
+      if (!layby.paZone) continue;
+      const { route, side } = layby;
+      const frameAt = (distance) => {
+        const center = this._sampleCenter(route, distance, 1);
+        return {
+          position: center.position,
+          tangent: center.baseTangent,
+          normal: horizontalNormal(center.baseTangent),
+          bank: this._bankAt(route, distance),
+          route,
+          distance,
+        };
+      };
+      // The forecourt occupies the outer ~4.5 m of the bay, measured from the
+      // drawn edge so it follows the bulge rather than a fixed lateral.
+      const innerAt = (distance) => side * (this._edgeHalfAt(route, distance, side) - layby.extra * 0.55);
+      const outerAt = (distance) => side * (this._edgeHalfAt(route, distance, side) - 1.2);
+      // Deck quads are wound up-facing from the +lateral edge to the -lateral
+      // edge (see _buildRouteGeometry); which of the two edges is which flips
+      // with the bay's side.
+      const pushDeckQuad = (bucket, innerA, innerB, outerA, outerB) => {
+        if (side > 0) this._pushQuad(bucket, outerA, outerB, innerB, innerA);
+        else this._pushQuad(bucket, innerA, innerB, outerB, outerA);
+      };
+
+      // Whichever end is square is the one the gate stands in; `into` is the
+      // direction the bay runs away from that wall.
+      const squareAtStart = layby.taperIn === 0;
+      const wallS = squareAtStart ? layby.start : layby.end;
+      const into = squareAtStart ? 1 : -1;
+      const padNear = wallS + into * 1.6;
+      const padFar = clamp(padNear + into * 14, layby.start, layby.end);
+      const padFrom = Math.min(padNear, padFar);
+      const padTo = Math.max(padNear, padFar);
+      // Forecourt paint, sampled along the route so it follows the curve and
+      // the bank instead of cutting one chord across both.
+      const steps = 8;
+      for (let i = 0; i < steps; i += 1) {
+        const dA = padFrom + (padTo - padFrom) * i / steps;
+        const dB = padFrom + (padTo - padFrom) * (i + 1) / steps;
+        const fA = frameAt(dA);
+        const fB = frameAt(dB);
+        const innerA = this._deckPoint(fA, innerAt(dA), 0.02);
+        const innerB = this._deckPoint(fB, innerAt(dB), 0.02);
+        const outerA = this._deckPoint(fA, outerAt(dA), 0.02);
+        const outerB = this._deckPoint(fB, outerAt(dB), 0.02);
+        pushDeckQuad(this._bucket(innerA, 'amber'), innerA, innerB, outerA, outerB);
+      }
+
+      // Gate standing just inboard of the closing wall.
+      const gateS = wallS + into * 0.75;
+      const gateFrame = frameAt(gateS);
+      const gateQuaternion = yawQuaternion(gateFrame.tangent);
+      const gateInner = innerAt(gateS) + side * 0.35;
+      const gateOuter = outerAt(gateS) - side * 0.35;
+      const gateMid = (gateInner + gateOuter) * 0.5;
+      const gateWidth = Math.abs(gateOuter - gateInner);
+      const postHeight = 3.6;
+      for (const lateral of [gateInner, gateOuter]) {
+        const post = this._deckPoint(gateFrame, lateral, postHeight * 0.5);
+        this._pushBox(this._bucket(post, 'concrete'), post, vec(0.45, postHeight, 0.55), gateQuaternion);
+        const lamp = this._deckPoint(gateFrame, lateral, postHeight + 0.42);
+        this._pushBox(this._bucket(lamp, 'exitGreen'), lamp, vec(0.3, 0.3, 0.3), gateQuaternion);
+      }
+      const lintel = this._deckPoint(gateFrame, gateMid, postHeight + 0.3);
+      this._pushBox(this._bucket(lintel, 'concrete'), lintel, vec(gateWidth + 0.45, 0.6, 0.6), gateQuaternion);
+      // The doorway itself: a self-lit slab in the gate opening, so the way in
+      // reads from down the bay at night.
+      const portalHeight = 2.7;
+      const portal = this._deckPoint(gateFrame, gateMid, portalHeight * 0.5);
+      this._pushBox(this._bucket(portal, 'matrix'), portal, vec(gateWidth - 0.6, portalHeight, 0.14), gateQuaternion);
+
+      if (typeof document !== 'undefined') {
+        const board = this._makeSignMesh('辰巳PA|TATSUMI PA', '#123a72', 2.8, 1.15);
+        const boardPosition = this._deckPoint(gateFrame, gateMid, postHeight + 1.25);
+        board.position.copy(boardPosition);
+        board.quaternion.copy(yawQuaternion(
+          TMP_C.copy(gateFrame.tangent).multiplyScalar(-(route.oneWayDirection || 1)),
+        ));
+        // Exempt from the Tatsumi clearing: the gate is the one thing that is
+        // MEANT to stand inside that rectangle.
+        board.userData.tatsumiClearingSurface = true;
+        this._addChunkMesh(board, boardPosition);
+      }
+
+      // Trigger point: on the forecourt, a car length past the gate.
+      const standS = clamp(wallS + into * 8, padFrom, padTo);
+      const stand = this._deckPoint(frameAt(standS), gateMid, 0);
+      this.zoneEntrances.push({
+        id: layby.paZone,
+        zoneId: layby.paZone,
+        label: 'Tatsumi PA',
+        routeId: route.id,
+        distance: standS,
+        position: stand,
+        tangent: frameAt(standS).tangent.clone(),
+        radius: 9,
+      });
+    }
+  }
+
+  /**
+   * Nearest walkable-zone entrance the car is standing on, or null. Mirrors
+   * getGarageTransition: horizontal reach plus a deck-height gate, so a road
+   * passing under the bay can never trigger it.
+   */
+  getZoneTransition(position, radius = null) {
+    for (const entrance of this.zoneEntrances) {
+      const reach = radius ?? entrance.radius;
+      const horizontalDistance = Math.sqrt(xzDistanceSq(position, entrance.position));
+      if (horizontalDistance > reach) continue;
+      if (Math.abs(position.y - entrance.position.y) > 8) continue;
+      return {
+        triggered: true,
+        zoneId: entrance.zoneId,
+        label: entrance.label,
+        position: entrance.position.clone(),
+        tangent: entrance.tangent.clone(),
+        distance: horizontalDistance,
+        radius: reach,
+      };
+    }
+    return null;
   }
 
   /** Project lat/lon to local metres with the extractor's origin. */

@@ -278,6 +278,139 @@ async function makeGarageWorld(onProgress) {
   };
 }
 
+function classifyPaChild(pa, object) {
+  // The blue prism IS the exit trigger: moving it moves where the player
+  // leaves the lot (see TatsumiPaSystem.findInteraction).
+  if (object === pa.exitMarkers) return { layer: 'Props', type: 'pa-prop', label: 'Exit prism (blue)', editable: true };
+  if (object === pa.carDisplay) return { layer: 'Props', type: 'pa-parked-car', label: 'Parked car', editable: true, note: 'shared PSXStyle anchor: the player spawns beside whatever this is moved to' };
+  if (object === pa.deck) return { layer: 'Terrain', type: 'pa-deck', label: 'PA deck', editable: true };
+  if (object === pa.exitPortal) return { layer: 'Props', type: 'pa-prop', label: 'Exit portal', editable: true };
+  if (object === pa.exitSign) return { layer: 'Signs', type: 'pa-sign', label: 'Exit sign', editable: true };
+  if (object === pa.stall) return { layer: 'Props', type: 'pa-prop', label: 'Parking stall paint', editable: true };
+  if (pa.walls?.includes(object)) return { layer: 'Barriers', type: 'pa-wall', label: 'Perimeter screen wall', editable: true };
+  if (pa.lamps?.includes(object)) return { layer: 'Lighting', type: 'pa-lamp', label: 'Lamp post', editable: true };
+  if (object.isLight) return { layer: 'Lighting', type: 'pa-light', label: 'PA light', editable: true };
+  if (object.isMesh && object.material?.map) return { layer: 'Signs', type: 'pa-sign', label: 'PA sign', editable: true };
+  return { layer: 'Props', type: 'pa-prop', label: 'PA object', editable: true };
+}
+
+/**
+ * The Tatsumi PA lot (js/tatsumi-pa.js), built by the same generator the game
+ * runs so an edit here lands on the object the player actually walks past.
+ * Addressed exactly like the garage: root children by build-order index.
+ */
+async function makeTatsumiPaWorld(onProgress) {
+  onProgress('Importing the production Tatsumi PA generator');
+  const [{ TatsumiPaSystem }, Data, carPack] = await Promise.all([
+    import('/js/tatsumi-pa.js'),
+    import('/js/data.js'),
+    import('/js/psx-car-pack.js'),
+  ]);
+  onProgress('Building the PA lot');
+  const tempScene = new THREE.Scene();
+  const tempCamera = new THREE.PerspectiveCamera();
+  const pa = new TatsumiPaSystem(tempScene, tempCamera, document.createElement('canvas'), {});
+  const starterSpec = Data.getCarSpec(Data.STARTER_CAR_ID);
+  onProgress(`Loading ${carPack.getPSXCarModel(carPack.DEFAULT_PSX_CAR_ID).label} parked car`);
+  const parkedCar = await carPack.loadPSXCar(carPack.DEFAULT_PSX_CAR_ID, {
+    length: starterSpec.dimensions?.length || starterSpec.length,
+    color: starterSpec.color,
+  });
+  pa.carDisplay.add(parkedCar);
+  pa.refreshColliders();
+  const root = pa.root;
+  tempScene.remove(root);
+  root.name = 'Tatsumi PA';
+  root.visible = true;
+  const editorObjectsGroup = new THREE.Group();
+  editorObjectsGroup.name = 'Editor placed objects';
+
+  const pickIndex = new WeakMap();
+  const counters = new Map();
+  const entities = [];
+  root.children.forEach((object, index) => {
+    const info = classifyPaChild(pa, object);
+    const ordinal = (counters.get(info.label) || 0) + 1;
+    counters.set(info.label, ordinal);
+    const entity = {
+      id: `tatsumi-pa-part:${stableIndex(index + 1)}`,
+      name: `${info.label} ${stableIndex(ordinal, 2)}`,
+      type: info.type,
+      layer: info.layer,
+      object3D: object,
+      source: 'js/tatsumi-pa.js:TatsumiPaSystem.build',
+      editable: info.editable,
+      generated: true,
+      assetId: null,
+      parentId: null,
+      visibilityObjects: [object],
+      getWorldBounds: () => new THREE.Box3().setFromObject(object),
+      metadata: {
+        childIndex: index,
+        static: !object.isLight,
+        instanced: false,
+        sourceKind: 'TATSUMI PA STRUCTURE',
+        collisionAvailable: false,
+        render: objectRenderMetadata(object),
+        sourceTransform: sourceTransform(object),
+        selectable: info.selectable !== false,
+        ...(info.note ? { editorNote: info.note } : {}),
+      },
+    };
+    entities.push(entity);
+    if (info.selectable !== false) {
+      object.traverse((child) => pickIndex.set(child, entity));
+      pickIndex.set(object, entity);
+    }
+  });
+  root.add(editorObjectsGroup);
+
+  root.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const presets = new Map([
+    ['initial-spawn', { id: 'initial-spawn', label: 'Beside the parked car', position: new THREE.Vector3(0, 2.4, 8), target: new THREE.Vector3(0, 1, -3), near: 0.05, far: 600, chunkMode: 'all' }],
+    ['map-center', { id: 'map-center', label: 'Lot overview', position: new THREE.Vector3(18, 16, 26), target: new THREE.Vector3(0, 1, 0), near: 0.05, far: 600, chunkMode: 'all' }],
+    ['entire-world', { ...framePreset(bounds, 'Entire PA lot'), near: 0.05, far: 900 }],
+  ]);
+
+  return {
+    group: root,
+    tatsumiPa: pa,
+    entities,
+    strategy: 'tatsumi_pa',
+    label: 'Tatsumi PA lot',
+    isRealWorld: true,
+    warning: null,
+    focusTarget: root,
+    bounds,
+    metadata: {
+      worldCenter: center, worldSize: size, routeCount: 0, chunkCount: 1, serviceAreaCount: 1, junctionCount: 0,
+      mapOrigin: null, mapScale: '1 unit = 1 metre',
+      approximateAreaKm2: size.x * size.z / 1e6,
+      coordinateSystem: 'PA-local metres; no GPS conversion',
+    },
+    presets,
+    getPreset(id) { return presets.get(id) || null; },
+    resolveSelection(object) {
+      let current = object;
+      while (current) { if (pickIndex.has(current)) return pickIndex.get(current); current = current.parent; }
+      return null;
+    },
+    editorObjectsGroup,
+    registerEditorEntity(editorEntity) {
+      if (!editorEntity?.object3D) return editorEntity;
+      pickIndex.set(editorEntity.object3D, editorEntity);
+      editorEntity.object3D.traverse((child) => pickIndex.set(child, editorEntity));
+      return editorEntity;
+    },
+    setChunkMode() {},
+    updateForCamera() {},
+    dispose() { disposeObject(root); },
+  };
+}
+
 function localToGps(origin, x, z) {
   if (!origin || !Number.isFinite(x) || !Number.isFinite(z)) return null;
   const radians = Math.PI / 180;
@@ -390,7 +523,9 @@ async function makeFullWorld(onProgress) {
 export async function loadWorld({ mode = 'real', scene = 'highway', onProgress = () => {} } = {}) {
   if (mode === 'demo') return makeRepresentativeWorld(onProgress);
   try {
-    return scene === 'garage' ? await makeGarageWorld(onProgress) : await makeFullWorld(onProgress);
+    if (scene === 'garage') return await makeGarageWorld(onProgress);
+    if (scene === 'tatsumi_pa') return await makeTatsumiPaWorld(onProgress);
+    return await makeFullWorld(onProgress);
   } catch (error) {
     console.error('[hesi-editor] real world failed; activating explicit fallback warning', error);
     return makeRepresentativeWorld(onProgress, { fallbackError: error });

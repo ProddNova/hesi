@@ -177,6 +177,63 @@ export const CAR_HEADLIGHT_FIELDS = Object.freeze([
   Object.freeze({ key: 'aimDistance', label: 'Aim distance', unit: 'm', min: 1, max: 120, step: 0.5, group: 'aim' }),
 ]);
 
+// Body paint is stored per car target instead of per modeled part: one car
+// body is spread over several materials and, once a Modeler replacement exists,
+// over several mesh parts too, so a single authoritative record is the only way
+// a colour change reaches the whole car.
+export const CAR_PAINT_FIELDS = Object.freeze([
+  Object.freeze({ key: 'metallic', label: 'Metallic flake', unit: '0 flat · 1 metallic', min: 0, max: 1, step: 0.02 }),
+  Object.freeze({ key: 'gloss', label: 'Clear-coat gloss', unit: '', min: 0, max: 1, step: 0.02 }),
+  // Livery controls. `wrapScale` is how many times the image repeats over the
+  // car's own length; 1 = one copy across the whole body.
+  Object.freeze({ key: 'wrapScale', label: 'Image scale', unit: 'repeats per car', min: 0.25, max: 6, step: 0.05, textureOnly: true }),
+  Object.freeze({ key: 'wrapTint', label: 'Tint by paint colour', unit: '0 image as-is · 1 fully tinted', min: 0, max: 1, step: 0.02, textureOnly: true }),
+]);
+
+const CAR_PAINT_FIELD_DEFAULTS = Object.freeze({ metallic: 0, gloss: 0, wrapScale: 1, wrapTint: 0 });
+
+const TRAFFIC_BODY_COLORS = Object.freeze({ car: '#b9c0c9', van: '#e6e8ea', truck: '#4a6274' });
+
+/** The colour the car ships with, used as the starting point of the picker. */
+export function stockCarBodyColor(target) {
+  const parsed = parseCarModelTarget(target);
+  if (!parsed) return '#b9c0c9';
+  if (parsed.scope === 'traffic') return TRAFFIC_BODY_COLORS[parsed.id] || '#b9c0c9';
+  const model = PSX_CAR_MODELS.find((entry) => entry.id === parsed.id);
+  return `#${((model?.color ?? 0xb9c0c9) & 0xffffff).toString(16).padStart(6, '0')}`;
+}
+
+export function defaultCarPaint(target) {
+  return { color: stockCarBodyColor(target), ...CAR_PAINT_FIELD_DEFAULTS };
+}
+
+/**
+ * Saved body paint, or `null` when the car keeps its stock material. Returning
+ * null (rather than the defaults) is what lets every unpainted car render
+ * byte-identically to before this record existed.
+ *
+ * A saved `texture` names an entry of the document's texture library; it is
+ * carried through as an id and turned into an image by applyCarPaint(), which
+ * is the only place that knows how a texture record becomes a GPU texture.
+ */
+export function carPaintSettings(target, document = null) {
+  const saved = carModelEntry(document, target)?.paint;
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null;
+  const defaults = defaultCarPaint(target);
+  const result = {
+    color: /^#[0-9a-f]{6}$/i.test(String(saved.color || ''))
+      ? String(saved.color).toLowerCase()
+      : defaults.color,
+  };
+  for (const field of CAR_PAINT_FIELDS) {
+    result[field.key] = clampField(saved[field.key], field, defaults[field.key]);
+  }
+  // An id left behind by a deleted image resolves to nothing downstream and
+  // the car simply falls back to plain paint.
+  result.texture = typeof saved.texture === 'string' && saved.texture ? saved.texture : null;
+  return result;
+}
+
 const PLAYER_CAR_HITBOX = Object.freeze({
   width: 1.78,
   length: 4.35,

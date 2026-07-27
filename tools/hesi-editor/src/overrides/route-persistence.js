@@ -54,7 +54,12 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
         const syntheticRoutes = record(record(record(production, 'meta'), 'editorRoadOverrides'), 'syntheticRoutes');
         for (const [id, entry] of Object.entries(savedSyntheticRoutes)) {
           if (!samePoints(syntheticRoutes[id]?.points, entry.points)) pending = true;
-          syntheticRoutes[id] = { points: structuredClone(entry.points) };
+          // `base` travels with the draft: it is what lets HighwayMap accept
+          // this edit verbatim instead of re-running its stale-override guard.
+          syntheticRoutes[id] = {
+            points: structuredClone(entry.points),
+            ...(entry.base ? { base: structuredClone(entry.base) } : {}),
+          };
         }
       }
       const ids = [...Object.keys(savedRoutes).filter((id) => !skipped.includes(id)), ...Object.keys(savedSyntheticRoutes)].sort();

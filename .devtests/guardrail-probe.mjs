@@ -250,7 +250,13 @@ for (const route of map.routes.values()) {
         if (!cells.has(key)) cells.set(key, []);
         cells.get(key).push(sample);
         // 6. inside asphalt (zone-forced interior rails are the union's own edge)
-        if (!sample.zoneForced && map._barrierSuppressed(point, route)) {
+        // An emergency lay-by's outer edge is the same class of deliberate
+        // claim: the bay bulges past a service-area footprint and its parapet
+        // must stand there, so the builder passes ignoreLot for those stations
+        // (see _barrierSuppressed) and this audit has to ask the same question.
+        // The route-vs-route half of the test still applies in full.
+        const laybyEdge = !!map._laybyAt(route, frame.distance, side);
+        if (!sample.zoneForced && map._barrierSuppressed(point, route, laybyEdge)) {
           summary.insideAsphalt += 1;
           if (summary.insideAsphalt <= 8) fail('rail-inside-asphalt', `${route.id} side ${side} s=${frame.distance.toFixed(0)} visible rail sits on another carriageway`);
         }

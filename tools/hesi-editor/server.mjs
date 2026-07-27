@@ -30,6 +30,13 @@ import {
   serializeRoadRouteOverrides,
   validateProductionRouteDocument,
 } from './src/overrides/road-route-schema.js';
+import {
+  ROAD_BARRIER_PATHS,
+  barrierModuleSource,
+  blankBarrierDocument,
+  canonicalizeBarrierDocument,
+  serializeBarrierDocument,
+} from '../../js/road-barrier-styles.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const PORT = Number(process.env.HESI_EDITOR_PORT) || 8081;
@@ -39,6 +46,7 @@ const BUILD_ENDPOINT = '/__hesi_editor_build';
 const COMMITS_ENDPOINT = '/__hesi_editor_commits';
 const ROUTES_ENDPOINT = '/__hesi_editor_routes';
 const ASSETS_ENDPOINT = '/__hesi_editor_assets';
+const BARRIERS_ENDPOINT = '/__hesi_editor_barriers';
 const DIAGNOSTICS_ENDPOINT = '/__hesi_editor_diagnostics';
 const DIAGNOSTICS_DIR = 'data/editor/diagnostics';
 const CUSTOM_ASSETS_PATH = 'data/editor/custom-assets.json';
@@ -257,6 +265,36 @@ async function saveRoadRouteUpdates(updates) {
     path: ROAD_ROUTE_PATHS.source,
     bytes: Buffer.byteLength(serialized),
     routes: [...Object.keys(document.routes), ...Object.keys(document.syntheticRoutes)].sort(),
+  };
+}
+
+// Lateral barrier styles. Unlike road centrelines there is no draft/publish
+// split: the styles are pure look, cheap to revert, and the whole point is a
+// short edit->drive loop. One save writes BOTH the canonical JSON source and
+// the ES module js/map.js imports, so the next world build picks it up.
+async function readBarrierDocument() {
+  const file = resolve(ROOT, ROAD_BARRIER_PATHS.source);
+  try {
+    return canonicalizeBarrierDocument(JSON.parse(await readFile(file, 'utf8')));
+  } catch (error) {
+    if (error.code === 'ENOENT') return blankBarrierDocument();
+    throw new Error(`Saved road barriers are unreadable: ${error.message}`);
+  }
+}
+
+async function saveBarrierDocument(document) {
+  const canonical = canonicalizeBarrierDocument(document);
+  const json = serializeBarrierDocument(canonical);
+  const moduleSource = barrierModuleSource(canonical);
+  await writeFileSafe(resolve(ROOT, ROAD_BARRIER_PATHS.source), json);
+  await writeFileSafe(resolve(ROOT, ROAD_BARRIER_PATHS.module), moduleSource);
+  const spanCount = Object.values(canonical.routes).reduce((total, spans) => total + spans.length, 0);
+  return {
+    sourcePath: ROAD_BARRIER_PATHS.source,
+    modulePath: ROAD_BARRIER_PATHS.module,
+    routes: Object.keys(canonical.routes).sort(),
+    spanCount,
+    document: canonical,
   };
 }
 
@@ -503,6 +541,21 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === 'POST') {
         const result = await publishRoadRoutes();
+        sendJson(res, 200, { ok: true, ...result }, req.method);
+        return;
+      }
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' }, req.method);
+      return;
+    }
+    if (path === BARRIERS_ENDPOINT) {
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        const document = await readBarrierDocument();
+        sendJson(res, 200, { ok: true, path: ROAD_BARRIER_PATHS.source, document }, req.method);
+        return;
+      }
+      if (req.method === 'PUT') {
+        const payload = await readJsonBody(req);
+        const result = await saveBarrierDocument(payload.document);
         sendJson(res, 200, { ok: true, ...result }, req.method);
         return;
       }

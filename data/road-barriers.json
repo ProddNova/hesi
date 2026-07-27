@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "routes": {
+    "ramp_8": [
+      {
+        "side": "both",
+        "start": 0,
+        "end": null,
+        "style": "shutokoTall",
+        "note": "Tatsumi approach ramp - walled both sides like the real Shutoko ramps"
+      }
+    ]
+  }
+}

@@ -83,7 +83,7 @@ export const CAR_SPECS = deepFreeze([
     year: 1988,
     tier: 0,
     bodyStyle: 'compact-sedan',
-    description: 'An honest, narrow old sedan. Slow enough to teach momentum and lively enough to teach countersteer.',
+    description: 'An honest, narrow old sedan, worked over for the expressway. Still light enough to teach countersteer, now geared to sit at 200 on the Bayshore.',
     basePrice: 165000,
     colors: ['#c8c3ad', '#8c2731', '#31506c', '#5c625c'],
     silhouette: {
@@ -91,16 +91,24 @@ export const CAR_SPECS = deepFreeze([
       hood: 0.31, cabin: 0.48, trunk: 0.21, roofDrop: 0.08,
       wheelRadius: 0.29, wheelWidth: 0.18,
     },
+    // Tuned for a 220 km/h top end. Nothing declares top speed to the sim — it
+    // falls out of the torque curve, the gearing and the drag area — so
+    // `topSpeedKmh` below is only a claim until something drives the car flat
+    // out: `.devtests/top-speed-probe.mjs` does exactly that and checks it.
+    // Power is the only lever that matters up there (drag alone asks for
+    // ~100 kW at the wheels), which is why the stock 92 hp topped out at 182
+    // however the box was geared.
     engine: {
       layout: 'I4', cylinders: 4, displacementL: 1.5, aspiration: 'NA',
-      powerHp: 92, peakTorqueNm: 126, idleRpm: 850, redlineRpm: 6500,
+      powerHp: 168, peakTorqueNm: 229, idleRpm: 850, redlineRpm: 6500,
       torqueCurve: [[800, 0.57], [1800, 0.78], [3200, 0.96], [4300, 1], [5600, 0.91], [6500, 0.70], [6900, 0.15]],
     },
     drivetrain: 'RWD',
-    transmission: { gears: [3.55, 2.04, 1.38, 1.00, 0.81], reverse: -3.42, finalDrive: 4.10, shiftTime: 0.29, efficiency: 0.86 },
+    // Taller 5th: 0.81 put the 220 km/h mark past the redline in top gear.
+    transmission: { gears: [3.55, 2.04, 1.38, 1.00, 0.76], reverse: -3.42, finalDrive: 4.10, shiftTime: 0.29, efficiency: 0.86 },
     massKg: 940, weightDistributionFront: 0.53, dragCd: 0.36, frontalAreaM2: 1.82,
     tireGrip: 0.94, brakeForce: 9.3, suspensionStiffness: 0.88, steeringLockDeg: 36,
-    fuelTankL: 44, fuelIdleLph: 0.75, fuelFullLoadLph: 25, topSpeedKmh: 166,
+    fuelTankL: 44, fuelIdleLph: 0.75, fuelFullLoadLph: 25, topSpeedKmh: 220,
   }),
   car({
     id: 'maboroshi-k-turbo',

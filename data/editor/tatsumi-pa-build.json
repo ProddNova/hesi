@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "scene": "tatsumi_pa",
+  "generatedAt": "2026-07-26T23:30:57.786Z",
+  "project": {
+    "draftSignature": "fnv1a32:306beaea",
+    "name": "HESI Tatsumi PA",
+    "path": "data/editor/tatsumi-pa-project.json"
+  },
+  "environment": {},
+  "operations": [
+    {
+      "childIndex": 5,
+      "op": "garage-object",
+      "position": [
+        -15,
+        0,
+        -9
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 6,
+      "op": "garage-object",
+      "position": [
+        15,
+        0,
+        -9
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 7,
+      "op": "garage-object",
+      "position": [
+        -15,
+        0,
+        9
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 8,
+      "op": "garage-object",
+      "position": [
+        15,
+        0,
+        9
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 9,
+      "op": "garage-object",
+      "position": [
+        0,
+        0.02,
+        -3
+      ],
+      "quaternion": [
+        -0.70711,
+        0,
+        0,
+        0.70711
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "childIndex": 10,
+      "op": "garage-object",
+      "position": [
+        0,
+        1.65,
+        14.5
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    }
+  ]
+}

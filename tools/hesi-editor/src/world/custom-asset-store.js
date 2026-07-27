@@ -101,9 +101,17 @@ export class CustomAssetStore {
       if (patch.settings) next.settings = { ...(previous.settings || {}), ...clone(patch.settings) };
       if (patch.headlights) next.headlights = { ...(previous.headlights || {}), ...clone(patch.headlights) };
       if (patch.rearLights) next.rearLights = { ...(previous.rearLights || {}), ...clone(patch.rearLights) };
+      if (patch.paint) {
+        next.paint = { ...(previous.paint || {}), ...clone(patch.paint) };
+        // A null field removes it rather than saving a hole — this is how the
+        // Modeler takes a body image off a car without clearing its paint.
+        for (const [key, value] of Object.entries(next.paint)) if (value === null) delete next.paint[key];
+      }
+      if (patch.paint === null) delete next.paint;
       if (next.assetId === undefined) delete next.assetId;
       if (!next.assetId && !Object.keys(next.settings || {}).length
-        && !Object.keys(next.headlights || {}).length && !Object.keys(next.rearLights || {}).length) {
+        && !Object.keys(next.headlights || {}).length && !Object.keys(next.rearLights || {}).length
+        && !Object.keys(next.paint || {}).length) {
         delete this.document.carModels[target];
       }
       else this.document.carModels[target] = next;

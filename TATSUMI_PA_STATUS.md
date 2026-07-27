@@ -132,8 +132,30 @@ banned by the placement probe (§6) as before.
   rectangular by design).
 - The editor's published `tatsumi_pa_entry`/`tatsumi_pa_exit` overrides in
   `data/routes-smoothed.js` are still skipped as stale (console warning at
-  load). Republish from the editor against the live deck — or clear them —
-  to silence the warnings.
+  load). They predate the `base` stamp (see below), so the stale guard still
+  judges them by geometry alone. Re-edit and save either connector in the
+  editor — the save is stamped and applies from then on — or adopt the saved
+  shape as-is with `node tools/hesi-editor/stamp-road-overrides.mjs --write
+  --publish`, or clear them, to silence the warnings.
+
+## Amendment (26 Jul 2026): editor edits of the connectors now survive publish
+
+`_syntheticOverrideIsStale` protects the lot from an override captured against
+an older deck fit, but its only evidence was geometric: an override whose
+terminus no longer sat on the generated curve was discarded. Reshaping a
+connector in the world editor produces exactly that, so every Apply to Game
+reverted the connector to the generated lane — the edit looked like it had
+never been made.
+
+Saved synthetic overrides now carry `base`, the generated polyline the edit was
+drawn on top of (`route.generatedPoints`, stamped in `_registerRoute` for every
+`synthetic` route). A matching base means the edit was authored against this
+exact deck fit, so it is applied verbatim, endpoints included; a missing or
+mismatched base falls through to the original heuristic unchanged. The stamp
+travels through the editor draft, the publish merge and `meta.editorRoadOverrides`
+(`tools/hesi-editor/src/overrides/road-route-schema.js`,
+`route-persistence.js`, `road-edit-controller.js`). Covered by
+`tools/hesi-editor/test/unit/synthetic-route-override.test.mjs`.
 - The direct `wangan_0` exit anchor (`futureAnchors.wanganExit`) is still
   unbuilt (deliberate).
 - Map build time and the junction-finishing/network-test failures inherited

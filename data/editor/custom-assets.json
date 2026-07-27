@@ -539817,20 +539817,33 @@
     "tex:0157": {
       "name": "HD-wallpaper-pure-black-dark-plain.jpg",
       "url": "textures/hd-wallpaper-pure-black-dark-pla-552c706b67.jpg"
+    },
+    "tex:0158": {
+      "name": "high_barrier.png",
+      "url": "textures/high-barrier-1f9c94abdc.png"
+    },
+    "tex:0159": {
+      "name": "asphalt1.png",
+      "url": "textures/asphalt1-12547b23bf.png"
+    },
+    "tex:0160": {
+      "name": "asphalt2.png",
+      "url": "textures/asphalt2-6fed323d37.png"
+    },
+    "tex:0161": {
+      "name": "metallic_blue.png",
+      "url": "textures/metallic-blue-75f3d2f89f.png"
     }
   },
   "worldTextures": {
     "road": {
-      "texture": "tex:0137",
-      "brightness": 2
+      "texture": "tex:0160"
     },
     "roadAlt": {
-      "texture": "tex:0137",
-      "brightness": 2
+      "texture": "tex:0160"
     },
     "roadService": {
-      "texture": "tex:0137",
-      "brightness": 2
+      "texture": "tex:0160"
     },
     "barrier": {
       "texture": "tex:0107",
@@ -539916,6 +539929,9 @@
     },
     "water": {
       "brightness": 2
+    },
+    "barrierScreen": {
+      "texture": "tex:0158"
     }
   },
   "worldModels": {},
@@ -539972,6 +539988,22 @@
         "width": 1.42,
         "length": 3.89,
         "height": 1.24
+      },
+      "headlights": {
+        "intensity": 650,
+        "range": 31.75,
+        "radius": 13,
+        "softness": 1,
+        "irregularity": 0.99,
+        "temperature": 0.5
+      },
+      "paint": {
+        "color": "#1b3fa8",
+        "metallic": 1,
+        "gloss": 1,
+        "texture": "tex:0161",
+        "wrapScale": 0.25,
+        "wrapTint": 0
       }
     }
   }

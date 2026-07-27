@@ -20,12 +20,11 @@
  *     are the only service routes/edges in the disabled-lane network;
  *     traffic never routes onto them, and the paAccessLanes:true twin still
  *     restores the legacy behaviour (4 lanes, legacy Tatsumi placement).
- *  8. LIVE GARAGE + SPAWN — tatsumi_pa owns the only garage flag and the
- *     initialSpawn sits on the deck (see tatsumi-pa-flow-probe for the
- *     detailed drivability/obstruction assertions).
+ *  8. LIVE GARAGE + SPAWN — tatsumi_pa owns the only garage flag while
+ *     initialSpawn uses the requested 3832, -3779 position on ramp_8.
  *  9. ANCHORS — garage / spawn / wangan_0-exit anchors are exposed and sit
- *     on the deck surface; the spawn anchor is consumed by initialSpawn,
- *     the wangan_0 exit remains a future checkpoint.
+ *     on the deck surface; the spawn and wangan_0 exit remain future
+ *     checkpoints.
  *
  * Run: node .devtests/tatsumi-pa-placement-probe.mjs
  */
@@ -217,14 +216,17 @@ check(tatsumiLanes.length === 0, `${tatsumiLanes.length} traffic lanes reference
 check(map.edges.length === twin.edges.length - 8 + 2,
   `edge count drift: disabled ${map.edges.length} vs twin ${twin.edges.length} (twin adds 2 per access lane, disabled adds the Tatsumi entry+exit)`);
 
-// --- 8. garage + initialSpawn live on the deck --------------------------------------------
+// --- 8. garage on the deck + fixed ramp_8 initialSpawn ------------------------------------
 const garageArea = map.serviceAreas.find((candidate) => candidate.hasGarage);
 check(garageArea?.id === 'tatsumi_pa', `active garage is ${garageArea?.id}`);
 check(map.serviceAreas.filter((candidate) => candidate.hasGarage).length === 1, 'more than one active garage');
-check(map.initialSpawn.serviceAreaId === 'tatsumi_pa', `initialSpawn anchored to ${map.initialSpawn.serviceAreaId}`);
-check(map.initialSpawn.label === 'Tatsumi PA deck', `initialSpawn label changed (${map.initialSpawn.label})`);
-const spawnToDeck = Math.hypot(map.initialSpawn.position.x - area.center.x, map.initialSpawn.position.z - area.center.z);
-check(spawnToDeck < area.length * 0.5, `initialSpawn off the deck (${spawnToDeck.toFixed(0)} m from centre)`);
+check(map.initialSpawn.routeId === 'ramp_8', `initialSpawn route is ${map.initialSpawn.routeId}`);
+check(Math.abs(map.initialSpawn.position.x - 3832) < 1e-6
+  && Math.abs(map.initialSpawn.position.z + 3779) < 1e-6,
+  `initialSpawn X/Z is ${map.initialSpawn.position.x.toFixed(3)}, ${map.initialSpawn.position.z.toFixed(3)}`);
+const initialSpawnInfo = map.getRoadInfo(map.initialSpawn.position.clone(), map.initialSpawn.routeId);
+check(initialSpawnInfo?.routeId === 'ramp_8' && !!initialSpawnInfo?.drivable,
+  'initialSpawn not on the drivable ramp_8 surface');
 check(garageArea && map.garagePosition.equals(garageArea.garageEntrance), 'garagePosition detached from the deck entrance');
 check(!!map.getGarageTransition(map.garagePosition.clone(), 13)?.triggered, 'deck garage transition does not fire');
 
