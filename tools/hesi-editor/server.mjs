@@ -112,6 +112,8 @@ function validateCustomAssetsDocument(document) {
   if (document.worldTextures !== undefined && !isRecord(document.worldTextures)) throw new Error('worldTextures must be an object');
   if (document.worldModels !== undefined && !isRecord(document.worldModels)) throw new Error('worldModels must be an object');
   if (document.carModels !== undefined && !isRecord(document.carModels)) throw new Error('carModels must be an object');
+  if (document.runtimeTuning !== undefined && !isRecord(document.runtimeTuning)) throw new Error('runtimeTuning must be an object');
+  if (document.runtimeTuning?.camera !== undefined && !isRecord(document.runtimeTuning.camera)) throw new Error('runtimeTuning.camera must be an object');
   const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
   for (const id of Object.keys(document.assets)) {
     if (forbidden.has(id) || !/^custom:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid custom asset id: ${id}`);

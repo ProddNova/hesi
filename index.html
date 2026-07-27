@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="styles.css?v=20260724f">
   <link rel="stylesheet" href="styles/dev-map.css">
   <link rel="stylesheet" href="styles/debug-stats.css">
+  <link rel="stylesheet" href="styles/playground.css?v=20260727a">
   <script type="importmap">
     {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"}}
   </script>
@@ -187,6 +188,26 @@
     </aside>
     <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span id="debug-drone-speed">55 M/S</span><span class="drone-help-desktop">WHEEL SPEED · SHIFT BOOST</span><span class="drone-help-touch">DRAG LOOK · BOOST</span><small class="drone-help-desktop">0 MENU</small><small class="drone-help-touch">DBG MENU</small></div>
 
+    <aside id="editor-test-tools" class="editor-test-tools" hidden aria-label="Editor test game tools">
+      <div class="test-mark"><i></i><b>EDITOR TEST GAME</b><small>Build locale · i progressi restano separati dal progetto editor</small></div>
+      <button type="button" data-test-action="playground">ENTRA NEL PLAYGROUND</button>
+      <button type="button" data-test-action="panel" hidden>PARAMETRI LIVE</button>
+      <button type="button" class="test-dismiss" data-test-action="dismiss" aria-label="Riduci avviso">×</button>
+    </aside>
+
+    <aside id="playground-panel" class="playground-panel" hidden aria-label="Playground live tuning">
+      <header>
+        <div><small>VEHICLE LAB // LIVE</small><b>PLAYGROUND PARAMETERS</b></div>
+        <button type="button" data-playground-action="reset-camera">RESET CAMERA</button>
+        <button type="button" data-playground-action="close" aria-label="Chiudi pannello">×</button>
+      </header>
+      <div class="playground-content" data-playground-content></div>
+      <footer>
+        <span data-playground-status>Le modifiche si vedono subito; salva per applicarle al gioco.</span>
+        <button type="button" data-playground-action="save">CONFERMA E APPLICA AL GIOCO</button>
+      </footer>
+    </aside>
+
     <div id="install-progress" class="install hidden"><span id="install-label">INSTALLING</span><div><i></i></div></div>
 
     <section id="touch-controls" class="touch-controls hidden" aria-label="Touch controls">
@@ -249,7 +270,7 @@
     </div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260727d"></script>
+  <script type="module" src="js/game.js?v=20260727g"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));

@@ -1,11 +1,12 @@
 /**
  * Driving-camera probe.
  *
- * Two behaviours, both of which are invisible to every other test:
- *  1. the chase camera's speed-dependent pull-back — it must still grow with
- *     speed, but only a fraction of what it used to, so the car does not shrink
- *     into the middle of the frame on the Bayshore;
- *  2. the camera shake — nothing at a standstill, something while driving hard,
+ * Three behaviours, all invisible to every other test:
+ *  1. the chase camera keeps the same car-relative distance while the car
+ *     translates, instead of accumulating world-space smoothing lag;
+ *  2. the chase FOV grows only slightly with speed, so motion does not visually
+ *     zoom the car away;
+ *  3. the camera shake — nothing at a standstill, something while driving hard,
  *     and in the chase view a gentler, slower version of the cockpit's.
  *
  * The camera is driven directly with synthetic telemetry so the measurements
@@ -100,19 +101,48 @@ const sample = await page.evaluate(() => {
     const distance = Math.hypot(
       samples.at(-1)[0] - origin.x, samples.at(-1)[1] - origin.y, samples.at(-1)[2] - origin.z,
     );
+    const horizontalDistance = Math.hypot(
+      samples.at(-1)[0] - origin.x, samples.at(-1)[2] - origin.z,
+    );
     let jitter = 0;
     for (let i = 1; i < samples.length; i += 1) {
       jitter = Math.max(jitter, Math.hypot(
         samples[i][0] - samples[i - 1][0], samples[i][1] - samples[i - 1][1], samples[i][2] - samples[i - 1][2],
       ));
     }
-    return { distance, jitter, shake: game.camShake };
+    return { distance, horizontalDistance, jitter, shake: game.camShake, fov: game.camera.fov };
+  };
+  const runMoving = (speedKmh, frames = 180) => {
+    const originalState = game.getVehicleState.bind(game);
+    const originalTelemetry = game.getTelemetry.bind(game);
+    const state = originalState();
+    const position = (state.position || state).clone();
+    const heading = state.heading ?? state.yaw ?? 0;
+    const t = telemetry(speedKmh, 1);
+    game.cameraMode = 'chase';
+    game.getVehicleState = () => ({ ...state, position, heading });
+    game.getTelemetry = () => t;
+    game.lastDriveInput = { throttle: 1, brake: 0, steer: 0, handbrake: 0 };
+    game.snapDrivingCamera();
+    const startDistance = game.camPos.distanceTo(position);
+    for (let i = 0; i < frames; i += 1) {
+      position.x += Math.sin(heading) * t.speedMS / 60;
+      position.z += Math.cos(heading) * t.speedMS / 60;
+      game.updateCamera(1 / 60, t);
+    }
+    const endDistance = game.camPos.distanceTo(position);
+    const out = { startDistance, endDistance, fov: game.camera.fov };
+    game.getVehicleState = originalState;
+    game.getTelemetry = originalTelemetry;
+    game.snapDrivingCamera();
+    return out;
   };
   const hard = telemetry(200, 1, 0.2);
   const out = {
     chaseStopped: run('chase', telemetry(0)),
     chaseFast: run('chase', telemetry(220, 1)),
     chaseHard: run('chase', hard),
+    chaseMoving: runMoving(220),
     cockpitStopped: run('cockpit', telemetry(0)),
     cockpitHard: run('cockpit', hard),
     hoodHard: run('hood', telemetry(200, 1, 0.2)),
@@ -130,14 +160,21 @@ const sample = await page.evaluate(() => {
 });
 
 // ---------------------------------------------------------------- chase cam
-// The formula is 6.2 m + speed × 0.00093, so 220 km/h must add ~0.2 m — a third
-// of the .0028 era, itself a quarter of the .005 one. The pull-back still has to
-// EXIST (it is what sells speed), it just must not resize the car. The car is
-// not on flat ground, so compare the growth.
+// Static telemetry must not alter physical distance: speed is communicated by
+// a restrained FOV gain instead. More importantly, translating at 220 km/h
+// must not add the old 2.6 m world-space smoothing lag.
 const growth = sample.chaseFast.distance - sample.chaseStopped.distance;
-check('the chase camera still backs off with speed', growth > 0.1, `+${growth.toFixed(2)} m at 220 km/h`);
-check('and the pull-back stays well under the old rates', growth < 0.35,
-  `+${growth.toFixed(2)} m (.0028 gave +0.6 m, .005 gave +1.1 m, the original .01 gave +2.2 m)`);
+check('the resting chase camera uses the closer framing',
+  sample.chaseStopped.horizontalDistance > 5.75 && sample.chaseStopped.horizontalDistance < 5.85,
+  `${sample.chaseStopped.horizontalDistance.toFixed(2)} m behind the car (was 6.20 m)`);
+check('speed does not change the chase camera distance', Math.abs(growth) < 0.01,
+  `${growth >= 0 ? '+' : ''}${growth.toFixed(3)} m at 220 km/h`);
+check('movement does not leave the chase camera behind',
+  Math.abs(sample.chaseMoving.endDistance - sample.chaseMoving.startDistance) < 0.02,
+  `${sample.chaseMoving.startDistance.toFixed(2)} m -> ${sample.chaseMoving.endDistance.toFixed(2)} m at 220 km/h`);
+check('the chase speed FOV remains restrained',
+  sample.chaseMoving.fov > 60 && sample.chaseMoving.fov < 65,
+  `${sample.chaseMoving.fov.toFixed(1)}° at 220 km/h (the old gain reached 72.5°)`);
 
 // ------------------------------------------------------------------- shake
 check('the chase view is dead steady at a standstill', sample.chaseStopped.jitter < 1e-6,

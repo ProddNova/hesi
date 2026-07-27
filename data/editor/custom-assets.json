@@ -540068,6 +540068,54 @@
         "gloss": 0,
         "wrapScale": 0.25,
         "wrapTint": 0
+      },
+      "rearLights": {
+        "offsetX": -0.05,
+        "offsetY": 0.17,
+        "offsetZ": -0.3,
+        "width": 0.19,
+        "spacing": 0.57
+      }
+    }
+  },
+  "runtimeTuning": {
+    "camera": {
+      "chase": {
+        "forward": -5.35,
+        "height": 2.05,
+        "lookAhead": 2.3,
+        "speedLookAhead": 0.016,
+        "lookHeight": 0.62,
+        "fov": 59,
+        "fovGain": 5,
+        "smoothing": 8.5,
+        "positionLag": 2.6,
+        "lookLag": 3,
+        "tunnelHeight": 1.8
+      },
+      "hood": {
+        "forward": 1.8,
+        "height": 1.7,
+        "lookAhead": 12,
+        "speedLookAhead": 0,
+        "lookHeight": 0.9,
+        "fov": 60,
+        "fovGain": 17,
+        "smoothing": 18,
+        "positionLag": 0.7,
+        "lookLag": 1.2
+      },
+      "cockpit": {
+        "forward": 0.55,
+        "height": 1.12,
+        "lookAhead": 11,
+        "speedLookAhead": 0,
+        "lookHeight": 0.9,
+        "fov": 60,
+        "fovGain": 17,
+        "smoothing": 18,
+        "positionLag": 0.7,
+        "lookLag": 1.2
       }
     }
   }

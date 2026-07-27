@@ -1,0 +1,46 @@
+.editor-test-tools{position:fixed;z-index:85;top:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;min-width:min(620px,calc(100vw - 28px));padding:8px 10px;border:1px solid rgba(255,176,46,.72);background:rgba(7,9,13,.94);box-shadow:0 10px 42px rgba(0,0,0,.62),3px 3px 0 rgba(255,176,46,.18);font:10px var(--term);letter-spacing:.08em;color:#ece9df}
+.editor-test-tools[hidden]{display:none}
+.editor-test-tools .test-mark{display:grid;grid-template-columns:auto 1fr;column-gap:9px;min-width:0;margin-right:auto}
+.editor-test-tools .test-mark i{grid-row:1/3;width:8px;background:var(--amber);box-shadow:0 0 15px rgba(255,176,46,.65)}
+.editor-test-tools .test-mark b{color:var(--amber);letter-spacing:.16em}
+.editor-test-tools .test-mark small{color:#94a09b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.editor-test-tools button,.playground-panel button{border:1px solid #3b4a43;background:#101712;color:#e8eee9;padding:7px 10px;font:9px var(--term);letter-spacing:.08em;cursor:pointer}
+.editor-test-tools button:hover,.playground-panel button:hover{border-color:var(--green);color:var(--green)}
+.editor-test-tools [data-test-action="playground"]{border-color:#9d6d20;background:#251805;color:#ffd49a}
+.editor-test-tools .test-dismiss{width:28px;padding:7px 0}
+.editor-test-tools.is-compact{min-width:0;left:14px;transform:none}
+.editor-test-tools.is-compact .test-mark small,.editor-test-tools.is-compact [data-test-action="dismiss"]{display:none}
+.playground-panel{position:fixed;z-index:84;right:14px;top:72px;bottom:14px;width:min(390px,calc(100vw - 28px));border:1px solid #33483e;background:rgba(5,9,8,.97);box-shadow:0 20px 75px #000;color:#e5eee8;font-family:var(--term);overflow:hidden}
+.playground-panel[hidden]{display:none}
+.playground-panel>header{height:58px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid #263b31;background:#09110d}
+.playground-panel>header div{display:flex;flex-direction:column;margin-right:auto}
+.playground-panel>header small{color:var(--green);letter-spacing:.12em}
+.playground-panel>header b{font-size:13px;letter-spacing:.08em}
+.playground-content{height:calc(100% - 112px);overflow:auto;padding:10px}
+.playground-section{border:1px solid #20362c;background:#080e0b;margin-bottom:8px}
+.playground-section>summary{display:flex;flex-direction:column;gap:3px;padding:10px;cursor:pointer;list-style:none}
+.playground-section>summary::-webkit-details-marker{display:none}
+.playground-section>summary b{color:#f0ede5;font-size:11px;letter-spacing:.08em}
+.playground-section>summary small{color:#788a81;font-size:8px;line-height:1.35}
+.playground-section[open]>summary{border-bottom:1px solid #20362c}
+.playground-section-body{padding:10px}
+.playground-section-body h4{margin:14px 0 6px;color:var(--amber);font-size:9px;letter-spacing:.12em;text-transform:uppercase}
+.playground-field{display:block;margin-bottom:10px}
+.playground-field>span{display:flex;justify-content:space-between;gap:12px;margin-bottom:4px}
+.playground-field b{font-size:9px;font-weight:400;color:#cbd4ce}
+.playground-field output{font-size:8px;color:var(--green)}
+.playground-field input[type="range"]{width:100%;accent-color:var(--green)}
+.playground-view-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:12px}
+.playground-view-tabs button.active{border-color:var(--amber);color:var(--amber);background:#201506}
+.playground-check,.playground-color{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:5px 0 12px;color:#cbd4ce;font-size:9px}
+.playground-check input{accent-color:var(--green)}
+.playground-color input{width:56px;height:28px;padding:1px;border:1px solid #355044;background:#070b09}
+.playground-panel>footer{height:53px;display:flex;align-items:center;gap:8px;padding:0 10px;border-top:1px solid #263b31;background:#09110d}
+.playground-panel>footer span{margin-right:auto;color:#8c9d94;font-size:8px;line-height:1.25}
+.playground-panel>footer [data-playground-action="save"]{border-color:#397e59;color:#8affb2}
+@media(max-width:720px){
+  .editor-test-tools{left:8px;right:8px;top:max(8px,env(safe-area-inset-top));min-width:0;transform:none;flex-wrap:wrap}
+  .editor-test-tools .test-mark{flex:1 1 100%}
+  .editor-test-tools.is-compact{right:auto}
+  .playground-panel{top:96px;right:8px;bottom:8px;width:calc(100vw - 16px)}
+}

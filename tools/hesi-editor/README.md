@@ -66,6 +66,23 @@ The toolbar badges distinguish `Draft: Unsaved/Saved` from
 `js/editor-map-patch.js`; missing build files are a no-op, and the game never
 imports editor code.
 
+### Test Game playground
+
+**Test Game** opens the playable build with an `EDITOR TEST GAME` strip. From
+there, **Enter playground** switches to a separate vehicle-lab scene: a large
+gridded pad with an asphalt strip, road wall, Jersey barrier, stopped car,
+slalom blocks, progressive ramp, uneven steps, and a brake-test wall. None of
+this geometry is added to or saved into the highway scene.
+
+**Live parameters** exposes the chase/hood/cockpit cameras, the selected
+player car's collision box, front and rear lights, VHS, speed blur, and camera
+shake. Hitbox and light controls import the exact field definitions used by the
+Car Modeler; the green box in the scene is the current physical hitbox.
+Camera values use the shared `js/playground-config.js` schema. Changes preview
+immediately. **Confirm and apply to game** writes the car and camera records to
+`data/editor/custom-assets.json`, so the normal game and Modeler read the same
+authoritative values on their next load.
+
 For road curves:
 
 1. Click a rendered asphalt surface or the Tatsumi PA deck (the editor gives

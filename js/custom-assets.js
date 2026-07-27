@@ -10,6 +10,7 @@ import {
   TRAFFIC_CAR_SETTING_FIELDS,
   isCarModelTarget,
 } from './car-models.js';
+import { CAMERA_TUNING_FIELDS } from './playground-config.js';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -500,6 +501,23 @@ export function customAssetsDocumentErrors(document) {
     else if (assetId !== null && !document.assets[assetId]) errors.push(`worldModels.${modelKey} references missing asset ${assetId}`);
   }
   if (document.carModels !== undefined && !isRecord(document.carModels)) errors.push('carModels must be an object');
+  if (document.runtimeTuning !== undefined && !isRecord(document.runtimeTuning)) errors.push('runtimeTuning must be an object');
+  if (document.runtimeTuning?.camera !== undefined && !isRecord(document.runtimeTuning.camera)) {
+    errors.push('runtimeTuning.camera must be an object');
+  }
+  for (const [view, fields] of Object.entries(CAMERA_TUNING_FIELDS)) {
+    const savedView = document.runtimeTuning?.camera?.[view];
+    if (savedView === undefined) continue;
+    if (!isRecord(savedView)) { errors.push(`runtimeTuning.camera.${view} must be an object`); continue; }
+    const fieldMap = new Map(fields.map((field) => [field.key, field]));
+    for (const [key, value] of Object.entries(savedView)) {
+      const field = fieldMap.get(key);
+      if (!field) { errors.push(`runtimeTuning.camera.${view}.${key} is unknown`); continue; }
+      if (!Number.isFinite(value) || value < field.min || value > field.max) {
+        errors.push(`runtimeTuning.camera.${view}.${key} must be between ${field.min} and ${field.max}`);
+      }
+    }
+  }
   const trafficSettingFields = new Map(TRAFFIC_CAR_SETTING_FIELDS.map((field) => [field.key, field]));
   const playerSettingFields = new Map(CAR_HITBOX_SETTING_FIELDS.map((field) => [field.key, field]));
   const headlightFields = new Map(CAR_HEADLIGHT_FIELDS.map((field) => [field.key, field]));
