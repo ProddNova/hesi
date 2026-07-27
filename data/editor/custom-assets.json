@@ -539987,6 +539987,15 @@
     "facadeColdStore": {
       "texture": "tex:0167",
       "brightness": 0.1
+    },
+    "road": {
+      "texture": "tex:0160"
+    },
+    "roadAlt": {
+      "texture": "tex:0160"
+    },
+    "roadService": {
+      "texture": "tex:0160"
     }
   },
   "worldModels": {},
@@ -540040,9 +540049,9 @@
     "player:JapanSedan": {
       "assetId": "custom:0038",
       "settings": {
-        "width": 1.42,
-        "length": 3.89,
-        "height": 1.24
+        "width": 1.36,
+        "length": 3.7,
+        "height": 1.14
       },
       "headlights": {
         "intensity": 650,

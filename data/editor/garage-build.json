@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "garage",
-  "generatedAt": "2026-07-26T23:56:18.422Z",
+  "generatedAt": "2026-07-27T17:28:40.889Z",
   "project": {
-    "draftSignature": "fnv1a32:52dcc3f5",
+    "draftSignature": "fnv1a32:1c9f94ac",
     "name": "HESI Garage Interior",
     "path": "data/editor/garage-project.json"
   },
@@ -1405,7 +1405,7 @@
       "op": "garage-object",
       "position": [
         3.2466,
-        -0.87381,
+        -1.15573,
         13.22632
       ],
       "quaternion": [
@@ -1426,7 +1426,7 @@
       "op": "garage-object",
       "position": [
         1.24946,
-        -0.65289,
+        -0.87807,
         -0.67974
       ],
       "quaternion": [
@@ -1447,7 +1447,7 @@
       "op": "garage-object",
       "position": [
         -3.54898,
-        -0.72134,
+        -0.94,
         1.70408
       ],
       "quaternion": [

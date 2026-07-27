@@ -1153,7 +1153,42 @@ class ShutokoNights {
   _buildServiceHitboxes(){
     const group=new THREE.Group(),material=this._debugMaterial(0xffd34f,.9);for(const area of this.map?.serviceAreas||[]){const edges=new THREE.EdgesGeometry(new THREE.BoxGeometry(area.width||20,6,area.length||30)),lines=new THREE.LineSegments(edges,material);lines.position.copy(area.center);lines.position.y=(area.elevation??area.center.y)+3;lines.rotation.y=Math.atan2(area.tangent?.x||0,area.tangent?.z||1);lines.renderOrder=999;group.add(lines);}return group;
   }
-  _buildVehicleHitboxes(){const group=new THREE.Group();this.debug.playerHelper=new THREE.BoxHelper(this.playerMesh,0x7dff62);group.add(this.debug.playerHelper);this.debug.trafficHelpers=(this.traffic?.pool||[]).map(vehicle=>{const helper=new THREE.BoxHelper(vehicle.mesh,0xff9a2e);helper.visible=false;group.add(helper);return{vehicle,helper};});return group;}
+  _makeVehicleHitboxHelper(color){
+    const box=new THREE.BoxGeometry(1,1,1),geometry=new THREE.EdgesGeometry(box);box.dispose();
+    const helper=new THREE.LineSegments(geometry,this._debugMaterial(color,.95));helper.renderOrder=999;helper.matrixAutoUpdate=true;return helper;
+  }
+  _positionVehicleHitbox(helper,state,{traffic=false}={}){
+    if(!helper||!state)return;
+    const position=state.position||state;
+    const heading=state.heading??state.yaw??0;
+    const forward=traffic&&state.tangent?.isVector3?state.tangent:this.debug._hitboxForward.set(Math.sin(heading),0,Math.cos(heading));
+    const right=traffic&&state.right?.isVector3?state.right:this.debug._hitboxRight.set(Math.cos(heading),0,-Math.sin(heading));
+    const width=Math.max(.01,Number(state.width)||1);
+    const length=Math.max(.01,Number(state.length)||1);
+    const height=Math.max(.01,Number(state.height)||1);
+    const offsetX=Number(state.offsetX??state.collisionOffsetX)||0;
+    const offsetY=Number(state.offsetY??state.collisionOffsetY)||0;
+    const offsetZ=Number(state.offsetZ??state.collisionOffsetZ)||0;
+    helper.position.set(
+      (position?.x||0)+right.x*offsetX+forward.x*offsetZ,
+      (position?.y||0)+offsetY+height*.5,
+      (position?.z||0)+right.z*offsetX+forward.z*offsetZ,
+    );
+    helper.rotation.set(0,Math.atan2(forward.x,forward.z),0);
+    helper.scale.set(width,height,length);
+    helper.visible=true;
+  }
+  _buildVehicleHitboxes(){
+    const group=new THREE.Group();
+    this.debug._hitboxForward=new THREE.Vector3();
+    this.debug._hitboxRight=new THREE.Vector3();
+    this.debug.playerHelper=this._makeVehicleHitboxHelper(0x7dff62);
+    group.add(this.debug.playerHelper);
+    this.debug.trafficHelpers=(this.traffic?.pool||[]).map(vehicle=>{
+      const helper=this._makeVehicleHitboxHelper(0xff9a2e);helper.visible=false;group.add(helper);return{vehicle,helper};
+    });
+    return group;
+  }
   _disposeDebugGroup(group){if(!group)return;group.traverse(o=>{o.geometry?.dispose?.();if(o.material&&!Array.isArray(o.material))o.material.dispose?.();});group.removeFromParent();}
   setDebugHitbox(kind,enabled){
     if(!(kind in this.debug.hitboxes))return;this.debug.hitboxes[kind]=!!enabled;let layer=this.debug.layers[kind];if(enabled&&!layer){if(kind==='roads')layer=this._buildRoadHitboxes();else if(kind==='walls')layer=this._buildWallHitboxes();else if(kind==='services')layer=this._buildServiceHitboxes();else if(kind==='vehicles')layer=this._buildVehicleHitboxes();else layer=new THREE.Group();layer.name=`Debug ${kind}`;this.debug.layers[kind]=layer;this.debug.overlay.add(layer);}if(layer)layer.visible=!!enabled;if(kind==='world'&&enabled)this.debug.worldRefresh=Infinity;
@@ -1162,7 +1197,17 @@ class ShutokoNights {
     const layer=this.debug.layers.world;if(!layer)return;for(const child of[...layer.children])this._disposeDebugGroup(child);const candidates=[];this.map?.group?.traverse?.(o=>{if(o.isMesh&&o.visible&&o.parent?.visible!==false)candidates.push(o);});const origin=this.debug.noclip?this.debug.position:this.camera.position;let count=0;for(const mesh of candidates){if(count>=120)break;mesh.geometry?.computeBoundingSphere?.();const center=mesh.geometry?.boundingSphere?.center?.clone?.();if(!center)continue;mesh.localToWorld(center);if(center.distanceToSquared(origin)>650*650)continue;const helper=new THREE.BoxHelper(mesh,0xb06cff);helper.material.depthTest=false;helper.material.transparent=true;helper.material.opacity=.48;helper.renderOrder=997;layer.add(helper);count++;}
   }
   updateDebugHitboxes(dt){
-    if(this.debug.hitboxes.vehicles){this.debug.playerHelper?.update?.();if(this.debug.playerHelper)this.debug.playerHelper.visible=this.playerMesh.visible;for(const {vehicle,helper}of this.debug.trafficHelpers||[]){helper.visible=!!vehicle.active;if(vehicle.active)helper.update();}}
+    if(this.debug.hitboxes.vehicles){
+      if(this.debug.playerHelper){
+        const player=this.getVehicleState();
+        this.debug.playerHelper.visible=!!this.playerMesh?.visible;
+        if(this.debug.playerHelper.visible)this._positionVehicleHitbox(this.debug.playerHelper,player);
+      }
+      for(const {vehicle,helper}of this.debug.trafficHelpers||[]){
+        helper.visible=!!vehicle.active;
+        if(vehicle.active)this._positionVehicleHitbox(helper,vehicle,{traffic:true});
+      }
+    }
     if(this.debug.hitboxes.world){this.debug.worldRefresh+=dt;if(this.debug.worldRefresh>.45){this.debug.worldRefresh=0;this._refreshWorldHitboxes();}}
   }
 

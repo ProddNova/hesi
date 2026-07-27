@@ -7740,10 +7740,17 @@ export class HighwayMap {
       }
     }
 
-    // Tunnel interiors: wall panels, ceiling light strips, jet fans,
-    // emergency exits, cabinets, portals.
+    // Tunnel interiors: wall panels, ceiling light strips, their baked road
+    // wash, jet fans, emergency exits, cabinets and portals. The strips are
+    // MeshBasic so the fixtures themselves glow, but without the pool below
+    // them they contributed no light at all to the Lambert road/walls: every
+    // gallery read as an unlit black tube. Reuse the map's static additive
+    // pool for the illumination rather than adding hundreds of forward lights.
+    // It is instanced with the other tunnel dressing, follows grade + bank and
+    // costs no per-fragment light loop.
     for (const tunnel of route.tunnels) {
       const style = tunnel.style === 'orange' ? 'tunnelLampOrange' : 'tunnelLampWhite';
+      const poolColor = tunnel.style === 'orange' ? 0xffb15e : 0xf3f7e8;
       const lightStep = 17;
       for (let distance = tunnel.startDistance + 8; distance < tunnel.endDistance; distance += lightStep) {
         const center = this._sampleCenter(route, distance, 1);
@@ -7754,6 +7761,31 @@ export class HighwayMap {
           position.y += 5.7;
           this._instance(position, vec(0.55, 0.1, 2.6), quaternion, null, `box:${style}`);
         }
+        const frame = {
+          position: center.position,
+          tangent: center.baseTangent,
+          normal: horizontalNormal(center.baseTangent),
+          bank: this._bankAt(route, distance),
+          route,
+          distance,
+        };
+        const bankQuat = new THREE.Quaternion().setFromAxisAngle(
+          tmpAxis.copy(center.baseTangent).normalize(),
+          -frame.bank,
+        );
+        const poolLength = lightStep * 1.28;
+        const pool = this._deckPoint(
+          frame,
+          0,
+          0.145 + sagClearance(frame, center.baseTangent, distance, 0, poolLength),
+        );
+        this._instance(
+          pool,
+          vec(Math.max(8, half * 1.9), 1, poolLength),
+          surfaceQuaternion(center.baseTangent).premultiply(bankQuat),
+          poolColor,
+          'pool:lightPool',
+        );
         // wall panels
         for (const side of [1, -1]) {
           const panel = center.position.clone().addScaledVector(horizontalNormal(center.baseTangent), side * (half + 0.18));
