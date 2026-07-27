@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as MapModule from './map.js?v=20260724f';
-import * as PhysicsModule from './physics.js?v=20260713a';
+import * as PhysicsModule from './physics.js?v=20260727a';
 import * as TrafficModule from './traffic.js?v=20260724g';
 import * as Data from './data.js';
 import * as SaveModule from './save.js';
@@ -664,7 +664,7 @@ class ShutokoNights {
     // expensive road query and caused the large "other" spikes in diagnostics.
     this.syncFuelFromPhysics();
     t0=performance.now();if(!this.debug.trafficDisabled)this.traffic?.update?.(dt,this.getVehicleState(),{roadInfo:this.currentRoadInfo,playerGhost:this.ghostTimer>0});pf.traffic+=performance.now()-t0;
-    this.handleTrafficEvents();this.updatePlayerMesh();
+    this.handleTrafficEvents();this.updatePlayerMesh(dt);
     t0=performance.now();this.map?.update?.(pos,performance.now()/1000);pf.map+=performance.now()-t0;
     const tel=this.getTelemetry();this.updateScoring(dt,tel);this.updateServices(tel);this.updateCamera(dt,tel);this.updateAudio(tel,dt);if(this.shouldUpdateHUD())this.updateHUD(tel,this.currentRoadInfo||roadInfo);
     if((tel.fuel??this.state.fuel)<=0.001&&!this.fuelWarned){this.fuelWarned=true;this.ui.toast('OUT OF FUEL // Open phone to call tow','red');}
@@ -1186,7 +1186,45 @@ class ShutokoNights {
   bankScore(name){if(this.run.score<1)return;const earned=Data.calculateScorePayout(this.run.score);this.debugStats?.event('score_banked',{location:name,score:this.run.score,earned,combo:this.run.combo,near_misses:this.run.nearMisses});this.state.money+=earned;this.state.records.bestScore=Math.max(this.state.records.bestScore||0,Math.floor(this.run.score));this.state.records.totalBanked=(this.state.records.totalBanked||0)+earned;this.ui.toast(`${name.toUpperCase()} // ${Math.floor(this.run.score).toLocaleString()} BANKED = ¥${earned.toLocaleString()}`,'amber');this.run.score=0;this.run.combo=1;this.run.comboTimer=0;this.run.nearMisses=0;this.persist();}
   autoRefuel(area){const car=this.getEffectiveCar(),capacity=car.fuelCapacity||45,needed=Math.max(0,capacity-this.state.fuel);if(needed<1)return;const cost=Math.ceil(needed*(Data.ECONOMY?.refuelPricePerLiter||Data.ECONOMY?.fuelPerLiter||170));if(this.state.money>=cost||this.admin.infiniteMoney){if(!this.admin.infiniteMoney)this.state.money-=cost;this.setPhysicsFuel(capacity);this.fuelWarned=false;this.ui.toast(`REFUELED ${needed.toFixed(1)}L // ¥${cost.toLocaleString()}`);this.persist();}else this.ui.toast('Not enough money to refuel','red');}
 
-  updatePlayerMesh(){const s=this.getVehicleState(),p=vec(s.position||s);this.playerMesh.position.copy(p);this.playerMesh.rotation.y=(s.heading??s.yaw??0)+Math.PI;const steer=s.steerAngle??s.steering??0;for(const w of this.playerMesh.userData.frontWheels||[])w.rotation.y=steer;this.customCar?.object?.userData?.setSteering?.(steer);}
+  /**
+   * Body attitude on the shell.
+   *
+   * The mesh used to be yaw-only, so the car was a brick that changed heading:
+   * it never leaned into a corner, never dived on the brakes and stayed
+   * perfectly level while climbing a ramp. It now takes the roll and pitch the
+   * sim has been computing all along, plus the gradient it is actually driving
+   * on, measured from its own motion so it is sign-correct everywhere (ramps,
+   * the PA, terrain) without trusting a route tangent's direction.
+   *
+   * Signs: the model faces backwards (yaw + PI), so its local +X points to the
+   * car's LEFT and its local -Z is the nose. Roll therefore takes the physics
+   * value as-is and pitch takes the opposite; the climb adds nose-up. YXZ order
+   * applies yaw first, so pitch and roll act on the car's own axes.
+   */
+  updatePlayerMesh(dt=null){const s=this.getVehicleState(),p=vec(s.position||s);
+    const climb=this.updateBodyClimb(p,dt);
+    this.playerMesh.position.copy(p);
+    this._bodyEuler=this._bodyEuler||new THREE.Euler();
+    this._bodyEuler.set(-(s.bodyPitch||0)+climb,(s.heading??s.yaw??0)+Math.PI,s.bodyRoll||0,'YXZ');
+    this.playerMesh.quaternion.setFromEuler(this._bodyEuler);
+    const steer=s.steerAngle??s.steering??0;for(const w of this.playerMesh.userData.frontWheels||[])w.rotation.y=steer;this.customCar?.object?.userData?.setSteering?.(steer);}
+  /**
+   * Gradient of the surface under the car, from how far it rose over how far it
+   * travelled. Smoothed at 5/s because the road-height follower is a spring and
+   * its per-frame output is bumpy; a null dt means a teleport, so the tracker
+   * restarts rather than pitching the car through the jump.
+   */
+  updateBodyClimb(p,dt){
+    this._bodyClimb=this._bodyClimb||0;
+    if(!dt||!this._bodyClimbFrom){this._bodyClimbFrom=p.clone();if(!dt)this._bodyClimb=0;return this._bodyClimb;}
+    const from=this._bodyClimbFrom,horizontal=Math.hypot(p.x-from.x,p.z-from.z);
+    if(horizontal>.12){
+      const target=clamp(Math.atan2(p.y-from.y,horizontal),-.2,.2);
+      this._bodyClimb=THREE.MathUtils.lerp(this._bodyClimb,target,1-Math.exp(-dt*5));
+      from.copy(p);
+    }
+    return this._bodyClimb;
+  }
   updateCamera(dt,t){const s=this.getVehicleState(),p=vec(s.position||s),h=s.heading??s.yaw??0,f=new THREE.Vector3(Math.sin(h),0,Math.cos(h));let desired,look;
     this.syncPlayerVisuals();
     if(this.cameraMode==='hood'){desired=p.clone().addScaledVector(f,1.65).add(new THREE.Vector3(0,1.02,0));look=p.clone().addScaledVector(f,12).add(new THREE.Vector3(0,.9,0));}

@@ -12,7 +12,10 @@ const clamp = THREE.MathUtils.clamp;
 // steady corner. Deliberately below 1: the remainder is the margin the car
 // spends on bumps, on the throttle and on a lane change taken mid-corner. At
 // 1.0 every held turn is already a slide waiting for its trigger.
-const STEER_GRIP_BUDGET = 0.86;
+const STEER_GRIP_BUDGET = 0.94;
+// Extra lock allowed on the way into a corner, before the lateral grip the
+// steering asked for has actually arrived. Fades to nothing as the corner loads.
+const TURN_IN_BOOST = 0.55;
 // When the car counts as sliding, measured in multiples of the rear tires' own
 // peak slip angle rather than in degrees — a soft tire on a wet surface is away
 // at an angle a sticky one is still gripping at. Nothing below onset is touched,
@@ -256,8 +259,12 @@ function buildSpec(carSpec = {}) {
     frontWeight: firstNumber(carSpec, ['frontWeight', 'frontWeightDistribution', 'weightDistributionFront'], 0.55),
     wheelRadius: firstNumber(carSpec, ['wheelRadius'], firstNumber(silhouette, ['wheelRadius'], 0.305)),
     tireGrip: firstNumber(carSpec, ['tireGrip', 'grip', 'tireMu'], firstNumber(tires, ['grip', 'mu'], 1)),
-    cornerStiffnessFront: firstNumber(carSpec, ['cornerStiffnessFront'], firstNumber(tires, ['cornerStiffnessFront'], 68000)),
-    cornerStiffnessRear: firstNumber(carSpec, ['cornerStiffnessRear'], firstNumber(tires, ['cornerStiffnessRear'], 72000)),
+    // ~21 N/rad per newton of axle load, which is where a road tire actually
+    // sits. The old 68000/72000 was about 60% of that, and a soft tire needs a
+    // big slip angle before it makes force: the car took 0.87 s to reach 0.8 g
+    // at speed, which reads as "it barely turns" long before any grip runs out.
+    cornerStiffnessFront: firstNumber(carSpec, ['cornerStiffnessFront'], firstNumber(tires, ['cornerStiffnessFront'], 105000)),
+    cornerStiffnessRear: firstNumber(carSpec, ['cornerStiffnessRear'], firstNumber(tires, ['cornerStiffnessRear'], 111000)),
     brakeForce: firstNumber(carSpec, ['brakeForce', 'maxBrakeForce'], firstNumber(brakes, ['force', 'maxForce'], 14500)),
     brakeBias: firstNumber(carSpec, ['brakeBias', 'frontBrakeBias'], firstNumber(brakes, ['bias', 'frontBias'], 0.64)),
     suspensionStiffness: firstNumber(carSpec, ['suspensionStiffness', 'stiffness'], firstNumber(suspension, ['stiffness'], 1)),
@@ -635,12 +642,29 @@ export class VehiclePhysics {
     // flat 0.024 rad allowance, which happened to land exactly on the limit for
     // one reference car and 20% PAST it for the lighter, softer starter car —
     // holding a turn there was already asking for more grip than existed.
-    const understeerGradient = Math.max(0, frontLoad / cornerFront - rearLoad / cornerRear) / G;
+    // The understeer gradient is taken from the STATIC axle weights, not from
+    // the transferred ones. It is a property of the car, and feeding the
+    // instantaneous loads into it made braking a steering aid: hard braking
+    // moves ~1.9 kN forward, which drove the gradient up 5.8x and doubled the
+    // lock a held button was allowed to ask for. Hitting the brake mid-corner
+    // snapped the wheel wide open, which is the opposite of what the tires can
+    // do while they are already spending their circle on stopping.
+    const staticFront = totalWeight * this.spec.frontWeight;
+    const understeerGradient = Math.max(0, staticFront / cornerFront - (totalWeight - staticFront) / cornerRear) / G;
     const budgetLateral = this.spec.tireGrip * surface.grip * G * STEER_GRIP_BUDGET;
     const steerSensitivity = clamp(finite(settings.steeringSensitivity, 1), 0.5, 1.6);
+    // Turn-in. The steady-state angle alone reads as numb, because it is exactly
+    // what the FINISHED corner needs and the car then has to wait for the yaw to
+    // build — about 0.75 s to full grip at 200 km/h. Drivers turn in past the
+    // steady angle and unwind as the grip arrives, so allow extra lock while the
+    // lateral acceleration is still short of what was asked for. It closes
+    // itself as the corner loads up and shuts off once the rear starts to slide,
+    // so it sharpens the entry without raising the steady demand.
+    const lateralDeficit = clamp(1 - Math.abs(this._lateralAcceleration) / Math.max(1, budgetLateral), 0, 1);
+    const turnIn = 1 + TURN_IN_BOOST * lateralDeficit * (1 - slide);
     const steerCommand = Math.min(
       this.spec.maxSteer,
-      budgetLateral * (this.spec.wheelbase / Math.max(4, u * u) + understeerGradient) * steerSensitivity,
+      budgetLateral * (this.spec.wheelbase / Math.max(4, u * u) + understeerGradient) * steerSensitivity * turnIn,
     );
 
     // Once the rear is genuinely away, the budget is measured from where the

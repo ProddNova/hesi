@@ -146,19 +146,49 @@ const provokeSlide = (settings) => {
   car.setSpeed(90 / 3.6);
   let peakRoll = 0;
   let peakPitch = 0;
+  let rollDuringRightTurn = 0;
   for (let i = 0; i < 240; i += 1) {
     car.update(1 / 60, { throttle: 0.6, steer: 1 }, ROAD, {});
-    peakRoll = Math.max(peakRoll, Math.abs(car.getTelemetry().bodyRoll));
+    const roll = car.getTelemetry().bodyRoll;
+    peakRoll = Math.max(peakRoll, Math.abs(roll));
+    if (Math.abs(roll) > Math.abs(rollDuringRightTurn)) rollDuringRightTurn = roll;
   }
   for (let i = 0; i < 120; i += 1) {
     car.update(1 / 60, { brake: 1, steer: 0 }, ROAD, {});
     peakPitch = Math.max(peakPitch, Math.abs(car.getTelemetry().bodyPitch));
   }
   check('body roll stays under 6 degrees', peakRoll < 0.105, `${deg(peakRoll).toFixed(1)}° at the limit`);
+  // Sign matters as much as size: steer 1 turns toward the car's right, so the
+  // shell must lean the other way. body-attitude-probe.mjs checks the far end
+  // of the same chain, where the mesh's backwards model flips it again.
+  check('and leans outward, not into the corner', rollDuringRightTurn < -0.02,
+    `bodyRoll ${rollDuringRightTurn.toFixed(3)} in a right-hand corner`);
   check('brake dive stays under 4 degrees', peakPitch < 0.07, `${deg(peakPitch).toFixed(1)}° under full braking`);
 }
 
-// 5 · Assists fully off must still integrate cleanly (no NaN, no launch).
+// 5 · The brake is not a steering aid. Feeding the transferred axle loads into
+// the understeer gradient used to double the lock a held button was allowed at
+// speed, so touching the brake mid-corner snapped the wheel wide open — the
+// opposite of what the tires can do while they are already spending their
+// friction circle on stopping.
+for (const kmh of [140, 200]) {
+  const peakLock = (input) => {
+    const { car } = makeCar();
+    car.setSpeed(kmh / 3.6);
+    let peak = 0;
+    for (let i = 0; i < 150; i += 1) {
+      car.update(1 / 60, input, ROAD, {});
+      peak = Math.max(peak, Math.abs(car.getTelemetry().steeringAngle));
+    }
+    return peak;
+  };
+  const coasting = peakLock({ throttle: 0.4, steer: 1 });
+  const braking = peakLock({ brake: 1, steer: 1 });
+  check(`${kmh} km/h: braking does not throw the steering open`, braking < coasting * 1.2,
+    `${deg(coasting).toFixed(2)}° coasting vs ${deg(braking).toFixed(2)}° braking`);
+}
+
+// 6 · Assists fully off must still integrate cleanly (no NaN, no launch).
 {
   const { car } = makeCar();
   car.setSpeed(140 / 3.6);

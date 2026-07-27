@@ -89,23 +89,108 @@ Note this is telemetry only today: nothing rotates the car mesh, `updatePlayerMe
 sets `rotation.y` and nothing else. If the visible lean was the complaint, the
 lean to fix is the *drift* angle, which is items 1–4.
 
+## Round 3 (July 2026) — follow-up on the same session
+
+Three things were still wrong after Round 2.
+
+### 6 · The brake was a steering aid
+
+Reported: "at high speed it barely turns, but the moment I brake the steering
+angle opens right up and it turns a huge amount." Exactly right, and the cause
+was Round 2's own understeer gradient being fed the *transferred* axle loads.
+Hard braking moves ~1.9 kN onto the front axle, which drove `K` up **5.8×** and
+therefore doubled `steerCommand`:
+
+| at 200 km/h | coasting | braking |
+| --- | --- | --- |
+| before | 1.86° | **3.53°** |
+| after | 1.25° | 1.26° |
+
+`K` is a property of the car, so it now comes from the **static** axle weights.
+Braking no longer changes how much lock you may ask for — which is correct, as
+the tires are already spending their circle on stopping.
+
+### 7 · The steering was too limited, and turn-in was numb
+
+Two changes, because they are two different things:
+
+* **Budget** `STEER_GRIP_BUDGET` 0.86 → **0.94**. Round 2 cut the demand from
+  119% to 86% of grip to stop the sliding; 94% keeps a real margin while giving
+  the lock back.
+* **Cornering stiffness** 68000/72000 → **105000/111000** N/rad. The old figures
+  were about 60% of a real road tire, and a soft tire needs a big slip angle
+  before it makes force. The car took **0.87 s to reach 0.8 g** at 140–200 km/h,
+  which reads as "it barely turns" long before any grip runs out. Now 0.68–0.72 s
+  for the same 0.8 g, at ~21 N/rad per newton of axle load.
+* **Turn-in allowance** (`TURN_IN_BOOST` 0.55). The steady-state angle is what
+  the *finished* corner needs; drivers turn in past it and unwind as the grip
+  arrives. Extra lock is allowed while the lateral acceleration is still short
+  of what was asked for, closing itself as the corner loads and shutting off
+  once the rear slides — so the entry sharpens without the steady demand rising.
+
+Knock-on: the 130 km/h lane change went from 3.9 m to **4.5 m** in the same
+1.4 s, with peak drift *falling* from 3.7° to 3.1°.
+
+### 8 · The shell did not move — `js/game.js`
+
+`updatePlayerMesh()` set `rotation.y` and nothing else, so the car was a brick
+that changed heading: no lean, no dive, no squat, and perfectly level up a ramp.
+It now takes the roll and pitch the sim had been computing all along, plus the
+gradient it is actually driving on.
+
+The gradient is measured from the car's own motion (rise over horizontal
+distance, smoothed at 5/s) rather than from a route tangent, so it is
+sign-correct everywhere — ramps, the PA, terrain — without assuming which way
+the route runs. A null `dt` means a teleport and restarts the tracker instead of
+pitching the car through the jump.
+
+Signs are the trap here: the model faces backwards (`yaw + PI`), so its local
++X points to the car's **left** and its local −Z is the **nose**. Roll takes the
+physics value as-is, pitch takes the opposite, and the Euler order is `YXZ` so
+pitch and roll act on the car's own axes rather than on world ones.
+
 ### Verification
 
 ```bash
 node .devtests/handling-probe.mjs
 ```
 
-14/14 on the real starter car: full throttle and full lock at 80 km/h peaks at
-2.1° of drift instead of swapping ends; a handbrake slide provoked to 18° is
+16/16 on the real starter car: full throttle and full lock at 80 km/h peaks at
+1.7° of drift instead of swapping ends; a handbrake slide provoked to 22° is
 caught back to 0° by blunt keyboard input; with assists off 36° of opposite lock
-is available and the slide stays bounded; a 130 km/h lane change moves 3.9 m in
-1.4 s at 3.7° of drift and settles to zero yaw; roll 2.8°, dive 1.7°.
+is available and the slide stays bounded; a 130 km/h lane change moves 4.5 m in
+1.4 s at 3.1° of drift and settles to zero yaw; braking changes the available
+lock by under 3% at 140 and 200 km/h; roll 3.3° leaning outward, dive 1.7°.
 
-`node .devtests/grip-test.mjs` still 12/12, with more margin than before — rear
-saturation at 100 km/h fell from 0.98 to 0.88 while still pulling 0.83 g.
-`node .devtests/top-speed-probe.mjs` 2/2 unchanged. `node .devtests/e2e.mjs` is
-38/42, the same four pre-existing failures as before this work (two layout
-overlaps, an auction swap, and a touch-steer check that already failed).
+```bash
+node .devtests/body-attitude-probe.mjs
+```
+
+16/16 — boots the real game and drives the real `updatePlayerMesh()` with
+synthetic vehicle state (the same trick `driving-camera-probe.mjs` uses, and the
+reason it is deterministic), then checks world-space nose and roof vectors at
+two headings: a right-hander leans the roof outward to the left, braking dives
+the nose, accelerating lifts it, a climb points it up the slope, and a teleport
+does not fling the body. Note the car cannot be driven for real in this probe —
+stepping `updateDriving()` by hand leaves it pinned at the spawn point, revving
+in 2nd at 0.1 km/h.
+
+`node .devtests/grip-test.mjs` still 12/12. `node .devtests/top-speed-probe.mjs`
+2/2 unchanged (220.2 km/h, 0–100 in 6.45 s — the traction cap does not touch
+straight-line acceleration, because the friction circle was already clipping it
+to the same number). `node .devtests/e2e.mjs` is 38/42, the same four
+pre-existing failures as before this work (two layout overlaps, an auction swap,
+and a touch-steer check that already failed on a clean baseline).
+
+Module versions were bumped so the change actually reaches the player past the
+service worker: `physics.js?v=20260727a`, `game.js?v=20260727a`, cache `v56`.
+
+---
+
+## Round 2 verification (superseded by Round 3 above)
+
+`handling-probe.mjs` was 14/14 at this point: 2.1° peak drift on the power-on
+corner, an 18° slide caught back to 0°, a 3.9 m lane change, roll 2.8°.
 
 ---
 
