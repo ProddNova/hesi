@@ -394,6 +394,7 @@ export class TrafficSystem {
       playerContact: false,
       age: 0,
       spawnGrace: 0,
+      blockedTimer: 0,
       userData: {},
     };
     mesh.userData.trafficVehicle = vehicle;
@@ -975,6 +976,18 @@ export class TrafficSystem {
     return Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
   }
 
+  /**
+   * Give each lane a subtly different natural pace. The median/fast lane is
+   * quickest and the outer lane slowest, so three cars that happen to line up
+   * cannot remain a same-speed rolling roadblock.
+   */
+  _lanePaceFactor(vehicle) {
+    const count = this._laneCountFor(vehicle);
+    const index = vehicle.laneRef?.laneIndex ?? vehicle.laneRef?.index ?? vehicle.laneSample?.laneIndex;
+    if (count <= 1 || !Number.isFinite(index)) return 1;
+    return THREE.MathUtils.lerp(1.08, 0.94, clamp(index / (count - 1), 0, 1));
+  }
+
   /** Swap a pooled vehicle onto a class and colour, updating its collision box. */
   _applyVehicleType(vehicle, type, color) {
     const geoms = this._typeGeometries[type.id] ?? this._typeGeometries.car;
@@ -1021,12 +1034,26 @@ export class TrafficSystem {
 
     const target = Math.min(this.options.maxVehicles, Math.round(this.options.targetVehicles * this.density));
     let spawnBudget = this.options.maxSpawnPerFrame;
-    while (this.active.length < target && spawnBudget > 0) {
+    let spawnAttempts = spawnBudget * 4;
+    while (this.active.length < target && spawnBudget > 0 && spawnAttempts > 0) {
       // Decide the class first so the spawn can bias it toward the right lane
-      // (tir to the outer lanes, cars anywhere).
+      // (tir to the outer lanes, cars anywhere). Compare several valid points
+      // and use the one furthest from existing traffic: this fills longitudinal
+      // holes instead of producing random clumps.
       const type = this._chooseVehicleType();
-      const candidate = this._requestSpawn(player, context, type);
-      if (!candidate || !this.spawnVehicle(candidate, { type })) break;
+      let candidate = null;
+      let bestClearance = -1;
+      for (let sampleIndex = 0; sampleIndex < 3; sampleIndex += 1) {
+        const sample = this._requestSpawn(player, context, type);
+        if (!sample) continue;
+        const clearance = this._spawnClearance(sample);
+        if (clearance > bestClearance) {
+          candidate = sample;
+          bestClearance = clearance;
+        }
+      }
+      spawnAttempts -= 1;
+      if (!candidate || !this.spawnVehicle(candidate, { type })) continue;
       spawnBudget -= 1;
     }
 
@@ -1095,6 +1122,38 @@ export class TrafficSystem {
 
   _vehiclesInLane(laneRef, sample = null) {
     return this._laneBuckets.get(this._laneKey(laneRef, sample)) || [];
+  }
+
+  _spawnClearance(candidate) {
+    if (!candidate?.position || !this.active.length) return this.options.spawnRadius;
+    let nearest = this.options.spawnRadius;
+    const ref = candidate.laneRef;
+    const routeId = ref?.routeId ?? ref?.route?.id;
+    const direction = Math.sign(ref?.direction ?? candidate.direction ?? 1);
+    const laneIndex = ref?.laneIndex ?? ref?.index ?? candidate.laneIndex;
+    const laneCount = Math.max(1, Math.floor(ref?.laneCount ?? ref?.route?.lanes ?? candidate.laneCount ?? 1));
+    const occupancy = Array(laneCount).fill(0);
+    for (const vehicle of this.active) {
+      if (!vehicle.active || Math.abs(vehicle.position.y - candidate.position.y) > 12) continue;
+      nearest = Math.min(
+        nearest,
+        Math.hypot(vehicle.position.x - candidate.position.x, vehicle.position.z - candidate.position.z),
+      );
+      const vehicleRef = vehicle.laneRef;
+      const vehicleRoute = vehicleRef?.routeId ?? vehicleRef?.route?.id;
+      const vehicleDirection = Math.sign(vehicleRef?.direction ?? vehicle.laneSample?.direction ?? 1);
+      const vehicleLane = vehicleRef?.laneIndex ?? vehicleRef?.index ?? vehicle.laneSample?.laneIndex;
+      if (vehicleRoute === routeId && vehicleDirection === direction
+        && Number.isFinite(vehicleLane) && vehicleLane >= 0 && vehicleLane < laneCount) {
+        occupancy[Math.floor(vehicleLane)] += 1;
+      }
+    }
+    // Lane balance takes priority over the secondary longitudinal-clearance
+    // score, otherwise farthest-point sampling can keep choosing one open lane.
+    const underfill = Number.isFinite(laneIndex) && laneIndex >= 0 && laneIndex < laneCount
+      ? Math.max(...occupancy) - occupancy[Math.floor(laneIndex)]
+      : 0;
+    return nearest + underfill * this.options.spawnRadius;
   }
 
   _normalizePlayer(source) {
@@ -1194,6 +1253,7 @@ export class TrafficSystem {
     vehicle.playerContact = false;
     vehicle.age = 0;
     vehicle.spawnGrace = 0.65;
+    vehicle.blockedTimer = 0;
     vehicle.userData = { ...overrides.userData, ...spawn.userData };
     this._setLights(vehicle, false);
     this.active.push(vehicle);
@@ -1519,8 +1579,9 @@ export class TrafficSystem {
     // Free-flow target: personal cruise pref, scaled by the global speed factor,
     // with a slow sinusoidal wander so nobody holds a laser-constant speed.
     const wander = 1 + Math.sin(this.time * 0.13 + (driver.wanderPhase ?? 0)) * (driver.wanderAmp ?? 0);
+    const lanePace = this._lanePaceFactor(vehicle);
     vehicle.desiredSpeed = clamp(
-      vehicle.targetSpeed * this.speedFactor * wander,
+      vehicle.targetSpeed * this.speedFactor * wander * lanePace,
       type.minSpeed * 0.55,
       type.maxSpeed * 1.15,
     );
@@ -1540,21 +1601,29 @@ export class TrafficSystem {
     vehicle.acceleration = THREE.MathUtils.lerp(vehicle.acceleration, acceleration, 1 - Math.exp(-dt * 4.5));
     vehicle.speed = Math.max(0, vehicle.speed + vehicle.acceleration * dt);
     vehicle.braking = vehicle.acceleration < -0.65 || (leader && leader.gap < Math.max(8, vehicle.speed * 0.55));
+    const blocked = Boolean(leader && vehicle.speed < vehicle.desiredSpeed * 0.86 && leader.gap < 48);
+    vehicle.blockedTimer = blocked
+      ? Math.min(12, vehicle.blockedTimer + dt)
+      : Math.max(0, vehicle.blockedTimer - dt * 2);
 
-    // Lane changes are deliberately rare: a check only every ~10-26 s, and even
-    // then only a fraction commit. Blocked cars overtake in proportion to their
-    // patience; free cars very occasionally drift toward their home lane.
+    // Free-flow lane changes stay rare. A blocked driver gets a decision within
+    // roughly two seconds and retries promptly, preventing long three-abreast
+    // queues from forcing the player to stop and wait.
     vehicle.decisionTimer -= dt;
+    if (blocked && vehicle.blockedTimer > 1.25) vehicle.decisionTimer = Math.min(vehicle.decisionTimer, 0);
     if (!vehicle.laneChange && vehicle.decisionTimer <= 0 && vehicle.age > 3) {
       const rate = this.laneChangeRate;
       if (rate > 0) {
-        const blocked = leader && vehicle.speed < vehicle.desiredSpeed * 0.82 && leader.gap < 42;
-        const overtakeChance = blocked ? 0.4 * (driver.patience ?? 0.6) : 0;
+        const overtakeChance = blocked ? 0.72 + 0.2 * (driver.patience ?? 0.6) : 0;
         const driftChance = 0.045;
         const chance = (overtakeChance + driftChance) * rate * (driver.laneChangeBias ?? 1);
-        if (this.random() < chance) this._considerLaneChange(vehicle, leader, blocked);
+        if (this.random() < chance || vehicle.blockedTimer > 4.5) {
+          if (this._considerLaneChange(vehicle, leader, blocked)) vehicle.blockedTimer = 0;
+        }
       }
-      vehicle.decisionTimer = THREE.MathUtils.lerp(10, 26, this.random()) / Math.max(0.4, this.laneChangeRate);
+      const retryMin = blocked ? 3 : 10;
+      const retryMax = blocked ? 6 : 26;
+      vehicle.decisionTimer = THREE.MathUtils.lerp(retryMin, retryMax, this.random()) / Math.max(0.4, this.laneChangeRate);
     }
 
     const distance = vehicle.speed * dt;
@@ -1728,6 +1797,11 @@ export class TrafficSystem {
   }
 
   _considerLaneChange(vehicle, leader, urgent) {
+    const changing = this.active.reduce((count, other) => count + (other.laneChange ? 1 : 0), 0);
+    if (changing >= Math.max(3, Math.ceil(this.active.length * 0.1))) return false;
+    const sourceOccupancy = this._vehiclesInLane(vehicle.laneRef, vehicle.laneSample)
+      .reduce((count, other) => count + (other.active ? 1 : 0), 0);
+    if (this._laneCountFor(vehicle) > 1 && sourceOccupancy <= 1) return false;
     // When blocked, try the faster (lower-index, toward-median) lane first to
     // overtake. When free, prefer easing back toward this class's home lane so
     // tir settle outward and cars don't loiter in the fast lane forever.

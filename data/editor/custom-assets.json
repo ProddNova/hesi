@@ -539900,15 +539900,6 @@
     }
   },
   "worldTextures": {
-    "road": {
-      "texture": "tex:0160"
-    },
-    "roadAlt": {
-      "texture": "tex:0160"
-    },
-    "roadService": {
-      "texture": "tex:0160"
-    },
     "barrier": {
       "texture": "tex:0107",
       "fit": "stretch"

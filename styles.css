@@ -125,7 +125,7 @@ button:disabled{opacity:.38;cursor:default;pointer-events:none}
 
 /* --- bottom-right: analog cluster --- */
 .hud-br{position:absolute;right:2.2vw;bottom:2.8vh}
-.cluster{display:flex;align-items:flex-end;gap:11px;padding:14px 16px 12px;background:linear-gradient(150deg,transparent 0 16%,rgba(3,8,6,.82) 42%);border-radius:4px}
+.cluster{display:flex;align-items:flex-end;gap:11px;padding:14px 16px 12px;background:transparent;border-radius:4px}
 .dial{position:relative;border-radius:50%;background:radial-gradient(circle at 50% 40%,#0c1219 0 55%,#05090f 76%,#02050a 100%);box-shadow:0 0 0 3px #10161f,0 0 0 4px #2b3542,0 8px 22px rgba(0,0,0,.75),inset 0 0 26px rgba(0,0,0,.85)}
 .dial canvas{position:absolute;inset:0;width:100%;height:100%}
 .dial-tach{width:118px;height:118px}

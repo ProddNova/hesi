@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-27T15:07:39.199Z",
+  "generatedAt": "2026-07-27T15:34:33.824Z",
   "project": {
-    "draftSignature": "fnv1a32:d9d97751",
+    "draftSignature": "fnv1a32:2d439c33",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -37,6 +37,72 @@
     }
   },
   "operations": [
+    {
+      "name": "chunk 6,-7 concrete",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "name": "chunk 6,-7 exitGreen",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "name": "chunk 6,-7 matrix",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
     {
       "name": "Garage transition marker",
       "nameIndex": 0,
@@ -73,6 +139,28 @@
         0.55639,
         0,
         0.83092
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": false
+    },
+    {
+      "name": "sign 辰巳PA|TATSUMI PA",
+      "nameIndex": 0,
+      "op": "object",
+      "position": [
+        3682.80785,
+        64.35363,
+        -4028.7519
+      ],
+      "quaternion": [
+        0,
+        0.5798,
+        0,
+        0.81476
       ],
       "scale": [
         1,
