@@ -12,7 +12,7 @@
 // install/activate run: it re-fetches CORE from the network and deletes the old
 // cache. This was a manual bump until 28 Jul 2026, which meant it was sometimes
 // simply forgotten.
-const CACHE = 'shutoko-nights-0f17c23a049e';
+const CACHE = 'shutoko-nights-03b2aeacab77';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './styles/playground.css', './manifest.webmanifest', './icon.svg', './fonts/shutoko-signal-regular.woff2', './fonts/shutoko-signal-bold.woff2', './fonts/shutoko-signal-display.woff2',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',

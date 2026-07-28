@@ -1,32 +1,32 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=0f17c23a049e';
-import * as PhysicsModule from './physics.js?v=0f17c23a049e';
-import * as TrafficModule from './traffic.js?v=0f17c23a049e';
-import * as Data from './data.js?v=0f17c23a049e';
-import * as SaveModule from './save.js?v=0f17c23a049e';
-import * as AudioModule from './audio.js?v=0f17c23a049e';
-import { GarageSystem } from './garage.js?v=0f17c23a049e';
-import { TatsumiPaSystem } from './tatsumi-pa.js?v=0f17c23a049e';
-import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=0f17c23a049e';
+import * as MapModule from './map.js?v=03b2aeacab77';
+import * as PhysicsModule from './physics.js?v=03b2aeacab77';
+import * as TrafficModule from './traffic.js?v=03b2aeacab77';
+import * as Data from './data.js?v=03b2aeacab77';
+import * as SaveModule from './save.js?v=03b2aeacab77';
+import * as AudioModule from './audio.js?v=03b2aeacab77';
+import { GarageSystem } from './garage.js?v=03b2aeacab77';
+import { TatsumiPaSystem } from './tatsumi-pa.js?v=03b2aeacab77';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=03b2aeacab77';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js?v=0f17c23a049e';
+import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js?v=03b2aeacab77';
 import {
   carHeadlightSettings,
   carHitboxSettings,
   carModelEntry,
   carModelTarget,
   carPaintSettings,
-} from './car-models.js?v=0f17c23a049e';
-import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=0f17c23a049e';
-import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=0f17c23a049e';
-import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=0f17c23a049e';
-import { GameUI } from './ui.js?v=0f17c23a049e';
-import { DeveloperMap } from './dev-map.js?v=0f17c23a049e';
-import { DebugStats } from './debug-stats.js?v=0f17c23a049e';
-import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=0f17c23a049e';
-import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=0f17c23a049e';
-import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=0f17c23a049e';
+} from './car-models.js?v=03b2aeacab77';
+import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=03b2aeacab77';
+import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=03b2aeacab77';
+import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=03b2aeacab77';
+import { GameUI } from './ui.js?v=03b2aeacab77';
+import { DeveloperMap } from './dev-map.js?v=03b2aeacab77';
+import { DebugStats } from './debug-stats.js?v=03b2aeacab77';
+import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=03b2aeacab77';
+import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=03b2aeacab77';
+import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=03b2aeacab77';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
@@ -1549,8 +1549,15 @@ class ShutokoNights {
     const viewport=this._stableViewportSize||{width:innerWidth,height:innerHeight};
     let w=Math.round(viewport.width*dpr*scale),h=Math.round(viewport.height*dpr*scale);
     // iPads have laptop-sized physical resolutions but a much smaller sustained
-    // GPU/thermal budget. Cap them near 1.25 MP; desktop High remains native.
-    const maxPixels=!this.isTouchDevice&&q==='high'?Math.max(this.performanceProfile.maxPixels,8500000):this.performanceProfile.maxPixels;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    // GPU/thermal budget, so their cap is a real thermal limit and stays.
+    // Desktop's was 4.2 MP, which is above 1440p but BELOW 4K (8.29 MP) — so a
+    // 4K or high-DPI display silently rendered at ~71% linear and upscaled, on
+    // exactly the tier a fresh save gets. That is invisible on a 1080p test
+    // machine and looks like everything else in this file's history: "still
+    // pixelated". Desktop now carries the 8.5 MP headroom on every tier, and
+    // the adaptive governor — which exists for precisely this — takes the frame
+    // rate back if the GPU cannot hold it.
+    const maxPixels=this.isTouchDevice?this.performanceProfile.maxPixels:Math.max(this.performanceProfile.maxPixels,8500000);const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     if(this.canvas.width!==w||this.canvas.height!==h)this.renderer.setSize(w,h,false);
     this.vhs?.setSize(w,h);
@@ -1562,6 +1569,18 @@ class ShutokoNights {
     // setSurfaceMipBias) — this is what turns the asphalt's aggregate into a
     // regular scatter of streaks on phones, which render furthest below native.
     this.map?.setSurfaceMipBias?.(Math.log2(Math.max(1,viewport.width*dpr)/Math.max(1,w)));
+    this.showRenderInfo(w,h,dpr,q,viewport);
+  }
+  // The boot screen carries the numbers that decide whether a "still looks
+  // pixelated" report is about the frame at all: the drawing buffer, the
+  // display pixels it is stretched over, DPR and the quality tier. A ✓ means
+  // they match. Four rounds of this were spent guessing at values that a
+  // photo of the boot screen would have answered.
+  showRenderInfo(w,h,dpr,quality,viewport){
+    const node=document.getElementById('render-info');if(!node)return;
+    const displayW=Math.round(viewport.width*dpr),displayH=Math.round(viewport.height*dpr);
+    const native=w===displayW&&h===displayH;
+    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}`;
   }
   resize({force=false}={}){
     const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};

@@ -234,3 +234,45 @@ so that file is decorative. Until the Build Command is set to
 `node scripts/stamp-build.mjs` in the Render dashboard (or the service is
 recreated from the Blueprint), **the stamp has to be run locally before
 committing** — `npm run build`.
+
+---
+
+# Round 6 · The 4K cap, and putting the numbers on screen
+
+The player's browser reached the latest commit (`03b2aea` on the boot screen)
+and still reported "pixelato". So the caches were finally out of the picture and
+the diagnosis was simply incomplete.
+
+Anti-aliasing was ruled out by measurement, not by eye —
+`node .devtests/antialias-probe.mjs`, 6/6: the driver allocates a 4-sample
+framebuffer (the hardware maximum here) for the VHS target, and 70% of
+high-contrast edges resolve across pixels, better than with the pass off. The
+probe's first run reported 0 edges, which was the *measurement* failing:
+without `preserveDrawingBuffer` the buffer is gone once the frame has been
+composited, so it now renders and reads back in one task.
+
+**What was left: `maxPixels`.** Desktop carried 4.2 MP — above 1440p, but below
+4K's 8.29 MP. So a 4K or high-DPI display rendered at ~71% linear and upscaled,
+on Medium, which is the tier a fresh save gets. Invisible on a 1080p test
+machine; every probe so far had run at 1280×720 or 1600×900 and reported
+"native ✓" quite correctly. Desktop now carries the 8.5 MP headroom on every
+tier — the adaptive governor exists to take the frame rate back if the GPU
+cannot hold it.
+
+| viewport | before | after |
+|---|---|---|
+| 1080p, 1440p | native | native |
+| 4K (dpr 1 or 1.5) | 2734×1538 → upscaled to 3840×2160 | 3840×2160 native |
+
+**The boot screen now shows the numbers.** Next to the build id:
+`· 3840×2160 ✓ · dpr 1.50 · MEDIUM`, or `· 2734×1538 → 3840×2160` when the
+frame is being stretched. Six rounds went into guessing at values a photo of the
+boot screen would have answered — the drawing buffer, the display pixels, DPR
+and the tier. `showRenderInfo()` in `game.js`, filled from
+`applyRenderResolution`.
+
+## Verification
+
+A new headless sweep across 1080p/1440p/4K at dpr 1 and 1.5 reports native on
+all five, with the on-screen string matching. `render-resolution-probe` 10/10,
+`antialias-probe` 6/6.
