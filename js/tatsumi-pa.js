@@ -202,7 +202,9 @@ export class TatsumiPaSystem {
     c.strokeStyle = `#${color.toString(16).padStart(6, '0')}`; c.lineWidth = 5; c.strokeRect(3, 3, 506, 90);
     c.fillStyle = `#${color.toString(16).padStart(6, '0')}`; c.font = 'bold 38px monospace'; c.textAlign = 'center';
     c.fillText(text, 256, 62);
-    const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+    // Filtered with mipmaps — see the matching sign in garage.js: a 512 px
+    // canvas on a 5.5 m plane is magnified, and nearest turns it into blocks.
+    const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.anisotropy = 8;
     return this.mesh(new THREE.PlaneGeometry(5.5, 1.03), new THREE.MeshBasicMaterial({ map: tex }), pos, V(0, ry, 0));
   }
 

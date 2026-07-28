@@ -196,7 +196,10 @@ export class GarageSystem {
 
   addSign(text,pos,ry=0,color=0xffffff){
     const canvas=document.createElement('canvas');canvas.width=512;canvas.height=96;const c=canvas.getContext('2d');c.fillStyle='#15191f';c.fillRect(0,0,512,96);c.strokeStyle=`#${color.toString(16).padStart(6,'0')}`;c.lineWidth=5;c.strokeRect(3,3,506,90);c.fillStyle=`#${color.toString(16).padStart(6,'0')}`;c.font='bold 38px monospace';c.textAlign='center';c.fillText(text,256,62);
-    const tex=new THREE.CanvasTexture(canvas);tex.magFilter=THREE.NearestFilter;tex.minFilter=THREE.NearestFilter;
+    // Filtered, with mipmaps: this canvas is 512 px wide and stretched over a
+    // 5.5 m sign the player walks right up to, so nearest magnification turns
+    // the lettering into blocks.
+    const tex=new THREE.CanvasTexture(canvas);tex.magFilter=THREE.LinearFilter;tex.minFilter=THREE.LinearMipmapLinearFilter;tex.generateMipmaps=true;tex.anisotropy=8;
     const sign=this.mesh(new THREE.PlaneGeometry(5.5,1.03),new THREE.MeshBasicMaterial({map:tex}),pos,V(0,ry,0));return sign;
   }
 
@@ -231,7 +234,7 @@ export class GarageSystem {
       g.position.set(zone.x+(i%3-1)*1.4,.02,zone.z+(Math.floor(i/3)-.5)*1.25);g.userData={delivery:d,index:i};this.root.add(g);this.deliveryMeshes.push(g);
     });
   }
-  makeLabel(text){const c=document.createElement('canvas');c.width=256;c.height=96;const x=c.getContext('2d');x.fillStyle='#eee9d9';x.fillRect(0,0,256,96);x.fillStyle='#13171b';x.font='bold 18px monospace';x.fillText('WANGAN MARKET',10,25);x.font='13px monospace';x.fillText(String(text).slice(0,25),10,52);x.fillRect(10,67,190,5);for(let i=0;i<16;i++)x.fillRect(10+i*10,72,i%3?3:6,18);const t=new THREE.CanvasTexture(c);t.magFilter=THREE.NearestFilter;return new THREE.Mesh(new THREE.PlaneGeometry(.8,.3),new THREE.MeshBasicMaterial({map:t}));}
+  makeLabel(text){const c=document.createElement('canvas');c.width=256;c.height=96;const x=c.getContext('2d');x.fillStyle='#eee9d9';x.fillRect(0,0,256,96);x.fillStyle='#13171b';x.font='bold 18px monospace';x.fillText('WANGAN MARKET',10,25);x.font='13px monospace';x.fillText(String(text).slice(0,25),10,52);x.fillRect(10,67,190,5);for(let i=0;i<16;i++)x.fillRect(10+i*10,72,i%3?3:6,18);const t=new THREE.CanvasTexture(c);t.magFilter=THREE.LinearFilter;t.minFilter=THREE.LinearMipmapLinearFilter;t.generateMipmaps=true;t.anisotropy=8;return new THREE.Mesh(new THREE.PlaneGeometry(.8,.3),new THREE.MeshBasicMaterial({map:t}));}
 
   update(dt,input={},context={}){
     if(!this.enabled)return;

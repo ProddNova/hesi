@@ -379,7 +379,9 @@ test('applyWorldTextureOverrides tiles, tints, and restores the generated look',
   assert.equal(materials.road.map.anisotropy, 16, 'asphalt asks for every sample the GPU has at a grazing camera angle');
   assert.equal(materials.road.map.userData.hesiTextureBudgetFloor, 1024, 'mobile keeps the asphalt mip source at 1024 px');
   assert.equal(materials.marking.map.userData.hesiTextureBudgetFloor, 0, 'other editor textures retain the normal mobile budget');
-  assert.equal(materials.marking.map.magFilter, THREE.NearestFilter, 'other PSX surfaces retain crisp sampling');
+  assert.equal(materials.marking.map.magFilter, THREE.LinearFilter, 'every imported surface is filtered, not point-sampled');
+  assert.equal(materials.marking.map.minFilter, THREE.LinearMipmapLinearFilter, 'and mip-filtered with it');
+  assert.equal(materials.marking.map.anisotropy, 8, 'ordinary surfaces take the cheaper anisotropy, not the road\'s 16');
   assert.equal(materials.lampSodium.color.getHexString(), '00ff88', 'a tint-only slot recolours without an image');
   // Dropping the overrides puts the generated materials back exactly.
   delete document.worldTextures.road;

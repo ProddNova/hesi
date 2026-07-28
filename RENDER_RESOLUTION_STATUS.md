@@ -1,4 +1,13 @@
-# Render resolution on desktop — status
+# "Il gioco è pixelato su PC" — status
+
+Two independent causes, fixed in two passes. **Round 1** was the framebuffer;
+after it landed the user reported "non è cambiato nulla, è tutto pixelato
+ancora" — correctly, because **Round 2** was the real one for indoor/close-up
+scenes.
+
+---
+
+# Round 1 · Render resolution on desktop
 
 **Report (28 Jul 2026):** "perché da PC risulta così pixelato?" — the game looked
 upscaled and aliased on a normal PC, at the default settings, in the editor
@@ -55,3 +64,60 @@ learns a 16.7 ms cadence, and that it holds native when a 12 ms frame fits it.
 `node .devtests/e2e.mjs` — 38/42, byte-identical to the pre-change baseline
 (verified by stashing `js/game.js` and re-running): the 4 failures are the
 pre-existing HUD-overlap, touch-steer and auction ones.
+
+---
+
+# Round 2 · Texture filtering
+
+Round 1 was real but it was not what the player was looking at. A garage
+screenshot at native resolution was still made of hard blocks, so the picture
+was measured instead of guessed at
+(`node .devtests/texture-filtering-probe.mjs`, then a raw dump):
+
+```
+canvas 1600×900 · css 1600×900 · dpr 1 · dynamicScale 1 · mipBias 0   ← frame was fine
+custom:box:front   uploaded 512×386   source 1140×859   aniso=1  min=1005  mag=1003
+```
+
+`mag=1003` is `THREE.NearestFilter`. **Every editor-imported texture in the game
+was point-sampled on magnification with anisotropy 1** — 78 of them in the
+garage alone. That is what walls, crates, posters, lockers and building facades
+were made of, and no amount of framebuffer would have helped.
+
+## Cause
+
+`textureFromSource()` in `js/custom-assets.js` defaulted to `sampling:'pixel'`,
+and only three slots (`road`, `roadAlt`, `roadService`) opted into `'smooth'`.
+The default also conflicted with the project's own stated policy — see the
+comment above `applyRetroMaterials` in `js/game.js`: *"The old PSX pass
+(nearest-filter mush) is gone. This pass only normalizes textures for the clean
+PS2 look: bilinear filtering + mipmaps."* That pass could never win, because
+`textureFromSource` re-runs `configure()` when the async image load resolves and
+re-applies `NearestFilter` after the scene-wide pass has already been through.
+
+## Fix
+
+- `textureFromSource` defaults to filtered: `LinearFilter` mag,
+  `LinearMipmapLinearFilter` min, anisotropy 8 (three clamps to hardware max).
+  `sampling:'pixel'` remains, opt-in, for genuine pixel art.
+- Filtering and the **resolution floor** are now separate arguments. The road
+  slots pass `budgetFloor: 1024` (full mip chain against the "confetti") and
+  keep anisotropy 16; they no longer have to ask for it via the sampling mode.
+- The generated canvas signs — `garage.js addSign`/`makeLabel`,
+  `tatsumi-pa.js` — were `NearestFilter` with *no mipmaps* at all. A 512 px
+  canvas on a 5.5 m plane the player walks up to; now linear + mips + aniso 8.
+- Desktop imported-texture cap: Medium 512 → **1024** (= High). Once the
+  sampling is smooth, the cap is what decides how much of a 1000–1600 px import
+  survives; the garage's 1254² sources were landing at 512².
+
+## Verification
+
+`node .devtests/texture-filtering-probe.mjs` — 6/6. Walks all 78 garage
+textures and asserts none is point-sampled, all are trilinear with a mip chain,
+none is left at anisotropy 1, and the frame is still native (Round 1 holding).
+
+`node --test tools/hesi-editor/test/unit/custom-assets.test.mjs` — 25/25, with
+the old `marking.map.magFilter === NearestFilter` assertion updated to the new
+policy. `car-body-wrap-probe` 26/26, `vhs-car-paint-probe` 23/23,
+`render-resolution-probe` 10/10. `e2e` 39/42 — no new failures (the 3 are the
+pre-existing HUD-overlap and auction ones).

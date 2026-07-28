@@ -1582,10 +1582,11 @@ class ShutokoNights {
     // Editor-imported textures are capped to a per-quality size so imported
     // 1000+ px images cannot blow VRAM on weak GPUs; cached textures re-upload
     // at the new cap when the player changes quality.
-    // Desktop draws Medium at native now, so a 256 px cap on editor-imported
-    // textures is visible as mush on signs and liveries; phones keep the tight
-    // VRAM budget they were tuned for.
-    const textureBudget=this.isTouchDevice?{low:128,medium:256,high:1024}:{low:256,medium:512,high:1024};
+    // Desktop draws Medium at native now, and imported textures are filtered
+    // rather than point-sampled, so the cap is what limits how much of a
+    // 1000-1600 px import actually survives. Medium matches High; phones keep
+    // the tight VRAM budget they were tuned against a real thermal envelope.
+    const textureBudget=this.isTouchDevice?{low:128,medium:256,high:1024}:{low:512,medium:1024,high:1024};
     setTextureSizeBudget(textureBudget[q]||256);
     return true;
   }

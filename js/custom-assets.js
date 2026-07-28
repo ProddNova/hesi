@@ -2129,6 +2129,11 @@ const textureCache = new Map();
 // 0 = no limit (the editor keeps full resolution for authoring).
 let textureSizeBudget = 0;
 const SMOOTH_SURFACE_TEXTURE_MIN_SIZE = 1024;
+// Anisotropy for ordinary imported textures. The PS2 look this game targets is
+// bilinear-with-mipmaps, not the nearest-filter mush of the generation before
+// it (see applyRetroMaterials in game.js, which states the same policy for the
+// shipped materials). three clamps this to the hardware maximum on upload.
+const DEFAULT_TEXTURE_ANISOTROPY = 8;
 
 function applyTextureSizeBudget(texture) {
   const source = texture.userData?.hesiSourceImage;
@@ -2207,9 +2212,9 @@ export function faceTextureTransform({
  */
 export function textureFromSource(source, {
   repeat = null, fit = 'stretch', surfaceAspect = 1, flipX = false, flipY = false,
-  rotation = 0, shift = null, sampling = 'pixel',
+  rotation = 0, shift = null, sampling = 'smooth', budgetFloor = 0,
 } = {}) {
-  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY), rotation || 0, shift, sampling]);
+  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY), rotation || 0, shift, sampling, budgetFloor || 0]);
   if (textureCache.has(key)) return textureCache.get(key);
   // Outside the browser (node tests) there is no image decoding: hand back a
   // bare texture object so material wiring stays testable.
@@ -2219,18 +2224,28 @@ export function textureFromSource(source, {
     const height = image?.naturalHeight || image?.videoHeight || image?.height || 1;
     const transform = faceTextureTransform({ fit, imageAspect: width / Math.max(height, 1), surfaceAspect, repeat, flipX, flipY });
     texture.colorSpace = THREE.SRGBColorSpace;
-    const smooth = sampling === 'smooth';
-    texture.userData.hesiTextureBudgetFloor = smooth ? SMOOTH_SURFACE_TEXTURE_MIN_SIZE : 0;
-    texture.magFilter = smooth ? THREE.LinearFilter : THREE.NearestFilter;
-    texture.minFilter = smooth ? THREE.LinearMipmapLinearFilter : THREE.NearestMipmapLinearFilter;
+    // Imported textures are filtered by default. `sampling:'pixel'` is opt-in
+    // and exists for images that are authored as pixel art; using it as the
+    // default is what made every wall, crate and facade in the garage and the
+    // city read as hard blocks — a whole class of "the game looks pixelated on
+    // PC" that has nothing to do with the render resolution. Note these
+    // textures are configured again when an async file load resolves, so the
+    // scene-wide applyRetroMaterials pass cannot be relied on to fix them
+    // after the fact: whatever is set here is what the GPU ends up with.
+    const crisp = sampling === 'pixel';
+    // Kept separate from filtering: the road slots need a full-resolution mip
+    // chain regardless of the quality budget, and that is not a property of
+    // how they are sampled.
+    texture.userData.hesiTextureBudgetFloor = budgetFloor || 0;
+    texture.magFilter = crisp ? THREE.NearestFilter : THREE.LinearFilter;
+    texture.minFilter = crisp ? THREE.NearestMipmapLinearFilter : THREE.LinearMipmapLinearFilter;
     texture.generateMipmaps = true;
-    // The smooth slots are the road, seen at a grazing angle all the way to
-    // the horizon: the texel-to-pixel ratio along the view direction runs into
-    // the tens, and 4 samples leave enough of the aggregate unfiltered to
-    // alias into visible streaks. Ask for every sample the GPU has (three
-    // clamps this to the hardware maximum on upload); prop and facade
-    // textures, which are never viewed edge-on, keep the cheap path.
-    texture.anisotropy = smooth ? 16 : 1;
+    // The road is seen at a grazing angle all the way to the horizon: the
+    // texel-to-pixel ratio along the view direction runs into the tens, and 8
+    // samples leave enough of the aggregate unfiltered to alias into visible
+    // streaks. It asks for every sample the GPU has; props and facades, which
+    // are never viewed edge-on, take the cheaper default.
+    texture.anisotropy = crisp ? 1 : (budgetFloor ? 16 : DEFAULT_TEXTURE_ANISOTROPY);
     texture.wrapS = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.wrapT = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.repeat.set(...transform.repeat);
@@ -3183,12 +3198,12 @@ export function applyWorldTextureOverrides(materials, document) {
         shift: style.offset,
         flipX: style.flipX,
         flipY: style.flipY,
-        // Photographic asphalt contains much finer detail than a PSX prop
-        // texture. At a grazing road-camera angle, nearest sampling turns that
-        // detail into repeating dark flecks ("confetti"), especially on mobile.
-        // Keep prop/facade pixels crisp, but prefilter the three road surfaces
-        // throughout their asynchronous load as well as after it completes.
-        sampling: SMOOTH_WORLD_TEXTURE_SLOTS.has(slot) ? 'smooth' : 'pixel',
+        // Photographic asphalt contains much finer detail than a prop texture,
+        // and at a grazing road-camera angle it needs a complete high-res mip
+        // chain (and full anisotropy) or it breaks into repeating dark flecks
+        // — the "confetti". That is a resolution floor, not a filtering mode:
+        // everything is filtered now.
+        budgetFloor: SMOOTH_WORLD_TEXTURE_SLOTS.has(slot) ? SMOOTH_SURFACE_TEXTURE_MIN_SIZE : 0,
       });
     } else {
       material.map = original.map;
