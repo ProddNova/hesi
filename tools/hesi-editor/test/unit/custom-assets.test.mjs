@@ -285,17 +285,34 @@ test('optimizeStaticCustomAssetGroup merges static parts by equivalent material'
 });
 
 test('applyWorldTextureOverrides only touches known slots with real textures', () => {
-  const materials = { road: new THREE.MeshLambertMaterial({ color: 0x14171f }) };
+  const materials = { barrier: new THREE.MeshLambertMaterial({ color: 0x14171f }) };
   const summary = applyWorldTextureOverrides(materials, {
     version: 1,
     assets: {},
     textures: { 'tex:0001': { dataUrl: PIXEL_PNG } },
-    worldTextures: { road: 'tex:0001', lava: 'tex:0001', roadAlt: 'tex:9999' },
+    worldTextures: { barrier: 'tex:0001', lava: 'tex:0001', roadAlt: 'tex:9999' },
   });
   assert.equal(summary.applied, 1);
   assert.equal(summary.skipped, 2);
-  assert.ok(materials.road.map, 'road material received a texture');
-  assert.equal(materials.road.color.getHexString(), 'ffffff');
+  assert.ok(materials.barrier.map, 'known material received a texture');
+  assert.equal(materials.barrier.color.getHexString(), 'ffffff');
+});
+
+test('all road surfaces reject photographic maps from stale editor documents', () => {
+  const colors = { road: 0x14171f, roadAlt: 0x171a23, roadService: 0x1d2029 };
+  const materials = Object.fromEntries(
+    Object.entries(colors).map(([slot, color]) => [slot, new THREE.MeshLambertMaterial({ color })]),
+  );
+  applyWorldTextureOverrides(materials, {
+    version: 1,
+    assets: {},
+    textures: { 'tex:0001': { dataUrl: PIXEL_PNG } },
+    worldTextures: Object.fromEntries(Object.keys(colors).map((slot) => [slot, { texture: 'tex:0001' }])),
+  });
+  for (const [slot, color] of Object.entries(colors)) {
+    assert.equal(materials[slot].map, null, `${slot} remains image-free`);
+    assert.equal(materials[slot].color.getHex(), color, `${slot} keeps its generated asphalt colour`);
+  }
 });
 
 test('build schema accepts place-custom operations and rejects malformed ones', () => {
@@ -372,11 +389,9 @@ test('applyWorldTextureOverrides tiles, tints, and restores the generated look',
     },
   };
   applyWorldTextureOverrides(materials, document);
-  assert.ok(materials.road.map, 'road took the image');
+  assert.equal(materials.road.map, null, 'road stays image-free even with a stale saved texture');
+  assert.equal(materials.road.color.getHexString(), '14171f', 'road keeps its generated asphalt colour');
   assert.ok(materials.marking.map, 'lane markings took the image');
-  assert.equal(materials.road.map.magFilter, THREE.LinearFilter, 'photographic asphalt is linearly filtered');
-  assert.equal(materials.road.map.minFilter, THREE.LinearMipmapLinearFilter, 'asphalt uses trilinear mip filtering');
-  assert.equal(materials.road.map.anisotropy, 4, 'asphalt stays stable at a grazing camera angle');
   assert.equal(materials.marking.map.magFilter, THREE.NearestFilter, 'other PSX surfaces retain crisp sampling');
   assert.equal(materials.lampSodium.color.getHexString(), '00ff88', 'a tint-only slot recolours without an image');
   // Dropping the overrides puts the generated materials back exactly.
@@ -392,17 +407,17 @@ test('applyWorldTextureOverrides tiles, tints, and restores the generated look',
 test('world surface fit modes drive the texture transform', () => {
   const materials = {
     facadeOffice: new THREE.MeshBasicMaterial({ color: 0xffffff }),
-    road: new THREE.MeshLambertMaterial({ color: 0x14171f }),
+    barrier: new THREE.MeshLambertMaterial({ color: 0x14171f }),
   };
   const document = {
     version: 1,
     assets: {},
     textures: { 'tex:0001': { dataUrl: PIXEL_PNG } },
     // A rectangular tile: the two axes are independent, not locked square.
-    worldTextures: { road: { texture: 'tex:0001', repeat: [3, 0.5] } },
+    worldTextures: { barrier: { texture: 'tex:0001', repeat: [3, 0.5] } },
   };
   applyWorldTextureOverrides(materials, document);
-  assert.deepEqual(materials.road.map.repeat.toArray(), [3, 0.5], 'tiles can be rectangles');
+  assert.deepEqual(materials.barrier.map.repeat.toArray(), [3, 0.5], 'tiles can be rectangles');
 
   // Stretch and Fit & crop pull ONE copy over the surface, so neither tiles.
   for (const fit of ['stretch', 'cover']) {
@@ -412,10 +427,11 @@ test('world surface fit modes drive the texture transform', () => {
   }
   assert.equal(materials.facadeOffice.map.wrapS, THREE.ClampToEdgeWrapping, 'Fit & crop clamps instead of repeating');
 
-  // Asphalt UVs are unbounded, so those slots tile whatever the fit says.
-  document.worldTextures.road = { texture: 'tex:0001', fit: 'cover', repeat: [3, 0.5] };
+  // World-anchored infrastructure UVs are unbounded, so those slots tile
+  // whatever the fit says.
+  document.worldTextures.barrier = { texture: 'tex:0001', fit: 'cover', repeat: [3, 0.5] };
   applyWorldTextureOverrides(materials, document);
-  assert.deepEqual(materials.road.map.repeat.toArray(), [3, 0.5], 'world-anchored asphalt keeps tiling');
+  assert.deepEqual(materials.barrier.map.repeat.toArray(), [3, 0.5], 'world-anchored surfaces keep tiling');
 
   assert.equal(normalizeWorldSurfaceStyle({ fit: 'nonsense' }).fit, 'tile');
   assert.deepEqual(compactWorldSurfaceStyle({ fit: 'cover', aspect: 3 }), { fit: 'cover', aspect: 3 });

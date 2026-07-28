@@ -55,7 +55,7 @@ export function textureSourceUrl(record) {
 // One repeat of a road texture covers this many metres of asphalt — mirrors
 // ROAD_TEXTURE_TILE_METERS in js/map.js, which bakes the world-anchored UVs.
 export const WORLD_SURFACE_TILE_METERS = 12;
-const SMOOTH_WORLD_TEXTURE_SLOTS = new Set(['road', 'roadAlt', 'roadService']);
+const IMAGE_FREE_ROAD_SURFACE_SLOTS = new Set(['road', 'roadAlt', 'roadService']);
 
 /**
  * Every generated-map material a user can repaint, in display order.
@@ -3148,9 +3148,14 @@ export function applyWorldTextureOverrides(materials, document) {
       continue;
     }
     const style = normalizeWorldSurfaceStyle(overrides[slot]);
-    const textureRecord = style.texture ? document.textures?.[style.texture] : null;
+    // Road photographs with high-contrast aggregate turn into long, repeating
+    // dark flecks at the mobile chase/drone camera angle. Keep the generated
+    // asphalt deliberately image-free even when an older editor document (or
+    // an offline cached copy) still contains a road texture assignment.
+    const imageTextureAllowed = !IMAGE_FREE_ROAD_SURFACE_SLOTS.has(slot);
+    const textureRecord = style.texture && imageTextureAllowed ? document.textures?.[style.texture] : null;
     const textureSource = textureSourceUrl(textureRecord);
-    if (style.texture && !textureSource) { summary.skipped += 1; continue; }
+    if (style.texture && imageTextureAllowed && !textureSource) { summary.skipped += 1; continue; }
     if (textureSource) {
       // A stored per-texture repeat (the original world-texture format) still
       // scales the image when the slot itself carries no explicit tiling.
@@ -3169,12 +3174,6 @@ export function applyWorldTextureOverrides(materials, document) {
         shift: style.offset,
         flipX: style.flipX,
         flipY: style.flipY,
-        // Photographic asphalt contains much finer detail than a PSX prop
-        // texture. At a grazing road-camera angle, nearest sampling turns that
-        // detail into repeating dark flecks ("confetti"), especially on mobile.
-        // Keep prop/facade pixels crisp, but prefilter the three road surfaces
-        // throughout their asynchronous load as well as after it completes.
-        sampling: SMOOTH_WORLD_TEXTURE_SLOTS.has(slot) ? 'smooth' : 'pixel',
       });
     } else {
       material.map = original.map;
