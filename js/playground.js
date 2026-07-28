@@ -4,7 +4,8 @@ import {
   cameraTuningFromDocument,
   normalizeCameraTuning,
   setDocumentCameraTuning,
-} from './playground-config.js?v=0af2d4e6d507';
+  setDocumentPicture,
+} from './playground-config.js?v=8aa9ed7e911a';
 import {
   CAR_HEADLIGHT_FIELDS,
   CAR_HITBOX_SETTING_FIELDS,
@@ -12,7 +13,7 @@ import {
   carHeadlightSettings,
   carHitboxSettings,
   carRearLightSettings,
-} from './car-models.js?v=0af2d4e6d507';
+} from './car-models.js?v=8aa9ed7e911a';
 
 const clamp = THREE.MathUtils.clamp;
 
@@ -442,6 +443,10 @@ export class PlaygroundPanel {
   async save() {
     if (!this.document) return;
     setDocumentCameraTuning(this.document, this.camera);
+    // The image dials on this panel are the same ones the dev panel drives, so
+    // saving here publishes them too — otherwise the two routes to the same
+    // values would disagree about which one ships.
+    setDocumentPicture(this.document, this.game.currentPicture());
     if (this.status) this.status.textContent = 'Salvataggio nel gioco…';
     try {
       const response = await fetch('/__hesi_editor_assets', {

@@ -87,6 +87,21 @@ await page.evaluate(() => window.shutoko.exitGarage());
 await page.waitForFunction(() => window.shutoko.mode === 'driving', null, { timeout: 20000 });
 await page.waitForTimeout(2500);
 
+// Captured before anything in this run touches a dial: this is what a fresh
+// browser actually boots with, and section 5 checks it against the file on disk.
+const bootPicture = await page.evaluate(() => {
+  const game = window.shutoko;
+  return {
+    admin: {
+      vhsAmount: game.admin.vhsAmount, motionBlur: game.admin.motionBlur,
+      headlightBrightness: game.admin.headlightBrightness,
+      cameraShake: game.admin.cameraShake, cameraShakePace: game.admin.cameraShakePace,
+    },
+    filter: { ...game.admin.ps2Filter },
+    revision: game.state.pictureRevision || null,
+  };
+});
+
 // ---- 1. The 512 px ceiling ----------------------------------------------
 // Walk every material in every scene and measure the image that is actually
 // uploaded (texture.image), not the source the editor imported.
@@ -334,6 +349,50 @@ check('the master switch zeroes the shader but keeps the dials',
   JSON.stringify(wiring.off));
 check('the settings reach the save file',
   wiring.saved?.pixelLines === 240 && wiring.saved?.enabled === true, JSON.stringify(wiring.saved));
+
+// ---- 5. The published picture -------------------------------------------
+// The authored look has to reach a fresh browser from
+// data/editor/custom-assets.json, and it has to reach a RETURNING browser too
+// (whose save already carries older values) — that is the whole point of
+// publishing. But a local tweak must survive a reload, or the dev panel is
+// useless. The signature is what separates the two.
+const shipped = JSON.parse(await readFile(join(ROOT, 'data', 'editor', 'custom-assets.json'), 'utf8')).runtimeTuning?.picture || null;
+check('the deployed document carries a picture section', !!shipped, JSON.stringify(shipped));
+
+const adopted = bootPicture;
+const matches = shipped && Object.entries(shipped).every(([key, value]) => (
+  key === 'filter'
+    ? Object.entries(value).every(([k, v]) => adopted.filter[k] === v)
+    : adopted.admin[key] === value
+));
+check('a fresh browser boots with the published picture', !!matches,
+  JSON.stringify({ shipped: shipped?.filter?.pixelLines, live: adopted.filter.pixelLines, revision: adopted.revision }));
+
+// A player who tuned something keeps it across a reload: same signature in,
+// same signature stored, nothing re-adopted.
+const sticky = await page.evaluate(() => {
+  const game = window.shutoko;
+  game.setFilterParam('pixelLines', 120, true);
+  const before = game.admin.ps2Filter.pixelLines;
+  // Re-applying the same document is exactly what the next boot does.
+  game.adoptDocumentPicture(game.editorCarAssets);
+  return { before, after: game.admin.ps2Filter.pixelLines };
+});
+check('a local tweak survives re-applying the same published picture',
+  sticky.before === 120 && sticky.after === 120, JSON.stringify(sticky));
+
+// Publishing new values changes the signature, and the client takes them once.
+const republished = await page.evaluate(() => {
+  const game = window.shutoko;
+  const document_ = JSON.parse(JSON.stringify({ runtimeTuning: game.editorCarAssets.runtimeTuning }));
+  document_.runtimeTuning.picture.filter.pixelLines = 296;
+  const took = game.adoptDocumentPicture(document_);
+  const again = game.adoptDocumentPicture(document_);
+  return { took, again, lines: game.admin.ps2Filter.pixelLines };
+});
+check('new published values are adopted exactly once',
+  republished.took === true && republished.again === false && republished.lines === 296,
+  JSON.stringify(republished));
 
 await page.evaluate(() => {
   window.shutoko.applyFilterPreset('ps2');

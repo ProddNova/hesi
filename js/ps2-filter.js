@@ -51,26 +51,33 @@ export function ditherPatternCode(pattern) {
 }
 
 /**
- * The values a freshly enabled filter starts from: a readable PS2, not a
- * caricature. 448 lines is the console's own NTSC framebuffer height, 32 levels
- * is its 5-bit-per-channel colour, and the grain is at the level where it reads
- * as capture noise rather than as an overlay.
+ * The shipped look, authored on the panel and switched ON by default.
  *
- * `enabled:false` is the shipped state — the filter costs nothing and changes
- * nothing until the player opens the panel and switches it on.
+ * These are not the textbook console numbers and that is deliberate: 448 lines
+ * with 32 colour levels and heavy dither is what the hardware did, but over a
+ * road rushing at the camera the dither crawls and the banding reads as a
+ * compression artifact rather than as a console. What survived that test is
+ * the *resolution* — 368 lines — plus a slow monochrome grain sitting in the
+ * shadows, with colour quantization left off. `PS2_FILTER_PRESETS.ps1` still
+ * carries the strict period-accurate combination for anyone who wants it.
+ *
+ * `data/editor/custom-assets.json` carries the same values under
+ * `runtimeTuning.picture` so they can be re-authored from the test game and
+ * deployed without a code change; these are the fallback when that section is
+ * missing, and they must be kept in step with it.
  */
 export const PS2_FILTER_DEFAULTS = Object.freeze({
-  enabled: false,
-  pixelLines: 448,
-  colorLevels: 32,
-  dither: 0.8,
-  ditherScale: 1,
-  ditherPattern: 'bayer8',
-  grain: 0.35,
-  grainScale: 2,
-  grainSpeed: 12,
-  grainShadows: 0.65,
-  grainColor: 0.2,
+  enabled: true,
+  pixelLines: 368,
+  colorLevels: 0,
+  dither: 0,
+  ditherScale: 4,
+  ditherPattern: 'bayer4',
+  grain: 0.2,
+  grainScale: 2.5,
+  grainSpeed: 18,
+  grainShadows: 1,
+  grainColor: 0,
 });
 
 /**
@@ -123,9 +130,10 @@ const FIELD_BY_KEY = new Map(PS2_FILTER_FIELDS.map((field) => [field.key, field]
 
 /**
  * Presets. `clean` is the identity — every dial neutral — and doubles as the
- * panel's reset. `ps2` restores the defaults; `ps1` is the same idea one
- * generation earlier (lower framebuffer, 15-bit colour, heavy dither) and
- * `arcade` keeps the console colour crunch without softening the picture.
+ * panel's reset. `ps2` restores the shipped look above (so it is the "put it
+ * back" button, not a separate idea); `ps1` is the period-accurate console
+ * treatment — low framebuffer, 4-bit colour, heavy ordered dither — and
+ * `arcade` keeps the colour crunch without softening the picture.
  */
 export const PS2_FILTER_PRESETS = Object.freeze({
   clean: { pixelLines: 0, colorLevels: 0, dither: 0, ditherScale: 1, grain: 0, grainScale: 2, grainSpeed: 12, grainShadows: 0.65, grainColor: 0.2, ditherPattern: 'bayer8' },

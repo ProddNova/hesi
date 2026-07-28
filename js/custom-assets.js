@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=0af2d4e6d507';
-import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=0af2d4e6d507';
+import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=8aa9ed7e911a';
+import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=8aa9ed7e911a';
 import {
   CAR_HITBOX_SETTING_FIELDS,
   CAR_HEADLIGHT_FIELDS,
@@ -9,8 +9,9 @@ import {
   CAR_REAR_LIGHT_FIELDS,
   TRAFFIC_CAR_SETTING_FIELDS,
   isCarModelTarget,
-} from './car-models.js?v=0af2d4e6d507';
-import { CAMERA_TUNING_FIELDS } from './playground-config.js?v=0af2d4e6d507';
+} from './car-models.js?v=8aa9ed7e911a';
+import { CAMERA_TUNING_FIELDS, PICTURE_FIELDS } from './playground-config.js?v=8aa9ed7e911a';
+import { PS2_DITHER_PATTERNS, PS2_FILTER_FIELDS } from './ps2-filter.js?v=8aa9ed7e911a';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -505,6 +506,40 @@ export function customAssetsDocumentErrors(document) {
   if (document.runtimeTuning !== undefined && !isRecord(document.runtimeTuning)) errors.push('runtimeTuning must be an object');
   if (document.runtimeTuning?.camera !== undefined && !isRecord(document.runtimeTuning.camera)) {
     errors.push('runtimeTuning.camera must be an object');
+  }
+  // The published picture (dev-panel image dials + PS2 filter). A malformed one
+  // reaches every visitor, so it is checked here rather than clamped silently.
+  const picture = document.runtimeTuning?.picture;
+  if (picture !== undefined) {
+    if (!isRecord(picture)) errors.push('runtimeTuning.picture must be an object');
+    else {
+      const pictureFields = new Map(PICTURE_FIELDS.map((field) => [field.key, field]));
+      const filterFields = new Map(PS2_FILTER_FIELDS.map((field) => [field.key, field]));
+      for (const [key, value] of Object.entries(picture)) {
+        if (key === 'filter') continue;
+        const field = pictureFields.get(key);
+        if (!field) { errors.push(`runtimeTuning.picture.${key} is unknown`); continue; }
+        if (!Number.isFinite(value) || value < field.min || value > field.max) {
+          errors.push(`runtimeTuning.picture.${key} must be between ${field.min} and ${field.max}`);
+        }
+      }
+      if (picture.filter !== undefined && !isRecord(picture.filter)) errors.push('runtimeTuning.picture.filter must be an object');
+      for (const [key, value] of Object.entries(picture.filter || {})) {
+        if (key === 'enabled') {
+          if (typeof value !== 'boolean') errors.push('runtimeTuning.picture.filter.enabled must be boolean');
+          continue;
+        }
+        if (key === 'ditherPattern') {
+          if (!PS2_DITHER_PATTERNS.some((pattern) => pattern.id === value)) errors.push(`runtimeTuning.picture.filter.ditherPattern must be one of ${PS2_DITHER_PATTERNS.map((p) => p.id).join(', ')}`);
+          continue;
+        }
+        const field = filterFields.get(key);
+        if (!field) { errors.push(`runtimeTuning.picture.filter.${key} is unknown`); continue; }
+        if (!Number.isFinite(value) || value < field.min || value > field.max) {
+          errors.push(`runtimeTuning.picture.filter.${key} must be between ${field.min} and ${field.max}`);
+        }
+      }
+    }
   }
   for (const [view, fields] of Object.entries(CAMERA_TUNING_FIELDS)) {
     const savedView = document.runtimeTuning?.camera?.[view];

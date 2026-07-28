@@ -1,34 +1,34 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=0af2d4e6d507';
-import * as PhysicsModule from './physics.js?v=0af2d4e6d507';
-import * as TrafficModule from './traffic.js?v=0af2d4e6d507';
-import * as Data from './data.js?v=0af2d4e6d507';
-import * as SaveModule from './save.js?v=0af2d4e6d507';
-import * as AudioModule from './audio.js?v=0af2d4e6d507';
-import { GarageSystem } from './garage.js?v=0af2d4e6d507';
-import { TatsumiPaSystem } from './tatsumi-pa.js?v=0af2d4e6d507';
-import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=0af2d4e6d507';
+import * as MapModule from './map.js?v=8aa9ed7e911a';
+import * as PhysicsModule from './physics.js?v=8aa9ed7e911a';
+import * as TrafficModule from './traffic.js?v=8aa9ed7e911a';
+import * as Data from './data.js?v=8aa9ed7e911a';
+import * as SaveModule from './save.js?v=8aa9ed7e911a';
+import * as AudioModule from './audio.js?v=8aa9ed7e911a';
+import { GarageSystem } from './garage.js?v=8aa9ed7e911a';
+import { TatsumiPaSystem } from './tatsumi-pa.js?v=8aa9ed7e911a';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=8aa9ed7e911a';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget, MAX_TEXTURE_SIZE } from './custom-assets.js?v=0af2d4e6d507';
+import { blankCustomAssetsDocument, buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget, MAX_TEXTURE_SIZE } from './custom-assets.js?v=8aa9ed7e911a';
 import {
   carHeadlightSettings,
   carHitboxSettings,
   carModelEntry,
   carModelTarget,
   carPaintSettings,
-} from './car-models.js?v=0af2d4e6d507';
-import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=0af2d4e6d507';
-import { detectHandheld } from './device-profile.js?v=0af2d4e6d507';
-import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=0af2d4e6d507';
-import { PS2_FILTER_DEFAULTS, PS2_FILTER_FIELDS, PS2_FILTER_PRESETS, PS2_DITHER_PATTERNS, normalizePS2Filter, clampFilterValue, formatFilterValue } from './ps2-filter.js?v=0af2d4e6d507';
-import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=0af2d4e6d507';
-import { GameUI } from './ui.js?v=0af2d4e6d507';
-import { DeveloperMap } from './dev-map.js?v=0af2d4e6d507';
-import { DebugStats } from './debug-stats.js?v=0af2d4e6d507';
-import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=0af2d4e6d507';
-import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=0af2d4e6d507';
-import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=0af2d4e6d507';
+} from './car-models.js?v=8aa9ed7e911a';
+import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=8aa9ed7e911a';
+import { detectHandheld } from './device-profile.js?v=8aa9ed7e911a';
+import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=8aa9ed7e911a';
+import { PS2_FILTER_DEFAULTS, PS2_FILTER_FIELDS, PS2_FILTER_PRESETS, PS2_DITHER_PATTERNS, normalizePS2Filter, clampFilterValue, formatFilterValue } from './ps2-filter.js?v=8aa9ed7e911a';
+import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=8aa9ed7e911a';
+import { GameUI } from './ui.js?v=8aa9ed7e911a';
+import { DeveloperMap } from './dev-map.js?v=8aa9ed7e911a';
+import { DebugStats } from './debug-stats.js?v=8aa9ed7e911a';
+import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=8aa9ed7e911a';
+import { cameraTuningFromDocument, normalizeCameraTuning, DEFAULT_PICTURE, normalizePicture, pictureFromDocument, pictureSignature, setDocumentPicture } from './playground-config.js?v=8aa9ed7e911a';
+import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=8aa9ed7e911a';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
@@ -120,7 +120,7 @@ class ShutokoNights {
     // On-foot mode: step out of the car anywhere (G), walk in first person, and
     // step back in when close. The car and world freeze while walking.
     this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
-    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,vhsAmount:1,motionBlur:1,headlightBrightness:1,cameraShake:1,cameraShakePace:1,ps2Filter:{...PS2_FILTER_DEFAULTS}};
+    this.admin=this.defaultAdmin();
     this.cameraTuning=normalizeCameraTuning();
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();this.setupCarModelHotReload();this.setupEditorTestMode();
     this.setupDebugMenu();
@@ -145,6 +145,25 @@ class ShutokoNights {
     });
     window.visualViewport?.addEventListener('resize',()=>this.scheduleResize(180));
     this.ui.showBoot(this.hadSave);this.ui.finishLoading();this.animate();
+  }
+
+  /**
+   * The admin/dev record a browser with no save starts from.
+   *
+   * It is a method rather than a literal because NEW GAME needs the same thing:
+   * it used to rebuild admin from the save file's own six-key admin block,
+   * which silently dropped every image dial (they all defaulted to 1, so it
+   * never showed). Now that the dials carry the authored look, that would have
+   * thrown the whole picture away on a fresh run.
+   *
+   * The image dials come from playground-config.js DEFAULT_PICTURE, so a fresh
+   * browser looks right before the deployed document has even been fetched.
+   */
+  defaultAdmin(){
+    return{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,
+      trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,
+      vhsAmount:DEFAULT_PICTURE.vhsAmount,motionBlur:DEFAULT_PICTURE.motionBlur,headlightBrightness:DEFAULT_PICTURE.headlightBrightness,
+      cameraShake:DEFAULT_PICTURE.cameraShake,cameraShakePace:DEFAULT_PICTURE.cameraShakePace,ps2Filter:{...PS2_FILTER_DEFAULTS}};
   }
 
   createPerformanceProfile(){
@@ -490,7 +509,12 @@ class ShutokoNights {
   newGame(){
     this.ui?.closePhone?.();this.ui?.closePC?.();try{localStorage.removeItem(this.runtimeSaveKey);this.saver?.newGame?.();}catch(e){}
     const starter=this.catalog.find(c=>c.starter)||this.catalog.find(c=>c.id===Data.STARTER_CAR_ID)||this.catalog[0]||this.fallbackCar(),starterOwned=Data.createStarterCar?.()||{...starter,carId:starter.id,color:starter.colors?.[0]||starter.color};this.state={version:2,money:Data.ECONOMY?.startingMoney??45000,ownedCarId:starter.id,ownedCar:starterOwned,installedParts:[],fuel:starterOwned.fuelLiters??starter.fuelTankL??starter.fuelCapacity??45,auctionSeed:Math.floor(Math.random()*2147483646)+1,auctions:[],deliveries:[],settings:{volume:.65,camera:'chase',gearbox:'auto',resolution:480,quality:'medium',customCar:true,customCarScale:DEFAULT_CUSTOM_CAR_SCALE,customCarModel:DEFAULT_PSX_CAR_ID,customCarVersion:1,vhs:true},records:{bestCombo:1,bestScore:0,totalBanked:0},admin:{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1}};
-    this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.customCar.enabled=true;this.customCar.scale=DEFAULT_CUSTOM_CAR_SCALE;this.customCar.modelId=DEFAULT_PSX_CAR_ID;this.clearCustomCarObject({abort:true});this.syncCustomCarControls();this.admin={...this.state.admin,timeScale:1};this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
+    this.state.auctions=this.generateAuctions(this.state.auctionSeed);this.customCar.enabled=true;this.customCar.scale=DEFAULT_CUSTOM_CAR_SCALE;this.customCar.modelId=DEFAULT_PSX_CAR_ID;this.clearCustomCarObject({abort:true});this.syncCustomCarControls();
+    // Back to the shipped look, not to the save file's admin block — and then
+    // straight back onto the published picture, which the loaded document
+    // already carries (state is new, so nothing has been adopted yet).
+    this.admin=this.defaultAdmin();this._applyPictureToRuntime();this.adoptDocumentPicture(this.editorCarAssets);this.applyTrafficAdmin?.();
+    this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
   }
 
   placeAtSpawn(){
@@ -549,6 +573,8 @@ class ShutokoNights {
     if(key==='headlightBrightness')this._applyHeadlightState();
     if(key==='vhsAmount')this.vhs?.setAmount?.(value);
     this.syncVisualControls?.();
+    // The playground panel publishes on its own SAVE button, not per drag.
+    this.persist();
   }
   applyPlaygroundCarDocument(document,section){
     this.editorCarAssets=document;this._effectiveCarCache=null;
@@ -904,6 +930,77 @@ class ShutokoNights {
       button.addEventListener('click',()=>this.applyFilterPreset(button.dataset.filterPreset));
     this.syncFilterControls();
   }
+  // ---------------------------------------------------------------------
+  // The authored picture, published from the test game and deployed with the
+  // site (data/editor/custom-assets.json → runtimeTuning.picture). See
+  // js/playground-config.js for the record and the signature.
+  // ---------------------------------------------------------------------
+  /** The image dials + filter as they are right now, ready to publish. */
+  currentPicture(){
+    return normalizePicture({
+      vhsAmount:this.admin.vhsAmount,motionBlur:this.admin.motionBlur,headlightBrightness:this.admin.headlightBrightness,
+      cameraShake:this.admin.cameraShake,cameraShakePace:this.admin.cameraShakePace,filter:this.admin.ps2Filter,
+    });
+  }
+  /**
+   * Takes the published look — but only once per published revision.
+   *
+   * Adopting on every boot would mean the dev panels could not hold a value
+   * across a reload, which is the one thing a live tuning panel has to do.
+   * Adopting never would mean a deploy changes nothing for anyone who has
+   * played before, which is the whole point of publishing. The stored
+   * signature separates the two: a player keeps their own tweaks until new
+   * values are published, and then takes them exactly once.
+   */
+  adoptDocumentPicture(document){
+    const picture=pictureFromDocument(document);
+    if(!picture)return false;
+    const revision=pictureSignature(picture);
+    if(this.state.pictureRevision===revision)return false;
+    this.state.pictureRevision=revision;
+    for(const key of ['vhsAmount','motionBlur','headlightBrightness','cameraShake','cameraShakePace'])this.admin[key]=picture[key];
+    this.admin.ps2Filter=picture.filter;
+    this._applyPictureToRuntime();
+    this.persist();
+    return true;
+  }
+  /** Pushes admin's image dials into the pass, the lights and the panels. */
+  _applyPictureToRuntime(){
+    this.vhs?.setAmount?.(this.admin.vhsAmount);
+    this.vhs?.setFilter?.(this.admin.ps2Filter);
+    this._applyHeadlightState?.();
+    this.syncVisualControls?.();this.syncFilterControls?.();
+  }
+  /**
+   * Writes the current picture back into the editor document. Test game only:
+   * it is the build the editor serves, so this is the one place where a change
+   * made while driving can become a change everybody downloads.
+   *
+   * Debounced, because it fires on every slider release and the document is a
+   * ~12 MB file with the textures embedded.
+   */
+  publishPicture({immediate=false}={}){
+    if(!this.editorTest)return;
+    clearTimeout(this._picturePublishTimer);
+    this._picturePublishTimer=setTimeout(()=>{this._picturePublishTimer=null;this._publishPictureNow();},immediate?0:600);
+  }
+  async _publishPictureNow(){
+    const document=this.editorCarAssets||blankCustomAssetsDocument();
+    const picture=setDocumentPicture(document,this.currentPicture());
+    this.editorCarAssets=document;
+    // Record the signature we are about to publish, so the next boot sees the
+    // document as already adopted instead of "new values" it has to take again.
+    this.state.pictureRevision=pictureSignature(picture);this.persist();
+    try{
+      const response=await fetch('/__hesi_editor_assets',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({document})});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok||!payload.ok)throw new Error(payload.error||`HTTP ${response.status}`);
+      this.ui?.toast?.('IMMAGINE SALVATA // custom-assets.json','amber');
+    }catch(error){
+      console.warn('Picture publish',error);
+      this.ui?.toast?.(`SALVATAGGIO IMMAGINE FALLITO // ${error.message}`,'red');
+    }
+  }
   toggleFilterMenu(force){this.setFilterMenuOpen(typeof force==='boolean'?force:!this.debug.filterOpen);}
   setFilterMenuOpen(open){
     open=!!open;
@@ -947,7 +1044,7 @@ class ShutokoNights {
     this.syncFilterControls();
     if(!commit)return;
     this.debugStats?.event('ps2_filter_changed',{...this.admin.ps2Filter});
-    this.persist();
+    this.persist();this.publishPicture();
   }
   syncFilterControls(){
     const filter=this.admin.ps2Filter||PS2_FILTER_DEFAULTS;
@@ -1237,7 +1334,7 @@ class ShutokoNights {
     else if(key==='shake'){a.cameraShake=clamp(v/100,0,3);}
     else if(key==='shakePace'){a.cameraShakePace=clamp(v/100,0,3);}
     else return;
-    this.syncVisualControls();if(commit){this.debugStats?.event('visual_tuning_changed',{key,value:v,runtime:{vhs:a.vhsAmount,motion_blur:a.motionBlur,headlight_brightness:a.headlightBrightness,camera_shake:a.cameraShake,camera_shake_pace:a.cameraShakePace}});this.persist();}
+    this.syncVisualControls();if(commit){this.debugStats?.event('visual_tuning_changed',{key,value:v,runtime:{vhs:a.vhsAmount,motion_blur:a.motionBlur,headlight_brightness:a.headlightBrightness,camera_shake:a.cameraShake,camera_shake_pace:a.cameraShakePace}});this.persist();this.publishPicture();}
   }
   syncVisualControls(){
     const a=this.admin;
@@ -1274,6 +1371,7 @@ class ShutokoNights {
     if(!document)return null;
     this.editorCarAssets=document;
     this.cameraTuning=cameraTuningFromDocument(document);
+    this.adoptDocumentPicture(document);
     if(this.playgroundPanel?.document!==document)this.playgroundPanel?.setDocument(document);
     this.editorCarResolver=createRuntimeAssetPartResolver(document,this.map);
     // Player hitbox and light settings live beside its Modeler shape. Rebuild

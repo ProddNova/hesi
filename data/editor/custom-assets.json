@@ -539897,6 +539897,14 @@
     "tex:0177": {
       "name": "huge_slyscraper.png",
       "url": "textures/huge-slyscraper-2d8b992fe6.png"
+    },
+    "tex:0178": {
+      "name": "asphalt3.png",
+      "url": "textures/asphalt3-d3c3704cf0.png"
+    },
+    "tex:0179": {
+      "name": "asphalt3.png",
+      "url": "textures/asphalt3-eb0a085b8f.png"
     }
   },
   "worldTextures": {
@@ -539990,13 +539998,13 @@
       "brightness": 0.1
     },
     "road": {
-      "texture": "tex:0160"
+      "texture": "tex:0179"
     },
     "roadAlt": {
-      "texture": "tex:0160"
+      "texture": "tex:0179"
     },
     "roadService": {
-      "texture": "tex:0160"
+      "texture": "tex:0179"
     }
   },
   "worldModels": {},
@@ -540116,6 +540124,26 @@
         "smoothing": 18,
         "positionLag": 0.7,
         "lookLag": 1.2
+      }
+    },
+    "picture": {
+      "vhsAmount": 0,
+      "motionBlur": 4,
+      "headlightBrightness": 1,
+      "cameraShake": 1.4,
+      "cameraShakePace": 1.2,
+      "filter": {
+        "enabled": true,
+        "pixelLines": 368,
+        "colorLevels": 0,
+        "dither": 0,
+        "ditherScale": 4,
+        "grain": 0.2,
+        "grainScale": 2.5,
+        "grainSpeed": 18,
+        "grainShadows": 1,
+        "grainColor": 0,
+        "ditherPattern": "bayer4"
       }
     }
   }
