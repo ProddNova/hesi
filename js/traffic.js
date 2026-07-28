@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { buildCustomAssetGroup } from './custom-assets.js?v=8aa9ed7e911a';
+import { buildCustomAssetGroup } from './custom-assets.js?v=aa56cc4f53cb';
 import {
   TRAFFIC_CAR_TYPES,
   carModelEntry,
   carModelTarget,
   effectiveTrafficCarType,
   trafficCarPartSpecs,
-} from './car-models.js?v=8aa9ed7e911a';
+} from './car-models.js?v=aa56cc4f53cb';
 
 const clamp = THREE.MathUtils.clamp;
 const EPSILON = 1e-6;

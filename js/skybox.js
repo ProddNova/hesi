@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { textureSourceUrl } from './custom-assets.js?v=8aa9ed7e911a';
-import { normalizeSkyboxConfig } from './skybox-config.js?v=8aa9ed7e911a';
+import { textureSourceUrl } from './custom-assets.js?v=aa56cc4f53cb';
+import { normalizeSkyboxConfig } from './skybox-config.js?v=aa56cc4f53cb';
 
 const clampTextureSize = (texture, maximum) => {
   const image = texture.image;
