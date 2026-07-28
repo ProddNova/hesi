@@ -2128,13 +2128,20 @@ const textureCache = new Map();
 // images cannot grow VRAM without bound as the map gains custom content.
 // 0 = no limit (the editor keeps full resolution for authoring).
 let textureSizeBudget = 0;
+const SMOOTH_SURFACE_TEXTURE_MIN_SIZE = 1024;
 
 function applyTextureSizeBudget(texture) {
   const source = texture.userData?.hesiSourceImage;
   if (!source) return;
   const width = source.naturalWidth || source.videoWidth || source.width || 0;
   const height = source.naturalHeight || source.videoHeight || source.height || 0;
-  const budget = textureSizeBudget;
+  // Road photographs need a complete high-resolution mip chain. Collapsing
+  // them to the generic 128/256 px mobile budget turns fine aggregate into
+  // stable, repeating dark flecks at a grazing camera angle. Smooth world
+  // surfaces are few and shared, so retaining one 1024 px source is a small,
+  // bounded cost while all prop/model textures keep the normal mobile cap.
+  const floor = Number(texture.userData?.hesiTextureBudgetFloor) || 0;
+  const budget = textureSizeBudget ? Math.max(textureSizeBudget, floor) : 0;
   if (!budget || !width || !height || Math.max(width, height) <= budget) {
     if (texture.image !== source) { texture.image = source; texture.needsUpdate = true; }
     return;
@@ -2213,6 +2220,7 @@ export function textureFromSource(source, {
     const transform = faceTextureTransform({ fit, imageAspect: width / Math.max(height, 1), surfaceAspect, repeat, flipX, flipY });
     texture.colorSpace = THREE.SRGBColorSpace;
     const smooth = sampling === 'smooth';
+    texture.userData.hesiTextureBudgetFloor = smooth ? SMOOTH_SURFACE_TEXTURE_MIN_SIZE : 0;
     texture.magFilter = smooth ? THREE.LinearFilter : THREE.NearestFilter;
     texture.minFilter = smooth ? THREE.LinearMipmapLinearFilter : THREE.NearestMipmapLinearFilter;
     texture.generateMipmaps = true;

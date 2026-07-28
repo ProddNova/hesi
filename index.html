@@ -270,10 +270,10 @@
     </div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260727g"></script>
+  <script type="module" src="js/game.js?v=20260728a"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
-      addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+      addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {}));
     }
   </script>
 </body>
