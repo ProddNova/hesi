@@ -270,10 +270,30 @@
     </div>
   </div>
 
-  <script type="module" src="js/game.js?v=20260728c"></script>
+  <script type="module" src="js/game.js?v=b33314be4a60"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      // Whether this page was already under a worker when it loaded. On a first
+      // ever visit the worker activates immediately and there is nothing stale
+      // to escape, so that case must not reload.
+      var hadWorker = !!navigator.serviceWorker.controller;
       addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {}));
+      // A worker that activates while this page is running means the modules
+      // already executing came from the previous deploy. Reload once, so an
+      // update lands without the player needing DevTools — there are none on a
+      // phone. Guarded three ways: only when a previous worker was in charge,
+      // at most once per cache name per tab (a re-activation cannot loop), and
+      // never once a session is underway, because a silent reload mid-drive
+      // would cost the run. In that last case the next natural load gets it.
+      navigator.serviceWorker.addEventListener('message', event => {
+        if (event.data?.type !== 'hesi-sw-activated' || !hadWorker) return;
+        try {
+          if (sessionStorage.getItem('hesi.swReload') === event.data.cache) return;
+          sessionStorage.setItem('hesi.swReload', event.data.cache);
+        } catch (e) { /* storage blocked: the guards below still apply */ }
+        if (window.shutoko?.started) return;
+        location.reload();
+      });
     }
   </script>
 </body>

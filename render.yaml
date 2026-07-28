@@ -2,7 +2,12 @@ services:
   - type: web
     name: shutoko-nights
     runtime: static
-    buildCommand: echo "Static game - no build step"
+    # Stamps the deployed commit into the service-worker cache name and the
+    # entry module's ?v= query, so every deploy invalidates the previous one
+    # without anyone editing sw.js or index.html by hand. See
+    # scripts/stamp-build.mjs — it exits non-zero if its patterns stop
+    # matching, which fails the deploy rather than shipping it unstamped.
+    buildCommand: node scripts/stamp-build.mjs
     staticPublishPath: .
     headers:
       - path: /*

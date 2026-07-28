@@ -2,6 +2,7 @@
   "name": "shutoko-nights",
   "private": true,
   "scripts": {
+    "build": "node scripts/stamp-build.mjs",
     "editor": "node tools/hesi-editor/server.mjs",
     "editor:dev": "node tools/hesi-editor/server.mjs",
     "editor:test": "node --test \"tools/hesi-editor/test/unit/*.test.mjs\" tools/hesi-editor/test/server.test.mjs",

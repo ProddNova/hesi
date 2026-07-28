@@ -144,8 +144,42 @@ The trap is the offline fallback plus Render's free tier: the instance sleeps,
 and the first request after a cold start can be slow enough to fail — at which
 point `caches.match()` serves the *entire* previous build, silently.
 
-`CACHE` was bumped `v65` → `v66`. Changing the bytes of `sw.js` is what makes
-`install` run (re-fetching CORE from the network) and `activate` delete the old
-cache; `skipWaiting()` + `clients.claim()` were already in place, so it takes
-effect on the next load. **Bump it on every deploy that changes a CORE file** —
-that is the whole mechanism, and nothing else enforces it.
+`CACHE` was bumped `v65` → `v66` as an immediate unstick. But that bump was
+manual, and so was `index.html`'s `js/game.js?v=20260728c` — two hand-edited
+version strings guarding every deploy, which is why they were sometimes not
+edited at all. Round 4 removed both.
+
+---
+
+# Round 4 · No more hand-edited cache versions
+
+**`scripts/stamp-build.mjs`** rewrites both strings with the commit being
+deployed, and `render.yaml`'s `buildCommand` runs it — so the stamp happens on
+every deploy, including ones pushed from a phone. The id comes from
+`RENDER_GIT_COMMIT`, falling back to `git rev-parse`, then to a UTC timestamp so
+a build outside a checkout still produces a unique id instead of silently
+reusing the last one. The script **exits non-zero if either pattern stops
+matching**: a rename fails the deploy rather than shipping it unstamped, which
+is the failure mode that started all this. Idempotent, so re-running is a no-op.
+
+**Self-healing clients.** Bumping the cache is only half the problem: claiming a
+page does not re-run the modules it already loaded, so an update still needed
+one manual reload — and on a phone there are no DevTools to force one. `sw.js`
+now posts `hesi-sw-activated` to its windows on `activate`, and `index.html`
+reloads once on that message. Three guards, because a silent reload is not free:
+
+- only if a worker was already controlling the page (`navigator.serviceWorker.controller`
+  at load) — a first-ever visit has nothing stale to escape;
+- at most once per cache name per tab, via `sessionStorage`, so a re-activation
+  cannot loop;
+- **never once `shutoko.started` is true** — reloading mid-drive would cost the
+  player their unbanked run. That session picks the update up on its next
+  natural load.
+
+## Verification
+
+`node scripts/stamp-build.mjs` stamps both files, is a no-op on the second run,
+and honours `RENDER_GIT_COMMIT` (checked with a fake SHA). `e2e` 39/42, no new
+failures. The service-worker path itself is not covered by a probe: it needs
+https, and the local harness serves over http where `index.html` deliberately
+skips registration.

@@ -1,14 +1,18 @@
-// BUMP THIS ON EVERY DEPLOY THAT CHANGES A CORE FILE.
+// STAMPED AT BUILD TIME — do not edit by hand; scripts/stamp-build.mjs rewrites
+// this line with the deployed commit as Render's build command. The value
+// committed here is whatever the last local stamp produced and is only a
+// placeholder.
 //
-// The fetch handler below is network-first, so in the normal case a deploy is
-// picked up without touching this. But the offline fallback serves whatever is
-// in Cache Storage, and on a free Render instance the site sleeps: the first
-// request after a cold start can take long enough to fail, at which point the
-// whole old build is served out of this cache and the player sees a deploy
-// that "did not apply". Bumping the name is what makes install/activate run —
-// it re-fetches CORE from the network and deletes the previous cache. With
-// skipWaiting + clients.claim below, the fix lands on the next page load.
-const CACHE = 'shutoko-nights-v66';
+// Why it has to change per deploy: the fetch handler below is network-first, so
+// normally an update is picked up without any cache work. But the offline
+// fallback serves whatever is in Cache Storage, and a free Render instance
+// sleeps — the first request after a cold start can take long enough to fail,
+// at which point the whole previous build is served out of this cache and the
+// player sees a deploy that "did not apply". A new name is what makes
+// install/activate run: it re-fetches CORE from the network and deletes the old
+// cache. This was a manual bump until 28 Jul 2026, which meant it was sometimes
+// simply forgotten.
+const CACHE = 'shutoko-nights-b33314be4a60';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './styles/playground.css', './manifest.webmanifest', './icon.svg', './fonts/shutoko-signal-regular.woff2', './fonts/shutoko-signal-bold.woff2', './fonts/shutoko-signal-display.woff2',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
@@ -31,7 +35,17 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim()));
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
+      // Claiming the page does not re-run the modules it already loaded from
+      // the previous worker, so without this the deploy needs one more manual
+      // reload — which on a phone means the player has no way to get it. Tell
+      // the page instead; index.html decides whether reloading is safe.
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then(clients => { for (const client of clients) client.postMessage({ type: 'hesi-sw-activated', cache: CACHE }); })
+  );
 });
 
 self.addEventListener('fetch', event => {
