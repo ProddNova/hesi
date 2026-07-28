@@ -121,3 +121,31 @@ the old `marking.map.magFilter === NearestFilter` assertion updated to the new
 policy. `car-body-wrap-probe` 26/26, `vhs-car-paint-probe` 23/23,
 `render-resolution-probe` 10/10. `e2e` 39/42 — no new failures (the 3 are the
 pre-existing HUD-overlap and auction ones).
+
+---
+
+# Round 3 · The deploy that "did not apply"
+
+After Round 2 shipped, the live site still looked unchanged to the player. It
+was not a build problem — the served bytes were checked directly:
+
+```
+$ curl -s https://hesi.onrender.com/js/custom-assets.js | grep -o "sampling = '[a-z]*'"
+sampling = 'smooth'
+```
+
+…and a clean headless browser against the *live* URL (service workers blocked)
+reported canvas `1600×900` = native, 78 textures, all 182 material maps at
+`magFilter 1006` (Linear), anisotropy 8. The deploy was correct; the player's
+browser was serving an old build out of the service worker.
+
+`sw.js` is network-first, so a deploy normally lands without any cache work.
+The trap is the offline fallback plus Render's free tier: the instance sleeps,
+and the first request after a cold start can be slow enough to fail — at which
+point `caches.match()` serves the *entire* previous build, silently.
+
+`CACHE` was bumped `v65` → `v66`. Changing the bytes of `sw.js` is what makes
+`install` run (re-fetching CORE from the network) and `activate` delete the old
+cache; `skipWaiting()` + `clients.claim()` were already in place, so it takes
+effect on the next load. **Bump it on every deploy that changes a CORE file** —
+that is the whole mechanism, and nothing else enforces it.

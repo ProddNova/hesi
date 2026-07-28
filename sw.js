@@ -1,4 +1,14 @@
-const CACHE = 'shutoko-nights-v65';
+// BUMP THIS ON EVERY DEPLOY THAT CHANGES A CORE FILE.
+//
+// The fetch handler below is network-first, so in the normal case a deploy is
+// picked up without touching this. But the offline fallback serves whatever is
+// in Cache Storage, and on a free Render instance the site sleeps: the first
+// request after a cold start can take long enough to fail, at which point the
+// whole old build is served out of this cache and the player sees a deploy
+// that "did not apply". Bumping the name is what makes install/activate run —
+// it re-fetches CORE from the network and deletes the previous cache. With
+// skipWaiting + clients.claim below, the fix lands on the next page load.
+const CACHE = 'shutoko-nights-v66';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './styles/playground.css', './manifest.webmanifest', './icon.svg', './fonts/shutoko-signal-regular.woff2', './fonts/shutoko-signal-bold.woff2', './fonts/shutoko-signal-display.woff2',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
