@@ -539988,6 +539988,15 @@
     "facadeColdStore": {
       "texture": "tex:0167",
       "brightness": 0.1
+    },
+    "road": {
+      "texture": "tex:0160"
+    },
+    "roadAlt": {
+      "texture": "tex:0160"
+    },
+    "roadService": {
+      "texture": "tex:0160"
     }
   },
   "worldModels": {},
