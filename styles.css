@@ -472,3 +472,16 @@ button:disabled{opacity:.38;cursor:default;pointer-events:none}
 .debug-range-note{margin:0;padding:9px 12px;background:#08120c;color:#6f8276;font:8px var(--term);letter-spacing:.06em}
 .debug-range-note span{color:var(--cyan)}
 .debug-menu.hidden,.debug-drone-hud.hidden{display:none!important}
+/* FILTRO // 9. Same shell as the debug menu, tinted cyan so a glance tells the
+   two apart, and one step wider because nine labelled dials need the room. */
+.filter-menu{width:min(470px,calc(100vw - 28px));border-color:#22485a;box-shadow:0 24px 90px #000,5px 5px 0 rgba(92,225,255,.2)}
+.filter-menu header{border-bottom-color:var(--cyan);background:linear-gradient(100deg,#0c1a20,#050b0e)}
+.filter-menu header small{color:var(--cyan)}
+/* With the master switch off the dials stay readable but visibly inert — they
+   still hold the values that come back the moment it is switched on. */
+.filter-menu-off .debug-traffic-panel{opacity:.55}
+.filter-presets{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 10px;border-bottom:1px solid #14281c}
+.filter-presets b{color:#7f9488;font-size:9px;letter-spacing:.08em}
+.filter-presets div{display:flex;gap:6px}
+.filter-presets button{padding:7px 10px;border:1px solid #22485a;background:#08120c;color:var(--cyan);font:10px var(--term);letter-spacing:.06em;cursor:pointer}
+.filter-presets button:hover{border-color:var(--cyan);background:#0d1c22}

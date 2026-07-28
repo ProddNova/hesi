@@ -114,6 +114,11 @@ function validateCustomAssetsDocument(document) {
   if (document.carModels !== undefined && !isRecord(document.carModels)) throw new Error('carModels must be an object');
   if (document.runtimeTuning !== undefined && !isRecord(document.runtimeTuning)) throw new Error('runtimeTuning must be an object');
   if (document.runtimeTuning?.camera !== undefined && !isRecord(document.runtimeTuning.camera)) throw new Error('runtimeTuning.camera must be an object');
+  // The published picture is deployed to every visitor; the field-level ranges
+  // live in js/custom-assets.js customAssetsDocumentErrors, which the game runs
+  // on fetch. This is the shape gate on the way in.
+  if (document.runtimeTuning?.picture !== undefined && !isRecord(document.runtimeTuning.picture)) throw new Error('runtimeTuning.picture must be an object');
+  if (document.runtimeTuning?.picture?.filter !== undefined && !isRecord(document.runtimeTuning.picture.filter)) throw new Error('runtimeTuning.picture.filter must be an object');
   const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
   for (const id of Object.keys(document.assets)) {
     if (forbidden.has(id) || !/^custom:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid custom asset id: ${id}`);

@@ -26,6 +26,7 @@ import {
   capturePartFaceProjection,
   customAssetsDocumentErrors,
   faceTextureTransform,
+  MAX_TEXTURE_SIZE,
   clearObjectFaceStyles,
   objectFaceSlots,
   optimizeStaticCustomAssetGroup,
@@ -377,7 +378,11 @@ test('applyWorldTextureOverrides tiles, tints, and restores the generated look',
   assert.equal(materials.road.map.magFilter, THREE.LinearFilter, 'photographic asphalt is linearly filtered');
   assert.equal(materials.road.map.minFilter, THREE.LinearMipmapLinearFilter, 'asphalt uses trilinear mip filtering');
   assert.equal(materials.road.map.anisotropy, 16, 'asphalt asks for every sample the GPU has at a grazing camera angle');
-  assert.equal(materials.road.map.userData.hesiTextureBudgetFloor, 1024, 'mobile keeps the asphalt mip source at 1024 px');
+  // The asphalt keeps the largest source the PS2 ceiling allows, so a phone's
+  // 128/256 px budget cannot collapse its mip chain into repeating flecks. It is
+  // written against MAX_TEXTURE_SIZE rather than a literal because the floor is
+  // defined as "as much as the ceiling permits", not as a number of its own.
+  assert.equal(materials.road.map.userData.hesiTextureBudgetFloor, MAX_TEXTURE_SIZE, 'mobile keeps the asphalt mip source at the ceiling');
   assert.equal(materials.marking.map.userData.hesiTextureBudgetFloor, 0, 'other editor textures retain the normal mobile budget');
   assert.equal(materials.marking.map.magFilter, THREE.LinearFilter, 'every imported surface is filtered, not point-sampled');
   assert.equal(materials.marking.map.minFilter, THREE.LinearMipmapLinearFilter, 'and mip-filtered with it');
