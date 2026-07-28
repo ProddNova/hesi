@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { applyObjectFaceStyles, applyWorldModelOverrides, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js?v=391fef1c80b8';
-import { SkyboxRenderer } from './skybox.js?v=391fef1c80b8';
-import { applySceneLighting, createSoftSpotLight } from './lighting-config.js?v=391fef1c80b8';
+import { applyObjectFaceStyles, applyWorldModelOverrides, applyWorldTextureOverrides, buildCustomAssetGroup, fetchCustomAssetsDocument } from './custom-assets.js?v=0f17c23a049e';
+import { SkyboxRenderer } from './skybox.js?v=0f17c23a049e';
+import { applySceneLighting, createSoftSpotLight } from './lighting-config.js?v=0f17c23a049e';
 
 // Applies HESI world-editor builds to the running game.
 //

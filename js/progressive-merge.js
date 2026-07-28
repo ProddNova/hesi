@@ -7,7 +7,7 @@
  * boundaries independently.
  */
 
-import { classifyProgressiveJunction } from './progressive-junction-classifier.js?v=391fef1c80b8';
+import { classifyProgressiveJunction } from './progressive-junction-classifier.js?v=0f17c23a049e';
 
 export const PROGRESSIVE_PHASES = Object.freeze([
   'approach',
