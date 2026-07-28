@@ -1,32 +1,33 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=86ad4259812b';
-import * as PhysicsModule from './physics.js?v=86ad4259812b';
-import * as TrafficModule from './traffic.js?v=86ad4259812b';
-import * as Data from './data.js?v=86ad4259812b';
-import * as SaveModule from './save.js?v=86ad4259812b';
-import * as AudioModule from './audio.js?v=86ad4259812b';
-import { GarageSystem } from './garage.js?v=86ad4259812b';
-import { TatsumiPaSystem } from './tatsumi-pa.js?v=86ad4259812b';
-import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=86ad4259812b';
+import * as MapModule from './map.js?v=a408363413c3';
+import * as PhysicsModule from './physics.js?v=a408363413c3';
+import * as TrafficModule from './traffic.js?v=a408363413c3';
+import * as Data from './data.js?v=a408363413c3';
+import * as SaveModule from './save.js?v=a408363413c3';
+import * as AudioModule from './audio.js?v=a408363413c3';
+import { GarageSystem } from './garage.js?v=a408363413c3';
+import { TatsumiPaSystem } from './tatsumi-pa.js?v=a408363413c3';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=a408363413c3';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js?v=86ad4259812b';
+import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js?v=a408363413c3';
 import {
   carHeadlightSettings,
   carHitboxSettings,
   carModelEntry,
   carModelTarget,
   carPaintSettings,
-} from './car-models.js?v=86ad4259812b';
-import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=86ad4259812b';
-import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=86ad4259812b';
-import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=86ad4259812b';
-import { GameUI } from './ui.js?v=86ad4259812b';
-import { DeveloperMap } from './dev-map.js?v=86ad4259812b';
-import { DebugStats } from './debug-stats.js?v=86ad4259812b';
-import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=86ad4259812b';
-import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=86ad4259812b';
-import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=86ad4259812b';
+} from './car-models.js?v=a408363413c3';
+import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=a408363413c3';
+import { detectHandheld } from './device-profile.js?v=a408363413c3';
+import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=a408363413c3';
+import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=a408363413c3';
+import { GameUI } from './ui.js?v=a408363413c3';
+import { DeveloperMap } from './dev-map.js?v=a408363413c3';
+import { DebugStats } from './debug-stats.js?v=a408363413c3';
+import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=a408363413c3';
+import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=a408363413c3';
+import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=a408363413c3';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
@@ -84,16 +85,9 @@ class ShutokoNights {
     // HIGH, which is supposed to be locked at native. Every probe here missed
     // it because headless Chromium reports maxTouchPoints 0.
     //
-    // `(pointer: coarse)` alone is not enough either: a touch panel can make it
-    // match on a machine that is plainly a desktop. So ask the operating system
-    // first and only fall back to the pointer when it cannot answer. Apple
-    // handhelds are named explicitly because iPadOS presents itself as a Mac.
-    const ua=navigator.userAgent;
-    const appleHandheld=/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-    const android=/Android/i.test(ua);
-    const uaMobile=navigator.userAgentData?.mobile;
-    const desktopOS=!android&&!appleHandheld&&(uaMobile===false||/Windows NT|Macintosh|X11|CrOS/.test(ua));
-    this.isHandheld=appleHandheld||(!desktopOS&&matchMedia('(pointer: coarse)').matches);
+    // See js/device-profile.js — the rule and the reason it is a pure
+    // function live there, with a unit-tested truth table.
+    this.isHandheld=detectHandheld();
     this.performanceProfile=this.createPerformanceProfile();
     // Desktop uses native MSAA so High has clean car silhouettes, rails and
     // one-pixel lamp posts. Touch devices retain the cheaper non-MSAA path and

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=86ad4259812b';
-import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=86ad4259812b';
+import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=a408363413c3';
+import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=a408363413c3';
 import {
   CAR_HITBOX_SETTING_FIELDS,
   CAR_HEADLIGHT_FIELDS,
@@ -9,8 +9,8 @@ import {
   CAR_REAR_LIGHT_FIELDS,
   TRAFFIC_CAR_SETTING_FIELDS,
   isCarModelTarget,
-} from './car-models.js?v=86ad4259812b';
-import { CAMERA_TUNING_FIELDS } from './playground-config.js?v=86ad4259812b';
+} from './car-models.js?v=a408363413c3';
+import { CAMERA_TUNING_FIELDS } from './playground-config.js?v=a408363413c3';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //

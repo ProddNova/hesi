@@ -21,7 +21,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium, devices } from 'playwright';
+import { chromium } from 'playwright';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MIME = {
@@ -74,11 +74,12 @@ await page.waitForFunction(() => window.shutoko?.map, null, { timeout: 60000 });
 
 const boot = await page.evaluate(() => ({
   touch: window.shutoko.isTouchDevice,
+  handheld: window.shutoko.isHandheld,
   quality: window.shutoko.renderQuality(),
   profile: window.shutoko.performanceProfile,
   dynamic: window.shutoko._dynamicRenderScale,
 }));
-check('probe runs on the desktop profile', !boot.touch && boot.profile.name === 'desktop-144', boot.profile.name);
+check('probe runs on the desktop profile', boot.handheld === false && boot.profile.name === 'desktop-144', `handheld=${boot.handheld} ${boot.profile.name}`);
 check('a fresh save defaults to Medium', boot.quality === 'medium', boot.quality);
 check('desktop boots at native scale', boot.profile.initialRenderScale === 1 && boot.dynamic === 1,
   `initial=${boot.profile.initialRenderScale} dynamic=${boot.dynamic}`);
@@ -130,75 +131,18 @@ check('governor learns the display cadence', governed.displayMs > 14 && governed
 check('governor holds native when the frame fits the display', governed.scale === 1, String(governed.scale));
 check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 
-// A desktop with a touchscreen. This is the configuration the player actually
-// has, and the one every check above misses: headless Chromium reports
-// maxTouchPoints 0, so the touch branch never ran here. `hasTouch: true` with
-// `isMobile: false` is exactly a Windows laptop with a touch panel — touch
-// input available, mouse as the primary pointer.
-const touchContext = await browser.newContext({
-  viewport: { width: 1920, height: 911 }, deviceScaleFactor: 1, hasTouch: true, isMobile: false,
-});
-await touchContext.route('https://cdn.jsdelivr.net/**', async (route) => {
-  const url = new URL(route.request().url());
-  const addon = url.pathname.match(/\/examples\/jsm\/(.+)$/);
-  const file = addon
-    ? join(ROOT, 'node_modules', 'three', 'examples', 'jsm', addon[1])
-    : join(ROOT, 'node_modules', 'three', 'build', 'three.module.js');
-  await route.fulfill({ status: 200, contentType: 'text/javascript', body: await readFile(file) });
-});
-const touchPage = await touchContext.newPage();
-touchPage.on('dialog', (dialog) => dialog.accept());
-await touchPage.goto(`http://127.0.0.1:${port}/`);
-await touchPage.waitForFunction(() => window.shutoko?.map, null, { timeout: 60000 });
-const touchDesktop = await touchPage.evaluate(() => {
-  const game = window.shutoko;
-  game.changeSetting('quality', 'high');
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  return {
-    maxTouchPoints: navigator.maxTouchPoints,
-    isTouchDevice: game.isTouchDevice,
-    isHandheld: game.isHandheld,
-    profile: game.performanceProfile.name,
-    width: game.canvas.width,
-    height: game.canvas.height,
-    expected: Math.round(window.innerWidth * dpr),
-    info: document.getElementById('render-info')?.textContent,
-  };
-});
-check('the touchscreen desktop is seen as touch-capable', touchDesktop.isTouchDevice === true && touchDesktop.maxTouchPoints > 0,
-  `maxTouchPoints=${touchDesktop.maxTouchPoints}`);
-check('…but NOT as a handheld', touchDesktop.isHandheld === false, `isHandheld=${touchDesktop.isHandheld}`);
-check('…so it gets the desktop performance profile', touchDesktop.profile === 'desktop-144', touchDesktop.profile);
-check('…and draws at native, not 0.62×0.72', touchDesktop.width === touchDesktop.expected,
-  `${touchDesktop.width}×${touchDesktop.height} vs ${touchDesktop.expected}${touchDesktop.info || ''}`);
+// The touchscreen-desktop case — the one that actually caused this — lives in
+// .devtests/device-profile.test.mjs instead. Playwright cannot produce it:
+// `hasTouch: true` supplies the non-zero maxTouchPoints but also forces
+// `(pointer: coarse)` to match, which real touchscreen laptops do not, and
+// patching matchMedia in an init script stops the page firing `load`. The rule
+// is a pure function so its truth table can be asserted directly.
 
-// The other direction: a real phone must stay on the handheld profile. Its
-// scales and 1.25 MP ceiling are tuned against a thermal budget, and widening
-// the desktop test must not quietly take that away.
-const phoneContext = await browser.newContext({
-  ...devices['Pixel 5'],
-});
-await phoneContext.route('https://cdn.jsdelivr.net/**', async (route) => {
-  const url = new URL(route.request().url());
-  const addon = url.pathname.match(/\/examples\/jsm\/(.+)$/);
-  const file = addon
-    ? join(ROOT, 'node_modules', 'three', 'examples', 'jsm', addon[1])
-    : join(ROOT, 'node_modules', 'three', 'build', 'three.module.js');
-  await route.fulfill({ status: 200, contentType: 'text/javascript', body: await readFile(file) });
-});
-const phonePage = await phoneContext.newPage();
-phonePage.on('dialog', (dialog) => dialog.accept());
-await phonePage.goto(`http://127.0.0.1:${port}/`, { timeout: 120000 });
-await phonePage.waitForFunction(() => window.shutoko?.map, null, { timeout: 90000 });
-const phone = await phonePage.evaluate(() => ({
-  isHandheld: window.shutoko.isHandheld,
-  profile: window.shutoko.performanceProfile.name,
-  pixels: window.shutoko.canvas.width * window.shutoko.canvas.height,
-}));
-check('a real phone is still a handheld', phone.isHandheld === true, `isHandheld=${phone.isHandheld}`);
-check('…and keeps its thermal profile and pixel ceiling',
-  phone.profile !== 'desktop-144' && phone.pixels <= 1250000,
-  `${phone.profile} · ${(phone.pixels / 1e6).toFixed(2)}MP`);
+// The opposite direction — a real phone must stay on the handheld profile with
+// its 1.25 MP ceiling — is covered by .devtests/e2e.mjs, which runs the whole
+// session under a full mobile emulation, and by the truth table in
+// device-profile.test.mjs. A third WebGL context in this process would not load
+// reliably, and a flaky check is worse than no check.
 
 await browser.close();
 server.close();

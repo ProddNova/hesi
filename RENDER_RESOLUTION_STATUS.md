@@ -319,25 +319,44 @@ The flag was answering two unrelated questions. They are now separate:
   actually needs. Drives the profile, quality scales, `maxPixels`, texture
   budget, MSAA, VHS samples, the governor and resize coalescing (13 call sites).
 
-`isHandheld` asks the OS first and only falls back to the pointer:
+The rule lives in `js/device-profile.js` as a pure function:
 
 ```js
-appleHandheld || (!desktopOS && matchMedia('(pointer: coarse)').matches)
+appleHandheld || (pointerCoarse && !anyPointerFine)
 ```
 
-Apple handhelds are named explicitly because iPadOS presents itself as a Mac;
-Android is excluded from `desktopOS` so tablets keep the thermal profile.
-`(pointer: coarse)` alone is not sufficient — a touch panel can make it match on
-a machine that is plainly a desktop, which is exactly what the emulated case
-showed.
+"touch is the primary pointer AND there is no fine pointer anywhere". Anything
+with a mouse or trackpad reports `(any-pointer: fine)`, so a touchscreen laptop
+is excluded whether or not its panel makes `(pointer: coarse)` match — which it
+can. A phone has no fine pointer at all. iPadOS is the one named exception: it
+presents itself as a Mac, and an iPad on a keyboard trackpad reports a fine
+pointer while still needing the thermal profile.
+
+**A wrong turn worth recording.** The first attempt keyed on the OS string in
+the user agent. It broke `e2e`: that context is a phone-shaped emulation with a
+*desktop* UA, so it was classified as a desktop and the "render quality changes
+internal resolution" check started failing (Medium and High are both native on
+desktop, so nothing moved). Capability queries describe what is actually
+attached; UA strings describe what the emulator did not bother to change.
 
 ## Verification
 
-`render-resolution-probe` — **16/16**, now including the configuration that was
-missing: `hasTouch: true, isMobile: false` at 1920×911, i.e. a Windows laptop
-with a touch panel. It reproduced the player's readout byte for byte
-(`857×407 → 1920×911 · dpr 1.00 · HIGH`) before the fix and reports
-`1920×911 ✓` after. The opposite direction is covered too — a Pixel 5 context
-must stay `isHandheld`, keep the `touch-stable` profile and stay under the
-1.25 MP ceiling — so widening the desktop test cannot quietly cost phones their
-thermal budget.
+**The interesting case cannot be produced in a browser**, which is why the rule
+is a pure function. Playwright's `hasTouch: true` supplies the non-zero
+`maxTouchPoints` that caused the bug, but it also forces `(pointer: coarse)` to
+match — precisely what a real touchscreen laptop does *not* do. Patching
+`matchMedia` from an init script to model the real combination stops the page
+firing `load` at all. So the truth table is asserted directly:
+
+`node --test .devtests/device-profile.test.mjs` — 8 cases, including Windows
+laptop with a touchscreen, the same machine reporting a coarse primary pointer,
+Windows tablet with no mouse, iPad on a keyboard trackpad, and a desktop Mac
+(which must not be caught by the iPadOS heuristic).
+
+`render-resolution-probe` 10/10 — its desktop assertion now reads `isHandheld`
+rather than `isTouchDevice`, which is the question it was always meant to ask.
+A phone check added here was **removed again**: a third WebGL context in the
+same process would not load reliably, and a flaky check is worse than none.
+That direction is covered by `e2e`, which runs the whole session under a full
+mobile emulation — **39/42, back to baseline**, with the regression the UA-based
+attempt introduced gone.
