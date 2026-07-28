@@ -1,33 +1,34 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=a408363413c3';
-import * as PhysicsModule from './physics.js?v=a408363413c3';
-import * as TrafficModule from './traffic.js?v=a408363413c3';
-import * as Data from './data.js?v=a408363413c3';
-import * as SaveModule from './save.js?v=a408363413c3';
-import * as AudioModule from './audio.js?v=a408363413c3';
-import { GarageSystem } from './garage.js?v=a408363413c3';
-import { TatsumiPaSystem } from './tatsumi-pa.js?v=a408363413c3';
-import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=a408363413c3';
+import * as MapModule from './map.js?v=0af2d4e6d507';
+import * as PhysicsModule from './physics.js?v=0af2d4e6d507';
+import * as TrafficModule from './traffic.js?v=0af2d4e6d507';
+import * as Data from './data.js?v=0af2d4e6d507';
+import * as SaveModule from './save.js?v=0af2d4e6d507';
+import * as AudioModule from './audio.js?v=0af2d4e6d507';
+import { GarageSystem } from './garage.js?v=0af2d4e6d507';
+import { TatsumiPaSystem } from './tatsumi-pa.js?v=0af2d4e6d507';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=0af2d4e6d507';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js?v=a408363413c3';
+import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget, MAX_TEXTURE_SIZE } from './custom-assets.js?v=0af2d4e6d507';
 import {
   carHeadlightSettings,
   carHitboxSettings,
   carModelEntry,
   carModelTarget,
   carPaintSettings,
-} from './car-models.js?v=a408363413c3';
-import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=a408363413c3';
-import { detectHandheld } from './device-profile.js?v=a408363413c3';
-import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=a408363413c3';
-import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=a408363413c3';
-import { GameUI } from './ui.js?v=a408363413c3';
-import { DeveloperMap } from './dev-map.js?v=a408363413c3';
-import { DebugStats } from './debug-stats.js?v=a408363413c3';
-import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=a408363413c3';
-import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=a408363413c3';
-import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=a408363413c3';
+} from './car-models.js?v=0af2d4e6d507';
+import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=0af2d4e6d507';
+import { detectHandheld } from './device-profile.js?v=0af2d4e6d507';
+import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=0af2d4e6d507';
+import { PS2_FILTER_DEFAULTS, PS2_FILTER_FIELDS, PS2_FILTER_PRESETS, PS2_DITHER_PATTERNS, normalizePS2Filter, clampFilterValue, formatFilterValue } from './ps2-filter.js?v=0af2d4e6d507';
+import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=0af2d4e6d507';
+import { GameUI } from './ui.js?v=0af2d4e6d507';
+import { DeveloperMap } from './dev-map.js?v=0af2d4e6d507';
+import { DebugStats } from './debug-stats.js?v=0af2d4e6d507';
+import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=0af2d4e6d507';
+import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=0af2d4e6d507';
+import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=0af2d4e6d507';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
@@ -112,11 +113,14 @@ class ShutokoNights {
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};
     this.lastService=null;this.contactCooldown=0;this.ghostTimer=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();this.camVehiclePos=new THREE.Vector3();this.camVehiclePosValid=false;this.camShake=0;this.camShakeTime=0;
     this.mobileFPS={startedAt:performance.now(),frames:0};
-    this.debug={menuOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
+    // menuOpen means "a dev overlay owns the screen" — the driving update, the
+    // touch controls and pointer lock all read it. debugOpen/filterOpen say
+    // WHICH one, because the two panels are mutually exclusive.
+    this.debug={menuOpen:false,debugOpen:false,filterOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
     // On-foot mode: step out of the car anywhere (G), walk in first person, and
     // step back in when close. The car and world freeze while walking.
     this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
-    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,vhsAmount:1,motionBlur:1,headlightBrightness:1,cameraShake:1,cameraShakePace:1};
+    this.admin={unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,vhsAmount:1,motionBlur:1,headlightBrightness:1,cameraShake:1,cameraShakePace:1,ps2Filter:{...PS2_FILTER_DEFAULTS}};
     this.cameraTuning=normalizeCameraTuning();
     this.setupLights();this.setupPersistence();this.setupUI();this.setupInput();this.buildWorld();this.setupCarModelHotReload();this.setupEditorTestMode();
     this.setupDebugMenu();
@@ -127,7 +131,8 @@ class ShutokoNights {
     // The pass owns multisampling once it is on, so the canvas MSAA above stops
     // being the anti-aliaser. Phones keep it off: a half-float colour buffer is
     // a bandwidth cost their profile already budgets against.
-    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4});
+    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
+    this.setupFilterMenu();
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
     // the address bar settles. Reallocating WebGL's drawing buffer for each one
@@ -188,7 +193,11 @@ class ShutokoNights {
     if(this.catalog.length>1&&!this.state.auctions.length)this.state.auctions=this.generateAuctions(this.state.auctionSeed);
     this.customCar={enabled:true,scale:DEFAULT_CUSTOM_CAR_SCALE,modelId:this.state.settings.customCarModel,object:null,loadPromise:null,loadingModelId:null,status:'idle',requestId:0,abortController:null};
     this.editorCarAssets=null;this.editorCarResolver=null;this.carModelReloadPromise=null;this.carModelChannel=null;
-    this.admin={...this.admin,...this.state.admin};this.cameraMode=this.state.settings.camera||'chase';this.persist();
+    this.admin={...this.admin,...this.state.admin};
+    // A save written before the filter existed (or by hand) carries anything at
+    // all here; normalize once, on load, so nothing downstream has to guard.
+    this.admin.ps2Filter=normalizePS2Filter(this.admin.ps2Filter);
+    this.cameraMode=this.state.settings.camera||'chase';this.persist();
   }
 
   normalizeState(raw,d){
@@ -354,6 +363,7 @@ class ShutokoNights {
     window.addEventListener('keydown',e=>{
       const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'');
       if((e.code==='Digit0'||e.code==='Numpad0')&&!typing&&!e.repeat){e.preventDefault();this.toggleDebugMenu();return;}
+      if((e.code==='Digit9'||e.code==='Numpad9')&&!typing&&!e.repeat){e.preventDefault();this.toggleFilterMenu();return;}
       if(e.code==='KeyM'&&!typing&&!e.repeat){e.preventDefault();this.toggleDevMap();return;}
       if(e.code==='KeyI'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggle();return;}
       if(e.code==='KeyP'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggleRecording();return;}
@@ -835,14 +845,123 @@ class ShutokoNights {
     visualRange('debug-vhs-amount','vhs');visualRange('debug-motion-blur','blur');visualRange('debug-headlight','headlight');
     visualRange('debug-shake-amount','shake');visualRange('debug-shake-pace','shakePace');this.syncVisualControls();
     document.getElementById('debug-close')?.addEventListener('click',()=>this.toggleDebugMenu(false));
+    document.getElementById('debug-open-filter')?.addEventListener('click',()=>this.setFilterMenuOpen(true));
     document.getElementById('debug-rec-toggle')?.addEventListener('click',()=>this.debugStats?.toggleRecording());
     document.getElementById('debug-rec-mark')?.addEventListener('click',()=>this.debugStats?.mark('debug menu'));
     document.querySelectorAll('[data-debug-hitbox]').forEach(input=>input.addEventListener('change',()=>this.setDebugHitbox(input.dataset.debugHitbox,input.checked)));
     document.getElementById('debug-hitboxes-all')?.addEventListener('click',()=>{const inputs=[...document.querySelectorAll('[data-debug-hitbox]')],enable=inputs.some(input=>!input.checked);for(const input of inputs){input.checked=enable;this.setDebugHitbox(input.dataset.debugHitbox,enable);}});
   }
   toggleDebugMenu(force){
-    const open=typeof force==='boolean'?force:!this.debug.menuOpen;this.debug.menuOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.syncTrafficControls();this.syncVisualControls();this.syncCustomCarControls();}
-    this.keys={};this.pressed.clear();this.releaseTouchInput?.();if(open)document.exitPointerLock?.();else if(this.debug.noclip&&!this.isTouchDevice)this.requestDronePointerLock();
+    const open=typeof force==='boolean'?force:!this.debug.debugOpen;this.debug.debugOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.setFilterMenuOpen(false);this.syncTrafficControls();this.syncVisualControls();this.syncCustomCarControls();}
+    this._syncOverlayState();
+  }
+  /**
+   * Both dev panels sit in the middle of the screen and both freeze the drive,
+   * so opening one closes the other. Everything that used to key off
+   * `debug.menuOpen` still works because this recomputes it from the two.
+   */
+  _syncOverlayState(){
+    const open=this.debug.debugOpen||this.debug.filterOpen;this.debug.menuOpen=open;
+    this.keys={};this.pressed.clear();this.releaseTouchInput?.();
+    if(open)document.exitPointerLock?.();else if(this.debug.noclip&&!this.isTouchDevice)this.requestDronePointerLock();
+  }
+
+  // ---------------------------------------------------------------------
+  // FILTRO // 9 — the PS2 picture panel (js/ps2-filter.js owns the model,
+  // js/vhs-effect.js owns the pixels). The sliders are built from
+  // PS2_FILTER_FIELDS rather than written out in index.html: nine dials across
+  // three groups, each with its own range, unit and neutral label, is exactly
+  // the kind of table that goes stale the moment it exists twice.
+  // ---------------------------------------------------------------------
+  setupFilterMenu(){
+    this.filterMenu=document.getElementById('filter-menu');
+    if(!this.filterMenu)return;
+    for(const group of this.filterMenu.querySelectorAll('[data-filter-group]')){
+      const name=group.dataset.filterGroup;
+      for(const field of PS2_FILTER_FIELDS.filter(f=>f.group===name)){
+        const label=document.createElement('label');label.className='debug-range';
+        const caption=document.createElement('span');
+        const value=document.createElement('b');value.id=`filter-${field.key}-val`;
+        caption.append(document.createTextNode(`${field.label} `),value);
+        const input=document.createElement('input');
+        input.type='range';input.id=`filter-${field.key}`;input.min=field.min;input.max=field.max;input.step=field.step;
+        input.value=this.admin.ps2Filter?.[field.key]??PS2_FILTER_DEFAULTS[field.key];
+        // Same live-drag / commit-on-release contract as the other dev sliders:
+        // dragging updates the picture every frame, releasing writes the save.
+        input.addEventListener('input',e=>this.setFilterParam(field.key,e.target.value,false));
+        input.addEventListener('change',e=>this.setFilterParam(field.key,e.target.value,true));
+        label.append(caption,input);group.append(label);
+      }
+    }
+    const pattern=document.getElementById('filter-dither-pattern');
+    if(pattern){
+      for(const option of PS2_DITHER_PATTERNS){const el=document.createElement('option');el.value=option.id;el.textContent=option.label;pattern.append(el);}
+      pattern.addEventListener('change',e=>this.setFilterParam('ditherPattern',e.target.value,true));
+    }
+    document.getElementById('filter-enabled')?.addEventListener('change',e=>this.setFilterEnabled(e.target.checked));
+    document.getElementById('filter-close')?.addEventListener('click',()=>this.setFilterMenuOpen(false));
+    for(const button of this.filterMenu.querySelectorAll('[data-filter-preset]'))
+      button.addEventListener('click',()=>this.applyFilterPreset(button.dataset.filterPreset));
+    this.syncFilterControls();
+  }
+  toggleFilterMenu(force){this.setFilterMenuOpen(typeof force==='boolean'?force:!this.debug.filterOpen);}
+  setFilterMenuOpen(open){
+    open=!!open;
+    if(open===this.debug.filterOpen)return;
+    this.debug.filterOpen=open;
+    this.filterMenu?.classList.toggle('hidden',!open);
+    this.filterMenu?.setAttribute('aria-hidden',String(!open));
+    if(open){this.toggleDebugMenu(false);this.syncFilterControls();}
+    this._syncOverlayState();
+  }
+  /**
+   * The master switch keeps every dial where the player left it — the shader
+   * simply stops reading them (see _writeFilterUniforms), so switching back on
+   * restores the exact look rather than the defaults.
+   */
+  setFilterEnabled(enabled){
+    this.admin.ps2Filter={...this.admin.ps2Filter,enabled:!!enabled};
+    this._applyFilterSettings(true);
+    this.ui?.toast?.(enabled?'FILTRO PS2 // ON':'FILTRO PS2 // OFF','amber');
+  }
+  setFilterParam(key,value,commit=true){
+    const current=this.admin.ps2Filter||PS2_FILTER_DEFAULTS;
+    const next=key==='ditherPattern'?String(value):clampFilterValue(key,value);
+    if(next===current[key]&&!commit)return;
+    this.admin.ps2Filter={...current,[key]:next};
+    this._applyFilterSettings(commit);
+  }
+  applyFilterPreset(name){
+    const preset=PS2_FILTER_PRESETS[name];
+    if(!preset)return;
+    // A preset never touches the master switch: picking one while the filter is
+    // off is how you set it up before turning it on.
+    this.admin.ps2Filter=normalizePS2Filter({...preset,enabled:this.admin.ps2Filter?.enabled});
+    this._applyFilterSettings(true);
+    this.ui?.toast?.(`FILTRO // ${name.toUpperCase()}`,'amber');
+  }
+  _applyFilterSettings(commit){
+    // The pass normalizes and hands back the settings it actually installed,
+    // so admin can never drift from what the shader is running.
+    this.admin.ps2Filter=this.vhs?.setFilter?.(this.admin.ps2Filter)||normalizePS2Filter(this.admin.ps2Filter);
+    this.syncFilterControls();
+    if(!commit)return;
+    this.debugStats?.event('ps2_filter_changed',{...this.admin.ps2Filter});
+    this.persist();
+  }
+  syncFilterControls(){
+    const filter=this.admin.ps2Filter||PS2_FILTER_DEFAULTS;
+    const toggle=document.getElementById('filter-enabled');
+    if(toggle)toggle.checked=!!filter.enabled;
+    this.filterMenu?.classList.toggle('filter-menu-off',!filter.enabled);
+    for(const field of PS2_FILTER_FIELDS){
+      const input=document.getElementById(`filter-${field.key}`);
+      if(input&&document.activeElement!==input)input.value=String(filter[field.key]);
+      const label=document.getElementById(`filter-${field.key}-val`);
+      if(label)label.textContent=formatFilterValue(field.key,filter[field.key]);
+    }
+    const pattern=document.getElementById('filter-dither-pattern');
+    if(pattern&&document.activeElement!==pattern)pattern.value=filter.ditherPattern;
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
   updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}
@@ -899,7 +1018,7 @@ class ShutokoNights {
       if(type.includes('truck'))trafficTrucks++;else if(type.includes('van'))trafficVans++;else trafficCars++;
     }
     const input=this.lastDriveInput||{};
-    const uiOverlay=this.devMap?.isOpen?.()?'dev-map':this.debug.menuOpen?'debug':this.ui?.pcOpen?'pc':this.ui?.phoneOpen?'phone':null;
+    const uiOverlay=this.devMap?.isOpen?.()?'dev-map':this.debug.debugOpen?'debug':this.debug.filterOpen?'filter':this.ui?.pcOpen?'pc':this.ui?.phoneOpen?'phone':null;
     return{scene,mode:this.debug.noclip?'noclip':this.mode,quality:this.renderQuality(),
       resolution:`${this.canvas.width}x${this.canvas.height}`,dpr:window.devicePixelRatio||1,
       chunksVisible,chunksTotal,traffic:active.length,trafficVisible,trafficCars,trafficVans,trafficTrucks,
@@ -1624,7 +1743,9 @@ class ShutokoNights {
     // rather than point-sampled, so the cap is what limits how much of a
     // 1000-1600 px import actually survives. Medium matches High; phones keep
     // the tight VRAM budget they were tuned against a real thermal envelope.
-    const textureBudget=this.isHandheld?{low:128,medium:256,high:1024}:{low:512,medium:1024,high:1024};
+    // The top tier is MAX_TEXTURE_SIZE (512): above that an import stops
+    // reading as a PS2 texture, and custom-assets clamps to it anyway.
+    const textureBudget=this.isHandheld?{low:128,medium:256,high:MAX_TEXTURE_SIZE}:{low:256,medium:MAX_TEXTURE_SIZE,high:MAX_TEXTURE_SIZE};
     setTextureSizeBudget(textureBudget[q]||256);
     return true;
   }

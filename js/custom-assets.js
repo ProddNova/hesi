@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=a408363413c3';
-import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=a408363413c3';
+import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=0af2d4e6d507';
+import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=0af2d4e6d507';
 import {
   CAR_HITBOX_SETTING_FIELDS,
   CAR_HEADLIGHT_FIELDS,
@@ -9,8 +9,8 @@ import {
   CAR_REAR_LIGHT_FIELDS,
   TRAFFIC_CAR_SETTING_FIELDS,
   isCarModelTarget,
-} from './car-models.js?v=a408363413c3';
-import { CAMERA_TUNING_FIELDS } from './playground-config.js?v=a408363413c3';
+} from './car-models.js?v=0af2d4e6d507';
+import { CAMERA_TUNING_FIELDS } from './playground-config.js?v=0af2d4e6d507';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -2126,9 +2126,25 @@ const textureCache = new Map();
 // GPU texture budget: the game caps every editor-imported image to a maximum
 // dimension per quality profile before upload, so player-imported 1000+ px
 // images cannot grow VRAM without bound as the map gains custom content.
-// 0 = no limit (the editor keeps full resolution for authoring).
+// 0 = "no per-quality budget" — MAX_TEXTURE_SIZE still applies.
 let textureSizeBudget = 0;
-const SMOOTH_SURFACE_TEXTURE_MIN_SIZE = 1024;
+/**
+ * Hard ceiling on every imported image, in pixels on the longest side.
+ *
+ * This is a LOOK decision, not a memory one: the game is aiming at a PS2
+ * picture, and a console of that generation simply could not hold a 1024 or
+ * 2048 px map for a wall, a poster or a car livery. Photographic imports read
+ * as modern the moment they carry more detail than the geometry around them,
+ * so the cap is applied unconditionally — before any quality profile, in the
+ * editor as well as in the game, and above the per-slot budget floor below.
+ * Aspect ratio is preserved (the longest side lands on 512), so a 1024×512
+ * import becomes 512×256 rather than being squashed into a square.
+ */
+export const MAX_TEXTURE_SIZE = 512;
+// The road is the one surface seen at a grazing angle to the horizon, where a
+// collapsed mip chain turns fine aggregate into repeating dark flecks. It keeps
+// the largest source the ceiling allows while props follow the quality budget.
+const SMOOTH_SURFACE_TEXTURE_MIN_SIZE = MAX_TEXTURE_SIZE;
 // Anisotropy for ordinary imported textures. The PS2 look this game targets is
 // bilinear-with-mipmaps, not the nearest-filter mush of the generation before
 // it (see applyRetroMaterials in game.js, which states the same policy for the
@@ -2143,10 +2159,13 @@ function applyTextureSizeBudget(texture) {
   // Road photographs need a complete high-resolution mip chain. Collapsing
   // them to the generic 128/256 px mobile budget turns fine aggregate into
   // stable, repeating dark flecks at a grazing camera angle. Smooth world
-  // surfaces are few and shared, so retaining one 1024 px source is a small,
-  // bounded cost while all prop/model textures keep the normal mobile cap.
+  // surfaces are few and shared, so retaining the largest allowed source is a
+  // small, bounded cost while all prop/model textures keep the mobile cap.
+  // MAX_TEXTURE_SIZE wins over both: it is the PS2 look, not a memory budget,
+  // so nothing — not the road floor, not "no budget set" — reaches the GPU
+  // above it.
   const floor = Number(texture.userData?.hesiTextureBudgetFloor) || 0;
-  const budget = textureSizeBudget ? Math.max(textureSizeBudget, floor) : 0;
+  const budget = Math.min(MAX_TEXTURE_SIZE, textureSizeBudget ? Math.max(textureSizeBudget, floor) : MAX_TEXTURE_SIZE);
   if (!budget || !width || !height || Math.max(width, height) <= budget) {
     if (texture.image !== source) { texture.image = source; texture.needsUpdate = true; }
     return;
@@ -2166,12 +2185,13 @@ function applyTextureSizeBudget(texture) {
 
 /**
  * Caps every cached (and future) custom texture to `maxSize` pixels on its
- * longest side, downscaling on a canvas before GPU upload. Pass 0 to restore
- * full resolution. Already-uploaded textures are re-uploaded at the new size,
- * so the game can apply this when the player changes the quality setting.
+ * longest side, downscaling on a canvas before GPU upload. Pass 0 to fall back
+ * to the MAX_TEXTURE_SIZE ceiling, which no quality profile can lift.
+ * Already-uploaded textures are re-uploaded at the new size, so the game can
+ * apply this when the player changes the quality setting.
  */
 export function setTextureSizeBudget(maxSize) {
-  const next = Number.isFinite(maxSize) && maxSize > 0 ? Math.floor(maxSize) : 0;
+  const next = Number.isFinite(maxSize) && maxSize > 0 ? Math.min(MAX_TEXTURE_SIZE, Math.floor(maxSize)) : 0;
   if (next === textureSizeBudget) return;
   textureSizeBudget = next;
   if (typeof document === 'undefined') return;

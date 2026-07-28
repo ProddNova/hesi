@@ -12,10 +12,10 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <title>SHUTOKO NIGHTS</title>
-  <link rel="stylesheet" href="styles.css?v=a408363413c3">
-  <link rel="stylesheet" href="styles/dev-map.css?v=a408363413c3">
-  <link rel="stylesheet" href="styles/debug-stats.css?v=a408363413c3">
-  <link rel="stylesheet" href="styles/playground.css?v=a408363413c3">
+  <link rel="stylesheet" href="styles.css?v=0af2d4e6d507">
+  <link rel="stylesheet" href="styles/dev-map.css?v=0af2d4e6d507">
+  <link rel="stylesheet" href="styles/debug-stats.css?v=0af2d4e6d507">
+  <link rel="stylesheet" href="styles/playground.css?v=0af2d4e6d507">
   <script type="importmap">
     {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"}}
   </script>
@@ -37,7 +37,7 @@
              DPR and quality tier. Between it and the build id, "it still looks
              pixelated" is answerable from a photo of the boot screen instead of
              a round trip per hypothesis. -->
-        <span class="boot-ver">Ver.2.02 · <b id="build-id">a408363</b><b id="render-info"></b></span>
+        <span class="boot-ver">Ver.2.02 · <b id="build-id">0af2d4e</b><b id="render-info"></b></span>
         <span class="boot-clock">TOKYO 02:17 <b class="blink">● REC</b></span>
       </header>
       <div class="boot-kanji" aria-hidden="true">首都高速</div>
@@ -146,7 +146,7 @@
         <div class="controls-grid">
           <dl><dt>W / ↑</dt><dd>Throttle</dd><dt>S / ↓</dt><dd>Brake / reverse</dd><dt>A D / ← →</dt><dd>Steer</dd><dt>SPACE</dt><dd>Handbrake</dd></dl>
           <dl><dt>SHIFT / E</dt><dd>Shift up</dd><dt>CTRL / Q</dt><dd>Shift down</dd><dt>C</dt><dd>Camera</dd><dt>F</dt><dd>Phone</dd><dt>H</dt><dd>Toggle HUD</dd></dl>
-          <dl><dt>GARAGE</dt><dd>WASD walk · mouse look</dd><dt>E</dt><dd>Interact / carry / install</dd><dt>ESC</dt><dd>Release mouse / leave screens</dd><dt>R</dt><dd>Recover car</dd><dt>Z</dt><dd>Copy exact XYZ</dd></dl>
+          <dl><dt>GARAGE</dt><dd>WASD walk · mouse look</dd><dt>E</dt><dd>Interact / carry / install</dd><dt>ESC</dt><dd>Release mouse / leave screens</dd><dt>R</dt><dd>Recover car</dd><dt>Z</dt><dd>Copy exact XYZ</dd><dt>9</dt><dd>Filtro PS2</dd><dt>0</dt><dd>Debug menu</dd></dl>
         </div>
       </div>
     </section>
@@ -177,6 +177,8 @@
         <div class="debug-custom-car">
           <label class="debug-select"><span>MODELLO AUTO PSXSTYLE</span><select id="debug-custom-car-model" aria-label="Modello auto PSXStyle"></select></label>
         </div>
+        <!-- Also the only way into the filter panel without a keyboard. -->
+        <div class="filter-presets"><b>FILTRO PS2 &middot; TASTO 9</b><div><button id="debug-open-filter" type="button">APRI FILTRO</button></div></div>
         <div class="debug-diagnostics">
           <span><b>DIAGNOSTIC RECORDER</b><small>JSON completo per analisi e ottimizzazione</small></span>
           <div><button id="debug-rec-toggle" type="button">START / STOP</button><button id="debug-rec-mark" type="button">MARK MOMENT</button></div>
@@ -193,6 +195,31 @@
         <div class="debug-controls"><b>DRONE CONTROLS</b><span>WASD move · mouse / arrows look</span><span>WHEEL speed · SPACE/CTRL height · SHIFT boost</span><span>TOUCH: D-pad move · drag look · UP/DOWN height</span></div>
       </div>
     </aside>
+    <aside id="filter-menu" class="debug-menu filter-menu hidden" aria-label="Filtro immagine PS2" aria-hidden="true">
+      <header><div><small>PS2 PICTURE SIM</small><h2>FILTRO // 9</h2></div><button id="filter-close" aria-label="Chiudi filtro">×</button></header>
+      <div class="debug-menu-body">
+        <label class="debug-toggle"><span><b>FILTRO PS2</b><small>Pixelazione, colori a 16 bit con dither e grana</small></span><input id="filter-enabled" type="checkbox"><i></i></label>
+        <div class="filter-presets"><b>PRESET</b><div><button type="button" data-filter-preset="ps2">PS2</button><button type="button" data-filter-preset="ps1">PS1</button><button type="button" data-filter-preset="arcade">ARCADE</button><button type="button" data-filter-preset="clean">PULITO</button></div></div>
+        <details class="debug-traffic-panel" open>
+          <summary><span><b>PIXELAZIONE</b><small>Il gioco viene disegnato a questa risoluzione e poi ingrandito</small></span><em>TUNE</em></summary>
+          <div data-filter-group="pixel"></div>
+          <p class="debug-range-note">448 righe = framebuffer NTSC di una PS2 · NATIVA disattiva la pixelazione · il valore è in righe virtuali, quindi l'effetto è identico su 1080p e 4K</p>
+        </details>
+        <details class="debug-traffic-panel">
+          <summary><span><b>COLORI &amp; DITHER</b><small>Quantizzazione dei colori e trama di dithering</small></span><em>TUNE</em></summary>
+          <div data-filter-group="color"></div>
+          <label class="debug-select"><span>PATTERN DITHER</span><select id="filter-dither-pattern" aria-label="Pattern dither"></select></label>
+          <p class="debug-range-note">32 livelli = colore a 5 bit per canale della console · il DITHER agisce solo con la quantizzazione attiva: serve a rompere le bande, da solo non fa nulla</p>
+        </details>
+        <details class="debug-traffic-panel">
+          <summary><span><b>GRANA (FILM GRAIN)</b><small>Rumore di ripresa, indipendente dalla grana del VHS</small></span><em>TUNE</em></summary>
+          <div data-filter-group="grain"></div>
+          <p class="debug-range-note">VELOCITÀ = quante volte al secondo la grana si ridisegna (FISSA = immobile) · OMBRE = quanto la grana resta nelle zone scure · resta attiva anche con l'effetto VHS spento</p>
+        </details>
+        <div class="debug-controls"><b>NOTE</b><span>Le dimensioni sono in pixel virtuali: seguono la risoluzione qui sopra</span><span>0 apre il menu debug · 9 chiude questo pannello</span></div>
+      </div>
+    </aside>
+
     <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span id="debug-drone-speed">55 M/S</span><span class="drone-help-desktop">WHEEL SPEED · SHIFT BOOST</span><span class="drone-help-touch">DRAG LOOK · BOOST</span><small class="drone-help-desktop">0 MENU</small><small class="drone-help-touch">DBG MENU</small></div>
 
     <aside id="editor-test-tools" class="editor-test-tools" hidden aria-label="Editor test game tools">
@@ -277,7 +304,7 @@
     </div>
   </div>
 
-  <script type="module" src="js/game.js?v=a408363413c3"></script>
+  <script type="module" src="js/game.js?v=0af2d4e6d507"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       // Whether this page was already under a worker when it loaded. On a first
