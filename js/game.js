@@ -86,7 +86,7 @@ class ShutokoNights {
     this.roadScene=new THREE.Scene();this.garageScene=new THREE.Scene();this.paScene=new THREE.Scene();this.playgroundScene=new THREE.Scene();
     this.clock=new THREE.Clock();this.keys={};this.pressed=new Set();this.mode='boot';this.started=false;
     this._lastPresentedAt=0;this._nextHudUpdate=0;this._dynamicRenderScale=this.performanceProfile.initialRenderScale;
-    this._performanceGovernor={emaMs:0,samples:0,lastAdjustAt:performance.now(),lastIncreaseAt:performance.now()};
+    this._performanceGovernor={emaMs:0,samples:0,lastAdjustAt:performance.now(),lastIncreaseAt:performance.now(),lastFrameAt:0,displayMs:0};
     // Per-frame subsystem timings (ms). Filled by animate()/updateDriving()
     // and consumed by DebugStats so long frames name their cause in the log.
     this.frameProf={phys:0,traffic:0,map:0,render:0,persist:0,other:0,total:0};
@@ -131,7 +131,12 @@ class ShutokoNights {
       // frameIntervalMs=0 means there is no artificial presentation cap.
       return{name:apple?'ipad-stable':'touch-stable',targetFps:60,frameIntervalMs:0,hudIntervalMs:100,trafficCount:40,maxTraffic:60,spawnRadius:720,despawnRadius:920,trafficRenderRadius:650,viewDistanceScale:.78,maxPixels:1250000,initialRenderScale:.72,minRenderScale:.72,adaptiveResolution:false};
     }
-    return{name:'desktop-144',targetFps:144,frameIntervalMs:1000/144,hudIntervalMs:1000/30,trafficCount:56,maxTraffic:84,spawnRadius:850,despawnRadius:1100,trafficRenderRadius:900,viewDistanceScale:1,maxPixels:3200000,initialRenderScale:.82,minRenderScale:.68,adaptiveResolution:true};
+    // Desktop starts AT native and only gives resolution back if the frame
+    // budget is actually missed. Booting at .82 (and .68 as the floor) meant a
+    // PC that never drops a frame still spent the whole session upscaling a
+    // ~62%-linear framebuffer — the "why is it so pixelated on PC" report.
+    // maxPixels covers 1440p natively; High lifts it to 8.5 MP below.
+    return{name:'desktop-144',targetFps:144,frameIntervalMs:1000/144,hudIntervalMs:1000/30,trafficCount:56,maxTraffic:84,spawnRadius:850,despawnRadius:1100,trafficRenderRadius:900,viewDistanceScale:1,maxPixels:4200000,initialRenderScale:1,minRenderScale:.8,adaptiveResolution:true};
   }
 
   effectiveRenderScale(){
@@ -651,10 +656,21 @@ class ShutokoNights {
   updatePerformanceGovernor(frameMs,now=performance.now()){
     if(this.performanceProfile.adaptiveResolution===false)return;
     if(!this.isTouchDevice&&this.renderQuality()==='high')return;
-    if(this.mode!=='driving'||this.debug.noclip||this.debug.menuOpen||this.ui.phoneOpen||this.ui.pcOpen)return;
-    const budget=1000/this.performanceProfile.targetFps;
-    if(!Number.isFinite(frameMs)||frameMs<=0||frameMs>budget*4)return;
     const governor=this._performanceGovernor;
+    // Estimate the display's refresh interval as the SHORTEST wall-clock gap
+    // between presented frames (a min, not an average: on a machine that is
+    // genuinely late the average is the symptom, and averaging it into the
+    // budget would make the governor stop noticing). targetFps is a ceiling,
+    // not a promise — judging a frame's CPU work against 1000/144 on a 60 Hz
+    // desktop condemned it to the resolution floor while it was never late.
+    if(governor.lastFrameAt){
+      const delta=now-governor.lastFrameAt;
+      if(delta>1000/240&&delta<200)governor.displayMs=governor.displayMs?Math.min(governor.displayMs,delta):delta;
+    }
+    governor.lastFrameAt=now;
+    if(this.mode!=='driving'||this.debug.noclip||this.debug.menuOpen||this.ui.phoneOpen||this.ui.pcOpen)return;
+    const budget=Math.max(1000/this.performanceProfile.targetFps,governor.displayMs||0);
+    if(!Number.isFinite(frameMs)||frameMs<=0||frameMs>budget*4)return;
     governor.emaMs=governor.samples?governor.emaMs*.94+frameMs*.06:frameMs;
     governor.samples+=1;
     if(governor.samples<36||now-governor.lastAdjustAt<750)return;
@@ -1522,7 +1538,12 @@ class ShutokoNights {
     this._resizeTimer=setTimeout(()=>{this._resizeTimer=null;this.resize({force});},Math.max(0,delay));
   }
   applyRenderResolution(){
-    const q=this.renderQuality(),qualityScale=this.isTouchDevice?{low:.4,medium:.5,high:.62}:{low:.55,medium:.75,high:1};
+    // On desktop, Medium and High both draw at native resolution: the tiers
+    // differ in view distance, far plane, texture budget and anisotropy, and
+    // Medium keeps the adaptive governor (down to .8) as its safety net while
+    // High is locked. Stacking a .75 quality scale on top of an already-sub-1
+    // dynamic scale is what made the default (Medium) look upscaled on PC.
+    const q=this.renderQuality(),qualityScale=this.isTouchDevice?{low:.4,medium:.5,high:.62}:{low:.62,medium:1,high:1};
     const scale=(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
     const dpr=Math.min(window.devicePixelRatio||1,3);
     const viewport=this._stableViewportSize||{width:innerWidth,height:innerHeight};
@@ -1561,7 +1582,11 @@ class ShutokoNights {
     // Editor-imported textures are capped to a per-quality size so imported
     // 1000+ px images cannot blow VRAM on weak GPUs; cached textures re-upload
     // at the new cap when the player changes quality.
-    setTextureSizeBudget({low:128,medium:256,high:1024}[q]||256);
+    // Desktop draws Medium at native now, so a 256 px cap on editor-imported
+    // textures is visible as mush on signs and liveries; phones keep the tight
+    // VRAM budget they were tuned for.
+    const textureBudget=this.isTouchDevice?{low:128,medium:256,high:1024}:{low:256,medium:512,high:1024};
+    setTextureSizeBudget(textureBudget[q]||256);
     return true;
   }
   // The old PSX pass (vertex snap, 31-level posterize, nearest-filter mush) is
