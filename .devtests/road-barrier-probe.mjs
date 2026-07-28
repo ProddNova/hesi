@@ -13,7 +13,7 @@
  *
  * Run: node .devtests/road-barrier-probe.mjs
  */
-import { HighwayMap, WALL_UV_SURFACE_MATERIAL_NAMES } from '../js/map.js';
+import { HighwayMap, ROAD_TEXTURE_TILE_METERS, WALL_UV_SURFACE_MATERIAL_NAMES } from '../js/map.js';
 import { WORLD_SURFACES } from '../js/custom-assets.js';
 import BARRIER_DOC from '../data/road-barriers.js';
 import {
@@ -115,23 +115,53 @@ check('the tall wall is a single piece', tall.sheets.length === 1 && !tall.posts
 // (the old bug) can only ever produce v in {0, 1}; the 9-point profile produces
 // a spread of intermediate values.
 const screenUvs = new Set();
-let uMin = Infinity;
-let uMax = -Infinity;
+let uReach = 0;
+let runEdges = 0;
+let fastEdges = 0;
+let worstDensity = 0;
 styled.group.traverse((object) => {
   if (!object.name?.includes('barrierScreen')) return;
-  const uv = object.geometry?.attributes?.uv;
-  if (!uv) return;
+  const geometry = object.geometry;
+  const uv = geometry?.attributes?.uv;
+  const position = geometry?.attributes?.position;
+  if (!uv || !position) return;
   for (let i = 0; i < uv.count; i += 1) {
     screenUvs.add(uv.getY(i).toFixed(3));
-    uMin = Math.min(uMin, uv.getX(i));
-    uMax = Math.max(uMax, uv.getX(i));
+    uReach = Math.max(uReach, Math.abs(uv.getX(i)));
+  }
+  // u advances with world chainage: on every edge, the metres of texture it
+  // crosses match the metres of wall it covers. (u itself is anchored to the
+  // nearest whole tile per segment — an integer shift lands on the same texel
+  // and keeps the number small enough for a mobile GPU to interpolate.)
+  const index = geometry.index;
+  const cornerCount = index ? index.count : position.count;
+  for (let corner = 0; corner + 2 < cornerCount; corner += 3) {
+    const ids = [0, 1, 2].map((k) => (index ? index.getX(corner + k) : corner + k));
+    for (const [p, q] of [[0, 1], [1, 2], [2, 0]]) {
+      const du = Math.abs(uv.getX(ids[p]) - uv.getX(ids[q])) * ROAD_TEXTURE_TILE_METERS;
+      if (du < 1e-4) continue;
+      const length = Math.hypot(
+        position.getX(ids[p]) - position.getX(ids[q]),
+        position.getY(ids[p]) - position.getY(ids[q]),
+        position.getZ(ids[p]) - position.getZ(ids[q]),
+      );
+      if (length < 0.5) continue;
+      const density = du / length;
+      runEdges += 1;
+      worstDensity = Math.max(worstDensity, density);
+      if (density > 0.9) fastEdges += 1;
+    }
   }
 });
 check('wall v comes from the profile, not per-quad refitting', screenUvs.size >= 5,
   `${screenUvs.size} distinct v values: ${[...screenUvs].sort().join(', ')}`);
 check('wall v spans foot to top exactly once', screenUvs.has('0.000') && screenUvs.has('1.000'));
-check('wall u runs along the route as world chainage', uMax - uMin > 20,
-  `u ${uMin.toFixed(1)} → ${uMax.toFixed(1)} tiles`);
+// The ceiling is not 1.0 because a lay-by's square end measures u along the
+// panel the edge sweeps, not along chainage, so its upper profile points
+// advance a little faster than they travel (see _emitStyledBarrierSegment).
+check('wall u runs along the route as world chainage', runEdges > 100 && worstDensity <= 1.3 && fastEdges / runEdges > 0.5,
+  `${fastEdges}/${runEdges} edges at full chainage density, worst ${worstDensity.toFixed(3)}`);
+check('wall u stays anchored near its own segment', uReach <= 2, `peak |u| ${uReach.toFixed(2)} tiles`);
 
 // Highest vertex anywhere near the ramp centreline, ignoring the deck itself:
 // the tall screen must reach well above the 1.15 m parapet it replaced.

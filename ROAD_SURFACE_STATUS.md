@@ -266,3 +266,60 @@ Verified:
   plan curve shifts where the 1 m sampler lands on those existing bumps. The
   two `transfer jump` entries pre-exist at identical magnitudes (verified
   against a baseline run of the previous commit). No new failure class.
+
+---
+
+## Follow-up (2026-07-28) — mobile-only asphalt "confetti"
+
+Symptom: on phones the lit asphalt broke up into a stable, repeating scatter
+of light/dark specks. Desktop was clean, and the specks survived swapping the
+asphalt photograph, clearing the browser cache and switching browsers — so
+neither the image nor a stale build was the cause.
+
+Cause: road surfaces carry **world-anchored** UVs (`applyWorldSurfaceUVs`,
+`applyWallSurfaceUVs`, and the styled-barrier chainage UVs) — world metres
+divided by `ROAD_TEXTURE_TILE_METERS`. The network reaches ~26 km from the
+world origin, so those uvs ran up to **~2170**. The texel is picked by the
+*fraction*, and at that magnitude almost the whole mantissa is spent on the
+integer part before the GPU interpolates the varying. Desktop hardware has
+bits to spare; mobile GPUs do not, and `precision: 'mediump'` (half floats,
+requested for touch devices) cannot represent it at all — the coordinate
+lands on a coarse lattice and the asphalt grain quantises into repeated
+flecks.
+
+Fix:
+
+- `tileAnchoredOrigin` (js/map.js) offsets every world-anchored uv by a WHOLE
+  number of tiles taken from the geometry's own bounding box, and the styled
+  barrier/post UVs anchor their chainage the same way. An integer shift is
+  invisible — the image repeats with period 1, so the sampled texel is
+  unchanged and neighbouring meshes still differ by an exact integer, keeping
+  tiles seamless across quads, chunks and routes — but the numbers stay
+  small: peak |uv| on world-tiled meshes drops **2173 → ~26**.
+- `js/game.js` requests `precision: 'highp'` on every device. Three downgrades
+  automatically on hardware without fragment highp.
+
+Verified:
+
+- `node --test tools/hesi-editor/test/unit/road-uv-density.test.mjs`: PASS.
+  The density/continuity contract is now "world projection / tile, up to a
+  whole tile", plus a new guard that every uv stays inside its own mesh's
+  footprint (which is what fails if the anchoring is ever removed);
+- `npm run editor:test`: 162/162;
+- `node .devtests/road-surface-probe.mjs`: PASS;
+- `node .devtests/road-barrier-probe.mjs`: PASS. The per-edge u density is
+  bit-identical before and after (14180/15656 edges at full chainage
+  density, worst 1.249 on the lay-by end panel) — the anchor only shifts u by
+  an integer. The probe now measures that density directly instead of the
+  mesh-wide u span, and asserts the anchoring holds (peak |u| 94.6 → 1.16);
+- `node .devtests/confetti-probe.mjs` (new): shoots the same asphalt on
+  desktop, on an emulated phone, and on desktop with vUv forced through half
+  precision. Before the fix the half-precision pass lost the grain entirely;
+  after it, the grain survives;
+- `node .devtests/e2e.mjs`: 39/42, identical to the pre-change baseline
+  (auction-swap and HUD-overlap failures pre-date this work).
+
+Not fixed here: `chunk 6,-7` carries `marking`/`roadService`/`barrier`
+vertices at y ≈ -5692 (a ~5.7 km spike below the world, also visible in
+`.devtests/surface-verify.mjs`). It is the one mesh whose uvs still reach
+~239 because its bounding box is that tall. Separate defect.

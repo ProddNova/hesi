@@ -73,7 +73,12 @@ class ShutokoNights {
     // Desktop uses native MSAA so High has clean car silhouettes, rails and
     // one-pixel lamp posts. Touch devices retain the cheaper non-MSAA path and
     // their explicit resolution/performance budget.
-    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isTouchDevice,powerPreference:'high-performance',alpha:false,precision:this.isTouchDevice?'mediump':'highp'});
+    // Precision is highp everywhere: the road's world-anchored UVs are metres
+    // over a 26 km network, and a `mediump` (half) varying cannot carry the
+    // fraction that picks the texel — it quantises the asphalt into a lattice
+    // of repeated specks, the mobile-only "confetti". Three downgrades this
+    // automatically on hardware without fragment highp.
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isTouchDevice,powerPreference:'high-performance',alpha:false,precision:'highp'});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=DEFAULT_LIGHTING.exposure;this.renderer.shadowMap.enabled=false;
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
