@@ -14,10 +14,19 @@ import {
 // generated topology — and tiles must continue seamlessly across quads,
 // chunks, and routes. The mapping contract that guarantees both is that
 // every stored uv equals the triangle's dominant-axis world projection
-// divided by the tile size; this probe verifies exactly that, across the
-// whole generated network.
+// divided by the tile size, UP TO A WHOLE NUMBER OF TILES; this probe
+// verifies exactly that, across the whole generated network.
+//
+// The whole-tile freedom is what keeps the numbers small enough for a GPU to
+// interpolate precisely (see tileAnchoredOrigin in js/map.js). It costs the
+// contract nothing: the image repeats with period 1, so two uvs an integer
+// apart sample the identical texel, and equal world positions still land on
+// equal texels — which is what "seamless" actually means.
 
 const TILE = ROAD_TEXTURE_TILE_METERS;
+
+// Distance to the nearest whole tile: 0 when two uvs address the same texel.
+const tileOffset = (value) => Math.abs(value - Math.round(value));
 
 // The three world-anchored projection planes the mapping may use. Which one a
 // surface picks is an implementation detail (dominant axis of its connected
@@ -67,8 +76,11 @@ test('applyWorldSurfaceUVs maps any quad size and orientation at one density', (
   const matrix = new THREE.Matrix4().makeTranslation(100, 3, -40);
   applyWorldSurfaceUVs(local, matrix);
   const localUv = local.getAttribute('uv');
-  assert.ok(Math.abs(localUv.getX(0) - 98 / TILE) < 1e-5);
-  assert.ok(Math.abs(localUv.getY(0) - (-42) / TILE) < 1e-5);
+  assert.ok(tileOffset(localUv.getX(0) - 98 / TILE) < 1e-5);
+  assert.ok(tileOffset(localUv.getY(0) - (-42) / TILE) < 1e-5);
+  // ...and the anchoring actually keeps the numbers small.
+  assert.ok(Math.abs(localUv.getX(0)) < 1 && Math.abs(localUv.getY(0)) < 1,
+    'world-anchored uvs stay near the origin so a GPU can interpolate them');
   for (const geometry of [small, large, diagonal, local]) geometry.dispose();
 });
 
@@ -93,6 +105,19 @@ test('every road surface in the real network keeps one texture density and seaml
       const uv = geometry.getAttribute('uv');
       assert.ok(uv, `road mesh "${object.name}" carries UVs`);
       assert.equal(uv.count, position.count, `road mesh "${object.name}" has one uv per vertex`);
+      // Anchoring guard: a mesh's uvs stay inside its OWN footprint (plus a
+      // tile of slack), never out at the world-absolute value its position
+      // would give. Unanchored uvs run to ~2000 out at the far end of the
+      // network, which is where mobile GPUs lose the fraction that picks the
+      // texel and the asphalt breaks up into repeated specks.
+      geometry.computeBoundingBox();
+      const size = geometry.boundingBox.clone().applyMatrix4(object.matrixWorld).getSize(new THREE.Vector3());
+      const reach = Math.max(size.x, size.y, size.z) / (2 * TILE) + 1;
+      for (let vertex = 0; vertex < uv.count; vertex += 1) {
+        const magnitude = Math.max(Math.abs(uv.getX(vertex)), Math.abs(uv.getY(vertex)));
+        assert.ok(magnitude <= reach,
+          `uv ${magnitude.toFixed(1)} on "${object.name}" exceeds its own ${reach.toFixed(1)}-tile reach`);
+      }
       const index = geometry.index;
       const cornerCount = index ? index.count : position.count;
       for (let corner = 0; corner + 2 < cornerCount; corner += 3) {
@@ -112,7 +137,7 @@ test('every road surface in the real network keeps one texture density and seaml
           const v = uv.getY(indices[k]);
           const matches = new Set();
           candidatePlaneUvs(worlds[k]).forEach((candidate, plane) => {
-            if (Math.hypot(u - candidate[0], v - candidate[1]) <= 2e-3) matches.add(plane);
+            if (Math.hypot(tileOffset(u - candidate[0]), tileOffset(v - candidate[1])) <= 2e-3) matches.add(plane);
           });
           commonPlanes = commonPlanes === null ? matches : new Set([...commonPlanes].filter((plane) => matches.has(plane)));
         }

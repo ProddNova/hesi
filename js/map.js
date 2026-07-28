@@ -430,6 +430,40 @@ function mulberry32(seed) {
 }
 
 /**
+ * Whole-tile origin for one batch of world positions.
+ *
+ * World-anchored uvs are world metres / tile size, and the network reaches
+ * ~26 km from the world origin, so raw uvs run into the THOUSANDS. What picks
+ * the texel is the fraction, and a uv of 1633.xx has already spent most of a
+ * float's mantissa on the integer part before the GPU interpolates it — the
+ * rasteriser then delivers a coarse staircase instead of a smooth ramp. On
+ * desktop that residue is invisible; mobile GPUs interpolate varyings with
+ * fewer bits (and `mediump` makes it dramatically worse), which quantises the
+ * asphalt to a lattice of repeated light/dark specks — the "confetti".
+ *
+ * Subtracting a WHOLE number of tiles is free of visual consequence — the
+ * image repeats with period 1, so shifting a uv by an integer samples exactly
+ * the same texel — while keeping the numbers small and the fraction precise.
+ * Each geometry picks its own origin; neighbouring meshes then differ by an
+ * exact integer, so tiles still line up seamlessly across quad, chunk and
+ * route boundaries.
+ */
+function tileAnchoredOrigin(world, vertexCount, tileMeters) {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = world[vertex * 3 + axis];
+      if (value < min[axis]) min[axis] = value;
+      if (value > max[axis]) max[axis] = value;
+    }
+  }
+  return min.map((low, axis) => (Number.isFinite(low)
+    ? Math.round(((low + max[axis]) * 0.5) / tileMeters) * tileMeters
+    : 0));
+}
+
+/**
  * World-anchored UVs for road surfaces: every triangle is mapped by a planar
  * projection along its dominant world axis at a fixed metres-per-tile scale,
  * so the road texture keeps ONE visual density everywhere — independent of
@@ -503,11 +537,12 @@ export function applyWorldSurfaceUVs(geometry, matrixWorld = null, tileMeters = 
   }
 
   const uvArray = new Float32Array(position.count * 2);
+  const [originX, originY, originZ] = tileAnchoredOrigin(world, position.count, tileMeters);
   for (let vertex = 0; vertex < position.count; vertex += 1) {
     const [nx, ny, nz] = normalByRoot.get(find(vertex)) || [0, 1, 0];
-    const x = world[vertex * 3];
-    const y = world[vertex * 3 + 1];
-    const z = world[vertex * 3 + 2];
+    const x = world[vertex * 3] - originX;
+    const y = world[vertex * 3 + 1] - originY;
+    const z = world[vertex * 3 + 2] - originZ;
     let u;
     let v;
     if (ny >= nx && ny >= nz) { u = x; v = z; } else if (nx >= nz) { u = z; v = y; } else { u = x; v = y; }
@@ -601,12 +636,16 @@ export function applyWallSurfaceUVs(geometry, matrixWorld = null, tileMeters = R
   }
 
   const uvArray = new Float32Array(position.count * 2);
+  // Same whole-tile anchoring as the road: keeps the tiled axis' uv small and
+  // precise for the GPU without moving the image (see tileAnchoredOrigin).
+  // `v` on an upright face is already component-local, so it needs no origin.
+  const [originX, , originZ] = tileAnchoredOrigin(world, position.count, tileMeters);
   for (let vertex = 0; vertex < position.count; vertex += 1) {
     const root = find(vertex);
     const [nx, ny, nz] = normalByRoot.get(root) || [0, 1, 0];
-    const x = world[vertex * 3];
+    const x = world[vertex * 3] - originX;
     const y = world[vertex * 3 + 1];
-    const z = world[vertex * 3 + 2];
+    const z = world[vertex * 3 + 2] - originZ;
     if (ny >= nx && ny >= nz) {
       // Near-horizontal: planar, agreeing with the road/ground it meets.
       uvArray[vertex * 2] = x / tileMeters;
@@ -6733,7 +6772,12 @@ export class HighwayMap {
     // keeps the same vertical anchor whatever the grade or the terminal taper
     // does to the geometry. Both are in tile units, exactly like the projection
     // in applyWallSurfaceUVs, so the Surfaces app's metres-per-tile still works.
-    const uA = a.distance / ROAD_TEXTURE_TILE_METERS;
+    // Chainage reaches tens of kilometres, so u is anchored to the nearest
+    // whole tile for the same reason the projections are (tileAnchoredOrigin):
+    // an integer shift lands on the same texel and keeps the fraction precise
+    // on GPUs that interpolate varyings with few bits to spare.
+    const uAnchor = Math.round(a.distance / ROAD_TEXTURE_TILE_METERS);
+    const uA = a.distance / ROAD_TEXTURE_TILE_METERS - uAnchor;
     // A lay-by's square end steps the drawn edge sideways by its full depth
     // over 5 cm of chainage: the panel that closes the bay is metres long but
     // has almost no chainage span, so plain chainage-based u would squash a
@@ -6747,7 +6791,7 @@ export class HighwayMap {
     const swept = Math.hypot(footB.x - footA.x, footB.z - footA.z);
     const uB = swept > along * 1.5 + 0.25
       ? uA + swept / ROAD_TEXTURE_TILE_METERS
-      : b.distance / ROAD_TEXTURE_TILE_METERS;
+      : b.distance / ROAD_TEXTURE_TILE_METERS - uAnchor;
     const vTop = style.approximateHeight || 1;
     for (const sheet of sheets) {
       const bucket = this._bucket(mid, sheet.material);
@@ -6787,15 +6831,17 @@ export class HighwayMap {
     );
     // Baked UVs like the sheets: the post occupies its own slice of the run's
     // u, and v fills its height, so it stays in register with the wall beside
-    // it instead of squashing a whole tile onto a 12 cm face.
+    // it instead of squashing a whole tile onto a 12 cm face. u is anchored to
+    // the nearest whole tile, like the sheets it sits in register with.
+    const uAnchor = Math.round(a.distance / ROAD_TEXTURE_TILE_METERS);
     this._pushBox(
       this._bucket(mid, posts.material),
       centre,
       vec(posts.width, height, posts.depth),
       yawQuaternion(a.tangent),
       [
-        (a.distance - posts.depth * 0.5) / ROAD_TEXTURE_TILE_METERS, base / (style.approximateHeight || 1),
-        (a.distance + posts.depth * 0.5) / ROAD_TEXTURE_TILE_METERS, (base + height) / (style.approximateHeight || 1),
+        (a.distance - posts.depth * 0.5) / ROAD_TEXTURE_TILE_METERS - uAnchor, base / (style.approximateHeight || 1),
+        (a.distance + posts.depth * 0.5) / ROAD_TEXTURE_TILE_METERS - uAnchor, (base + height) / (style.approximateHeight || 1),
       ],
     );
   }
