@@ -1,14 +1,18 @@
 # PS2 FILTER STATUS — 28 Jul 2026
 
-Two changes, both aimed at the same thing: making the game look like it came off
-a PlayStation 2 rather than off a modern GPU.
+Three changes, all aimed at the same thing: making the game look like it came
+off a PlayStation 2 rather than off a modern GPU.
 
 1. **Every imported image is capped at 512×512.**
 2. **A new "filtro" panel on key 9** with pixelation, colour quantization +
    dithering, and film grain.
+3. **The tuned look is the shipped look** — the image dials are authored in the
+   test game and deployed with the site, so every visitor gets them.
 
-Probe: `node .devtests/ps2-filter-probe.mjs` — **21/21**.
-Regression: `node .devtests/vhs-car-paint-probe.mjs` — **23/23** (unchanged).
+Probes: `node .devtests/ps2-filter-probe.mjs` — **25/25**;
+`node .devtests/picture-publish-probe.mjs` — **7/7**.
+Regression: `node .devtests/vhs-car-paint-probe.mjs` — **23/23**,
+`node .devtests/texture-filtering-probe.mjs` — **6/6**, editor unit tests green.
 
 ---
 
@@ -126,3 +130,63 @@ in Hz (0 = frozen), how much it stays in the shadows, and mono ↔ colour.
 
 Touch devices have no key 9, so the debug menu (`0`, or the DBG touch button)
 carries an **APRI FILTRO** button.
+
+---
+
+## 3. The tuned look is the shipped look
+
+Before this, the image dials lived only in the player's `localStorage`: the
+author's tuning stopped at their own browser and every visitor got the code
+defaults. They now travel in `data/editor/custom-assets.json` under
+`runtimeTuning.picture`, beside the camera tuning that already worked this way.
+
+### The values that ship
+
+```
+vhsAmount 0 · motionBlur 4 · headlightBrightness 1
+cameraShake 1.4 · cameraShakePace 1.2
+filter: on · 368 lines · colour levels off · dither off (scale 4, bayer4)
+        grain 0.20 · size 2.5 · 18 Hz · shadows 100% · monochrome
+```
+
+The tape look is authored **off** (`vhsAmount 0`) — the PS2 filter carries the
+picture now. Note `settings.vhs` (the phone's on/off switch) is deliberately NOT
+published: it is in the player's settings screen, so it stays theirs.
+
+The same numbers are `PS2_FILTER_DEFAULTS` + `DEFAULT_PICTURE` in code, which is
+what a browser uses before the document has been fetched (and offline). **Keep
+the two in step** — the probe compares them against the file on disk.
+
+### Adopt-once, not adopt-always
+
+`adoptDocumentPicture()` stores a signature (`pictureSignature()`, FNV-1a over
+the record) in the save and only takes the document's values when it changes.
+
+- fresh browser → no stored signature → adopts. ✔
+- returning player with an older save → signature differs → adopts, so a deploy
+  actually reaches people who have played before. ✔
+- player tweaks a dial, reloads → signature unchanged → keeps their tweak,
+  which is the one thing a live tuning panel must do. ✔
+- new values published → signature changes → everyone takes them, once. ✔
+
+### Publishing from the test game
+
+In `?editorTest` every committed slider release calls `publishPicture()`, which
+debounces 600 ms and PUTs the whole document to `/__hesi_editor_assets` — the
+same endpoint the playground panel already used. The playground's own SAVE
+button writes the picture too, so the two routes cannot disagree. Then commit
+`data/editor/custom-assets.json` and push: Render deploys it and every client
+picks the look up on its next load.
+
+Both the editor server and `customAssetsDocumentErrors()` validate the new
+section; the game's fetch runs the latter, so a malformed picture is ignored
+rather than shipped.
+
+### The bug this uncovered
+
+`newGame()` rebuilt `admin` from the save file's own six-key admin block, which
+silently dropped every image dial. It never showed because they all defaulted to
+1 — but with the dials now carrying the authored look, NEW GAME would have
+thrown the whole picture away. There is now one `defaultAdmin()` used by both
+the constructor and `newGame()`, and `newGame()` re-adopts the published picture
+straight after.

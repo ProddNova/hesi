@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { BARRIER_MATERIALS, BARRIER_STYLES } from './road-barrier-styles.js?v=0af2d4e6d507';
-import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=0af2d4e6d507';
+import { BARRIER_MATERIALS, BARRIER_STYLES } from './road-barrier-styles.js?v=8aa9ed7e911a';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=8aa9ed7e911a';
 
 // Tatsumi No.1 PA — the walkable zone behind the lay-by gate.
 //

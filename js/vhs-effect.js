@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PS2_FILTER_DEFAULTS, normalizePS2Filter, filterAffectsImage, ditherPatternCode } from './ps2-filter.js?v=0af2d4e6d507';
+import { PS2_FILTER_DEFAULTS, normalizePS2Filter, filterAffectsImage, ditherPatternCode } from './ps2-filter.js?v=8aa9ed7e911a';
 
 /**
  * A deliberately restrained VHS pass for the night highway.

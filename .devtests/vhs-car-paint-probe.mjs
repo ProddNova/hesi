@@ -75,6 +75,19 @@ await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeo
 await page.evaluate(() => window.shutoko.exitGarage());
 await page.waitForFunction(() => window.shutoko.mode === 'driving', null, { timeout: 20000 });
 await page.waitForTimeout(2500);
+// This probe is about the tape look in isolation. The PS2 filter (key 9) ships
+// switched ON and shares this pass, so leaving it running would keep the
+// offscreen buffer alive when the tape is toggled off — correct behaviour, but
+// it would turn the buffer-release check below into a measurement of something
+// else, and its grain would move pixels between two frames meant to be equal.
+// The shipped picture also authors the tape strength down to 0 (the PS2 filter
+// carries the look now), so the amount has to be dialled back up here or the
+// artifact checks below would be measuring an intentionally blank effect.
+await page.evaluate(() => {
+  window.shutoko.setFilterEnabled(false);
+  window.shutoko.setVisualParam('vhs', 1);
+});
+await page.waitForTimeout(600);
 
 const state = await page.evaluate(() => ({
   enabled: window.shutoko.vhs?.enabled ?? null,
