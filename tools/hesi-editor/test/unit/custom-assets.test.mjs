@@ -376,7 +376,7 @@ test('applyWorldTextureOverrides tiles, tints, and restores the generated look',
   assert.ok(materials.marking.map, 'lane markings took the image');
   assert.equal(materials.road.map.magFilter, THREE.LinearFilter, 'photographic asphalt is linearly filtered');
   assert.equal(materials.road.map.minFilter, THREE.LinearMipmapLinearFilter, 'asphalt uses trilinear mip filtering');
-  assert.equal(materials.road.map.anisotropy, 4, 'asphalt stays stable at a grazing camera angle');
+  assert.equal(materials.road.map.anisotropy, 16, 'asphalt asks for every sample the GPU has at a grazing camera angle');
   assert.equal(materials.road.map.userData.hesiTextureBudgetFloor, 1024, 'mobile keeps the asphalt mip source at 1024 px');
   assert.equal(materials.marking.map.userData.hesiTextureBudgetFloor, 0, 'other editor textures retain the normal mobile budget');
   assert.equal(materials.marking.map.magFilter, THREE.NearestFilter, 'other PSX surfaces retain crisp sampling');

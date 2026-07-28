@@ -2,15 +2,17 @@
  * Road "confetti" probe.
  *
  * Shoots the same stretch of asphalt three ways:
- *   - desktop (highp varyings, what the PC shows),
- *   - phone-emulated (same code path a phone takes),
- *   - desktop with vUv forced through half precision, which is what a mobile
- *     GPU does with `precision mediump float` varyings.
+ *   - desktop (what the PC shows),
+ *   - phone-emulated (the code path a phone takes: low internal resolution,
+ *     stretched over a dense display),
+ *   - desktop with vUv forced through half precision.
  *
- * The road carries WORLD-anchored uvs (world metres / 12), so they run into
- * the thousands. Quantising those to fp16 snaps the sample point onto a
- * coarse lattice and turns the asphalt grain into a stable scatter of flecks
- * — the reported "confetti". This probe demonstrates that mechanism.
+ * It also reports the road's sampling state — texture size, anisotropy, mip
+ * bias, framebuffer vs display pixels — which is what the mobile-only speckle
+ * turned out to hinge on: a phone draws ~421 px wide and shows it across 1170,
+ * so the asphalt reaches the eye ~1.5 mip levels sharper than it can be
+ * resolved. Half precision was ruled out as the cause by this probe; the
+ * numbers it prints are the ones that matter.
  *
  * Run: node .devtests/confetti-probe.mjs
  */
@@ -129,6 +131,8 @@ for (const spec of CASES) {
       webgl2: game.renderer.capabilities.isWebGL2,
       canvas: [game.canvas.width, game.canvas.height],
       texture: t ? { w: t.image?.width, h: t.image?.height, aniso: t.anisotropy, mips: t.generateMipmaps } : null,
+      mipBias: Number(game.map._surfaceMipBias?.value?.toFixed(2)),
+      displayPx: Math.round(game.canvas.clientWidth * Math.min(window.devicePixelRatio || 1, 3)),
     };
   });
   console.log(`${spec.name}: ${JSON.stringify({ ...report, ...placement })}`);
