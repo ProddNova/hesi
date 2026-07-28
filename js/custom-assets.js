@@ -55,6 +55,7 @@ export function textureSourceUrl(record) {
 // One repeat of a road texture covers this many metres of asphalt — mirrors
 // ROAD_TEXTURE_TILE_METERS in js/map.js, which bakes the world-anchored UVs.
 export const WORLD_SURFACE_TILE_METERS = 12;
+const SMOOTH_WORLD_TEXTURE_SLOTS = new Set(['road', 'roadAlt', 'roadService']);
 
 /**
  * Every generated-map material a user can repaint, in display order.
@@ -2199,9 +2200,9 @@ export function faceTextureTransform({
  */
 export function textureFromSource(source, {
   repeat = null, fit = 'stretch', surfaceAspect = 1, flipX = false, flipY = false,
-  rotation = 0, shift = null,
+  rotation = 0, shift = null, sampling = 'pixel',
 } = {}) {
-  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY), rotation || 0, shift]);
+  const key = JSON.stringify([source, repeat, fit, Number(surfaceAspect).toFixed(5), Boolean(flipX), Boolean(flipY), rotation || 0, shift, sampling]);
   if (textureCache.has(key)) return textureCache.get(key);
   // Outside the browser (node tests) there is no image decoding: hand back a
   // bare texture object so material wiring stays testable.
@@ -2211,8 +2212,11 @@ export function textureFromSource(source, {
     const height = image?.naturalHeight || image?.videoHeight || image?.height || 1;
     const transform = faceTextureTransform({ fit, imageAspect: width / Math.max(height, 1), surfaceAspect, repeat, flipX, flipY });
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestMipmapLinearFilter;
+    const smooth = sampling === 'smooth';
+    texture.magFilter = smooth ? THREE.LinearFilter : THREE.NearestFilter;
+    texture.minFilter = smooth ? THREE.LinearMipmapLinearFilter : THREE.NearestMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = smooth ? 4 : 1;
     texture.wrapS = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.wrapT = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.repeat.set(...transform.repeat);
@@ -3165,6 +3169,12 @@ export function applyWorldTextureOverrides(materials, document) {
         shift: style.offset,
         flipX: style.flipX,
         flipY: style.flipY,
+        // Photographic asphalt contains much finer detail than a PSX prop
+        // texture. At a grazing road-camera angle, nearest sampling turns that
+        // detail into repeating dark flecks ("confetti"), especially on mobile.
+        // Keep prop/facade pixels crisp, but prefilter the three road surfaces
+        // throughout their asynchronous load as well as after it completes.
+        sampling: SMOOTH_WORLD_TEXTURE_SLOTS.has(slot) ? 'smooth' : 'pixel',
       });
     } else {
       material.map = original.map;

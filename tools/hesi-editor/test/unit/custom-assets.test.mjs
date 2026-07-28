@@ -374,6 +374,10 @@ test('applyWorldTextureOverrides tiles, tints, and restores the generated look',
   applyWorldTextureOverrides(materials, document);
   assert.ok(materials.road.map, 'road took the image');
   assert.ok(materials.marking.map, 'lane markings took the image');
+  assert.equal(materials.road.map.magFilter, THREE.LinearFilter, 'photographic asphalt is linearly filtered');
+  assert.equal(materials.road.map.minFilter, THREE.LinearMipmapLinearFilter, 'asphalt uses trilinear mip filtering');
+  assert.equal(materials.road.map.anisotropy, 4, 'asphalt stays stable at a grazing camera angle');
+  assert.equal(materials.marking.map.magFilter, THREE.NearestFilter, 'other PSX surfaces retain crisp sampling');
   assert.equal(materials.lampSodium.color.getHexString(), '00ff88', 'a tint-only slot recolours without an image');
   // Dropping the overrides puts the generated materials back exactly.
   delete document.worldTextures.road;
