@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=20260724f';
+import * as MapModule from './map.js?v=20260728a';
 import * as PhysicsModule from './physics.js?v=20260727b';
 import * as TrafficModule from './traffic.js?v=20260724g';
 import * as Data from './data.js';
@@ -17,7 +17,6 @@ import {
   carModelEntry,
   carModelTarget,
   carPaintSettings,
-  carRearLightSettings,
 } from './car-models.js';
 import { applyCarPaint, updateCarPaintLights } from './car-paint.js';
 import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js';
@@ -30,6 +29,7 @@ import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-co
 import { PlaygroundPanel, PlaygroundSystem } from './playground.js';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
+const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
 const VehiclePhysics = PhysicsModule.VehiclePhysics || PhysicsModule.default;
 const TrafficSystem = TrafficModule.TrafficSystem || TrafficModule.default;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -217,6 +217,10 @@ class ShutokoNights {
     // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
     try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';const p2HandoffDebug=params.get('p2HandoffDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',viewDistanceScale:this.effectiveViewDistanceScale(),addLighting:false,...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(p2HandoffDebug?{progressiveMergeHandoffDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    // The first resize() runs before the map exists, so seat the road's mip
+    // bias here — it is what keeps the asphalt from aliasing on the low-
+    // resolution framebuffers phones render into (see setSurfaceMipBias).
+    this.applyRenderResolution();
     this.performanceMetrics={...(this.performanceMetrics||{}),mapBuildMs:performance.now()-mapBuildStarted};
     // Live road adapter: physics substeps query fresh geometry every 1/120 s
     // (fixes the stale-clamp stuck-in-guardrail bug) and sweep the corridor
@@ -516,9 +520,8 @@ class ShutokoNights {
     this.editorCarAssets=document;this._effectiveCarCache=null;
     if(section==='settings'){
       this.physics?.changeSpec?.(this.getEffectiveCar());
-      this.refreshPlayerHeadlights();this.refreshPlayerRearLights();
+      this.refreshPlayerHeadlights();
     }else if(section==='headlights')this.refreshPlayerHeadlights();
-    else if(section==='rearLights')this.refreshPlayerRearLights();
     this.refreshPlaygroundHitbox();
   }
   refreshPlaygroundHitbox(){
@@ -1124,7 +1127,6 @@ class ShutokoNights {
     this._effectiveCarCache=null;
     if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());
     this.refreshPlayerHeadlights();
-    this.refreshPlayerRearLights();
     const result=this.traffic?.applyModelOverrides?.(document,{resolveAssetPart:this.editorCarResolver})||{models:0,settings:0,active:0};
     // Model overrides rebuild the type catalogue and its default weights.
     // Reapply the saved/admin mix so an asynchronous editor asset load cannot
@@ -1145,7 +1147,7 @@ class ShutokoNights {
   syncPlayerVisuals(){
     // There is no procedural fallback: the player anchor contains lights only,
     // while the selected PSX model is the sole visible vehicle in both scenes.
-    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=this.customCar?.object?.parent===this.playerMesh,customInGarage=this.customCar?.object?.parent===this.garage?.carDisplay,customInPa=this.customCar?.object?.parent===this.tatsumiPa?.carDisplay,onRoadVisible=chase&&customOnRoad&&this.mode==='driving';if(this.garage?.carDisplay)this.garage.carDisplay.visible=!!customInGarage;if(this.tatsumiPa?.carDisplay)this.tatsumiPa.carDisplay.visible=!!customInPa;if(this.garage?.parkedGroup)this.garage.parkedGroup.visible=false;if(this.customCar?.object)this.customCar.object.visible=onRoadVisible||(this.mode==='garage'&&customInGarage)||(this.mode==='pa'&&customInPa);if(this.playerMesh.userData.rearLights)this.playerMesh.userData.rearLights.visible=onRoadVisible;if(this.playerMesh.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=onRoadVisible&&this.headlightsOn!==false&&this.playerMesh.userData.headlightConfig?.enabled!==false;
+    if(!this.playerMesh)return;const chase=this.cameraMode==='chase',customOnRoad=this.customCar?.object?.parent===this.playerMesh,customInGarage=this.customCar?.object?.parent===this.garage?.carDisplay,customInPa=this.customCar?.object?.parent===this.tatsumiPa?.carDisplay,onRoadVisible=chase&&customOnRoad&&this.mode==='driving';if(this.garage?.carDisplay)this.garage.carDisplay.visible=!!customInGarage;if(this.tatsumiPa?.carDisplay)this.tatsumiPa.carDisplay.visible=!!customInPa;if(this.garage?.parkedGroup)this.garage.parkedGroup.visible=false;if(this.customCar?.object)this.customCar.object.visible=onRoadVisible||(this.mode==='garage'&&customInGarage)||(this.mode==='pa'&&customInPa);if(this.playerMesh.userData.headlightLenses)this.playerMesh.userData.headlightLenses.visible=onRoadVisible&&this.headlightsOn!==false&&this.playerMesh.userData.headlightConfig?.enabled!==false;
   }
   attachCustomCarVisual(){if(!this.playerMesh||!this.customCar?.object)return;const parent=(this.mode==='garage'?this.garage?.carDisplay:this.mode==='pa'?this.tatsumiPa?.carDisplay:null)||this.playerMesh;parent.add(this.customCar.object);this.customCar.object.scale.setScalar(DEFAULT_CUSTOM_CAR_SCALE);if(this.mode!=='driving')updateCarPaintLights(this.customCar.object,[]);this.syncPlayerVisuals();}
   updatePlayerPaintLights(){
@@ -1209,9 +1211,9 @@ class ShutokoNights {
   async setCustomCarModel(modelId,{persist=true,silent=false}={}){
     const next=getPSXCarModel(modelId);if(next.id===this.customCar.modelId){this.syncCustomCarControls();return;}
     const previousId=this.customCar.modelId;this.customCar.modelId=next.id;this.state.settings.customCarModel=next.id;this.state.settings.customCarVersion=1;
-    this._effectiveCarCache=null;if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());this.refreshPlayerHeadlights();this.refreshPlayerRearLights();
+    this._effectiveCarCache=null;if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());this.refreshPlayerHeadlights();
     if(persist)this.persist();this.syncCustomCarControls();
-    try{const visual=await this.loadCustomCar(next.id);if(visual&&!silent)this.ui?.toast?.(`PSXSTYLE // ${next.label.toUpperCase()}`,'amber');}catch(error){console.error('PSX car switch',error);if(this.customCar.object){this.customCar.modelId=this.customCar.object.userData.psxCarId||previousId;this.state.settings.customCarModel=this.customCar.modelId;this.customCar.status='ready';this._effectiveCarCache=null;if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());this.refreshPlayerHeadlights();this.refreshPlayerRearLights();if(persist)this.persist();this.syncCustomCarControls();}if(!silent)this.ui?.toast?.('PSXSTYLE // CAMBIO MODELLO FALLITO','red');}
+    try{const visual=await this.loadCustomCar(next.id);if(visual&&!silent)this.ui?.toast?.(`PSXSTYLE // ${next.label.toUpperCase()}`,'amber');}catch(error){console.error('PSX car switch',error);if(this.customCar.object){this.customCar.modelId=this.customCar.object.userData.psxCarId||previousId;this.state.settings.customCarModel=this.customCar.modelId;this.customCar.status='ready';this._effectiveCarCache=null;if(this.physics)this.physics.changeSpec?.(this.getEffectiveCar());this.refreshPlayerHeadlights();if(persist)this.persist();this.syncCustomCarControls();}if(!silent)this.ui?.toast?.('PSXSTYLE // CAMBIO MODELLO FALLITO','red');}
   }
   setNoclip(enabled){
     enabled=!!enabled;const input=document.getElementById('debug-noclip');if(input)input.checked=enabled;
@@ -1533,6 +1535,12 @@ class ShutokoNights {
     this.vhs?.setSize(w,h);
     this.camera.aspect=viewport.width/Math.max(1,viewport.height);this.camera.far=q==='high'?1650:q==='medium'?1350:1100;this.camera.updateProjectionMatrix();
     this.canvas.style.imageRendering='auto';
+    // The frame is drawn at `w` and stretched over `viewport.width*dpr` real
+    // pixels, so the road's mip selection is that many octaves too sharp for
+    // what the eye receives. Hand the shortfall to the map (see
+    // setSurfaceMipBias) — this is what turns the asphalt's aggregate into a
+    // regular scatter of streaks on phones, which render furthest below native.
+    this.map?.setSurfaceMipBias?.(Math.log2(Math.max(1,viewport.width*dpr)/Math.max(1,w)));
   }
   resize({force=false}={}){
     const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
@@ -1559,7 +1567,12 @@ class ShutokoNights {
   // The old PSX pass (vertex snap, 31-level posterize, nearest-filter mush) is
   // gone. This pass only normalizes textures for the clean PS2 look: bilinear
   // filtering + mipmaps + a touch of anisotropy so signs stay legible.
-  applyRetroMaterials(scene){const maxAniso=this.renderer.capabilities.getMaxAnisotropy?.()||1,targetAniso=this.renderQuality()==='high'?8:4;scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if(m.map){m.map.magFilter=THREE.LinearFilter;m.map.minFilter=THREE.LinearMipmapLinearFilter;m.map.generateMipmaps=true;m.map.anisotropy=Math.min(targetAniso,maxAniso);m.map.needsUpdate=true;}m.dithering=true;}});}
+  // The road is the exception: it is the one surface seen at a grazing angle
+  // all the way to the horizon, where 4 samples leave its aggregate aliasing
+  // into visible streaks. It gets every sample the GPU will give — anisotropy
+  // is cheap on a surface this large and this flat, and it is the difference
+  // between a road and a shimmer on a phone's low-resolution framebuffer.
+  applyRetroMaterials(scene){const maxAniso=this.renderer.capabilities.getMaxAnisotropy?.()||1,targetAniso=this.renderQuality()==='high'?8:4,roadMaterials=new Set(ROAD_SURFACE_NAMES.concat('marking').map(name=>this.map?.materials?.[name]).filter(Boolean));scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if(m.map){m.map.magFilter=THREE.LinearFilter;m.map.minFilter=THREE.LinearMipmapLinearFilter;m.map.generateMipmaps=true;m.map.anisotropy=Math.min(roadMaterials.has(m)?16:targetAniso,maxAniso);m.map.needsUpdate=true;}m.dithering=true;}});}
 
   createCarMesh(spec,player=false){
     // Physics/camera anchor only. The box-built fallback car was removed; the
@@ -1568,7 +1581,7 @@ class ShutokoNights {
     // One broad cone represents the overlapping pair of physical headlamps.
     // The two visible lamp meshes remain on the car model, but a second
     // SpotLight would duplicate almost the same per-fragment work.
-    if(player){this.playerHeadlights=[];this.attachPlayerHeadlights(g,spec);this.attachPlayerRearLights(g,spec);}
+    if(player){this.playerHeadlights=[];this.attachPlayerHeadlights(g,spec);}
     g.userData.frontWheels=[];g.userData.visualMeshes=[];return g;
   }
   _playerCarModelTarget(){
@@ -1620,38 +1633,6 @@ class ShutokoNights {
     }
     this._applyHeadlightState();
     return beamRoot;
-  }
-  attachPlayerRearLights(anchor,spec=this.getEffectiveCar()){
-    if(!anchor)return null;
-    const target=this._playerCarModelTarget();
-    const rear=carRearLightSettings(target,this.editorCarAssets);
-    if(!rear.enabled)return null;
-    const dimensions=spec.dimensions||spec.silhouette||{};
-    const length=spec.length||dimensions.length||4.35;
-    const lensGeometry=new THREE.BoxGeometry(rear.width,rear.height,rear.depth);
-    const lensMaterial=new THREE.MeshBasicMaterial({color:rear.color,toneMapped:false,fog:false,depthWrite:false});
-    const haloGeometry=new THREE.BoxGeometry(rear.width*1.65,rear.height*1.65,rear.depth*1.3);
-    const haloMaterial=new THREE.MeshBasicMaterial({color:rear.color,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,toneMapped:false,fog:false,depthWrite:false});
-    const lenses=new THREE.InstancedMesh(lensGeometry,lensMaterial,2),halos=new THREE.InstancedMesh(haloGeometry,haloMaterial,2);
-    const matrix=new THREE.Matrix4(),position=new THREE.Vector3(),quaternion=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
-    const z=length*.5-rear.inset+rear.offsetZ;
-    for(let index=0;index<2;index++){
-      position.set(rear.offsetX+(index?1:-1)*rear.spacing*.5,rear.elevation+rear.offsetY,z);
-      matrix.compose(position,quaternion,scale);
-      lenses.setMatrixAt(index,matrix);halos.setMatrixAt(index,matrix);
-    }
-    lenses.instanceMatrix.needsUpdate=halos.instanceMatrix.needsUpdate=true;
-    lenses.frustumCulled=halos.frustumCulled=false;lenses.renderOrder=halos.renderOrder=50;
-    const group=new THREE.Group();group.name='Player rear lights · unlit';group.add(lenses,halos);
-    group.userData.ownedGeometries=[lensGeometry,haloGeometry];group.userData.ownedMaterials=[lensMaterial,haloMaterial];
-    anchor.add(group);anchor.userData.rearLights=group;
-    return group;
-  }
-  refreshPlayerRearLights(){
-    const anchor=this.playerMesh;if(!anchor)return null;
-    const old=anchor.userData.rearLights;
-    if(old){old.removeFromParent();for(const geometry of old.userData.ownedGeometries||[])geometry.dispose();for(const material of old.userData.ownedMaterials||[])material.dispose();delete anchor.userData.rearLights;}
-    return this.attachPlayerRearLights(anchor,this.getEffectiveCar());
   }
   refreshPlayerHeadlights(){
     const anchor=this.playerMesh;if(!anchor)return null;
@@ -1721,7 +1702,7 @@ class ShutokoNights {
     this._effectiveCarCache=null;const spec=this.getEffectiveCar();
     this.physics?.changeSpec?.(spec);this.physics?.setCarSpec?.(spec);this.audio?.setVehicle?.(spec);
     if(this.playerMesh){
-      for(const key of['rearLights','headlightLenses']){
+      for(const key of['headlightLenses']){
         const group=this.playerMesh.userData[key];
         if(!group)continue;
         for(const geometry of group.userData.ownedGeometries||[])geometry.dispose();

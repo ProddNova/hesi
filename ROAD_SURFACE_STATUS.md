@@ -323,3 +323,55 @@ Not fixed here: `chunk 6,-7` carries `marking`/`roadService`/`barrier`
 vertices at y ≈ -5692 (a ~5.7 km spike below the world, also visible in
 `.devtests/surface-verify.mjs`). It is the one mesh whose uvs still reach
 ~239 because its bounding box is that tall. Separate defect.
+
+## Follow-up 2 (2026-07-28) — the confetti was texture filtering, not precision
+
+The uv anchoring above did not fix the phone. Two more hypotheses were tested
+and **ruled out** before measuring the artefact itself:
+
+- half-precision varyings — `.devtests/confetti-probe.mjs` forces `vUv` through
+  the fp16 lattice on desktop. It flattens the asphalt; it does not speckle it;
+- depth precision (markings at +0.055 m, additive pools on polygonOffset) —
+  `.devtests/confetti-depth-probe.mjs` drops the near plane to 0.01, thirty
+  times worse than shipped. The road stays clean, so nothing is z-fighting.
+
+Measuring the reported screenshot settled it. Autocorrelating the speckle
+inside the circled area, with the lighting gradient removed: the features are
+~4-5 px wide, decorrelate at lag 5 and trough at lag 8-9 (a ~17 px period),
+and stay correlated past lag 14 vertically. That is a **regular, directional
+pattern elongated along the road** — moire, not noise, not a lattice. At the
+screenshot's 2.78x upscale those are ~1.7 render pixels wide, spaced ~6.
+
+Cause: the GPU picks a mip from derivatives measured in FRAMEBUFFER pixels,
+but phones render far below native and let the browser stretch the result over
+the display — an iPhone 13 draws 421 px wide and shows it across 1170. Every
+texel the sampler considered correctly filtered is then magnified 2.78x, so
+the asphalt arrives ~log2(2.78) = 1.5 mip levels sharper than the display can
+resolve and its aggregate beats against the pixel grid. Desktop renders at
+0.62x (bias 0.7) on a much coarser display, which is why it never showed. It
+also explains the two earlier dead ends: a different photograph moires just as
+well, and raising the mobile texture budget to 1024 px made it *worse*.
+
+Fix:
+
+- `HighwayMap.setSurfaceMipBias` (js/map.js) adds a mip bias to the base
+  colour lookup of every planar-uv road material, through a `hesiMipBias`
+  uniform composed onto the existing `groundMurk` hook. `applyRenderResolution`
+  feeds it `log2(display px / framebuffer px)` every time the framebuffer is
+  sized, so quality changes and rotation re-tune it without a recompile:
+  **0.70 on desktop, 1.47 on an iPhone 13**;
+- road textures ask for **anisotropy 16** instead of 4 (`textureFromSource`'s
+  smooth path, and `applyRetroMaterials` no longer clamps the road back down).
+  The road is the one surface viewed edge-on to the horizon; three clamps the
+  request to the hardware maximum.
+
+Verified: `npm run editor:test` 162/162 (the custom-assets expectation moved
+4 → 16); `road-surface-probe` and `road-barrier-probe` PASS; `e2e.mjs` 39/42,
+identical to baseline; the desktop road renders unchanged — markings still
+crisp, no over-blur. `performance.mjs` reports the same pre-existing overruns
+before and after (software renderer in CI; workload p95 144 → 86 ms).
+
+Also in this pass, by request: the **player car's rear lights are removed**
+(`attachPlayerRearLights` / `refreshPlayerRearLights` and their callsites).
+Traffic keeps its own rear lights, and the editor still authors the rear-light
+settings the traffic reads.

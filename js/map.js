@@ -430,6 +430,29 @@ function mulberry32(seed) {
 }
 
 /**
+ * Adds a mip-bias term to a material's base colour lookup, composing with any
+ * hook the material already carries (the road materials also run groundMurk).
+ * `texture2D`/`texture` take a bias argument in a fragment shader on both
+ * GLSL ES 1.00 and 3.00, so this needs no per-profile branch.
+ */
+function surfaceMipBias(material, uniform) {
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previous?.call(material, shader, renderer);
+    shader.uniforms.hesiMipBias = uniform;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float hesiMipBias;')
+      .replace('#include <map_fragment>', `
+        #ifdef USE_MAP
+          diffuseColor *= texture2D( map, vMapUv, hesiMipBias );
+        #endif`);
+  };
+  // Same key for every road material, so they still share compiled programs.
+  material.customProgramCacheKey = () => 'hesiMipBias';
+  material.needsUpdate = true;
+}
+
+/**
  * Whole-tile origin for one batch of world positions.
  *
  * World-anchored uvs are world metres / tile size, and the network reaches
@@ -788,6 +811,8 @@ export class HighwayMap {
     this._visibleKey = null;
     this._lastVisibleUpdate = -Infinity;
 
+    // Shared by every road material's shader; see setSurfaceMipBias.
+    this._surfaceMipBias = { value: 0 };
     this.materials = this._createMaterials();
     this._defineNetwork();
     this._defineServiceAreas();
@@ -1048,7 +1073,32 @@ export class HighwayMap {
     for (const [name, material] of Object.entries(palette)) {
       if (!MURK_EXEMPT.has(name)) groundMurk(material);
     }
+    for (const name of PLANAR_UV_SURFACE_MATERIAL_NAMES) {
+      if (palette[name]) surfaceMipBias(palette[name], this._surfaceMipBias);
+    }
     return palette;
+  }
+
+  /**
+   * Blur the road's mip selection by `bias` levels.
+   *
+   * The GPU picks a mip from derivatives measured in FRAMEBUFFER pixels, but
+   * phones render the scene well below native and let the browser stretch the
+   * result over the display — an iPhone draws ~421 px wide and shows it across
+   * 1170. Everything the sampler considered correctly filtered is then
+   * magnified ~2.8x, so the asphalt arrives at the eye roughly 1.5 mip levels
+   * sharper than it can be resolved, and its aggregate beats against the pixel
+   * grid as a regular scatter of streaks — the reported "confetti".
+   *
+   * The bias is exactly that shortfall, log2(display px / framebuffer px), so
+   * the road is filtered for the picture the player actually sees. It is a
+   * uniform, so changing quality or rotating the phone re-tunes it without
+   * recompiling a shader.
+   */
+  setSurfaceMipBias(bias) {
+    const next = clamp(Number(bias) || 0, 0, 3);
+    if (Math.abs(next - this._surfaceMipBias.value) < 0.01) return;
+    this._surfaceMipBias.value = next;
   }
 
   /**

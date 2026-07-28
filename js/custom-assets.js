@@ -2224,7 +2224,13 @@ export function textureFromSource(source, {
     texture.magFilter = smooth ? THREE.LinearFilter : THREE.NearestFilter;
     texture.minFilter = smooth ? THREE.LinearMipmapLinearFilter : THREE.NearestMipmapLinearFilter;
     texture.generateMipmaps = true;
-    texture.anisotropy = smooth ? 4 : 1;
+    // The smooth slots are the road, seen at a grazing angle all the way to
+    // the horizon: the texel-to-pixel ratio along the view direction runs into
+    // the tens, and 4 samples leave enough of the aggregate unfiltered to
+    // alias into visible streaks. Ask for every sample the GPU has (three
+    // clamps this to the hardware maximum on upload); prop and facade
+    // textures, which are never viewed edge-on, keep the cheap path.
+    texture.anisotropy = smooth ? 16 : 1;
     texture.wrapS = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.wrapT = fit === 'cover' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.repeat.set(...transform.repeat);
