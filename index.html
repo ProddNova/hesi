@@ -12,10 +12,10 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <title>SHUTOKO NIGHTS</title>
-  <link rel="stylesheet" href="styles.css?v=20260724f">
-  <link rel="stylesheet" href="styles/dev-map.css">
-  <link rel="stylesheet" href="styles/debug-stats.css">
-  <link rel="stylesheet" href="styles/playground.css?v=20260727a">
+  <link rel="stylesheet" href="styles.css?v=391fef1c80b8">
+  <link rel="stylesheet" href="styles/dev-map.css?v=391fef1c80b8">
+  <link rel="stylesheet" href="styles/debug-stats.css?v=391fef1c80b8">
+  <link rel="stylesheet" href="styles/playground.css?v=391fef1c80b8">
   <script type="importmap">
     {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"}}
   </script>
@@ -30,7 +30,10 @@
       <div class="boot-city" aria-hidden="true"></div>
       <header class="boot-top">
         <span class="boot-sys"><i>◆</i> SHUTOKO SYSTEM MENU</span>
-        <span class="boot-ver">Ver.2.02</span>
+        <!-- The build id is stamped here by scripts/stamp-build.mjs. It exists
+             so "the deploy did not apply" is answerable by looking at the boot
+             screen instead of guessing at caches. -->
+        <span class="boot-ver">Ver.2.02 · <b id="build-id">391fef1</b></span>
         <span class="boot-clock">TOKYO 02:17 <b class="blink">● REC</b></span>
       </header>
       <div class="boot-kanji" aria-hidden="true">首都高速</div>
@@ -270,7 +273,7 @@
     </div>
   </div>
 
-  <script type="module" src="js/game.js?v=b33314be4a60"></script>
+  <script type="module" src="js/game.js?v=391fef1c80b8"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       // Whether this page was already under a worker when it loaded. On a first

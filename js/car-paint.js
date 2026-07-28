@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { textureFromSource, textureSourceUrl } from './custom-assets.js';
+import { textureFromSource, textureSourceUrl } from './custom-assets.js?v=391fef1c80b8';
 
 /**
  * Body paint applied to a finished car visual.

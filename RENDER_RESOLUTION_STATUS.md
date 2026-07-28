@@ -176,10 +176,61 @@ reloads once on that message. Three guards, because a silent reload is not free:
   player their unbanked run. That session picks the update up on its next
   natural load.
 
+---
+
+# Round 5 · The actual reason the deploy stayed invisible
+
+Round 4 was still not enough, and the reason was in `js/game.js`'s own imports:
+
+```js
+from './map.js?v=20260728a'
+from './garage.js?v=20260723b'   // changed in Round 2, stamp untouched
+from './custom-assets.js'        // the texture fix — NO ?v= at all
+```
+
+Every module carried a **hand-written per-file date**. `custom-assets.js` — the
+file holding the entire texture-filtering fix — had none, and `garage.js` kept a
+five-day-old one although it had changed. Busting `index.html` and the service
+worker did nothing, because these URLs were byte-identical to the previous
+build: the browser reused what it already had. A clean browser saw the fix
+because it had nothing to reuse. That is the whole story of "non è cambiato
+nulla".
+
+38 relative imports had no version at all.
+
+## Fix
+
+`stamp-build.mjs` now stamps **one id onto every local URL**, because a URL that
+has never been requested cannot be stale in any cache layer:
+
+- `sw.js` — the cache name (required pattern; a miss fails the build)
+- `index.html` — every local `href=`/`src=` `.css`/`.js`
+- `js/*.js` — every relative module specifier (`from './x.js'`, `import('./y.js')`)
+
+Bare specifiers are left alone: `'three'` goes through the import map to a CDN.
+
+**The build id is now visible on the boot screen** (`Ver.2.02 · 391fef1`), so
+"the deploy did not apply" is answerable by looking instead of by guessing which
+cache is holding what. Its pattern is required too — losing the label fails the
+build rather than silently removing the only way to tell what is running.
+
 ## Verification
 
-`node scripts/stamp-build.mjs` stamps both files, is a no-op on the second run,
-and honours `RENDER_GIT_COMMIT` (checked with a fake SHA). `e2e` 39/42, no new
-failures. The service-worker path itself is not covered by a probe: it needs
-https, and the local harness serves over http where `index.html` deliberately
-skips registration.
+`node scripts/stamp-build.mjs`: stamps 31 files, no-op on a second run, honours
+`RENDER_GIT_COMMIT` (checked with a fake SHA), and exits 1 when a required
+pattern is removed (checked by deleting the boot label). Query strings on module
+specifiers are resolved fine by Node, the editor server (`requestUrl.pathname`)
+and the probe harnesses (`request.url.split('?')[0]`):
+`custom-assets` unit tests 25/25, `texture-filtering-probe` 6/6, `e2e` 39/42,
+`editor-build-ops-probe` 95/99 hide ops on target (the 4 `chunk 6,-7
+box:marking` drifts are the known pre-existing ones).
+
+## Open item — `render.yaml` is not being applied
+
+The deploy of `391fef1` served `shutoko-nights-b33314be4a60`, i.e. the value
+committed locally, **not** the deployed commit. So Render never ran
+`buildCommand`: the service predates `render.yaml` and is not Blueprint-managed,
+so that file is decorative. Until the Build Command is set to
+`node scripts/stamp-build.mjs` in the Render dashboard (or the service is
+recreated from the Blueprint), **the stamp has to be run locally before
+committing** — `npm run build`.
