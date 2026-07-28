@@ -12,6 +12,10 @@
  * snapshotted before the run and restored afterwards, including on failure —
  * this writes to a file that is under version control.
  *
+ * DO NOT run this while the editor is open and saving. The snapshot/restore
+ * spans the whole run, so anything saved from the editor in that window is
+ * overwritten when this puts the original back. Close the editor first.
+ *
  * Run: node .devtests/picture-publish-probe.mjs
  */
 import { spawn } from 'node:child_process';
