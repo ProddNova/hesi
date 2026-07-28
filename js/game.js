@@ -68,6 +68,17 @@ class ShutokoNights {
   constructor(){
     this.canvas=document.getElementById('game-canvas');
     const bootParams=new URLSearchParams(location.search);this.editorTest=bootParams.has('editorTest');this.requestedPlayground=bootParams.get('playground')==='1';
+    // ?diag=... — layer isolation for reproducing a rendering artefact on a
+    // device the developer cannot attach a debugger to. Each switch removes
+    // ONE suspect from the picture, so whoever is holding the phone can say
+    // which layer the artefact lives in instead of us guessing from a photo.
+    //   native  render at the display's real pixel count (no downscale+stretch)
+    //   noroad  asphalt as flat colour, no photograph
+    //   nomark  no lane paint
+    //   nopools no sodium light pools or reflection streaks
+    //   novhs   no VHS/grain present pass
+    // Combine with commas: ?diag=noroad,novhs
+    this.diag=new Set(String(bootParams.get('diag')||'').split(',').map(entry=>entry.trim()).filter(Boolean));
     this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
     this.performanceProfile=this.createPerformanceProfile();
     // Desktop uses native MSAA so High has clean car silhouettes, rails and
@@ -217,6 +228,7 @@ class ShutokoNights {
     // disables the four Checkpoint-1 progressive records; ?paAccessLanes=1
     // restores the temporarily disabled PA access lanes (debug/screenshot A/B only)
     try{const params=typeof location!=='undefined'?new URLSearchParams(location.search):new URLSearchParams();const legacyMouths=params.get('legacyMouths')==='1';const legacyProgressiveMerges=params.get('legacyProgressiveMerges')==='1';const paAccessLanes=params.get('paAccessLanes')==='1';const p4CorridorDebug=params.get('p4CorridorDebug')==='1';const p2HandoffDebug=params.get('p2HandoffDebug')==='1';this.p4OwnershipDebug=params.get('p4OwnershipDebug')==='1';this.p4CaptureView=params.get('p4Capture');this.map=new HighwayMap(this.roadScene,{quality:this.renderQuality?.()||'medium',viewDistanceScale:this.effectiveViewDistanceScale(),addLighting:false,...(legacyMouths?{junctionMouthSurfaces:false}:{}),...(legacyProgressiveMerges?{progressiveMerges:false}:{}),...(paAccessLanes?{paAccessLanes:true}:{}),...(p4CorridorDebug?{progressiveCorridorDebug:true}:{}),...(p2HandoffDebug?{progressiveMergeHandoffDebug:true}:{}),...(this.p4OwnershipDebug?{progressiveOwnershipDebug:true,markingDebug:true}:{})});this.map.build?.();}catch(e){console.error('Map init',e);this.map=null;}
+    this.applyDiagnosticLayers();
     // The first resize() runs before the map exists, so seat the road's mip
     // bias here — it is what keeps the asphalt from aliasing on the low-
     // resolution framebuffers phones render into (see setSurfaceMipBias).
@@ -1523,13 +1535,13 @@ class ShutokoNights {
   }
   applyRenderResolution(){
     const q=this.renderQuality(),qualityScale=this.isTouchDevice?{low:.4,medium:.5,high:.62}:{low:.55,medium:.75,high:1};
-    const scale=(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
+    const scale=this.diag?.has('native')?1:(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
     const dpr=Math.min(window.devicePixelRatio||1,3);
     const viewport=this._stableViewportSize||{width:innerWidth,height:innerHeight};
     let w=Math.round(viewport.width*dpr*scale),h=Math.round(viewport.height*dpr*scale);
     // iPads have laptop-sized physical resolutions but a much smaller sustained
     // GPU/thermal budget. Cap them near 1.25 MP; desktop High remains native.
-    const maxPixels=!this.isTouchDevice&&q==='high'?Math.max(this.performanceProfile.maxPixels,8500000):this.performanceProfile.maxPixels;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    const maxPixels=this.diag?.has('native')?Infinity:!this.isTouchDevice&&q==='high'?Math.max(this.performanceProfile.maxPixels,8500000):this.performanceProfile.maxPixels;const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     if(this.canvas.width!==w||this.canvas.height!==h)this.renderer.setSize(w,h,false);
     this.vhs?.setSize(w,h);
@@ -1573,6 +1585,27 @@ class ShutokoNights {
   // is cheap on a surface this large and this flat, and it is the difference
   // between a road and a shimmer on a phone's low-resolution framebuffer.
   applyRetroMaterials(scene){const maxAniso=this.renderer.capabilities.getMaxAnisotropy?.()||1,targetAniso=this.renderQuality()==='high'?8:4,roadMaterials=new Set(ROAD_SURFACE_NAMES.concat('marking').map(name=>this.map?.materials?.[name]).filter(Boolean));scene.traverse(o=>{if(!o.material)return;for(const m of(Array.isArray(o.material)?o.material:[o.material])){if(m.map){m.map.magFilter=THREE.LinearFilter;m.map.minFilter=THREE.LinearMipmapLinearFilter;m.map.generateMipmaps=true;m.map.anisotropy=Math.min(roadMaterials.has(m)?16:targetAniso,maxAniso);m.map.needsUpdate=true;}m.dithering=true;}});}
+
+  /**
+   * Applies the ?diag= layer switches (see the constructor). Each one strips a
+   * single suspect out of the frame, and the badge names the active set so a
+   * screenshot taken on the phone says what it is showing.
+   */
+  applyDiagnosticLayers(){
+    if(!this.diag?.size)return;
+    if(this.diag.has('novhs'))this.vhs?.setEnabled?.(false);
+    const materials=this.map?.materials;
+    if(materials){
+      if(this.diag.has('noroad'))for(const name of ROAD_SURFACE_NAMES){const m=materials[name];if(m){m.map=null;m.needsUpdate=true;}}
+      const hidden=new Set();
+      if(this.diag.has('nomark'))for(const name of ['marking','amber'])if(materials[name])hidden.add(materials[name]);
+      if(this.diag.has('nopools'))for(const name of ['lightPool','lightStreak'])if(materials[name])hidden.add(materials[name]);
+      if(hidden.size)this.roadScene.traverse(o=>{if(o.material&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>hidden.has(m)))o.visible=false;});
+    }
+    let badge=document.getElementById('diag-badge');
+    if(!badge){badge=document.createElement('div');badge.id='diag-badge';badge.style.cssText='position:fixed;left:8px;bottom:8px;z-index:9999;font:600 12px/1.4 monospace;color:#0f0;background:rgba(0,0,0,.72);padding:4px 8px;border:1px solid #0f0;pointer-events:none';document.body.appendChild(badge);}
+    badge.textContent=`DIAG ${[...this.diag].join(',')}`;
+  }
 
   createCarMesh(spec,player=false){
     // Physics/camera anchor only. The box-built fallback car was removed; the

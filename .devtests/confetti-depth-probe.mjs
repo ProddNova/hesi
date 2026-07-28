@@ -52,7 +52,7 @@ await context.route('https://cdn.jsdelivr.net/**', async (route) => {
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());
 page.on('pageerror', (e) => console.error('pageerror:', String(e)));
-await page.goto(`http://127.0.0.1:${port}/`);
+await page.goto(`http://127.0.0.1:${port}/${process.env.DIAG ? `?diag=${process.env.DIAG}` : ''}`);
 await page.waitForFunction(() => window.shutoko?.map, null, { timeout: 120000 });
 await page.click('#new-game-button');
 await page.waitForFunction(() => window.shutoko?.mode === 'garage', null, { timeout: 20000 });
@@ -93,6 +93,35 @@ const biasReport = await page.evaluate(() => {
   };
 });
 console.log('mip bias:', JSON.stringify(biasReport));
+
+// Does the mip bias actually move pixels? If forcing it to 4 renders the same
+// image as 0, the shader injection is a no-op and the "fix" never reached the
+// sampler at all.
+{
+  await page.evaluate(() => {
+    const game = window.shutoko;
+    const map = game.map;
+    const route = map.getRoute('wangan_1');
+    const lane = map.sampleLane(route.id, route.length * 0.35, 0, 1);
+    if (game.debug.noclip) game.setNoclip(false);
+    game.traffic?.setDensity?.(0);
+    game.physics.setPosition(lane.position.x, lane.position.y + 0.6, lane.position.z, lane.heading);
+    game.physics.setSpeed(0);
+    map._visibleKey = null;
+    map.update(lane.position, performance.now() / 1000);
+    game.snapDrivingCamera();
+    if (game.customCar?.object) game.customCar.object.visible = false;
+  });
+  await page.waitForTimeout(600);
+  const shoot = async (bias) => {
+    await page.evaluate((b) => { window.shutoko.map._surfaceMipBias.value = b; }, bias);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    return page.screenshot({ path: join(OUT, `confetti-bias-${bias}.png`) });
+  };
+  const flat = await shoot(0);
+  const blurred = await shoot(4);
+  console.log('MIP BIAS 0 vs 4 — identical image:', Buffer.compare(flat, blurred) === 0);
+}
 
 for (const near of [0.3, 0.05, 0.01]) {
   await page.evaluate((nearPlane) => {

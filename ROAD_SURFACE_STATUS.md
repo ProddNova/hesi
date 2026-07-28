@@ -375,3 +375,37 @@ Also in this pass, by request: the **player car's rear lights are removed**
 (`attachPlayerRearLights` / `refreshPlayerRearLights` and their callsites).
 Traffic keeps its own rear lights, and the editor still authors the rear-light
 settings the traffic reads.
+
+## Follow-up 3 (2026-07-28) — stop guessing, instrument the device
+
+Three fixes have now been shipped for the mobile speckle and none of them
+landed. The reason is method, not any one hypothesis: **the artefact has never
+been observed here.** This environment renders through SwiftShader, a software
+rasteriser; the report comes from an Apple GPU. Every fix so far was inferred
+from a screenshot and shipped blind. Ruled out so far, each with a probe:
+
+| Hypothesis | Probe | Verdict |
+|---|---|---|
+| world-uv magnitude / varying precision | `confetti-probe.mjs` | ruled out — fp16 flattens the asphalt, does not speckle it |
+| depth precision, coplanar markings/pools | `confetti-depth-probe.mjs` | ruled out — clean at a near plane 30x worse |
+| mip under-filtering from the render-to-display upscale | mip bias A/B in `confetti-depth-probe.mjs` | the bias demonstrably moves pixels, so the code path works — but it did not fix the device |
+
+`?diag=` (js/game.js, `applyDiagnosticLayers`) takes one suspect out of the
+frame at a time so the person holding the phone can answer what no probe here
+can. A green badge names the active set, so a screenshot is self-documenting.
+
+| switch | removes |
+|---|---|
+| `native` | the downscale — renders at the display's real pixel count |
+| `noroad` | the asphalt photograph (flat colour deck) |
+| `nomark` | lane paint |
+| `nopools` | sodium light pools and reflection streaks |
+| `novhs` | the VHS/grain present pass |
+
+Combine with commas: `?diag=noroad,novhs`. The two that matter most:
+`?diag=native` separates "aliasing from rendering below the display" from
+everything else, and `?diag=noroad` separates the asphalt image from every
+other layer. Whichever makes the specks disappear names the culprit.
+
+Verified: `e2e.mjs` 39/42, identical to baseline; every switch boots with no
+page errors; `?diag=native` measured at canvas 900 = display 900, mip bias 0.
