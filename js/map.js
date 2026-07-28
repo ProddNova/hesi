@@ -3,12 +3,12 @@ import * as THREE from 'three';
 // as data/routes.js but with the extractor's chord-polygon noise removed in
 // XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
 // any extractor run).
-import ROUTE_DATA from '../data/routes-smoothed.js?v=03b2aeacab77';
+import ROUTE_DATA from '../data/routes-smoothed.js?v=86ad4259812b';
 // Per-route / per-side / per-chainage lateral barrier styles, authored in the
 // world editor's Barriers app (see js/road-barrier-styles.js for the catalogue
 // and the addressing rules). Routes absent from this document render the
 // shipped parapet exactly as before.
-import ROAD_BARRIER_DATA from '../data/road-barriers.js?v=03b2aeacab77';
+import ROAD_BARRIER_DATA from '../data/road-barriers.js?v=86ad4259812b';
 import {
   BARRIER_MATERIALS,
   BARRIER_MATERIAL_NAMES,
@@ -17,12 +17,12 @@ import {
   barrierStyle,
   canonicalizeBarrierDocument,
   flattenBarrierSpans,
-} from './road-barrier-styles.js?v=03b2aeacab77';
-import { BUILDING_TYPES } from './building-types.js?v=03b2aeacab77';
-import { buildProgressiveTransitions } from './progressive-merge.js?v=03b2aeacab77';
-import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js?v=03b2aeacab77';
+} from './road-barrier-styles.js?v=86ad4259812b';
+import { BUILDING_TYPES } from './building-types.js?v=86ad4259812b';
+import { buildProgressiveTransitions } from './progressive-merge.js?v=86ad4259812b';
+import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js?v=86ad4259812b';
 // The shared interaction-point look (garage, PA lot, PA road gate).
-import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=03b2aeacab77';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=86ad4259812b';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from

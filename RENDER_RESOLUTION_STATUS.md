@@ -276,3 +276,68 @@ and the tier. `showRenderInfo()` in `game.js`, filled from
 A new headless sweep across 1080p/1440p/4K at dpr 1 and 1.5 reports native on
 all five, with the on-screen string matching. `render-resolution-probe` 10/10,
 `antialias-probe` 6/6.
+
+---
+
+# Round 7 · The actual bug: a desktop on the phone profile
+
+The boot-screen readout added in Round 6 answered it on the first look:
+
+```
+Ver.2.02 · 86ad425 · 857×407 → 1920×911 · dpr 1.00 · HIGH
+```
+
+857/1920 = **0.446**, and 0.446 is exactly `0.62 × 0.72` — the **touch** quality
+scale for High times the **touch** profile's fixed `initialRenderScale`. On
+quality High, which on desktop is supposed to be locked at native. The player's
+PC was running the phone performance profile, and had been the whole time.
+
+`isTouchDevice` was:
+
+```js
+matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
+```
+
+`navigator.maxTouchPoints > 0` is true on any Windows machine with a touchscreen
+or a precision touchpad. Every probe here missed it because headless Chromium
+reports `maxTouchPoints: 0` — so all seven rounds of measurement ran on the
+desktop branch and reported "native ✓", entirely correctly, about a code path
+the player was never on.
+
+This also explains why nothing before it helped: Rounds 1 and 6 tuned desktop
+constants the player's machine never read, and Round 2's texture fix was real
+but was being resampled into a 0.446-linear frame.
+
+## Fix
+
+The flag was answering two unrelated questions. They are now separate:
+
+- **`isTouchDevice`** — *can it be touched?* Unchanged and deliberately
+  permissive: a Windows laptop with a touch panel still gets the on-screen
+  controls. Drives input only (7 call sites).
+- **`isHandheld`** — *is it a phone or a tablet?* What the performance profile
+  actually needs. Drives the profile, quality scales, `maxPixels`, texture
+  budget, MSAA, VHS samples, the governor and resize coalescing (13 call sites).
+
+`isHandheld` asks the OS first and only falls back to the pointer:
+
+```js
+appleHandheld || (!desktopOS && matchMedia('(pointer: coarse)').matches)
+```
+
+Apple handhelds are named explicitly because iPadOS presents itself as a Mac;
+Android is excluded from `desktopOS` so tablets keep the thermal profile.
+`(pointer: coarse)` alone is not sufficient — a touch panel can make it match on
+a machine that is plainly a desktop, which is exactly what the emulated case
+showed.
+
+## Verification
+
+`render-resolution-probe` — **16/16**, now including the configuration that was
+missing: `hasTouch: true, isMobile: false` at 1920×911, i.e. a Windows laptop
+with a touch panel. It reproduced the player's readout byte for byte
+(`857×407 → 1920×911 · dpr 1.00 · HIGH`) before the fix and reports
+`1920×911 ✓` after. The opposite direction is covered too — a Pixel 5 context
+must stay `isHandheld`, keep the `touch-stable` profile and stay under the
+1.25 MP ceiling — so widening the desktop test cannot quietly cost phones their
+thermal budget.

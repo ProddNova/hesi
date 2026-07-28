@@ -1,32 +1,32 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=03b2aeacab77';
-import * as PhysicsModule from './physics.js?v=03b2aeacab77';
-import * as TrafficModule from './traffic.js?v=03b2aeacab77';
-import * as Data from './data.js?v=03b2aeacab77';
-import * as SaveModule from './save.js?v=03b2aeacab77';
-import * as AudioModule from './audio.js?v=03b2aeacab77';
-import { GarageSystem } from './garage.js?v=03b2aeacab77';
-import { TatsumiPaSystem } from './tatsumi-pa.js?v=03b2aeacab77';
-import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=03b2aeacab77';
+import * as MapModule from './map.js?v=86ad4259812b';
+import * as PhysicsModule from './physics.js?v=86ad4259812b';
+import * as TrafficModule from './traffic.js?v=86ad4259812b';
+import * as Data from './data.js?v=86ad4259812b';
+import * as SaveModule from './save.js?v=86ad4259812b';
+import * as AudioModule from './audio.js?v=86ad4259812b';
+import { GarageSystem } from './garage.js?v=86ad4259812b';
+import { TatsumiPaSystem } from './tatsumi-pa.js?v=86ad4259812b';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=86ad4259812b';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js?v=03b2aeacab77';
+import { buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget } from './custom-assets.js?v=86ad4259812b';
 import {
   carHeadlightSettings,
   carHitboxSettings,
   carModelEntry,
   carModelTarget,
   carPaintSettings,
-} from './car-models.js?v=03b2aeacab77';
-import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=03b2aeacab77';
-import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=03b2aeacab77';
-import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=03b2aeacab77';
-import { GameUI } from './ui.js?v=03b2aeacab77';
-import { DeveloperMap } from './dev-map.js?v=03b2aeacab77';
-import { DebugStats } from './debug-stats.js?v=03b2aeacab77';
-import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=03b2aeacab77';
-import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=03b2aeacab77';
-import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=03b2aeacab77';
+} from './car-models.js?v=86ad4259812b';
+import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=86ad4259812b';
+import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=86ad4259812b';
+import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=86ad4259812b';
+import { GameUI } from './ui.js?v=86ad4259812b';
+import { DeveloperMap } from './dev-map.js?v=86ad4259812b';
+import { DebugStats } from './debug-stats.js?v=86ad4259812b';
+import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=86ad4259812b';
+import { cameraTuningFromDocument, normalizeCameraTuning } from './playground-config.js?v=86ad4259812b';
+import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=86ad4259812b';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
@@ -68,7 +68,32 @@ class ShutokoNights {
   constructor(){
     this.canvas=document.getElementById('game-canvas');
     const bootParams=new URLSearchParams(location.search);this.editorTest=bootParams.has('editorTest');this.requestedPlayground=bootParams.get('playground')==='1';
+    // Two different questions, conflated until 28 Jul 2026.
+    //
+    // isTouchDevice — can this machine be touched? A Windows laptop with a
+    // touchscreen can, and should get the on-screen controls, so this stays
+    // permissive.
     this.isTouchDevice=matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
+    // isHandheld — is it a phone or a tablet? That is what the performance
+    // profile actually needs to know, and `navigator.maxTouchPoints > 0` is a
+    // bad proxy for it: it is true on any Windows machine with a touchscreen
+    // or a precision touchpad. Those desktops were being put on the phone
+    // profile, where High means 0.62 (its quality scale) × 0.72 (its fixed
+    // render scale) — a 0.446-linear framebuffer stretched over the monitor.
+    // Measured on the player's PC as 857×407 presented at 1920×911, on quality
+    // HIGH, which is supposed to be locked at native. Every probe here missed
+    // it because headless Chromium reports maxTouchPoints 0.
+    //
+    // `(pointer: coarse)` alone is not enough either: a touch panel can make it
+    // match on a machine that is plainly a desktop. So ask the operating system
+    // first and only fall back to the pointer when it cannot answer. Apple
+    // handhelds are named explicitly because iPadOS presents itself as a Mac.
+    const ua=navigator.userAgent;
+    const appleHandheld=/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+    const android=/Android/i.test(ua);
+    const uaMobile=navigator.userAgentData?.mobile;
+    const desktopOS=!android&&!appleHandheld&&(uaMobile===false||/Windows NT|Macintosh|X11|CrOS/.test(ua));
+    this.isHandheld=appleHandheld||(!desktopOS&&matchMedia('(pointer: coarse)').matches);
     this.performanceProfile=this.createPerformanceProfile();
     // Desktop uses native MSAA so High has clean car silhouettes, rails and
     // one-pixel lamp posts. Touch devices retain the cheaper non-MSAA path and
@@ -78,7 +103,7 @@ class ShutokoNights {
     // fraction that picks the texel — it quantises the asphalt into a lattice
     // of repeated specks, the mobile-only "confetti". Three downgrades this
     // automatically on hardware without fragment highp.
-    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isTouchDevice,powerPreference:'high-performance',alpha:false,precision:'highp'});
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isHandheld,powerPreference:'high-performance',alpha:false,precision:'highp'});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=DEFAULT_LIGHTING.exposure;this.renderer.shadowMap.enabled=false;
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
@@ -108,7 +133,7 @@ class ShutokoNights {
     // The pass owns multisampling once it is on, so the canvas MSAA above stops
     // being the anti-aliaser. Phones keep it off: a half-float colour buffer is
     // a bandwidth cost their profile already budgets against.
-    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isTouchDevice?0:4});
+    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4});
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
     // the address bar settles. Reallocating WebGL's drawing buffer for each one
@@ -124,7 +149,7 @@ class ShutokoNights {
   }
 
   createPerformanceProfile(){
-    if(this.isTouchDevice){
+    if(this.isHandheld){
       const apple=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
       // Let requestAnimationFrame follow the display's native refresh rate on
       // mobile. targetFps remains the performance governor's quality budget;
@@ -142,7 +167,7 @@ class ShutokoNights {
   effectiveRenderScale(){
     // High is an image-quality promise on desktop: the adaptive 144-fps
     // governor must not silently turn it into a 68-82% internal framebuffer.
-    return !this.isTouchDevice&&this.renderQuality?.()==='high'?1:this._dynamicRenderScale;
+    return !this.isHandheld&&this.renderQuality?.()==='high'?1:this._dynamicRenderScale;
   }
   effectiveViewDistanceScale(){return this.performanceProfile.viewDistanceScale*(.65+.35*this.effectiveRenderScale());}
 
@@ -277,7 +302,7 @@ class ShutokoNights {
     // the transient tile-memory budget of mobile GPUs and present a black
     // canvas while WebGL recovers. Phones use the stable visible-chunk path;
     // resources stream normally as the player approaches them.
-    if(this.isTouchDevice){
+    if(this.isHandheld){
       this.performanceMetrics={...(this.performanceMetrics||{}),prewarmMs:0,prewarmed:{skipped:'mobile-stable-rendering'}};
       return;
     }
@@ -634,7 +659,7 @@ class ShutokoNights {
       // a simple integer divisor.
       if(this._lastPresentedAt){
         const elapsed=now-this._lastPresentedAt;
-        const tolerance=this.isTouchDevice?.8:.9;
+        const tolerance=this.isHandheld?.8:.9;
         if(elapsed<frameInterval*tolerance)return;
         this._lastPresentedAt=elapsed>=frameInterval?now-(elapsed%frameInterval):now;
       }else this._lastPresentedAt=now;
@@ -655,7 +680,7 @@ class ShutokoNights {
   finishFrameProf(frameStart){const pf=this.frameProf;pf.total=performance.now()-frameStart;pf.other=Math.max(0,pf.total-pf.phys-pf.traffic-pf.map-pf.render-pf.persist);this.debugStats?.frame(pf);this.updatePerformanceGovernor(pf.total);}
   updatePerformanceGovernor(frameMs,now=performance.now()){
     if(this.performanceProfile.adaptiveResolution===false)return;
-    if(!this.isTouchDevice&&this.renderQuality()==='high')return;
+    if(!this.isHandheld&&this.renderQuality()==='high')return;
     const governor=this._performanceGovernor;
     // Estimate the display's refresh interval as the SHORTEST wall-clock gap
     // between presented frames (a min, not an average: on a machine that is
@@ -674,7 +699,7 @@ class ShutokoNights {
     governor.emaMs=governor.samples?governor.emaMs*.94+frameMs*.06:frameMs;
     governor.samples+=1;
     if(governor.samples<36||now-governor.lastAdjustAt<750)return;
-    const target=budget*(this.isTouchDevice?.84:.88);
+    const target=budget*(this.isHandheld?.84:.88);
     let next=this._dynamicRenderScale;
     if(governor.emaMs>target*1.02){
       const severity=governor.emaMs/target;
@@ -703,7 +728,7 @@ class ShutokoNights {
     // render(); instance matrices already contain world-space traffic poses.
     this.roadScene.matrixWorldAutoUpdate=false;
   }
-  updateMobileFPS(now){if(!this.isTouchDevice)return;const meter=this.mobileFPS;meter.frames++;const elapsed=now-meter.startedAt;if(elapsed<500)return;this.ui.updateFPS(meter.frames*1000/elapsed);meter.frames=0;meter.startedAt=now;}
+  updateMobileFPS(now){if(!this.isHandheld)return;const meter=this.mobileFPS;meter.frames++;const elapsed=now-meter.startedAt;if(elapsed<500)return;this.ui.updateFPS(meter.frames*1000/elapsed);meter.frames=0;meter.startedAt=now;}
   updateBoot(){const t=performance.now()*.00004;const center=this.map?.initialSpawn?.position||{x:0,y:8,z:0};this.camera.position.set(center.x+Math.cos(t)*45,24,center.z+Math.sin(t)*45);this.camera.lookAt(center.x,5,center.z);}
   updateGarage(dt){
     this.makeDeliveriesReady();this.garage.update(dt,this.getWalkInput(),this.getPCContext());
@@ -1543,7 +1568,7 @@ class ShutokoNights {
     // Medium keeps the adaptive governor (down to .8) as its safety net while
     // High is locked. Stacking a .75 quality scale on top of an already-sub-1
     // dynamic scale is what made the default (Medium) look upscaled on PC.
-    const q=this.renderQuality(),qualityScale=this.isTouchDevice?{low:.4,medium:.5,high:.62}:{low:.62,medium:1,high:1};
+    const q=this.renderQuality(),qualityScale=this.isHandheld?{low:.4,medium:.5,high:.62}:{low:.62,medium:1,high:1};
     const scale=(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
     const dpr=Math.min(window.devicePixelRatio||1,3);
     const viewport=this._stableViewportSize||{width:innerWidth,height:innerHeight};
@@ -1557,7 +1582,7 @@ class ShutokoNights {
     // pixelated". Desktop now carries the 8.5 MP headroom on every tier, and
     // the adaptive governor — which exists for precisely this — takes the frame
     // rate back if the GPU cannot hold it.
-    const maxPixels=this.isTouchDevice?this.performanceProfile.maxPixels:Math.max(this.performanceProfile.maxPixels,8500000);const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    const maxPixels=this.isHandheld?this.performanceProfile.maxPixels:Math.max(this.performanceProfile.maxPixels,8500000);const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     if(this.canvas.width!==w||this.canvas.height!==h)this.renderer.setSize(w,h,false);
     this.vhs?.setSize(w,h);
@@ -1585,7 +1610,7 @@ class ShutokoNights {
   resize({force=false}={}){
     const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
     const previous=this._stableViewportSize||current;
-    if(this.isTouchDevice&&!force){
+    if(this.isHandheld&&!force){
       const orientationChanged=(current.width>=current.height)!==(previous.width>=previous.height);
       const widthChanged=Math.abs(current.width-previous.width)>Math.max(32,previous.width*.12);
       const majorHeightChanged=Math.abs(current.height-previous.height)>Math.max(220,previous.height*.35);
@@ -1605,7 +1630,7 @@ class ShutokoNights {
     // rather than point-sampled, so the cap is what limits how much of a
     // 1000-1600 px import actually survives. Medium matches High; phones keep
     // the tight VRAM budget they were tuned against a real thermal envelope.
-    const textureBudget=this.isTouchDevice?{low:128,medium:256,high:1024}:{low:512,medium:1024,high:1024};
+    const textureBudget=this.isHandheld?{low:128,medium:256,high:1024}:{low:512,medium:1024,high:1024};
     setTextureSizeBudget(textureBudget[q]||256);
     return true;
   }
