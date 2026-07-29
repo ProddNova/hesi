@@ -7472,34 +7472,6 @@ export class HighwayMap {
   }
 
   /**
-   * True when a deck passes overhead close enough that a `height` metre
-   * lamppost planted at `base` would stab through it — the Tatsumi PA slab, or
-   * another carriageway flying over this one. The lamp walk skips those
-   * stations rather than planting a pole through a soffit.
-   */
-  _lampHeadObstructed(base, route, height = 9.9) {
-    if (this._tatsumiClearingArea === undefined) {
-      this._tatsumiClearingArea = this.serviceAreas?.find((area) => area.id === 'tatsumi_pa') || null;
-    }
-    const deck = this._tatsumiClearingArea;
-    if (deck) {
-      const rise = (deck.elevation ?? deck.center?.y ?? 0) - base.y;
-      if (rise > 1 && rise < height && this._insideTatsumiClearing(base, 1.2)) return true;
-    }
-    for (const { route: other, index, distSq } of this._candidateRoutes(base).values()) {
-      if (other === route) continue;
-      const reach = other.halfWidth + 30;
-      if (distSq > reach * reach) continue;
-      const projection = this._projectToRoute(other, base, index);
-      if (projection.endOvershoot > 2) continue;
-      if (Math.abs(projection.signedLateral) > this._halfWidthAt(other, projection.distance) + 1.2) continue;
-      const rise = projection.point.y - base.y;
-      if (rise > 1 && rise < height) return true;
-    }
-    return false;
-  }
-
-  /**
    * Sodium lampposts: tapered pole + curved arm + luminaire (one merged
    * instanced geometry), an emissive lens, an additive ground pool and a
    * stretched wet-reflection streak (hidden on Low quality).
