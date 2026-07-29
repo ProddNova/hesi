@@ -70,6 +70,21 @@ class ShutokoNights {
   constructor(){
     this.canvas=document.getElementById('game-canvas');
     const bootParams=new URLSearchParams(location.search);this.editorTest=bootParams.has('editorTest');this.requestedPlayground=bootParams.get('playground')==='1';
+    // ?diag=native — draw at the display's real pixel count on a handheld.
+    //
+    // A phone never renders at native: qualityScale in applyRenderResolution is
+    // .4/.5/.62, so even High draws ~38% of the pixels and stretches the result
+    // over the screen. Desktop Medium and High both draw at 1.0. That is the
+    // one structural difference left between the two, and the speckling on the
+    // road has only ever been reported on the phone. setSurfaceMipBias exists
+    // to compensate for exactly this shortfall and did not settle it.
+    //
+    // This switch removes the variable instead of compensating for it, so the
+    // answer is a yes/no rather than a fourth inference from a screenshot: if
+    // the specks survive at native, sub-native rendering is not the cause and
+    // the whole resolution/filtering family is finally dead. Diagnostic only —
+    // absent from the URL, nothing here runs. Expect a low frame rate.
+    this.diagNative=(bootParams.get('diag')||'').split(',').includes('native');
     // Two different questions, conflated until 28 Jul 2026.
     //
     // isTouchDevice — can this machine be touched? A Windows laptop with a
@@ -1780,7 +1795,10 @@ class ShutokoNights {
     // High is locked. Stacking a .75 quality scale on top of an already-sub-1
     // dynamic scale is what made the default (Medium) look upscaled on PC.
     const q=this.renderQuality(),qualityScale=this.isHandheld?{low:.4,medium:.5,high:.62}:{low:.62,medium:1,high:1};
-    const scale=(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
+    // ?diag=native bypasses BOTH the quality scale and the adaptive governor —
+    // the governor would immediately claw the resolution back down on a phone
+    // and quietly reintroduce the variable this switch exists to remove.
+    const scale=this.diagNative?1:(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
     const dpr=Math.min(window.devicePixelRatio||1,3);
     const viewport=this._stableViewportSize||{width:innerWidth,height:innerHeight};
     let w=Math.round(viewport.width*dpr*scale),h=Math.round(viewport.height*dpr*scale);
@@ -1793,7 +1811,10 @@ class ShutokoNights {
     // pixelated". Desktop now carries the 8.5 MP headroom on every tier, and
     // the adaptive governor — which exists for precisely this — takes the frame
     // rate back if the GPU cannot hold it.
-    const maxPixels=this.isHandheld?this.performanceProfile.maxPixels:Math.max(this.performanceProfile.maxPixels,8500000);const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    // The handheld cap is a thermal limit, so it too has to stand aside for the
+    // diagnostic — leaving it in place would clamp the frame back below native
+    // on exactly the devices the question is about.
+    const maxPixels=this.diagNative?Infinity:this.isHandheld?this.performanceProfile.maxPixels:Math.max(this.performanceProfile.maxPixels,8500000);const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     if(this.canvas.width!==w||this.canvas.height!==h)this.renderer.setSize(w,h,false);
     this.vhs?.setSize(w,h);
@@ -1816,7 +1837,10 @@ class ShutokoNights {
     const node=document.getElementById('render-info');if(!node)return;
     const displayW=Math.round(viewport.width*dpr),displayH=Math.round(viewport.height*dpr);
     const native=w===displayW&&h===displayH;
-    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}`;
+    // Naming the switch on the boot screen makes a photo of it self-documenting:
+    // "specks are still there" is only an answer if the frame was actually
+    // native when it was taken, and the ✓ above is what proves it.
+    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}${this.diagNative?' · DIAG:NATIVE':''}`;
   }
   resize({force=false}={}){
     const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
