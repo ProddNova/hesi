@@ -139,6 +139,27 @@ test('install completes on a phone-sized quota by reclaiming the previous build 
   assert.ok(core.size > 30, `core should be populated, got ${core.size} entries`);
 });
 
+test('a deploy that reused the previous cache name still replaces its contents', async () => {
+  // The stamp is only as reliable as the deploy running it. render.yaml's
+  // buildCommand runs stamp-build, but a Render service that is not
+  // Blueprint-managed ignores render.yaml entirely — and the committed CACHE
+  // has in fact sat several commits behind main. install must not assume the
+  // name changed; it runs because the worker bytes changed, which is enough.
+  const fetchImpl = async (request) => makeResponse(`fresh:${request.url}`, 10);
+  const cacheStorage = mockCacheStorage({ fetchImpl });
+
+  const sameName = await cacheStorage.open(cacheName); // identical id, stale contents
+  await sameName.put(new Request('https://x/data/editor/custom-assets.json'), makeResponse('OLD MANIFEST', 10));
+
+  const worker = loadWorker({ cacheStorage, fetchImpl });
+  await worker.install();
+
+  const entries = cacheStorage.__raw.get(cacheName);
+  const manifest = entries.get('https://x/data/editor/custom-assets.json');
+  assert.equal(manifest, undefined, 'the stale manifest must not survive an install under the same name');
+  assert.ok(entries.size > 30, 'and the core is repopulated from the network');
+});
+
 test('install survives a file that fails to fetch', async () => {
   // addAll() was all-or-nothing: one flaky request aborted the whole update.
   const fetchImpl = async (request) => (request.url.includes('traffic.js')

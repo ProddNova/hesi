@@ -12,7 +12,7 @@
 // install/activate run: it re-fetches CORE from the network and deletes the old
 // cache. This was a manual bump until 28 Jul 2026, which meant it was sometimes
 // simply forgotten.
-const CACHE = 'shutoko-nights-aa56cc4f53cb';
+const CACHE = 'shutoko-nights-e1e7b1f036d9';
 const CORE = [
   './', './index.html', './styles.css', './styles/dev-map.css', './styles/debug-stats.css', './styles/playground.css', './manifest.webmanifest', './icon.svg', './fonts/shutoko-signal-regular.woff2', './fonts/shutoko-signal-bold.woff2', './fonts/shutoko-signal-display.woff2',
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
@@ -39,9 +39,9 @@ const isHttpCachedAsset = request => new URL(request.url).pathname.includes('/da
 // cache and re-fetches.
 const isBuildScopedAsset = request => new URL(request.url).pathname.includes('/3d/PSXStyleCars-DevEdition/');
 
-const deleteOtherCaches = async () => {
+const deleteCaches = async (keep = null) => {
   const keys = await caches.keys();
-  await Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)));
+  await Promise.all(keys.filter(key => key !== keep).map(key => caches.delete(key)));
 };
 
 self.addEventListener('install', event => {
@@ -55,7 +55,16 @@ self.addEventListener('install', event => {
     // the old build indefinitely (old textures) while desktop, with quota to
     // spare, updated normally. Purging first makes the update fit. The outgoing
     // worker is network-first, so it keeps serving from the network meanwhile.
-    await deleteOtherCaches();
+    //
+    // Purges EVERY cache, including one that already carries this build's name.
+    // The name is only as fresh as the last stamp, and the stamp is only as
+    // reliable as the deploy running it: at the time of writing the committed
+    // CACHE was four commits behind main, so those deploys reused a name and
+    // this handler would have kept exactly the entries it needs to replace.
+    // install runs when the worker BYTES change, which a real deploy does even
+    // when the id does not — so purging unconditionally is what makes an update
+    // land without depending on the stamp being correct.
+    await deleteCaches();
     const cache = await caches.open(CACHE);
     // Per-file rather than addAll(): addAll is all-or-nothing, so one flaky
     // request on a phone aborted the entire install and postponed the update
@@ -70,7 +79,7 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     // Install already purged; this catches anything a worker that installed
     // concurrently may have left behind.
-    deleteOtherCaches()
+    deleteCaches(CACHE)
       .then(() => self.clients.claim())
       // Claiming the page does not re-run the modules it already loaded from
       // the previous worker, so without this the deploy needs one more manual
