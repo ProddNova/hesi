@@ -52,7 +52,7 @@ const check = (name, pass, detail = '') => {
   console.log(`${pass ? 'PASS' : 'FAIL'} · ${name}${detail ? ` · ${detail}` : ''}`);
 };
 
-async function boot(query) {
+async function boot(query, { turnVhsOff = false } = {}) {
   // A real phone context: coarse primary pointer, no fine pointer, touch — the
   // inputs isHandheldDevice keys on (see .devtests/device-profile.test.mjs).
   const context = await browser.newContext({ ...devices['iPhone 13'] });
@@ -74,8 +74,9 @@ async function boot(query) {
   await page.waitForFunction(() => window.shutoko?.map, null, { timeout: 60000 });
   // High is the tier that gets closest to native on its own (.62), so it is the
   // strictest backdrop for the claim that only the switch reaches 1.0.
-  const measured = await page.evaluate(() => {
+  const measured = await page.evaluate((vhsOff) => {
     window.shutoko.changeSetting('quality', 'high');
+    if (vhsOff) window.shutoko.changeSetting('vhs', false);
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     return {
       handheld: window.shutoko.isHandheld,
@@ -85,8 +86,14 @@ async function boot(query) {
       displayWidth: Math.round(window.innerWidth * dpr),
       displayHeight: Math.round(window.innerHeight * dpr),
       badge: document.getElementById('render-info')?.textContent || '',
+      // The post pass is the other half of the question: it carries the
+      // 368-line resample, the grain, and the only MSAA asymmetry in the
+      // renderer (4× on desktop, 0 on a handheld).
+      hasPass: !!window.shutoko.vhs,
+      passActive: window.shutoko.vhs?.active?.() ?? false,
+      filterAffects: window.shutoko.vhs?.filter?.pixelLines ?? null,
     };
-  });
+  }, turnVhsOff);
   await context.close();
   return { ...measured, errors };
 }
@@ -109,8 +116,33 @@ check('the thermal pixel cap stands aside too',
   `${(on.width * on.height / 1e6).toFixed(2)} MP vs ${(off.width * off.height / 1e6).toFixed(2)} MP`);
 check('the boot readout names the switch, so a photo is self-documenting',
   on.badge.includes('DIAG:NATIVE') && on.badge.includes('✓'), on.badge.trim());
-check('no console errors', on.errors.length === 0 && off.errors.length === 0,
-  [...on.errors, ...off.errors].slice(0, 2).join(' · '));
+// --- ?diag=nofilter ---------------------------------------------------------
+// The post pass survives ?diag=native, so ruling out sub-native rendering did
+// not rule out the picture the player actually sees.
+check('the post pass runs by default', off.hasPass && off.passActive,
+  `pass=${off.hasPass} active=${off.passActive} pixelLines=${off.filterAffects}`);
+
+// The claim that motivated adding a switch at all: a player who turns the VHS
+// filter off in Settings still gets the pass, because active() stays true while
+// filterAffectsImage(filter) is — and pixelLines:368 keeps it true.
+const vhsOff = await boot('', { turnVhsOff: true });
+check('the in-game VHS toggle CANNOT remove it — the shipped filter keeps it alive',
+  vhsOff.passActive === true,
+  `VHS off, pass still active=${vhsOff.passActive} (pixelLines=${vhsOff.filterAffects})`);
+
+const noFilter = await boot('?diag=nofilter');
+check('?diag=nofilter removes the pass entirely',
+  noFilter.hasPass === false,
+  `pass=${noFilter.hasPass} — render() falls back to renderer.render()`);
+check('and names itself on the boot readout',
+  noFilter.badge.includes('DIAG:NOFILTER'), noFilter.badge.trim());
+check('nofilter leaves the render resolution alone (one variable at a time)',
+  noFilter.width === off.width && noFilter.height === off.height,
+  `${noFilter.width}×${noFilter.height} vs ${off.width}×${off.height}`);
+
+check('no console errors', on.errors.length === 0 && off.errors.length === 0
+  && noFilter.errors.length === 0 && vhsOff.errors.length === 0,
+  [...on.errors, ...off.errors, ...noFilter.errors].slice(0, 2).join(' · '));
 
 await browser.close();
 server.close();
