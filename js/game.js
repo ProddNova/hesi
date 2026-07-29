@@ -28,6 +28,8 @@ import { DeveloperMap } from './dev-map.js?v=aa56cc4f53cb';
 import { DebugStats } from './debug-stats.js?v=aa56cc4f53cb';
 import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=aa56cc4f53cb';
 import { cameraTuningFromDocument, normalizeCameraTuning, DEFAULT_PICTURE, normalizePicture, pictureFromDocument, pictureSignature, setDocumentPicture } from './playground-config.js?v=aa56cc4f53cb';
+import { applyHudTheme, copyHudProfile, defaultHudTheme, detectHudDevice, hudThemeFromDocument, hudThemeFromPreset, hudThemeSignature, HUD_DEVICE_QUERY, normalizeHudTheme, resetHudSection, setDocumentHudTheme, setHudField } from './hud-theme.js?v=aa56cc4f53cb';
+import { HudEditor } from './hud-editor.js?v=aa56cc4f53cb';
 import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=aa56cc4f53cb';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
@@ -114,9 +116,9 @@ class ShutokoNights {
     this.lastService=null;this.contactCooldown=0;this.ghostTimer=0;this.crash={active:false,timer:0};this.cameraMode='chase';this.camPos=new THREE.Vector3();this.camLook=new THREE.Vector3();this.camVehiclePos=new THREE.Vector3();this.camVehiclePosValid=false;this.camShake=0;this.camShakeTime=0;
     this.mobileFPS={startedAt:performance.now(),frames:0};
     // menuOpen means "a dev overlay owns the screen" — the driving update, the
-    // touch controls and pointer lock all read it. debugOpen/filterOpen say
-    // WHICH one, because the two panels are mutually exclusive.
-    this.debug={menuOpen:false,debugOpen:false,filterOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
+    // touch controls and pointer lock all read it. debugOpen/filterOpen/hudEditorOpen say
+    // WHICH one, because the panels are mutually exclusive.
+    this.debug={menuOpen:false,debugOpen:false,filterOpen:false,hudEditorOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
     // On-foot mode: step out of the car anywhere (G), walk in first person, and
     // step back in when close. The car and world freeze while walking.
     this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
@@ -133,6 +135,7 @@ class ShutokoNights {
     // a bandwidth cost their profile already budgets against.
     this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
     this.setupFilterMenu();
+    this.setupHudEditor();
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
     // the address bar settles. Reallocating WebGL's drawing buffer for each one
@@ -163,7 +166,9 @@ class ShutokoNights {
     return{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,
       trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficSpeed:1,
       vhsAmount:DEFAULT_PICTURE.vhsAmount,motionBlur:DEFAULT_PICTURE.motionBlur,headlightBrightness:DEFAULT_PICTURE.headlightBrightness,
-      cameraShake:DEFAULT_PICTURE.cameraShake,cameraShakePace:DEFAULT_PICTURE.cameraShakePace,ps2Filter:{...PS2_FILTER_DEFAULTS}};
+      cameraShake:DEFAULT_PICTURE.cameraShake,cameraShakePace:DEFAULT_PICTURE.cameraShakePace,ps2Filter:{...PS2_FILTER_DEFAULTS},
+      // The shipped interface, i.e. exactly what styles.css says on its own.
+      hudTheme:defaultHudTheme()};
   }
 
   createPerformanceProfile(){
@@ -216,6 +221,12 @@ class ShutokoNights {
     // A save written before the filter existed (or by hand) carries anything at
     // all here; normalize once, on load, so nothing downstream has to guard.
     this.admin.ps2Filter=normalizePS2Filter(this.admin.ps2Filter);
+    // Same treatment for the interface, and applied here rather than in
+    // setupHudEditor: the loading screen is on screen right now, and it is one
+    // of the things the theme owns. Waiting for the editor to be built would
+    // mean the player's own theme arrives after the screen it restyles.
+    this.admin.hudTheme=normalizeHudTheme(this.admin.hudTheme);
+    this.refreshHudTheme();
     this.cameraMode=this.state.settings.camera||'chase';this.persist();
   }
 
@@ -383,6 +394,7 @@ class ShutokoNights {
       const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'');
       if((e.code==='Digit0'||e.code==='Numpad0')&&!typing&&!e.repeat){e.preventDefault();this.toggleDebugMenu();return;}
       if((e.code==='Digit9'||e.code==='Numpad9')&&!typing&&!e.repeat){e.preventDefault();this.toggleFilterMenu();return;}
+      if((e.code==='Digit8'||e.code==='Numpad8')&&!typing&&!e.repeat){e.preventDefault();this.toggleHudEditor();return;}
       if(e.code==='KeyM'&&!typing&&!e.repeat){e.preventDefault();this.toggleDevMap();return;}
       if(e.code==='KeyI'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggle();return;}
       if(e.code==='KeyP'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggleRecording();return;}
@@ -514,6 +526,9 @@ class ShutokoNights {
     // straight back onto the published picture, which the loaded document
     // already carries (state is new, so nothing has been adopted yet).
     this.admin=this.defaultAdmin();this._applyPictureToRuntime();this.adoptDocumentPicture(this.editorCarAssets);this.applyTrafficAdmin?.();
+    // The interface goes back the same way: shipped defaults first, then the
+    // published theme if the loaded document carries one.
+    this.refreshHudTheme();this.adoptDocumentHudTheme(this.editorCarAssets);
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
   }
 
@@ -872,22 +887,23 @@ class ShutokoNights {
     visualRange('debug-shake-amount','shake');visualRange('debug-shake-pace','shakePace');this.syncVisualControls();
     document.getElementById('debug-close')?.addEventListener('click',()=>this.toggleDebugMenu(false));
     document.getElementById('debug-open-filter')?.addEventListener('click',()=>this.setFilterMenuOpen(true));
+    document.getElementById('debug-open-hud')?.addEventListener('click',()=>this.setHudEditorOpen(true));
     document.getElementById('debug-rec-toggle')?.addEventListener('click',()=>this.debugStats?.toggleRecording());
     document.getElementById('debug-rec-mark')?.addEventListener('click',()=>this.debugStats?.mark('debug menu'));
     document.querySelectorAll('[data-debug-hitbox]').forEach(input=>input.addEventListener('change',()=>this.setDebugHitbox(input.dataset.debugHitbox,input.checked)));
     document.getElementById('debug-hitboxes-all')?.addEventListener('click',()=>{const inputs=[...document.querySelectorAll('[data-debug-hitbox]')],enable=inputs.some(input=>!input.checked);for(const input of inputs){input.checked=enable;this.setDebugHitbox(input.dataset.debugHitbox,enable);}});
   }
   toggleDebugMenu(force){
-    const open=typeof force==='boolean'?force:!this.debug.debugOpen;this.debug.debugOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.setFilterMenuOpen(false);this.syncTrafficControls();this.syncVisualControls();this.syncCustomCarControls();}
+    const open=typeof force==='boolean'?force:!this.debug.debugOpen;this.debug.debugOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.setFilterMenuOpen(false);this.setHudEditorOpen(false);this.syncTrafficControls();this.syncVisualControls();this.syncCustomCarControls();}
     this._syncOverlayState();
   }
   /**
-   * Both dev panels sit in the middle of the screen and both freeze the drive,
-   * so opening one closes the other. Everything that used to key off
-   * `debug.menuOpen` still works because this recomputes it from the two.
+   * All three dev panels sit in the middle of the screen and all three freeze
+   * the drive, so opening one closes the others. Everything that keys off
+   * `debug.menuOpen` still works because this recomputes it from the three.
    */
   _syncOverlayState(){
-    const open=this.debug.debugOpen||this.debug.filterOpen;this.debug.menuOpen=open;
+    const open=this.debug.debugOpen||this.debug.filterOpen||this.debug.hudEditorOpen;this.debug.menuOpen=open;
     this.keys={};this.pressed.clear();this.releaseTouchInput?.();
     if(open)document.exitPointerLock?.();else if(this.debug.noclip&&!this.isTouchDevice)this.requestDronePointerLock();
   }
@@ -1008,7 +1024,7 @@ class ShutokoNights {
     this.debug.filterOpen=open;
     this.filterMenu?.classList.toggle('hidden',!open);
     this.filterMenu?.setAttribute('aria-hidden',String(!open));
-    if(open){this.toggleDebugMenu(false);this.syncFilterControls();}
+    if(open){this.toggleDebugMenu(false);this.setHudEditorOpen(false);this.syncFilterControls();}
     this._syncOverlayState();
   }
   /**
@@ -1059,6 +1075,150 @@ class ShutokoNights {
     }
     const pattern=document.getElementById('filter-dither-pattern');
     if(pattern&&document.activeElement!==pattern)pattern.value=filter.ditherPattern;
+  }
+  // ---------------------------------------------------------------------
+  // EDITOR HUD // 8 — the interface editor (js/hud-theme.js owns the model,
+  // js/hud-editor.js owns the panel). Everything the player reads is a CSS
+  // custom property on <html>: palette, fonts, the four HUD corners, the
+  // keitai, the market terminal, the loading screen and the boot menu, with a
+  // separate set of numbers for PC and for phone.
+  //
+  // Two behaviours are worth knowing before reading the code:
+  //
+  //  - The panel previews the profile it is editing. The phone HUD has to be
+  //    authorable from a PC, so while the editor is open the *edited* profile's
+  //    properties are on the document and closing it puts the real one back.
+  //  - A theme is a player setting first (it lives in the runtime save) and a
+  //    publishable one second: in the editor test game it also goes into
+  //    custom-assets.json, exactly like the picture, and every client adopts a
+  //    published revision once.
+  // ---------------------------------------------------------------------
+  setupHudEditor(){
+    const root=document.getElementById('hud-editor');
+    if(!root)return;
+    this.hudEditor=new HudEditor({
+      root,
+      getTheme:()=>this.admin.hudTheme,
+      getActiveDevice:()=>detectHudDevice(),
+      onField:(key,value,options)=>this.setHudThemeField(key,value,options),
+      onPreset:name=>this.applyHudThemePreset(name),
+      onResetSection:(sectionId,device)=>this.resetHudThemeSection(sectionId,device),
+      onResetAll:()=>this.resetHudTheme(),
+      onCopyProfile:(from,to)=>this.copyHudThemeProfile(from,to),
+      onImport:theme=>this.importHudTheme(theme),
+      onEditDevice:()=>this.refreshHudTheme(),
+      onClose:()=>this.setHudEditorOpen(false),
+      toast:(message,tone)=>this.ui?.toast?.(message,tone),
+    });
+    // The live profile is decided by a media query, so it can change with no
+    // reload at all: a tablet rotating, or a desktop window dragged under
+    // 700px. Re-apply, or the properties would keep describing a layout the
+    // stylesheet has already stopped using.
+    try{matchMedia(HUD_DEVICE_QUERY).addEventListener('change',()=>this.refreshHudTheme());}
+    catch(error){console.warn('HUD profile watch unavailable',error);}
+  }
+  toggleHudEditor(force){this.setHudEditorOpen(typeof force==='boolean'?force:!this.debug.hudEditorOpen);}
+  setHudEditorOpen(open){
+    open=!!open;
+    if(open===this.debug.hudEditorOpen)return;
+    this.debug.hudEditorOpen=open;
+    this.hudEditor?.setOpen(open);
+    if(open){this.toggleDebugMenu(false);this.setFilterMenuOpen(false);}
+    this.refreshHudTheme();
+    this._syncOverlayState();
+  }
+  /** Which profile's numbers belong on the document right now (see above). */
+  hudThemeDevice(){return this.debug?.hudEditorOpen&&this.hudEditor?this.hudEditor.device:detectHudDevice();}
+  /** Pushes the theme onto <html> and pulls the panel's controls back in step. */
+  refreshHudTheme(){applyHudTheme(this.admin.hudTheme,{device:this.hudThemeDevice()});this.hudEditor?.sync();}
+  setHudThemeField(key,value,{commit=true,device='desktop'}={}){
+    this.admin.hudTheme=setHudField(this.admin.hudTheme,key,value,device);
+    this._commitHudTheme(commit);
+  }
+  applyHudThemePreset(name){
+    const theme=hudThemeFromPreset(name);
+    if(!theme)return;
+    this.admin.hudTheme=theme;
+    this._commitHudTheme(true);
+    this.ui?.toast?.(`HUD // PRESET ${name.toUpperCase()}`,'amber');
+  }
+  resetHudThemeSection(sectionId,device=null){
+    this.admin.hudTheme=resetHudSection(this.admin.hudTheme,sectionId,device);
+    this._commitHudTheme(true);
+    this.ui?.toast?.(`HUD // ${String(sectionId).toUpperCase()} RIPRISTINATA`,'amber');
+  }
+  resetHudTheme(){
+    this.admin.hudTheme=defaultHudTheme();
+    this._commitHudTheme(true);
+    this.ui?.toast?.('HUD // INTERFACCIA ORIGINALE','amber');
+  }
+  copyHudThemeProfile(from,to){
+    this.admin.hudTheme=copyHudProfile(this.admin.hudTheme,from,to);
+    this._commitHudTheme(true);
+    this.ui?.toast?.(`HUD // ${String(from).toUpperCase()} → ${String(to).toUpperCase()}`,'amber');
+  }
+  /**
+   * Installs a pasted theme. It goes through the same normalizer as every other
+   * path, so hand-edited JSON can only produce values the panel could also have
+   * produced; anything unknown is dropped rather than carried.
+   */
+  importHudTheme(theme){
+    if(!theme||typeof theme!=='object'){this.ui?.toast?.('TEMA HUD NON VALIDO','red');return false;}
+    this.admin.hudTheme=normalizeHudTheme(theme);
+    this._commitHudTheme(true);
+    this.ui?.toast?.('TEMA HUD APPLICATO','amber');
+    return true;
+  }
+  _commitHudTheme(commit){
+    this.refreshHudTheme();
+    if(!commit)return;
+    this.debugStats?.event('hud_theme_changed',{signature:hudThemeSignature(this.admin.hudTheme),device:this.hudThemeDevice()});
+    this.persist();this.publishHudTheme();
+  }
+  /**
+   * Takes a published interface — but only once per published revision, for the
+   * same reason as the picture: adopting on every boot would stop the panel from
+   * holding a value across a reload, and adopting never would make publishing
+   * pointless. See adoptDocumentPicture.
+   */
+  adoptDocumentHudTheme(document){
+    const theme=hudThemeFromDocument(document);
+    if(!theme)return false;
+    const revision=hudThemeSignature(theme);
+    if(this.state.hudThemeRevision===revision)return false;
+    this.state.hudThemeRevision=revision;
+    this.admin.hudTheme=theme;
+    this.refreshHudTheme();
+    this.persist();
+    return true;
+  }
+  /**
+   * Writes the theme back into the editor document. Test game only — it is the
+   * build the editor serves, so this is the one place where restyling the HUD
+   * while driving becomes what everybody downloads. Debounced, because the
+   * document carries the car textures and is megabytes wide.
+   */
+  publishHudTheme({immediate=false}={}){
+    if(!this.editorTest)return;
+    clearTimeout(this._hudThemePublishTimer);
+    this._hudThemePublishTimer=setTimeout(()=>{this._hudThemePublishTimer=null;this._publishHudThemeNow();},immediate?0:600);
+  }
+  async _publishHudThemeNow(){
+    const document=this.editorCarAssets||blankCustomAssetsDocument();
+    const theme=setDocumentHudTheme(document,this.admin.hudTheme);
+    this.editorCarAssets=document;
+    // Record the revision being published so the next boot sees the document as
+    // already adopted rather than as new values to take again.
+    this.state.hudThemeRevision=hudThemeSignature(theme);this.persist();
+    try{
+      const response=await fetch('/__hesi_editor_assets',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({document})});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok||!payload.ok)throw new Error(payload.error||`HTTP ${response.status}`);
+      this.ui?.toast?.('HUD SALVATO // custom-assets.json','amber');
+    }catch(error){
+      console.warn('HUD theme publish',error);
+      this.ui?.toast?.(`SALVATAGGIO HUD FALLITO // ${error.message}`,'red');
+    }
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
   updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}
@@ -1369,6 +1529,7 @@ class ShutokoNights {
     this.editorCarAssets=document;
     this.cameraTuning=cameraTuningFromDocument(document);
     this.adoptDocumentPicture(document);
+    this.adoptDocumentHudTheme(document);
     if(this.playgroundPanel?.document!==document)this.playgroundPanel?.setDocument(document);
     this.editorCarResolver=createRuntimeAssetPartResolver(document,this.map);
     // Player hitbox and light settings live beside its Modeler shape. Rebuild

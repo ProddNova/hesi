@@ -119,6 +119,16 @@ function validateCustomAssetsDocument(document) {
   // on fetch. This is the shape gate on the way in.
   if (document.runtimeTuning?.picture !== undefined && !isRecord(document.runtimeTuning.picture)) throw new Error('runtimeTuning.picture must be an object');
   if (document.runtimeTuning?.picture?.filter !== undefined && !isRecord(document.runtimeTuning.picture.filter)) throw new Error('runtimeTuning.picture.filter must be an object');
+  // Same shape gate for the published interface theme (HUD editor, key 8). The
+  // field-level ranges live in js/hud-theme.js hudThemeDocumentErrors, which the
+  // game runs on fetch; the server stays dependency-free.
+  if (document.runtimeTuning?.hud !== undefined) {
+    if (!isRecord(document.runtimeTuning.hud)) throw new Error('runtimeTuning.hud must be an object');
+    for (const [scope, values] of Object.entries(document.runtimeTuning.hud)) {
+      if (!['shared', 'desktop', 'mobile'].includes(scope)) throw new Error(`runtimeTuning.hud.${scope} is unknown`);
+      if (!isRecord(values)) throw new Error(`runtimeTuning.hud.${scope} must be an object`);
+    }
+  }
   const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
   for (const id of Object.keys(document.assets)) {
     if (forbidden.has(id) || !/^custom:[a-z0-9][a-z0-9_-]{0,80}$/i.test(id)) throw new Error(`Invalid custom asset id: ${id}`);

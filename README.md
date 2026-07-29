@@ -26,6 +26,7 @@ You can also create a **Static Site** manually with an empty build command and `
 - Recover: R
 - Garage: WASD + mouse, E interact, Esc release pointer/exit screens
 - Diagnostics: `I` toggles the performance HUD, `P` starts/stops a structured recording (JSON download + clipboard summary), and `O` adds a manual marker
+- Dev panels: `0` debug menu, `9` PS2 picture filter, `8` HUD editor — palette, fonts, HUD layout, phone, PC terminal and loading screen, with separate PC and phone profiles (`HUD_EDITOR_STATUS.md`). On touch all three are reachable from the on-screen `DBG` button.
 - Mobile driving: on-screen steering, pedals, handbrake, camera, gears, phone and reset
 - Mobile garage: on-screen movement, drag the right side to look, USE to interact
 - Admin unlock: enter `1997` in the phone Admin app
