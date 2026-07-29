@@ -62,6 +62,8 @@ await page.evaluate(() => window.shutoko.exitGarage());
 await page.waitForFunction(() => window.shutoko.mode === 'driving', null, { timeout: 5000 });
 
 const spots = [
+  { name: 'ramp8-pa-approach', route: 'ramp_8', frac: 0.40 },
+  { name: 'ramp8-pa-bay', route: 'ramp_8', frac: 0.50 },
   { name: 'wangan-straight', route: 'wangan', frac: 0.2 },
   { name: 'tatsumi-underdeck', route: 'wangan_0', frac: 0.0303 },
   { name: 'k1-industrial', route: 'k1', frac: 0.5 },

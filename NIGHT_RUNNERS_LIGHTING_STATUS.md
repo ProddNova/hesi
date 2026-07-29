@@ -499,3 +499,74 @@ Two earlier attempts at the same request are now redundant, and one is reverted:
 
 Shots: `node .devtests/building-shots.mjs` → `.devtests/shots/buildings-murk2-*.png`
 (c1-canyon and k1-works are the ones that carry it).
+
+---
+
+# Both kerbs, and the lamps the Tatsumi clearing ate (2026-07-29)
+
+Two reports: the ramps around the Tatsumi PA (ramp_8 above all) had stretches
+with no lampposts at all, and on the normal carriageways the lamps only ever
+stood on **one** side of the road.
+
+## What was actually happening
+
+- **One kerb.** `_queueRouteDetails` alternated the lamp side only when
+  `route.bidirectional` — and no route in this world is bidirectional, so every
+  carriageway resolved to `side = 1` and lit a single edge for its whole length.
+- **The Tatsumi hole, part 1.** The PA bay on `ramp_8` is a lay-by, so the drawn
+  edge the pole rides swings ~10 m outward — straight onto the PA deck, where
+  the clearing zero-scales anything standing in the footprint. The poles beside
+  the PA were tombstoned.
+- **The Tatsumi hole, part 2 (the big one).** `_instance` tested the clearing by
+  padding the deck rectangle with **half the instance's longest axis, used as a
+  radius**. A lamp's ground pool is a ~13 × 84 m ribbon, so that padding was
+  42 m in every direction: every pool and streak within 42 m of the slab died,
+  including the ones lying on ramp_8 twenty metres to the side that never touch
+  the deck. That is what left ~200 m of the ramp pitch black.
+
+## Changes (`js/map.js`)
+
+- `_queueRouteLamps(route, mirror)` — the lamp walk lifted out of
+  `_queueRouteDetails` verbatim, with `mirror` flipping it to the opposite kerb.
+  `_decalSagClearance` came out with it (the tunnel dressing shares it).
+- `_buildMirrorSideLamps()` — second row, run from `_buildWorld` **after every
+  other instancing pass**, the same index discipline as `_buildInfill` and
+  `_buildLaybyDressing`: it only appends to the instance buckets, so no index a
+  saved editor edit addresses can move. Folding it into the first walk would
+  have shifted roughly half the world's instanced indices.
+- The mirror row's ground pool is `0.6 ×` width at `0.42 ×` brightness
+  (`MIRROR_LAMP_POOL_WIDTH` / `MIRROR_LAMP_POOL_GAIN`). The first row's pool
+  already reaches across the carriageway; two full-strength additive pools stack
+  to clipped white. Together they land ~1.4 × the old peak — brighter, still
+  sodium.
+- `_lampHeadObstructed()` — the mirror row alone may skip a station where a deck
+  passes overhead within the 9.26 m pole (the Wangan pair under the PA slab, or
+  any flyover). The first row may move a pole but never drop one: its instance
+  count is frozen by the editor saves that address it.
+- `_tatsumiClearingBlocks()` replaces the radius test: the instance's oriented
+  box is projected onto the deck's own axes, so a decal only dies when it
+  genuinely reaches onto the slab. The cheap circle test still rejects the whole
+  world first; only instances near the deck pay for the exact one.
+- Lamp mounting retreats from the lay-by edge to the through-lane edge when the
+  drawn edge would put the pole inside the clearing — the ramp_8 poles now stand
+  on the ramp's own kerb instead of vanishing.
+
+## Measured
+
+`node .devtests/lamp-coverage-probe.mjs [--verbose]`
+
+- 4177 lampposts on the first kerb, 4057 on the mirror kerb (a station is
+  skipped where the pole would stand in another carriageway or under a deck).
+- Routes with no lamps at all: four 86–160 m ramp stubs whose **both** kerbs sit
+  inside a neighbouring carriageway. Correct — a pole there would be inside the
+  road next door.
+- Saved editor instance ops: 95 still on target, 4 drifted, 1 unresolved —
+  **identical to the numbers before this change**; the drift predates it.
+- Live instances standing inside the Tatsumi clearing: 0. The deck is still an
+  empty slab.
+- World build time and frame time unchanged within noise (the mirror pass is
+  ~0.45 s of a ~13 s build; the additive pools measured ~1 % of frame time under
+  software rasterization).
+
+Shots: `node .devtests/lighting-probe.mjs <tag>` — the `ramp8-pa-approach` and
+`ramp8-pa-bay` spots were added to frame the reported hole.

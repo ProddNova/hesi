@@ -65,6 +65,12 @@ const TMP_SURF_F = new THREE.Vector3();
 const TMP_SURF_U = new THREE.Vector3();
 const TMP_SURF_R = new THREE.Vector3();
 const TMP_MAT = new THREE.Matrix4();
+// Unit axes + scratch vector for projecting an instance's oriented box onto the
+// Tatsumi deck frame (see _tatsumiClearingBlocks).
+const TMP_X = new THREE.Vector3(1, 0, 0);
+const TMP_Y = new THREE.Vector3(0, 1, 0);
+const TMP_Z = new THREE.Vector3(0, 0, 1);
+const TMP_AXIS = new THREE.Vector3();
 const EPSILON = 1e-5;
 
 const LANE_W = 3.55;
@@ -80,6 +86,13 @@ const SERVICE_DASH_PERIOD = 14;
 // Denser broken line marking a merge/exit boundary through junction zones.
 const ZONE_DASH_LENGTH = 3.0;
 const ZONE_DASH_PERIOD = 6;
+// Second (opposite-kerb) lamp row. Its poles and lenses are identical to the
+// first row's; only the ground decal is scaled back, because the first row's
+// pool already reaches across the carriageway and two full-strength additive
+// pools stacked on the same asphalt clip to white instead of reading sodium.
+// Together they land around 1.4x the old peak — brighter, still amber.
+const MIRROR_LAMP_POOL_WIDTH = 0.6;
+const MIRROR_LAMP_POOL_GAIN = 0.42;
 // ------------------------------------------------------------------
 // Emergency lay-bys (非常駐車帯 / piazzole di sosta d'emergenza)
 //
@@ -5542,13 +5555,46 @@ export class HighwayMap {
       && Math.abs(across) <= area.width * 0.5 + padding;
   }
 
+  /**
+   * Does an instance's actual footprint overlap the Tatsumi clearing?
+   *
+   * The old test padded the rectangle by half the instance's LONGEST axis and
+   * treated that as a radius. On a compact prop that is close enough, but a
+   * lamp's ground pool is a ~13 x 84 m ribbon: 42 m of padding zeroed every
+   * pool within 42 m of the deck IN ANY DIRECTION, including the ones lying on
+   * ramp_8 twenty metres to the side, which never touch the deck at all. That
+   * is what left the ramp beside the PA dark for 200 m.
+   *
+   * Project the instance's oriented box onto the deck's own axes instead, so a
+   * decal is only killed when it genuinely reaches onto the slab. The cheap
+   * circle test still runs first and rejects the whole world in one comparison;
+   * only the handful of instances near the deck pay for the exact one.
+   */
+  _tatsumiClearingBlocks(position, scale, quaternion) {
+    const sx = Math.abs(scale.x); const sy = Math.abs(scale.y); const sz = Math.abs(scale.z);
+    if (!this._insideTatsumiClearing(position, (sx + sy + sz) * 0.5)) return false;
+    const area = this._tatsumiClearingArea;
+    if (!area) return false;
+    if (!quaternion) return this._insideTatsumiClearing(position, Math.max(sx, sz) * 0.5);
+    let alongReach = 0;
+    let acrossReach = 0;
+    for (const [axis, half] of [[TMP_X, sx * 0.5], [TMP_Y, sy * 0.5], [TMP_Z, sz * 0.5]]) {
+      TMP_AXIS.copy(axis).applyQuaternion(quaternion);
+      alongReach += half * Math.abs(TMP_AXIS.x * area.tangent.x + TMP_AXIS.z * area.tangent.z);
+      acrossReach += half * Math.abs(TMP_AXIS.x * area.normal.x + TMP_AXIS.z * area.normal.z);
+    }
+    const dx = position.x - area.center.x;
+    const dz = position.z - area.center.z;
+    return Math.abs(dx * area.tangent.x + dz * area.tangent.z) <= area.length * 0.5 + alongReach
+      && Math.abs(dx * area.normal.x + dz * area.normal.z) <= area.width * 0.5 + acrossReach;
+  }
+
   _instance(position, scale, quaternion = null, color = null, type = 'box:concrete') {
     const key = this._chunkKey(position.x, position.z);
     if (!this._chunkInstances.has(key)) this._chunkInstances.set(key, new Map());
     const types = this._chunkInstances.get(key);
     if (!types.has(type)) types.set(type, []);
-    const footprintPadding = Math.max(Math.abs(scale.x), Math.abs(scale.z)) * 0.5;
-    const suppressed = this._suppressServiceAreaObjects || this._insideTatsumiClearing(position, footprintPadding);
+    const suppressed = this._suppressServiceAreaObjects || this._tatsumiClearingBlocks(position, scale, quaternion);
     types.get(type).push({
       position: position.clone(),
       // Tatsumi is deliberately an entirely empty paved deck. Keep zero-scale
@@ -5806,6 +5852,9 @@ export class HighwayMap {
     this._buildLaybyDressing();
     this._buildZoneEntrances();
     this._buildTerrain();
+    // Dead last among the instancing passes, for the same index reason as the
+    // two above: the opposite-kerb lamp row only APPENDS to its buckets.
+    this._buildMirrorSideLamps();
     this._finalizeChunks();
     // Built last and outside the index-sensitive chunk buckets.
     this._buildTatsumiUnderdeckPools();
@@ -7357,6 +7406,210 @@ export class HighwayMap {
     return offsets;
   }
 
+  /**
+   * A ground decal is a PLANE; the road also curves VERTICALLY. Orienting the
+   * quad to the local surface fixes constant grade, but through a sag (valley)
+   * the deck rises away at both ends and the plane's tips still bury themselves
+   * in the asphalt — depth-occluded, which is the same hard straight light/dark
+   * line as the flat-quad case. Probe the deck at both ends of the decal and
+   * return the extra lift that clears its own local sag. Two curve samples per
+   * decal at BUILD time; the result is baked into the instance matrix, so there
+   * is no runtime cost at all. Capped: a soft additive glow floating a few
+   * centimetres reads as nothing, a hard black line reads as a bug.
+   */
+  _decalSagClearance(route, centerFrame, tangent, atDistance, lateral, length) {
+    const planeRise = tangent.y / Math.max(EPSILON, tangent.length());
+    const baseY = this._deckPoint(centerFrame, lateral, 0).y;
+    let sag = 0;
+    for (const end of [-0.5, 0.5]) {
+      const span = end * length;
+      const endDistance = atDistance + span;
+      if (endDistance < 0 || endDistance > route.length) continue;
+      const endCenter = this._sampleCenter(route, endDistance, 1);
+      const endFrame = {
+        position: endCenter.position, tangent: endCenter.baseTangent,
+        normal: horizontalNormal(endCenter.baseTangent), bank: this._bankAt(route, endDistance),
+        route, distance: endDistance,
+      };
+      sag = Math.max(sag, this._deckPoint(endFrame, lateral, 0).y - (baseY + planeRise * span));
+    }
+    return Math.min(0.4, sag);
+  }
+
+  /**
+   * True when a deck passes overhead close enough that a `height` metre
+   * lamppost planted at `base` would stab through it — the Tatsumi PA slab, or
+   * another carriageway flying over this one. Only the second (mirror) lamp row
+   * consults this: the first row's instance COUNT is frozen by the editor saves
+   * that address it by index, so it may move a pole but never drop one.
+   */
+  _lampHeadObstructed(base, route, height = 9.9) {
+    if (this._tatsumiClearingArea === undefined) {
+      this._tatsumiClearingArea = this.serviceAreas?.find((area) => area.id === 'tatsumi_pa') || null;
+    }
+    const deck = this._tatsumiClearingArea;
+    if (deck) {
+      const rise = (deck.elevation ?? deck.center?.y ?? 0) - base.y;
+      if (rise > 1 && rise < height && this._insideTatsumiClearing(base, 1.2)) return true;
+    }
+    for (const { route: other, index, distSq } of this._candidateRoutes(base).values()) {
+      if (other === route) continue;
+      const reach = other.halfWidth + 30;
+      if (distSq > reach * reach) continue;
+      const projection = this._projectToRoute(other, base, index);
+      if (projection.endOvershoot > 2) continue;
+      if (Math.abs(projection.signedLateral) > this._halfWidthAt(other, projection.distance) + 1.2) continue;
+      const rise = projection.point.y - base.y;
+      if (rise > 1 && rise < height) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Sodium lampposts: tapered pole + curved arm + luminaire (one merged
+   * instanced geometry), an emissive lens, an additive ground pool and a
+   * stretched wet-reflection streak (hidden on Low quality).
+   *
+   * Night-runners lighting: the pool is large and soft, sized to OVERLAP its
+   * neighbours so the road reads as a continuous warm ribbon rather than a
+   * string of isolated circles, and it is thrown across the near lanes toward
+   * the centreline instead of only lighting the pole base. Deterministic
+   * per-lamp jitter (length/width/offset/rotation/brightness, seeded by
+   * distance) breaks up the mechanical "perfect circle" repetition. This adds
+   * no draw calls, geometries or lights — the instanced planes are simply
+   * bigger and individually tinted.
+   *
+   * Every carriageway here is one-way, so the original single row stood on one
+   * kerb only and the far edge ran unlit. `mirror` re-runs the identical walk
+   * on the OPPOSITE edge so both sides of both roads carry a lamp row. It is a
+   * separate pass (see _buildMirrorSideLamps) purely for index safety, and it
+   * differs from the first row in two ways:
+   *
+   *  - its ground pool is narrower and dimmer, because the first row's pool
+   *    already washes most of the deck: two full-strength additive pools stack
+   *    into a blown-out white ribbon instead of a warm sodium one;
+   *  - it may skip a station outright (overhead deck, see _lampHeadObstructed),
+   *    which the first row must never do.
+   */
+  _queueRouteLamps(route, mirror = false) {
+    const isService = route.kind === 'service';
+    const isRamp = route.kind === 'ramp';
+    const lampStep = isService ? 55 : (isRamp ? 70 : 42);
+    const halfTurn = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI);
+    // Cheap deterministic hash -> [0,1) so every rebuild lays the same jitter.
+    const lampNoise = (seed) => {
+      let h = (Math.floor(seed) * 374761393 + 668265263) >>> 0;
+      h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    };
+    const poolSodium = new THREE.Color(0xff8a2e);
+    const tmpColor = new THREE.Color();
+    const tmpAxis = new THREE.Vector3();
+    let lampSide = 1;
+    for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
+      const center = this._sampleCenter(route, distance, 1);
+      const half = this._halfWidthAt(route, distance);
+      if (this._isTunnel(route, distance)) continue;
+      const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
+      // Same frame, but carrying the route/station _deckPoint needs to apply the
+      // progressive-junction deck offset. Without them that term silently
+      // evaluates to 0, so through a merge/diverge transition the light decals
+      // were pinned to the UNADJUSTED centreline while the asphalt beneath them
+      // had eased onto the host plane — the decal cut into the deck and left the
+      // same hard light/dark line. Only the ground decals use this: the lamppost
+      // and lens instances keep their original positions so saved editor edits,
+      // which address instances by index and verify by matrix, cannot move.
+      const deckFrame = { ...frame, route, distance };
+      const rowSide = route.bidirectional ? (lampSide *= -1) : 1;
+      const side = mirror ? -rowSide : rowSide;
+      // Pole and lens ride the DRAWN edge (a lay-by carries them outward with
+      // its parapet); the pools below stay sized/offset off the through-lane
+      // half-width, so the light ribbon over the running lanes is unchanged.
+      let mountHalf = this._edgeHalfAt(route, distance, side);
+      let base = this._deckPoint(frame, side * (mountHalf - 0.62), 0.01);
+      // Tatsumi PA: the deck is a deliberately empty paved rectangle, and
+      // _instance zero-scales anything standing inside its footprint. On ramp_8
+      // the PA bay IS a lay-by, so the drawn edge swings ~10 m out ONTO the deck
+      // and the lamp riding it vanished. Retreat to the through-lane edge there:
+      // the pole (and the decals that follow it) stands on the ramp's own kerb,
+      // clear of the slab, instead of disappearing.
+      if (mountHalf > half && this._insideTatsumiClearing(base, 0.6)) {
+        const retreat = this._deckPoint(frame, side * (half - 0.62), 0.01);
+        if (!this._insideTatsumiClearing(retreat, 0.6)) { mountHalf = half; base = retreat; }
+      }
+      if (this._barrierSuppressed(base, route, !!this._laybyAt(route, distance, side))) continue;
+      if (mirror && this._lampHeadObstructed(base, route)) continue;
+      // local +X of the lamp geometry maps to -normal under yawQuaternion;
+      // mirror with a half turn for the other edge so the arm reaches the road
+      const quaternion = yawQuaternion(center.baseTangent);
+      if (side < 0) quaternion.multiply(halfTurn);
+      this._instance(base, vec(1, 1, 1), quaternion, null, 'lamppost:concrete');
+      const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
+      lens.y = base.y + 9.26;
+      this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
+
+      const jL = lampNoise(distance);
+      const jW = lampNoise(distance * 1.7 + 41);
+      const jY = lampNoise(distance * 2.3 + 7);
+      // Pool: length comfortably exceeds the lamp spacing so consecutive pools
+      // overlap into one continuous ribbon (no dark gaps); width reaches across
+      // the near lanes; offset pushes its body over the road toward the
+      // centreline instead of only lighting the pole base.
+      // Pool SIZE stays keyed to the through-lane half-width (the ribbon over
+      // the running lanes is what it exists for), but its offset is measured
+      // from the DRAWN edge like the pole it belongs to: a lamp carried 10 m
+      // out onto a lay-by parapet would otherwise leave its own pool behind on
+      // the lanes — a bright patch with no lamp over it, and a lamp with no
+      // light under it. The pool's overhang past the deck edge is unchanged
+      // either way (it is +0.1x its width in both cases).
+      const poolLen = lampStep * (1.2 + jL * 0.2);
+      const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19) * (mirror ? MIRROR_LAMP_POOL_WIDTH : 1);
+      const poolOffset = side * (mountHalf - poolWidth * 0.4) + (jW - 0.5) * 1.6;
+      // The pool is a big flat quad; the deck is banked AND graded. Orient it to
+      // lie PARALLEL to the road surface so it hugs the asphalt instead of cutting
+      // through it — a dead-flat quad on a tilted deck dips below the surface on
+      // one side (depth-occluded → a hard diagonal light/dark edge) and floats
+      // over it on the other, and on a slope a run of them reads as light steps
+      // ("gradoni"). surfaceQuaternion follows heading + grade (pitch); bankQuat
+      // then rolls it about the tangent for lateral superelevation. _deckPoint
+      // raises height toward +normal by tan(bank)*lateral, matching a -bank roll
+      // (a +bank rotation tilts it the wrong way and doubles the mismatch).
+      const bankQuat = new THREE.Quaternion().setFromAxisAngle(tmpAxis.copy(center.baseTangent).normalize(), -frame.bank);
+      const poolQuat = surfaceQuaternion(center.baseTangent)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2))
+        .premultiply(bankQuat);
+      const pool = this._deckPoint(deckFrame, poolOffset, 0.14 + this._decalSagClearance(route, deckFrame, center.baseTangent, distance, poolOffset, poolLen));
+      pool.addScaledVector(frame.tangent, (jY - 0.5) * 4);
+      // Additive instance tint doubles as per-lamp brightness jitter;
+      // brighter lamps read a touch whiter, dimmer ones more amber.
+      tmpColor.copy(poolSodium).multiplyScalar((0.96 + jY * 0.26) * (mirror ? MIRROR_LAMP_POOL_GAIN : 1));
+      this._instance(pool, vec(poolWidth, 1, poolLen), poolQuat, tmpColor.getHex(), 'pool:lightPool');
+
+      // Wet-asphalt reflection down the near lane, long enough to bridge the
+      // lamp spacing so it reads as a continuous reflective streak on wet
+      // asphalt (Medium+; hidden on Low, where the pool carries continuity).
+      const streakLen = lampStep * (1.04 + jW * 0.2);
+      const streakLateral = side * (mountHalf - 3.0);
+      const streak = this._deckPoint(deckFrame, streakLateral, 0.17 + this._decalSagClearance(route, deckFrame, center.baseTangent, distance, streakLateral, streakLen));
+      streak.addScaledVector(frame.tangent, (jL - 0.5) * 3);
+      this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), surfaceQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
+    }
+  }
+
+  /**
+   * Second lamp row, on the kerb opposite the one the first pass lit.
+   *
+   * Deliberately a separate pass run AFTER every other instancing pass (the
+   * same discipline as _buildInfill and _buildLaybyDressing): it only ever
+   * APPENDS to the per-chunk instance buckets, so every index the editor saved
+   * against the original lamps, markings and props keeps pointing at the same
+   * instance. Folding these poles into the first walk would shift roughly half
+   * the world's instanced indices and silently move every saved edit.
+   */
+  _buildMirrorSideLamps() {
+    for (const route of this.routes.values()) this._queueRouteLamps(route, true);
+  }
+
   _queueRouteDetails(route) {
     const isService = route.kind === 'service';
     const isRamp = route.kind === 'ramp';
@@ -7726,133 +7979,7 @@ export class HighwayMap {
       }
     }
 
-    // Sodium lampposts: tapered pole + curved arm + luminaire (one merged
-    // instanced geometry), an emissive lens, an additive ground pool and a
-    // stretched wet-reflection streak (hidden on Low quality).
-    //
-    // Night-runners lighting: the pool is large and soft, sized to OVERLAP its
-    // neighbours so the road reads as a continuous warm ribbon rather than a
-    // string of isolated circles, and it is thrown across the near lanes toward
-    // the centreline instead of only lighting the pole base. Deterministic
-    // per-lamp jitter (length/width/offset/rotation/brightness, seeded by
-    // distance) breaks up the mechanical "perfect circle" repetition. This adds
-    // no draw calls, geometries or lights — the instanced planes are simply
-    // bigger and individually tinted.
-    const lampStep = isService ? 55 : (isRamp ? 70 : 42);
-    const halfTurn = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI);
-    // Cheap deterministic hash -> [0,1) so every rebuild lays the same jitter.
-    const lampNoise = (seed) => {
-      let h = (Math.floor(seed) * 374761393 + 668265263) >>> 0;
-      h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
-      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-    };
-    const poolSodium = new THREE.Color(0xff8a2e);
-    const tmpColor = new THREE.Color();
-    const tmpAxis = new THREE.Vector3();
-    // A ground decal is a PLANE; the road also curves VERTICALLY. Orienting the
-    // quad to the local surface fixes constant grade, but through a sag (valley)
-    // the deck rises away at both ends and the plane's tips still bury themselves
-    // in the asphalt — depth-occluded, which is the same hard straight light/dark
-    // line as the flat-quad case. Probe the deck at both ends of the decal and
-    // return the extra lift that clears its own local sag. Two curve samples per
-    // lamp at BUILD time; the result is baked into the instance matrix, so there
-    // is no runtime cost at all. Capped: a soft additive glow floating a few
-    // centimetres reads as nothing, a hard black line reads as a bug.
-    const sagClearance = (centerFrame, tangent, atDistance, lateral, length) => {
-      const planeRise = tangent.y / Math.max(EPSILON, tangent.length());
-      const baseY = this._deckPoint(centerFrame, lateral, 0).y;
-      let sag = 0;
-      for (const end of [-0.5, 0.5]) {
-        const span = end * length;
-        const endDistance = atDistance + span;
-        if (endDistance < 0 || endDistance > route.length) continue;
-        const endCenter = this._sampleCenter(route, endDistance, 1);
-        const endFrame = {
-          position: endCenter.position, tangent: endCenter.baseTangent,
-          normal: horizontalNormal(endCenter.baseTangent), bank: this._bankAt(route, endDistance),
-          route, distance: endDistance,
-        };
-        sag = Math.max(sag, this._deckPoint(endFrame, lateral, 0).y - (baseY + planeRise * span));
-      }
-      return Math.min(0.4, sag);
-    };
-    let lampSide = 1;
-    for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
-      const center = this._sampleCenter(route, distance, 1);
-      const half = this._halfWidthAt(route, distance);
-      if (this._isTunnel(route, distance)) continue;
-      const frame = { position: center.position, tangent: center.baseTangent, normal: horizontalNormal(center.baseTangent), bank: this._bankAt(route, distance) };
-      // Same frame, but carrying the route/station _deckPoint needs to apply the
-      // progressive-junction deck offset. Without them that term silently
-      // evaluates to 0, so through a merge/diverge transition the light decals
-      // were pinned to the UNADJUSTED centreline while the asphalt beneath them
-      // had eased onto the host plane — the decal cut into the deck and left the
-      // same hard light/dark line. Only the ground decals use this: the lamppost
-      // and lens instances keep their original positions so saved editor edits,
-      // which address instances by index and verify by matrix, cannot move.
-      const deckFrame = { ...frame, route, distance };
-      const side = route.bidirectional ? (lampSide *= -1) : 1;
-      // Pole and lens ride the DRAWN edge (a lay-by carries them outward with
-      // its parapet); the pools below stay sized/offset off the through-lane
-      // half-width, so the light ribbon over the running lanes is unchanged.
-      const edgeHalf = this._edgeHalfAt(route, distance, side);
-      const base = this._deckPoint(frame, side * (edgeHalf - 0.62), 0.01);
-      if (this._barrierSuppressed(base, route, !!this._laybyAt(route, distance, side))) continue;
-      // local +X of the lamp geometry maps to -normal under yawQuaternion;
-      // mirror with a half turn for the other edge so the arm reaches the road
-      const quaternion = yawQuaternion(center.baseTangent);
-      if (side < 0) quaternion.multiply(halfTurn);
-      this._instance(base, vec(1, 1, 1), quaternion, null, 'lamppost:concrete');
-      const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
-      lens.y = base.y + 9.26;
-      this._instance(lens, vec(1.1, 0.1, 0.34), quaternion, null, 'box:lampSodium');
-
-      const jL = lampNoise(distance);
-      const jW = lampNoise(distance * 1.7 + 41);
-      const jY = lampNoise(distance * 2.3 + 7);
-      // Pool: length comfortably exceeds the lamp spacing so consecutive pools
-      // overlap into one continuous ribbon (no dark gaps); width reaches across
-      // the near lanes; offset pushes its body over the road toward the
-      // centreline instead of only lighting the pole base.
-      // Pool SIZE stays keyed to the through-lane half-width (the ribbon over
-      // the running lanes is what it exists for), but its offset is measured
-      // from the DRAWN edge like the pole it belongs to: a lamp carried 10 m
-      // out onto a lay-by parapet would otherwise leave its own pool behind on
-      // the lanes — a bright patch with no lamp over it, and a lamp with no
-      // light under it. The pool's overhang past the deck edge is unchanged
-      // either way (it is +0.1x its width in both cases).
-      const poolLen = lampStep * (1.2 + jL * 0.2);
-      const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
-      const poolOffset = side * (edgeHalf - poolWidth * 0.4) + (jW - 0.5) * 1.6;
-      // The pool is a big flat quad; the deck is banked AND graded. Orient it to
-      // lie PARALLEL to the road surface so it hugs the asphalt instead of cutting
-      // through it — a dead-flat quad on a tilted deck dips below the surface on
-      // one side (depth-occluded → a hard diagonal light/dark edge) and floats
-      // over it on the other, and on a slope a run of them reads as light steps
-      // ("gradoni"). surfaceQuaternion follows heading + grade (pitch); bankQuat
-      // then rolls it about the tangent for lateral superelevation. _deckPoint
-      // raises height toward +normal by tan(bank)*lateral, matching a -bank roll
-      // (a +bank rotation tilts it the wrong way and doubles the mismatch).
-      const bankQuat = new THREE.Quaternion().setFromAxisAngle(tmpAxis.copy(center.baseTangent).normalize(), -frame.bank);
-      const poolQuat = surfaceQuaternion(center.baseTangent)
-        .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2))
-        .premultiply(bankQuat);
-      const pool = this._deckPoint(deckFrame, poolOffset, 0.14 + sagClearance(deckFrame, center.baseTangent, distance, poolOffset, poolLen));
-      pool.addScaledVector(frame.tangent, (jY - 0.5) * 4);
-      // Additive instance tint doubles as per-lamp brightness jitter;
-      // brighter lamps read a touch whiter, dimmer ones more amber.
-      tmpColor.copy(poolSodium).multiplyScalar(0.96 + jY * 0.26);
-      this._instance(pool, vec(poolWidth, 1, poolLen), poolQuat, tmpColor.getHex(), 'pool:lightPool');
-
-      // Wet-asphalt reflection down the near lane, long enough to bridge the
-      // lamp spacing so it reads as a continuous reflective streak on wet
-      // asphalt (Medium+; hidden on Low, where the pool carries continuity).
-      const streakLen = lampStep * (1.04 + jW * 0.2);
-      const streakLateral = side * (edgeHalf - 3.0);
-      const streak = this._deckPoint(deckFrame, streakLateral, 0.17 + sagClearance(deckFrame, center.baseTangent, distance, streakLateral, streakLen));
-      streak.addScaledVector(frame.tangent, (jL - 0.5) * 3);
-      this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), surfaceQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
-    }
+    this._queueRouteLamps(route, false);
 
     // Emergency phone boxes on elevated open sections (green beacon + cabinet).
     if (!isService && !isRamp) {
@@ -7916,14 +8043,14 @@ export class HighwayMap {
           distance,
         };
         const bankQuat = new THREE.Quaternion().setFromAxisAngle(
-          tmpAxis.copy(center.baseTangent).normalize(),
+          center.baseTangent.clone().normalize(),
           -frame.bank,
         );
         const poolLength = lightStep * 1.28;
         const pool = this._deckPoint(
           frame,
           0,
-          0.145 + sagClearance(frame, center.baseTangent, distance, 0, poolLength),
+          0.145 + this._decalSagClearance(route, frame, center.baseTangent, distance, 0, poolLength),
         );
         this._instance(
           pool,
