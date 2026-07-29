@@ -92,6 +92,13 @@ async function boot(query, { turnVhsOff = false } = {}) {
       hasPass: !!window.shutoko.vhs,
       passActive: window.shutoko.vhs?.active?.() ?? false,
       filterAffects: window.shutoko.vhs?.filter?.pixelLines ?? null,
+      // Multisampling, the one asymmetry no test has touched: a handheld gets
+      // none in either path (context antialias, post-target samples) while
+      // desktop gets both.
+      contextAA: window.shutoko.renderer.getContextAttributes?.().antialias ?? null,
+      passSamples: window.shutoko.vhs?.samples ?? null,
+      fragmentHighp: window.shutoko.gpuFragmentHighp,
+      shaderPrecision: window.shutoko.gpuPrecision,
     };
   }, turnVhsOff);
   await context.close();
@@ -140,9 +147,31 @@ check('nofilter leaves the render resolution alone (one variable at a time)',
   noFilter.width === off.width && noFilter.height === off.height,
   `${noFilter.width}×${noFilter.height} vs ${off.width}×${off.height}`);
 
+// --- ?diag=aa ---------------------------------------------------------------
+// antialias-probe.mjs measures edge resolution but runs on the desktop profile,
+// where multisampling is on — so the handheld path it does not cover is the one
+// carrying the artefact.
+check('a handheld gets NO multisampling anywhere by default',
+  off.contextAA === false && off.passSamples === 0,
+  `context antialias=${off.contextAA} post samples=${off.passSamples}`);
+
+const aa = await boot('?diag=aa');
+check('?diag=aa restores it in both paths',
+  aa.contextAA === true && aa.passSamples === 4,
+  `context antialias=${aa.contextAA} post samples=${aa.passSamples}`);
+check('and names itself on the boot readout', aa.badge.includes('DIAG:AA'), aa.badge.trim());
+
+// The documented cause of the "confetti" is a mediump varying quantising the
+// road's world-anchored UVs. `precision:'highp'` asks for the fix; three
+// downgrades silently when the hardware lacks fragment highp, and nobody has
+// checked what the reporting device grants. Reported, not asserted — the answer
+// is a property of the GPU, and this environment is SwiftShader, not the phone.
+console.log(`\nINFO · fragment highp granted: ${aa.fragmentHighp} · shader precision: ${aa.shaderPrecision}`);
+console.log('INFO · (SwiftShader here — the number that matters is the one on the phone\'s boot screen)');
+
 check('no console errors', on.errors.length === 0 && off.errors.length === 0
-  && noFilter.errors.length === 0 && vhsOff.errors.length === 0,
-  [...on.errors, ...off.errors, ...noFilter.errors].slice(0, 2).join(' · '));
+  && noFilter.errors.length === 0 && vhsOff.errors.length === 0 && aa.errors.length === 0,
+  [...on.errors, ...off.errors, ...noFilter.errors, ...aa.errors].slice(0, 2).join(' · '));
 
 await browser.close();
 server.close();

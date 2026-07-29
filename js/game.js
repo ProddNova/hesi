@@ -89,6 +89,17 @@ class ShutokoNights {
     // ?diag=nofilter — remove the VHS/PS2 post pass entirely. See the VHSEffect
     // construction for why the in-game VHS setting cannot do this.
     this.diagNoFilter=diag.includes('nofilter');
+    // ?diag=aa — give a handheld the multisampling a desktop already gets.
+    //
+    // A phone has none, anywhere: the context is built `antialias:!isHandheld`
+    // and the post target takes `samples:isHandheld?0:4`. Desktop gets both. So
+    // every test so far changed resolution or post-processing while leaving the
+    // phone with zero multisampling in every path — including ?diag=nofilter,
+    // which routes drawing straight to the un-multisampled default framebuffer.
+    //
+    // .devtests/antialias-probe.mjs measures this but runs on desktop, where it
+    // is on, so the handheld path has never actually been measured.
+    this.diagAA=diag.includes('aa');
     // Two different questions, conflated until 28 Jul 2026.
     //
     // isTouchDevice — can this machine be touched? A Windows laptop with a
@@ -117,7 +128,22 @@ class ShutokoNights {
     // fraction that picks the texel — it quantises the asphalt into a lattice
     // of repeated specks, the mobile-only "confetti". Three downgrades this
     // automatically on hardware without fragment highp.
-    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isHandheld,powerPreference:'high-performance',alpha:false,precision:'highp'});
+    // ?diag=aa forces the desktop multisampling path on. `antialias` can only
+    // be chosen at context creation, so it has to be a boot parameter.
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:this.diagAA||!this.isHandheld,powerPreference:'high-performance',alpha:false,precision:'highp'});
+    // What the device ACTUALLY granted, as opposed to what was asked for above.
+    // The comment above is a hypothesis about this machine's capabilities that
+    // has never been checked against the machine reporting the artefact: if
+    // fragment highp is missing, `precision:'highp'` above was silently
+    // downgraded and the confetti explanation stands; if it is present, that
+    // explanation is dead and the UV magnitude is not the story. Surfaced on
+    // the boot screen under any ?diag= so a photo settles it.
+    try{
+      const gl=this.renderer.getContext();
+      const high=gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT);
+      this.gpuFragmentHighp=!!high&&high.precision>0;
+      this.gpuPrecision=this.renderer.capabilities?.precision||'?';
+    }catch(e){this.gpuFragmentHighp=null;this.gpuPrecision='?';}
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=DEFAULT_LIGHTING.exposure;this.renderer.shadowMap.enabled=false;
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
@@ -161,7 +187,7 @@ class ShutokoNights {
     // below is 4× MSAA on desktop and ZERO on a handheld, and the 368-line
     // resample is stretched over ~1992 px of phone against ~1080 of monitor.
     // Both survive ?diag=native, which is why that answered nothing.
-    this.vhs=this.diagNoFilter?null:new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
+    this.vhs=this.diagNoFilter?null:new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:(this.diagAA||!this.isHandheld)?4:0,filter:this.admin.ps2Filter});
     this.setupFilterMenu();
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
@@ -1855,7 +1881,7 @@ class ShutokoNights {
     // Naming the switch on the boot screen makes a photo of it self-documenting:
     // "specks are still there" is only an answer if the frame was actually
     // native when it was taken, and the ✓ above is what proves it.
-    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}${this.diagNative?' · DIAG:NATIVE':''}${this.diagNoFilter?' · DIAG:NOFILTER':''}`;
+    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}${this.diagNative?' · DIAG:NATIVE':''}${this.diagNoFilter?' · DIAG:NOFILTER':''}${this.diagAA?' · DIAG:AA':''}${(this.diagNative||this.diagNoFilter||this.diagAA)?` · fragHighp:${this.gpuFragmentHighp===null?'?':this.gpuFragmentHighp?'YES':'NO'} · shader:${this.gpuPrecision}`:''}`;
   }
   resize({force=false}={}){
     const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
