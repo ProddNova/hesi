@@ -161,7 +161,7 @@ class ShutokoNights {
    */
   defaultAdmin(){
     return{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,
-      trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficLaneChange:1,trafficSpeed:1,
+      trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficSpeed:1,
       vhsAmount:DEFAULT_PICTURE.vhsAmount,motionBlur:DEFAULT_PICTURE.motionBlur,headlightBrightness:DEFAULT_PICTURE.headlightBrightness,
       cameraShake:DEFAULT_PICTURE.cameraShake,cameraShakePace:DEFAULT_PICTURE.cameraShakePace,ps2Filter:{...PS2_FILTER_DEFAULTS}};
   }
@@ -865,7 +865,7 @@ class ShutokoNights {
     this.syncCustomCarControls();
     // Live traffic test sliders: drag updates instantly (no persist), release commits.
     const trafficRange=(id,key)=>{const el=document.getElementById(id);if(!el)return;el.addEventListener('input',e=>this.setTrafficParam(key,e.target.value,false));el.addEventListener('change',e=>this.setTrafficParam(key,e.target.value,true));};
-    trafficRange('debug-traffic-intensity','density');trafficRange('debug-traffic-truck','truck');trafficRange('debug-traffic-van','van');trafficRange('debug-traffic-lanechange','lanechange');trafficRange('debug-traffic-speed','speed');this.syncTrafficControls();
+    trafficRange('debug-traffic-intensity','density');trafficRange('debug-traffic-truck','truck');trafficRange('debug-traffic-van','van');trafficRange('debug-traffic-speed','speed');this.syncTrafficControls();
     // Same live-drag / commit-on-release contract for the image and light dials.
     const visualRange=(id,key)=>{const el=document.getElementById(id);if(!el)return;el.addEventListener('input',e=>this.setVisualParam(key,e.target.value,false));el.addEventListener('change',e=>this.setVisualParam(key,e.target.value,true));};
     visualRange('debug-vhs-amount','vhs');visualRange('debug-motion-blur','blur');visualRange('debug-headlight','headlight');
@@ -1119,7 +1119,7 @@ class ShutokoNights {
     return{scene,mode:this.debug.noclip?'noclip':this.mode,quality:this.renderQuality(),
       resolution:`${this.canvas.width}x${this.canvas.height}`,dpr:window.devicePixelRatio||1,
       chunksVisible,chunksTotal,traffic:active.length,trafficVisible,trafficCars,trafficVans,trafficTrucks,
-      trafficDensity:this.admin?.trafficDensity??1,trafficLaneChange:this.admin?.trafficLaneChange??1,trafficSpeed:this.admin?.trafficSpeed??1,timeScale:this.admin?.timeScale??1,
+      trafficDensity:this.admin?.trafficDensity??1,trafficSpeed:this.admin?.trafficSpeed??1,timeScale:this.admin?.timeScale??1,
       x,y,z,heading,speedKmh,rpm,gear,throttle:input.throttle??0,brake:input.brake??0,steer:input.steer??0,handbrake:!!input.handbrake,
       forwardSpeed:physicsTelemetry.forwardSpeed??null,lateralSpeed:physicsTelemetry.lateralSpeed??null,yawRate:physicsTelemetry.yawRate??null,
       longitudinalAcceleration:physicsTelemetry.accelerationLongitudinal??null,lateralAcceleration:physicsTelemetry.accelerationLateral??null,
@@ -1146,7 +1146,7 @@ class ShutokoNights {
       runtime_tuning:{
         time_scale:this.admin?.timeScale??1,traffic_density:this.admin?.trafficDensity??1,
         traffic_truck_ratio:this.admin?.trafficTruckRatio??null,traffic_van_ratio:this.admin?.trafficVanRatio??null,
-        traffic_lane_change:this.admin?.trafficLaneChange??null,traffic_speed:this.admin?.trafficSpeed??null,
+        traffic_speed:this.admin?.trafficSpeed??null,
         traffic_disabled:!!this.debug?.trafficDisabled,noclip:!!this.debug?.noclip,
       },
       world:{
@@ -1290,7 +1290,6 @@ class ShutokoNights {
     if(!this.traffic)return;const a=this.admin;
     this.traffic.setDensity?.(clamp(a.trafficDensity??1,0,3));
     this.traffic.setTypeMix?.({truck:clamp(a.trafficTruckRatio??0.09,0,0.6),van:clamp(a.trafficVanRatio??0.19,0,0.7)});
-    this.traffic.setLaneChangeRate?.(clamp(a.trafficLaneChange??1,0,3));
     this.traffic.setSpeedFactor?.(clamp(a.trafficSpeed??1,0.4,1.8));
   }
   // One entry point for every dev-panel traffic slider. commit=false while
@@ -1300,10 +1299,9 @@ class ShutokoNights {
     if(key==='density'){a.trafficDensity=clamp(v,0,3);this.traffic?.setDensity?.(a.trafficDensity);}
     else if(key==='truck'){a.trafficTruckRatio=clamp(v/100,0,0.6);this.traffic?.setTypeMix?.({truck:a.trafficTruckRatio,van:a.trafficVanRatio??0.19});}
     else if(key==='van'){a.trafficVanRatio=clamp(v/100,0,0.7);this.traffic?.setTypeMix?.({truck:a.trafficTruckRatio??0.09,van:a.trafficVanRatio});}
-    else if(key==='lanechange'){a.trafficLaneChange=clamp(v/100,0,3);this.traffic?.setLaneChangeRate?.(a.trafficLaneChange);}
     else if(key==='speed'){a.trafficSpeed=clamp(v/100,0.4,1.8);this.traffic?.setSpeedFactor?.(a.trafficSpeed);}
     else return;
-    this.syncTrafficControls();if(commit){this.debugStats?.event('traffic_tuning_changed',{key,value:v,runtime:{density:a.trafficDensity,truck_ratio:a.trafficTruckRatio,van_ratio:a.trafficVanRatio,lane_change:a.trafficLaneChange,speed:a.trafficSpeed}});this.persist();}
+    this.syncTrafficControls();if(commit){this.debugStats?.event('traffic_tuning_changed',{key,value:v,runtime:{density:a.trafficDensity,truck_ratio:a.trafficTruckRatio,van_ratio:a.trafficVanRatio,speed:a.trafficSpeed}});this.persist();}
   }
   // Reflect stored values back into the sliders + readouts (skips the control
   // the user is actively dragging so it doesn't fight them).
@@ -1311,11 +1309,10 @@ class ShutokoNights {
     const a=this.admin;
     const set=(id,val,label)=>{const el=document.getElementById(id);if(el&&document.activeElement!==el)el.value=String(val);const lab=document.getElementById(id+'-val');if(lab)lab.textContent=label;};
     const truckPct=Math.round((a.trafficTruckRatio??0.09)*100),vanPct=Math.round((a.trafficVanRatio??0.19)*100),carPct=Math.max(0,100-truckPct-vanPct);
-    const lanePct=Math.round((a.trafficLaneChange??1)*100),speedPct=Math.round((a.trafficSpeed??1)*100),density=a.trafficDensity??1;
+    const speedPct=Math.round((a.trafficSpeed??1)*100),density=a.trafficDensity??1;
     set('debug-traffic-intensity',density,`${density.toFixed(2)}×`);
     set('debug-traffic-truck',truckPct,`${truckPct}%`);
     set('debug-traffic-van',vanPct,`${vanPct}%`);
-    set('debug-traffic-lanechange',lanePct,lanePct===0?'OFF':`${lanePct}%`);
     set('debug-traffic-speed',speedPct,`${speedPct}%`);
     const note=document.getElementById('debug-traffic-mix-note');if(note)note.textContent=`auto ${carPct}% · furgoni ${vanPct}% · tir ${truckPct}%`;
   }

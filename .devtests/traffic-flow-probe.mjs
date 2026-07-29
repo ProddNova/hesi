@@ -5,7 +5,10 @@
  *   1. Smoothness next to a slow player — traffic must not brake/throttle
  *      slam (judder) because the player is crawling alongside it.
  *   2. Coverage of the road ahead — no hundreds of empty metres in front.
- *   3. Side-by-side walls — three vehicles abreast must not persist.
+ *   3. Side-by-side walls — a row of vehicles filling every lane must not
+ *      persist. Traffic keeps its lane, so this has to come out of the flow
+ *      itself: each lane cruises in its own speed band, and a driver level
+ *      with a neighbour clears the situation.
  *
  * Run: node .devtests/traffic-flow-probe.mjs
  */
@@ -190,7 +193,7 @@ assert('there is usually a car within ~100m ahead',
 // The single longest formation is a noisy tail statistic; p95 of every wall's
 // lifetime is the stable measure of whether rows sort themselves out. Before
 // this work it was 21.5 s at a cruising pace and 9.8 s at speed, over notably
-// sparser traffic.
+// sparser traffic, and that was WITH traffic changing lane to escape.
 assert('a full-width wall of traffic breaks up quickly',
   flow.wallP95 < 12 && fastFlow.wallP95 < 12);
 process.exit(ok ? 0 : 1);

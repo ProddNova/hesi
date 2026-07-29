@@ -44,15 +44,16 @@ const TRAFFIC_VISIBILITY_FLOOR = 0.18;
 const COLORS_BY_ID = { car: CAR_COLORS, van: VAN_COLORS, truck: TRUCK_COLORS };
 
 // Neutral fallback so a hand-built vehicle (tests) still behaves sanely.
-const DEFAULT_DRIVER = Object.freeze({ paceRank: 0.5, gapMul: 1, accelMul: 1, laneChangeBias: 1, patience: 0.6, wanderPhase: 0, wanderAmp: 0 });
+const DEFAULT_DRIVER = Object.freeze({ paceRank: 0.5, gapMul: 1, accelMul: 1, wanderPhase: 0, wanderAmp: 0 });
 
 // --- Flow tuning -----------------------------------------------------------
-// Each lane owns a non-overlapping SLICE of its class' cruise range: lane 0
-// (by the median) takes the top of the range, the outer lane the bottom. Two
-// cars in adjacent lanes therefore can never cruise at the same speed, so a
-// row of vehicles side by side always dissolves on its own instead of rolling
-// along as a wall. `LANE_SLICE_MARGIN` is the guard band kept empty between
-// two neighbouring slices, expressed as a fraction of one slice.
+// Traffic keeps to its lane for its whole life, so the flow has to sort itself
+// out longitudinally. Each lane owns a non-overlapping SLICE of its class'
+// cruise range: lane 0 (by the median) takes the top of the range, the outer
+// lane the bottom. Two cars in adjacent lanes therefore can never cruise at the
+// same speed, so a row of vehicles side by side always slides apart instead of
+// rolling along as a wall. `LANE_SLICE_MARGIN` is the guard band kept empty
+// between two neighbouring slices, expressed as a fraction of one slice.
 const LANE_SLICE_MARGIN = 0.2;
 // Maximum jerk (m/s³). Traffic used to swing from full throttle to emergency
 // braking inside one frame whenever a leader appeared/disappeared, which read
@@ -69,7 +70,7 @@ const COMFORT_BRAKE = 0.34;
 // this many metres of half their combined length.
 const ABREAST_SLACK = 3.5;
 // How hard the alongside rule biases cruise speed (fraction of desired speed).
-const ABREAST_BIAS = 0.12;
+const ABREAST_BIAS = 0.18;
 // Horizontal half-angle of the driving camera plus margin. A spawn point that
 // falls outside this cone is off-screen even when it is "in front", so it may
 // appear much closer than the fog horizon (this is what repopulates the road
@@ -112,11 +113,6 @@ function seededRandom(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function smoothstep01(value) {
-  const t = clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
 }
 
 function speedToMps(value, fallback) {
@@ -275,8 +271,9 @@ function makeTrafficMesh(geometries, sharedMaterials) {
   group.userData.lamps = lamps;
   group.userData.headlamps = [];
   group.userData.taillamps = [taillamp];
-  // side -1 sits on local -X, side +1 on local +X; the runtime picks the side
-  // from the actual lateral movement so the signal always matches the drift.
+  // side -1 sits on local -X, side +1 on local +X. Traffic keeps its lane, so
+  // nothing signals; the roles stay for authored Modeler bodies that declare
+  // indicator lamps.
   group.userData.indicators = [{ side: -1, meshes: [blinkerL] }, { side: 1, meshes: [blinkerR] }];
   group.userData.generatedTaillamps = [taillamp];
   group.userData.generatedIndicators = [{ side: -1, meshes: [blinkerL] }, { side: 1, meshes: [blinkerR] }];
@@ -332,12 +329,10 @@ export class TrafficSystem {
     this.density = this.options.density;
     this.vehicleTypes = Object.fromEntries(VEHICLE_TYPES.map((type) => [type.id, { ...type }]));
     // Live-tunable behaviour knobs (dev panel). typeWeights sets how common each
-    // class is, laneChangeRate scales how often cars change lane (0 = never),
-    // speedFactor scales free-flow cruising speed across all traffic.
+    // class is; speedFactor scales free-flow cruising speed across all traffic.
     this.typeWeights = this._normalizeTypeWeights(options.typeWeights ?? {
       car: this.vehicleTypes.car.weight, van: this.vehicleTypes.van.weight, truck: this.vehicleTypes.truck.weight,
     });
-    this.laneChangeRate = clamp(finite(options.laneChangeRate, 1), 0, 3);
     this.speedFactor = clamp(finite(options.speedFactor, 1), 0.4, 1.8);
     this.time = 0;
     this._idCounter = 0;
@@ -349,8 +344,6 @@ export class TrafficSystem {
     this._laneCacheTime = -Infinity;
     this._laneBuckets = new Map();
     this._laneBucketPool = [];
-    this._changingCount = 0;
-    this._driftingCount = 0;
     this._frameParity = 0;
     this._objectRefIds = new WeakMap();
     this._nextRefId = 1;
@@ -427,16 +420,12 @@ export class TrafficSystem {
       laneSample: null,
       s: 0,
       mapState: null,
-      laneChange: null,
       blendOffset: null,
-      indicator: 0,
-      decisionTimer: 0,
       nearMissArmed: true,
       collisionCooldown: 0,
       playerContact: false,
       age: 0,
       spawnGrace: 0,
-      blockedTimer: 0,
       userData: {},
     };
     mesh.userData.trafficVehicle = vehicle;
@@ -670,7 +659,6 @@ export class TrafficSystem {
       }
     }
 
-    const blink = Math.floor(this.time * 3) % 2 === 0;
     const renderRadiusSq = this.options.renderRadius * this.options.renderRadius;
     for (const vehicle of this.active) {
       const batch = this._renderBatchByType[vehicle.type?.id];
@@ -688,8 +676,9 @@ export class TrafficSystem {
       }
       vehicle.mesh.updateMatrix();
       for (const descriptor of batch.descriptors) {
-        if (descriptor.role === 'indicator-left' && (!blink || vehicle.indicator !== -1)) continue;
-        if (descriptor.role === 'indicator-right' && (!blink || vehicle.indicator !== 1)) continue;
+        // Traffic no longer changes lane, so nothing ever signals. The part
+        // roles stay so authored Modeler bodies keep declaring their lamps.
+        if (descriptor.role === 'indicator-left' || descriptor.role === 'indicator-right') continue;
         const braking = descriptor.role === 'taillamp' && vehicle.braking;
         const target = braking ? descriptor.brakeMesh : descriptor.mesh;
         const index = braking ? descriptor.brakeCount++ : descriptor.count++;
@@ -727,12 +716,6 @@ export class TrafficSystem {
   setDensity(density) {
     this.density = clamp(finite(density, 1), 0, 3);
     return this.density;
-  }
-
-  /** How often cars change lane. 0 disables lane changes, 1 is the default. */
-  setLaneChangeRate(rate) {
-    this.laneChangeRate = clamp(finite(rate, 1), 0, 3);
-    return this.laneChangeRate;
   }
 
   /** Global free-flow speed multiplier for all traffic. */
@@ -926,11 +909,11 @@ export class TrafficSystem {
 
   /**
    * A per-vehicle "driver": small random offsets to cruising speed, following
-   * distance, acceleration, lane-change appetite and patience. This is what
+   * distance and acceleration. This is what
    * stops every car of a class behaving identically and makes the flow read as
    * real traffic rather than a synced train.
    */
-  _makeDriver(type) {
+  _makeDriver() {
     const r = this.random;
     // paceRank places the driver INSIDE its lane's speed slice (see
     // _laneCruiseSpeed) instead of shifting its cruise speed freely: personal
@@ -940,8 +923,6 @@ export class TrafficSystem {
       paceRank: r(),
       gapMul: THREE.MathUtils.lerp(0.82, 1.4, r()),
       accelMul: THREE.MathUtils.lerp(0.85, 1.15, r()),
-      laneChangeBias: THREE.MathUtils.lerp(0.55, 1.5, r()) * (type.id === 'truck' ? 0.55 : 1),
-      patience: THREE.MathUtils.lerp(0.35, 1, r()),
       wanderPhase: r() * Math.PI * 2,
       // Kept well below the guard band between two lane slices so the slow
       // breathing of a cruising car never inverts the lane ordering.
@@ -1187,15 +1168,9 @@ export class TrafficSystem {
     this._laneBuckets.clear();
     for (const bucket of this._laneBucketPool) bucket.length = 0;
     let bucketCount = 0;
-    this._changingCount = 0;
-    this._driftingCount = 0;
     this._frameParity = (this._frameParity + 1) % 3;
     for (const vehicle of this.active) {
       if (!vehicle.active) continue;
-      if (vehicle.laneChange) {
-        this._changingCount += 1;
-        if (!vehicle.laneChange.urgent) this._driftingCount += 1;
-      }
       const key = vehicle.laneKey;
       let bucket = this._laneBuckets.get(key);
       if (!bucket) {
@@ -1206,10 +1181,6 @@ export class TrafficSystem {
       }
       bucket.push(vehicle);
     }
-  }
-
-  _vehiclesInLane(laneRef, sample = null) {
-    return this._laneBuckets.get(this._laneKey(laneRef, sample)) || [];
   }
 
   _spawnClearance(candidate) {
@@ -1305,7 +1276,7 @@ export class TrafficSystem {
     const palette = COLORS_BY_ID[type.id] ?? CAR_COLORS;
     const color = overrides.color ?? spawn.color ?? palette[Math.floor(this.random() * palette.length)];
     this._applyVehicleType(vehicle, type, color);
-    vehicle.driver = this._makeDriver(type);
+    vehicle.driver = this._makeDriver();
 
     vehicle.active = true;
     vehicle.mesh.visible = true;
@@ -1337,17 +1308,12 @@ export class TrafficSystem {
     vehicle.velocity.copy(vehicle.tangent).multiplyScalar(vehicle.speed);
     vehicle.acceleration = 0;
     vehicle.braking = false;
-    vehicle.laneChange = null;
     vehicle.blendOffset = null;
-    vehicle.indicator = 0;
-    // First lane-change decision is well after spawn so cars settle first.
-    vehicle.decisionTimer = THREE.MathUtils.lerp(8, 20, this.random());
     vehicle.nearMissArmed = true;
     vehicle.collisionCooldown = 0;
     vehicle.playerContact = false;
     vehicle.age = 0;
     vehicle.spawnGrace = 0.65;
-    vehicle.blockedTimer = 0;
     vehicle.abreastBias = 0;
     vehicle.abreastTarget = 0;
     vehicle.playerLeaderHold = 0;
@@ -1502,9 +1468,16 @@ export class TrafficSystem {
       { lo: near, hi: front, weight: 1.15 },
       { lo: -rear, hi: -near, weight: 0.45 },
     ];
+    // Now that nobody changes lane, where a vehicle is born is the ONLY thing
+    // that decides the lane distribution, so an under-filled lane has to be
+    // pulled back up deliberately. Without this the fast lane drains: its cars
+    // are the quickest, they run ahead out of the corridor, and nothing moves
+    // over to replace them.
+    const busiest = Math.max(...[...slots.values()].map((slot) => slot.occupied.length));
     const candidates = [];
     for (const slot of slots.values()) {
-      const affinity = this._laneAffinity(type, slot.laneIndex, laneCount);
+      const underfill = Math.pow(2.2, Math.min(4, busiest - slot.occupied.length));
+      const affinity = this._laneAffinity(type, slot.laneIndex, laneCount) * underfill;
       // Oncoming traffic sweeps past quickly, so it needs a lower share of the
       // budget than the lanes the player travels with.
       const facing = slot.direction === playerDirection ? 1 : 0.72;
@@ -1825,9 +1798,10 @@ export class TrafficSystem {
     const driver = vehicle.driver || DEFAULT_DRIVER;
     const type = vehicle.type;
     // Free-flow target: the cruise speed of the lane the car is in (recomputed
-    // every frame so a lane change re-paces the driver), scaled by the global
-    // speed factor, with a slow sinusoidal wander so nobody holds a
-    // laser-constant speed, and the alongside bias that breaks up rows.
+    // every frame, so a car handed to a different lane at a junction re-paces
+    // itself), scaled by the global speed factor, with a slow sinusoidal wander
+    // so nobody holds a laser-constant speed, and the alongside bias that
+    // breaks up rows.
     const wander = 1 + Math.sin(this.time * 0.13 + (driver.wanderPhase ?? 0)) * (driver.wanderAmp ?? 0);
     if (!vehicle.forcedSpeed) vehicle.targetSpeed = this._laneCruiseSpeed(vehicle);
     // The alongside scan is staggered across vehicles: the bias is eased in over
@@ -1874,73 +1848,19 @@ export class TrafficSystem {
     vehicle.acceleration = clamp(smoothed, vehicle.acceleration - jerk, vehicle.acceleration + jerk);
     vehicle.speed = Math.max(0, vehicle.speed + vehicle.acceleration * dt);
     vehicle.braking = vehicle.acceleration < -0.65 || (leader && leader.gap < Math.max(8, vehicle.speed * 0.55));
-    const blocked = Boolean(leader && vehicle.speed < vehicle.desiredSpeed * 0.86 && leader.gap < 48);
-    vehicle.blockedTimer = blocked
-      ? Math.min(12, vehicle.blockedTimer + dt)
-      : Math.max(0, vehicle.blockedTimer - dt * 2);
-
-    // Free-flow lane changes stay rare. A blocked driver gets a decision within
-    // roughly two seconds and retries promptly, preventing long three-abreast
-    // queues from forcing the player to stop and wait.
-    vehicle.decisionTimer -= dt;
-    if (blocked && vehicle.blockedTimer > 1.25) vehicle.decisionTimer = Math.min(vehicle.decisionTimer, 0);
-    if (!vehicle.laneChange && vehicle.decisionTimer <= 0 && vehicle.age > 3) {
-      const rate = this.laneChangeRate;
-      if (rate > 0) {
-        const overtakeChance = blocked ? 0.72 + 0.2 * (driver.patience ?? 0.6) : 0;
-        const driftChance = 0.045;
-        const chance = (overtakeChance + driftChance) * rate * (driver.laneChangeBias ?? 1);
-        if (this.random() < chance || vehicle.blockedTimer > 4.5) {
-          if (this._considerLaneChange(vehicle, leader, blocked)) vehicle.blockedTimer = 0;
-        }
-      }
-      const retryMin = blocked ? 3 : 10;
-      const retryMax = blocked ? 6 : 26;
-      vehicle.decisionTimer = THREE.MathUtils.lerp(retryMin, retryMax, this.random()) / Math.max(0.4, this.laneChangeRate);
-    }
 
     const distance = vehicle.speed * dt;
     let sample = this._advanceVehicleOnMap(vehicle, distance, context);
     if (!sample) return false;
     if (sample.transferred) {
-      // Route hand-off (junction ramp/merge). Cancel any half-done lane change
-      // (the old lane ref no longer applies) and blend out the lateral jump so
-      // the car glides through the gore instead of popping across it.
-      vehicle.laneChange = null;
-      vehicle.indicator = 0;
+      // Route hand-off (junction ramp/merge). Blend out the lateral jump so the
+      // car glides through the gore instead of popping across it.
       const jump = vehicle.position.distanceTo(sample.position);
       if (jump > 1.1 && jump < 60) {
         vehicle.blendOffset = vehicle.position.clone().sub(sample.position);
         vehicle.blendOffset.y = clamp(vehicle.blendOffset.y, -2.5, 2.5);
       }
     }
-    if (vehicle.laneChange) {
-      vehicle.laneChange.elapsed += dt;
-      // Signal first, then drift. During the lead time the indicator blinks but
-      // the car holds its lane; the crossing itself is a long smoothstep so it
-      // eases over instead of snapping across.
-      const lead = vehicle.laneChange.signalLead ?? 0;
-      const activeElapsed = Math.max(0, vehicle.laneChange.elapsed - lead);
-      const progress = clamp(activeElapsed / vehicle.laneChange.duration, 0, 1);
-      const targetSample = this._sampleLane(vehicle.laneChange.to, vehicle.s);
-      if (targetSample) {
-        const blend = smoothstep01(progress);
-        sample.position.lerp(targetSample.position, blend);
-        sample.tangent.lerp(targetSample.tangent, blend).normalize();
-        sample.right.set(sample.tangent.z, 0, -sample.tangent.x).normalize();
-        if (progress >= 1) {
-          vehicle.laneRef = vehicle.laneChange.to;
-          vehicle.laneKey = this._laneKey(vehicle.laneRef, targetSample);
-          vehicle.laneSample = targetSample;
-          vehicle.laneChange = null;
-          vehicle.indicator = 0;
-        }
-      } else {
-        vehicle.laneChange = null;
-        vehicle.indicator = 0;
-      }
-    }
-
     vehicle.position.copy(sample.position);
     if (vehicle.blendOffset) {
       vehicle.blendOffset.multiplyScalar(Math.exp(-dt * 2.6));
@@ -2053,10 +1973,10 @@ export class TrafficSystem {
    * onto the current tangent: through a bend the projection under-reads the gap
    * and can lose the leader entirely, which produced brake/throttle chatter.
    *
-   * Everything else — the player, and traffic scanned during a lane change —
-   * uses a geometric test with a strict in-lane corridor. A car merely BESIDE
-   * this one is not a leader: reacting to it is what made traffic brake to the
-   * player's speed and judder whenever the player crawled along next to them.
+   * The player is not on a lane, so it gets a geometric test with a strict
+   * in-lane corridor. A car merely BESIDE this one is not a leader: reacting to
+   * it is what made traffic brake to the player's speed and judder whenever the
+   * player crawled along next to them.
    */
   _findLeader(vehicle, player, dt = 0) {
     let best = null;
@@ -2081,29 +2001,12 @@ export class TrafficSystem {
       return gap;
     };
 
-    if (vehicle.laneChange) {
-      // Straddling two lanes: the cars that matter are the ones in the lane
-      // being left and the lane being joined. Scanning the whole population
-      // (as this used to) is both slower and no more accurate.
-      const target = this._laneBuckets.get(this._laneKey(vehicle.laneChange.to));
-      for (const bucket of [this._laneBuckets.get(vehicle.laneKey), target]) {
-        for (const other of bucket || []) {
-          if (other === vehicle || !other.active) continue;
-          const gap = considerGeometric(
-            other.position, other.length, other.width,
-            vehicle.tangent.dot(other.tangent) > 0.72,
-          );
-          if (gap != null) offer(gap, other.speed, other);
-        }
-      }
-    } else {
-      for (const other of (this._laneBuckets.get(vehicle.laneKey) || [])) {
-        if (other === vehicle || !other.active) continue;
-        const delta = this._longitudinalDelta(vehicle, other);
-        const gap = delta - (vehicle.length + other.length) * 0.5;
-        if (delta <= 0 || gap > 90) continue;
-        offer(Math.max(0, gap), other.speed, other);
-      }
+    for (const other of (this._laneBuckets.get(vehicle.laneKey) || [])) {
+      if (other === vehicle || !other.active) continue;
+      const delta = this._longitudinalDelta(vehicle, other);
+      const gap = delta - (vehicle.length + other.length) * 0.5;
+      if (delta <= 0 || gap > 90) continue;
+      offer(Math.max(0, gap), other.speed, other);
     }
 
     // The player gets a short hold once accepted (and a slightly wider corridor
@@ -2123,155 +2026,11 @@ export class TrafficSystem {
     return best;
   }
 
-  _considerLaneChange(vehicle, leader, urgent) {
-    // Two budgets instead of one. The old flat cap of 10% of the population was
-    // saturated over 90% of the time by drivers merely drifting back toward
-    // their home lane, so a driver actually stuck behind a slow car almost
-    // never got a slot — which is how a row of vehicles could hold the player
-    // up for twenty seconds. Overtakes now have their own, larger allowance.
-    const cap = urgent
-      ? Math.max(4, Math.ceil(this.active.length * 0.22))
-      : Math.max(2, Math.ceil(this.active.length * 0.1));
-    const changing = urgent ? this._changingCount : this._driftingCount;
-    if (changing >= cap) return false;
-    const sourceOccupancy = this._vehiclesInLane(vehicle.laneRef, vehicle.laneSample)
-      .reduce((count, other) => count + (other.active ? 1 : 0), 0);
-    // Leaving a lane empty is normally avoided — an abandoned lane is exactly
-    // the kind of hole this system exists to prevent. A driver that has been
-    // genuinely stuck for several seconds is the one exception, otherwise the
-    // sole car in a lane could sit in front of the player indefinitely.
-    const desperate = vehicle.blockedTimer > 4;
-    if (!desperate && this._laneCountFor(vehicle) > 1 && sourceOccupancy <= 1) return false;
-    // When blocked, go to whichever adjacent lane actually has room ahead. The
-    // old rule always tried the median side first, which — now that held-up
-    // drivers get a real lane-change allowance — drained the outer lanes into
-    // one crawling column instead of spreading the flow.
-    let preferred;
-    if (urgent) {
-      const left = this._laneRoomAhead(vehicle, this._adjacentLane(vehicle, -1));
-      const right = this._laneRoomAhead(vehicle, this._adjacentLane(vehicle, 1));
-      // Ties, and the case where neither side is known, keep the old bias
-      // toward the faster lane: that is where an overtake belongs.
-      preferred = right > left + 12 ? 1 : -1;
-    } else {
-      const idx = vehicle.laneRef?.laneIndex ?? vehicle.laneRef?.lane;
-      if (Number.isFinite(idx)) {
-        const maxIndex = Math.max(0, this._laneCountFor(vehicle) - 1);
-        const home = (vehicle.type.laneBias ?? 0.5) * maxIndex;
-        preferred = idx > home + 0.5 ? -1 : idx < home - 0.5 ? 1 : (this.random() < 0.5 ? -1 : 1);
-      } else {
-        preferred = this.random() < 0.5 ? -1 : 1;
-      }
-    }
-
-    for (const direction of [preferred, -preferred]) {
-      const adjacent = this._adjacentLane(vehicle, direction);
-      if (!adjacent || !this._laneChangeSafe(vehicle, adjacent)) continue;
-      // Signal to the side the car will actually drift toward (robust to any
-      // lane-index convention) and cross slowly over 3.5-6 s.
-      const targetSample = this._sampleLane(adjacent, vehicle.s);
-      const lateralSign = targetSample
-        ? (((targetSample.position.x - vehicle.position.x) * vehicle.right.x
-          + (targetSample.position.y - vehicle.position.y) * vehicle.right.y
-          + (targetSample.position.z - vehicle.position.z) * vehicle.right.z) >= 0 ? 1 : -1)
-        : direction;
-      vehicle.laneChange = {
-        from: vehicle.laneRef,
-        to: adjacent,
-        direction,
-        urgent: Boolean(urgent),
-        elapsed: 0,
-        signalLead: THREE.MathUtils.lerp(0.7, 1.5, this.random()),
-        // An overtake is committed to briskly; a free-flow drift can take its
-        // time. The old 3.5-6 s crossing applied to both, which meant every
-        // overtaking car spent six seconds straddling two lanes.
-        duration: urgent
-          ? THREE.MathUtils.lerp(2.2, 3.4, this.random())
-          : THREE.MathUtils.lerp(3.5, 6.0, this.random()),
-        lateralSign,
-      };
-      this._changingCount += 1;
-      if (!urgent) this._driftingCount += 1;
-      vehicle.indicator = lateralSign;
-      return true;
-    }
-    return false;
-  }
-
-  /** Clear road ahead of `vehicle` in `laneRef`, capped at 140 m. */
-  _laneRoomAhead(vehicle, laneRef) {
-    if (!laneRef) return -1;
-    const sign = Math.sign(laneRef.direction ?? vehicle.laneRef?.direction ?? 1) || 1;
-    let room = 140;
-    for (const other of this._vehiclesInLane(laneRef)) {
-      if (other === vehicle || !other.active) continue;
-      const delta = (other.s - vehicle.s) * sign;
-      if (delta > 0) room = Math.min(room, delta);
-    }
-    return room;
-  }
-
-  _adjacentLane(vehicle, direction) {
-    for (const name of ['getAdjacentTrafficLane', 'getAdjacentLane']) {
-      const fn = this.map?.[name];
-      if (typeof fn !== 'function') continue;
-      try {
-        const result = fn.length <= 1
-          ? fn.call(this.map, { lane: vehicle.laneRef, direction, s: vehicle.s, vehicle })
-          : fn.call(this.map, vehicle.laneRef, direction, vehicle.s, vehicle);
-        if (result && this._sampleLane(result, vehicle.s)) return result;
-      } catch (error) {
-        this._adapterWarning(name, error);
-      }
-    }
-    const adjacent = direction < 0
-      ? vehicle.laneSample?.leftLane ?? vehicle.laneRef?.leftLane
-      : vehicle.laneSample?.rightLane ?? vehicle.laneRef?.rightLane;
-    if (adjacent && this._sampleLane(adjacent, vehicle.s)) return adjacent;
-
-    const index = vehicle.laneRef?.laneIndex ?? vehicle.laneRef?.index;
-    if (Number.isFinite(index) && typeof vehicle.laneRef === 'object') {
-      let laneCount = vehicle.laneRef.laneCount;
-      if (!Number.isFinite(laneCount)) {
-        try {
-          laneCount = this.map?.getRoute?.(vehicle.laneRef.routeId)?.lanes;
-        } catch {
-          laneCount = null;
-        }
-      }
-      if (index + direction < 0 || (Number.isFinite(laneCount) && index + direction >= laneCount)) return null;
-      const candidate = { ...vehicle.laneRef, laneIndex: index + direction, index: index + direction };
-      if (index + direction >= 0 && this._sampleLane(candidate, vehicle.s)) return candidate;
-    }
-    return null;
-  }
-
-  _laneChangeSafe(vehicle, targetLane) {
-    const sample = this._sampleLane(targetLane, vehicle.s);
-    if (!sample) return false;
-    for (const other of this._vehiclesInLane(targetLane, sample)) {
-      if (other === vehicle || !other.active) continue;
-      const dx = other.position.x - sample.position.x;
-      const dy = other.position.y - sample.position.y;
-      const dz = other.position.z - sample.position.z;
-      const longitudinal = dx * sample.tangent.x + dy * sample.tangent.y + dz * sample.tangent.z;
-      const lateral = Math.abs(dx * sample.right.x + dy * sample.right.y + dz * sample.right.z);
-      if (lateral < (vehicle.width + other.width) * 0.55 + 0.5 && longitudinal > -Math.max(18, other.speed * 0.8) && longitudinal < Math.max(14, vehicle.speed * 0.55)) return false;
-    }
-    return true;
-  }
-
   _setLights(vehicle, braking) {
-    // ~1.5 Hz blink, like a real indicator, rather than a fast strobe.
-    const blink = Math.floor(this.time * 3) % 2 === 0;
     for (const lamp of vehicle.mesh.userData.taillamps) {
       lamp.material = braking
         ? this._brakeMaterial()
         : lamp.userData?.hesiTrafficTaillampMaterial || this._sharedMaterials.taillamp;
-    }
-    for (const indicator of vehicle.mesh.userData.indicators) {
-      const active = vehicle.indicator === indicator.side && blink;
-      for (const mesh of indicator.meshes) mesh.visible = active;
     }
   }
 
@@ -2474,9 +2233,7 @@ export class TrafficSystem {
     vehicle.velocity.set(0, 0, 0);
     vehicle.laneRef = null;
     vehicle.laneSample = null;
-    vehicle.laneChange = null;
     vehicle.blendOffset = null;
-    vehicle.indicator = 0;
     this.options.onDespawn?.(vehicle, reason);
   }
 
