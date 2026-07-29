@@ -10,14 +10,26 @@
  *  2. ATTITUDE. The mesh was yaw-only, so on a grade the body stayed level
  *     while the deck tilted away — nose or tail buried in the asphalt by
  *     halfLength·sin(grade).
+ *  3. HAND-OFFS. At a junction the car kept the height of the route it was
+ *     leaving and eased onto the new one over ~1 s, so at every exit where the
+ *     decks meet at different heights it drove buried in (or floating over)
+ *     the asphalt for tens of metres. It also "eased" across continuation
+ *     edges whose routes are 55 m apart, which flew a car through the terrain.
  *
- * This drives the REAL TrafficSystem over the REAL map and measures both
+ * This drives the REAL TrafficSystem over the REAL map and measures all of it
  * against the map's own authoritative deck surface (_frameAt/_deckPoint, what
  * the asphalt is built from and what physics reads):
  *
  *   deckError  — vertical distance from the car's contact point to the deck.
  *   cornerDrop — how far the deepest of the four underside corners sits BELOW
  *                the deck. This is the number you actually see.
+ *
+ * Then, separately from the drive, two build-time surface checks:
+ *
+ *   hand-offs  — every directed junction edge traffic can take, walked through
+ *                the real advanceTraffic, checking the car lands ON the deck.
+ *   light pool — how far the additive lamp decals float over the asphalt. They
+ *                are what cars visibly wade through when this is too large.
  *
  * Run from repo root:  node .devtests/traffic-slope-probe.mjs
  */
@@ -125,6 +137,121 @@ for (let step = 0; step < 5400; step += 1) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Junction hand-offs. The drive above rarely reaches a route end, so drive a
+// pooled vehicle off the end of every traffic route instead — through the REAL
+// _updateVehicle, so the blend under test is the shipping one and not a copy
+// of it that could drift.
+// ---------------------------------------------------------------------------
+const handoff = { count: 0, offDeckMax: 0, offDeckSum: 0, strayMax: 0, blendedMax: 0, offRoad: 0 };
+{
+  const probe = traffic.pool[0];
+  const realPoolIndex = probe.poolIndex;
+  for (const route of map.routes.values()) {
+    if (!route.traffic) continue;
+    for (let lane = 0; lane < route.lanes; lane += 1) {
+      // advanceAlongRoute picks between several continuation/merge options with
+      // `poolIndex % options.length`, so one vehicle only ever walks one branch.
+      // Sweep the index or whole edges never get exercised — including the
+      // r11_0 -> ramp_14 continuation whose routes are 55 m apart.
+      for (let branch = 0; branch < 4; branch += 1) {
+      probe.poolIndex = branch;
+      const direction = route.oneWay ? route.oneWayDirection : 1;
+      const laneRef = map._laneRefFor(route, lane, direction);
+      const s = direction > 0 ? Math.max(0, route.length - 260) : Math.min(route.length, 260);
+      const start = map.sampleTrafficLane(laneRef, s);
+      if (!start) continue;
+
+      traffic.active = [probe];
+      probe.active = true;
+      probe.laneRef = laneRef;
+      probe.laneKey = `${route.id}:${lane}:${direction > 0 ? '+' : '-'}`;
+      probe.s = s;
+      probe.mapState = null;
+      probe.blendOffset = null;
+      probe.position.copy(start.position);
+      probe.previousPosition.copy(start.position);
+      probe.tangent.copy(start.tangent);
+      probe.up.set(0, 1, 0);
+      probe.speed = 30;
+      probe.forcedSpeed = true;
+      probe.targetSpeed = 30;
+      probe.acceleration = 0;
+      probe.spawnGrace = 0;
+
+      for (let i = 0; i < 700; i += 1) {
+        const before = probe.laneRef?.routeId;
+        if (!traffic._updateVehicle(probe, 1 / 60, player, {})) break;
+        const routeId = probe.laneRef?.routeId;
+        const blended = probe.blendOffset ? probe.blendOffset.length() : 0;
+        handoff.blendedMax = Math.max(handoff.blendedMax, blended);
+        if (routeId === before && !blended) continue;
+        // Landed on (or is easing onto) a route. Two different questions, and
+        // they need two different references.
+        //
+        // HEIGHT is measured against the car's OWN route's deck. Letting
+        // getRoadInfo choose the corridor does not work here: at a stacked
+        // junction it resolves a car on r11_0 to the r1_2 deck crossing 64 cm
+        // below, and every large "error" it reported was that mismatch rather
+        // than a car off its road.
+        //
+        // BEING ON ASPHALT AT ALL is the opposite: a gore blend crosses the
+        // HOST's deck by design, so that one has to accept any corridor.
+        const deck = deckYOn(routeId, probe.position);
+        if (deck !== null) {
+          const off = Math.abs(probe.position.y - deck);
+          handoff.count += 1;
+          handoff.offDeckSum += off;
+          handoff.offDeckMax = Math.max(handoff.offDeckMax, off);
+        }
+        const road = map.getRoadInfo(probe.position);
+        if (!road) { handoff.offRoad += 1; continue; }
+        handoff.strayMax = Math.max(handoff.strayMax,
+          Math.abs(road.signedLateral) - road.roadHalfWidth);
+      }
+      probe.active = false;
+      }
+    }
+  }
+  probe.poolIndex = realPoolIndex;
+  traffic.active = [];
+}
+
+// ---------------------------------------------------------------------------
+// Lamp ground decals. Read the instance matrices of the additive pools the map
+// ACTUALLY BUILT and measure them against the asphalt under them — this is the
+// "cars drive through a cloud of light" number. Reading the built geometry
+// rather than recomputing the lamp walk means a change to the lift constants
+// or to the sag probe shows up here; a private copy of the maths would not.
+// ---------------------------------------------------------------------------
+const poolLift = [];
+{
+  const matrix = new THREE.Matrix4();
+  const point = new THREE.Vector3();
+  const meshes = [];
+  map.group.traverse((object) => {
+    if (object.isInstancedMesh && /pool:lightPool$/.test(object.name)) meshes.push(object);
+  });
+  for (const mesh of meshes) {
+    mesh.updateWorldMatrix(true, false);
+    for (let i = 0; i < mesh.count; i += 1) {
+      mesh.getMatrixAt(i, matrix);
+      matrix.premultiply(mesh.matrixWorld);
+      // The unit quad is 1x1 in local XZ, so ±0.3 down local Z walks the
+      // bright core of the glow; outside that the sprite has faded out.
+      for (const f of [-0.3, -0.15, 0, 0.15, 0.3]) {
+        point.set(0, 0, f).applyMatrix4(matrix);
+        const road = map.getRoadInfo(point);
+        if (!road?.route || !road.onRoadSurface) continue;
+        const deck = map._deckPoint(map._frameAt(road.route, road.distance), road.signedLateral).y;
+        poolLift.push(point.y - deck);
+      }
+    }
+  }
+}
+poolLift.sort((a, b) => a - b);
+const q = (p) => poolLift[Math.floor(p * (poolLift.length - 1))];
+
 const deg = (rad) => `${(rad * 180 / Math.PI).toFixed(2)}°`;
 const cm = (m) => `${(m * 100).toFixed(1)} cm`;
 console.log('samples                :', stats.samples);
@@ -133,6 +260,13 @@ console.log('corner drop  mean / max:', cm(stats.cornerDropSum / stats.samples),
 console.log('underside fit      mean:', cm(stats.cornerFitSum / stats.cornerFitCount));
 console.log('steepest grade driven  :', deg(stats.gradeMax));
 console.log('steepest body pitch    :', deg(stats.pitchedMax));
+console.log('hand-off frames checked:', handoff.count);
+console.log('  off the deck while handing over mean / max:', cm(handoff.offDeckSum / handoff.count), '/', cm(handoff.offDeckMax));
+console.log('  widest blend offset carried              :', `${handoff.blendedMax.toFixed(2)} m`);
+console.log('  furthest outside the paved corridor      :', `${handoff.strayMax.toFixed(2)} m`);
+console.log('  frames on no road surface at all         :', handoff.offRoad);
+console.log('light pool over the asphalt (bright core), n =', poolLift.length);
+console.log('  p50', cm(q(0.5)), ' p90', cm(q(0.9)), ' p99', cm(q(0.99)));
 
 const failures = [];
 if (stats.samples < 500) failures.push(`only ${stats.samples} samples — the drive never got going`);
@@ -148,6 +282,31 @@ if (stats.cornerFitSum / stats.cornerFitCount > 0.03) {
 if (stats.gradeMax > 0.02 && stats.pitchedMax < stats.gradeMax * 0.5) {
   failures.push(`body stays level (${deg(stats.pitchedMax)}) on grades up to ${deg(stats.gradeMax)}`);
 }
+// Landing on a junction must put the car on the new road, not on the old
+// road's height. A couple of centimetres is the sampler's own projection
+// error; anything more is the vertical blend coming back.
+if (handoff.count < 40) failures.push(`only ${handoff.count} hand-off frames checked — the junction sweep is not running`);
+if (handoff.offDeckMax > 0.08) failures.push(`cars sit ${cm(handoff.offDeckMax)} off the deck while handing over`);
+// Easing across a gap wider than a few lane widths drags the car through
+// whatever lies between two routes that do not actually meet — including, on
+// r11_0 -> ramp_14, 55 m of open air.
+// A blend may carry a car across the gore, never off the paved corridor.
+if (handoff.strayMax > 2) {
+  failures.push(`a hand-off blend puts cars ${handoff.strayMax.toFixed(1)} m past the paved edge`);
+}
+if (handoff.offRoad > 0) {
+  failures.push(`${handoff.offRoad} hand-off frames put a car on no road surface at all`);
+}
+// The lamp ribbon has to lie ON the road. Every centimetre it floats is a
+// centimetre of car that visibly drives through it. The tail is a flat quad
+// spanning a curving deck — the only way to shrink it further is to break the
+// ribbon into shorter segments, which would re-tune how the glow reads.
+if (q(0.5) > 0.06) failures.push(`light pools float ${cm(q(0.5))} over the asphalt at the median`);
+if (q(0.9) > 0.16) failures.push(`light pools float ${cm(q(0.9))} over the asphalt at p90`);
+if (q(0.99) > 0.28) failures.push(`light pools float ${cm(q(0.99))} over the asphalt at p99`);
+// Floating is the bug being fixed, but burying the ribbon in the deck trades
+// it for a hard dark band, so guard that direction too.
+if (q(0.01) < -0.05) failures.push(`light pools sink ${cm(-q(0.01))} into the asphalt at p1`);
 
 if (failures.length) {
   console.log('\nFAIL');

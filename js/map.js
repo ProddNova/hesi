@@ -161,6 +161,20 @@ const TERRAIN_BOTTOM_Y = -0.5;
 // the World editor's dial goes from matte (0) through the shipped look (1) to
 // wet (up to 3). Toned down from the pre-dial 0.34 / 0.2.
 const SURFACE_GLOSS_BASE = Object.freeze({ lightPool: 0.28, lightStreak: 0.12 });
+// How far the additive ground decals float over the deck, before their own
+// sag clearance is added. This only has to beat the difference between the
+// DRAWN asphalt and the analytic deck the decal is placed on: the road is
+// tessellated adaptively, and its chords sit within 1 cm of the true surface
+// over 99.9% of the network and within 2 cm over 99.99%. Both materials also
+// carry a negative polygonOffset, so depth ties are already handled in the
+// rasteriser rather than by physical height.
+//
+// These used to be 0.14 / 0.17 — a hand-tuned "float clear of everything"
+// margin from when nothing else stood on the road surface. Traffic now sits
+// properly ON the deck, so those 15 cm became a slab of glow hanging at
+// bumper height that every car visibly waded through. The streak keeps a
+// centimetre over the pool because the two overlap across the near lane.
+const DECAL_LIFT = Object.freeze({ pool: 0.04, streak: 0.05 });
 // These fixtures are emissive meshes with baked road pools, not real Three.js
 // lights. Keep a tiny spatial record so the player-car shader can reproduce
 // their direct highlight without adding PointLights to every world material.
@@ -7451,12 +7465,23 @@ export class HighwayMap {
    * decal at BUILD time; the result is baked into the instance matrix, so there
    * is no runtime cost at all. Capped: a soft additive glow floating a few
    * centimetres reads as nothing, a hard black line reads as a bug.
+   *
+   * The probe covers the decal's BRIGHT CORE, not its geometric tips. The glow
+   * sprite is a radial gradient that is already down to 14% alpha at 0.75 of
+   * its half-extent and reaches zero at the edge, so the outer third of the
+   * quad contributes nothing that could be missed if it clips. Deviation from
+   * a plane grows with the SQUARE of the span, so clearing ±0.3 of the length
+   * instead of ±0.5 costs about a third of the lift. That matters now that
+   * traffic sits properly on the deck: every centimetre the glow floats is a
+   * centimetre of car that wades through it, and the old full-length probe
+   * (plus a 14 cm base) left the ribbon hovering ~15 cm over the asphalt with
+   * cars ploughing through it like fog.
    */
   _decalSagClearance(route, centerFrame, tangent, atDistance, lateral, length) {
     const planeRise = tangent.y / Math.max(EPSILON, tangent.length());
     const baseY = this._deckPoint(centerFrame, lateral, 0).y;
     let sag = 0;
-    for (const end of [-0.5, 0.5]) {
+    for (const end of [-0.3, -0.18, 0.18, 0.3]) {
       const span = end * length;
       const endDistance = atDistance + span;
       if (endDistance < 0 || endDistance > route.length) continue;
@@ -7582,7 +7607,7 @@ export class HighwayMap {
       const poolQuat = surfaceQuaternion(center.baseTangent)
         .multiply(new THREE.Quaternion().setFromAxisAngle(UP, (jL - 0.5) * 0.2))
         .premultiply(bankQuat);
-      const pool = this._deckPoint(deckFrame, poolOffset, 0.14 + this._decalSagClearance(route, deckFrame, center.baseTangent, distance, poolOffset, poolLen));
+      const pool = this._deckPoint(deckFrame, poolOffset, DECAL_LIFT.pool + this._decalSagClearance(route, deckFrame, center.baseTangent, distance, poolOffset, poolLen));
       pool.addScaledVector(frame.tangent, (jY - 0.5) * 4);
       // Additive instance tint doubles as per-lamp brightness jitter;
       // brighter lamps read a touch whiter, dimmer ones more amber.
@@ -7594,7 +7619,7 @@ export class HighwayMap {
       // asphalt (Medium+; hidden on Low, where the pool carries continuity).
       const streakLen = lampStep * (1.04 + jW * 0.2);
       const streakLateral = side * (mountHalf - 3.0);
-      const streak = this._deckPoint(deckFrame, streakLateral, 0.17 + this._decalSagClearance(route, deckFrame, center.baseTangent, distance, streakLateral, streakLen));
+      const streak = this._deckPoint(deckFrame, streakLateral, DECAL_LIFT.streak + this._decalSagClearance(route, deckFrame, center.baseTangent, distance, streakLateral, streakLen));
       streak.addScaledVector(frame.tangent, (jL - 0.5) * 3);
       this._instance(streak, vec(2.5 + jW * 1.1, 1, streakLen), surfaceQuaternion(center.baseTangent).premultiply(bankQuat), null, 'pool:lightStreak');
     }
