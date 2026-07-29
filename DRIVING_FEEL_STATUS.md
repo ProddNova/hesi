@@ -1,5 +1,14 @@
 # Driving feel
 
+> **Where these numbers live now (29 Jul 2026).** Every constant named below —
+> `STEER_GRIP_BUDGET`, `TURN_IN_BOOST`, `DIRECTION_CHANGE_BOOST`,
+> `COUNTER_STEER_ASSIST`, `STABILITY_YAW_GAIN`, `TRACTION_HEADROOM`, the slide
+> onset and range, the roll and pitch gradients — is now an authored field in
+> `js/vehicle-movement.js`, tunable live on the MOVIMENTI panel (key 8) and
+> publishable with the site. The values and the reasoning in this document are
+> unchanged: they are the defaults of that record. See
+> VEHICLE_MOVEMENT_STATUS.md.
+
 ## Round 5 (July 2026) — quicker high-speed direction changes
 
 Reported: at high speed the car turns, but changing from one direction to the

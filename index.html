@@ -176,8 +176,10 @@
         <div class="debug-custom-car">
           <label class="debug-select"><span>MODELLO AUTO PSXSTYLE</span><select id="debug-custom-car-model" aria-label="Modello auto PSXStyle"></select></label>
         </div>
-        <!-- Also the only way into the filter panel without a keyboard. -->
+        <!-- Also the only way into the filter and movement panels without a keyboard. -->
         <div class="filter-presets"><b>FILTRO PS2 &middot; TASTO 9</b><div><button id="debug-open-filter" type="button">APRI FILTRO</button></div></div>
+        <!-- Hidden outside the editor test game, where MOVIMENTI is not offered. -->
+        <div class="filter-presets" id="debug-movement-row" hidden><b>MOVIMENTI AUTO &middot; TASTO 8</b><div><button id="debug-open-movement" type="button">APRI MOVIMENTI</button></div></div>
         <div class="debug-diagnostics">
           <span><b>DIAGNOSTIC RECORDER</b><small>JSON completo per analisi e ottimizzazione</small></span>
           <div><button id="debug-rec-toggle" type="button">START / STOP</button><button id="debug-rec-mark" type="button">MARK MOMENT</button></div>
@@ -216,6 +218,22 @@
           <p class="debug-range-note">VELOCITÀ = quante volte al secondo la grana si ridisegna (FISSA = immobile) · OMBRE = quanto la grana resta nelle zone scure · resta attiva anche con l'effetto VHS spento</p>
         </details>
         <div class="debug-controls"><b>NOTE</b><span>Le dimensioni sono in pixel virtuali: seguono la risoluzione qui sopra</span><span>0 apre il menu debug · 9 chiude questo pannello</span></div>
+      </div>
+    </aside>
+    <!-- MOVIMENTI // 8. Sections, sliders and presets are generated from
+         js/vehicle-movement.js by setupMovementMenu(): fifty-odd dials written
+         out here would be a table nobody can keep in step with the ranges the
+         game clamps to. -->
+    <aside id="movement-menu" class="debug-menu movement-menu hidden" aria-label="Movimenti del veicolo" aria-hidden="true">
+      <header><div><small>VEHICLE MOVEMENT LAB</small><h2>MOVIMENTI // 8</h2></div><button type="button" data-movement-action="close" aria-label="Chiudi movimenti">×</button></header>
+      <div class="debug-menu-body">
+        <div class="filter-presets movement-presets"><b>PRESET</b><div data-movement-presets></div></div>
+        <div class="movement-status">
+          <span><b data-movement-summary>ASSETTO DI SERIE</b><small>Le modifiche si sentono subito, anche in curva</small></span>
+          <div><button type="button" data-movement-action="reset">RESET</button><button type="button" data-movement-action="save">SALVA NEL GIOCO</button></div>
+        </div>
+        <div data-movement-groups></div>
+        <div class="debug-controls"><b>NOTE</b><span>Questi valori valgono per QUALSIASI auto: sono moltiplicatori e gradienti sopra la scheda del veicolo</span><span>SALVA scrive in custom-assets.json e li fa arrivare al gioco pubblicato</span><span>8 chiude questo pannello · 9 filtro · 0 menu debug</span></div>
       </div>
     </aside>
 

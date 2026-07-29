@@ -485,3 +485,27 @@ button:disabled{opacity:.38;cursor:default;pointer-events:none}
 .filter-presets div{display:flex;gap:6px}
 .filter-presets button{padding:7px 10px;border:1px solid #22485a;background:#08120c;color:var(--cyan);font:10px var(--term);letter-spacing:.06em;cursor:pointer}
 .filter-presets button:hover{border-color:var(--cyan);background:#0d1c22}
+/* MOVIMENTI // 8. Same shell again, amber this time — but docked to the LEFT
+   edge instead of centred, and it does not freeze the drive: these dials are
+   only worth anything while the car is actually cornering, so the panel has to
+   leave the road visible and the controls live. The playground's own panel sits
+   on the right, so both can be open at once. */
+.movement-menu{left:14px;right:auto;top:72px;bottom:14px;width:min(430px,calc(100vw - 28px));max-height:none;transform:none;border-color:#5a4520;box-shadow:0 24px 90px #000,5px 5px 0 rgba(255,196,92,.18)}
+.movement-menu header{border-bottom-color:var(--amber);background:linear-gradient(100deg,#1a140a,#0b0805)}
+.movement-menu header small{color:var(--amber)}
+.movement-menu .debug-range span b{color:var(--amber)}
+.movement-menu .debug-range input[type=range]{background:#2a2013}
+.movement-menu .debug-range input[type=range]::-webkit-slider-thumb{background:var(--amber);border-color:#241a08}
+.movement-menu .debug-range input[type=range]::-moz-range-thumb{background:var(--amber);border-color:#241a08}
+.movement-menu .debug-range input[type=range]:focus{outline-color:var(--amber)}
+/* Five presets do not fit one row at the narrow end of the panel's range. */
+.movement-presets div{flex-wrap:wrap;justify-content:flex-end}
+.movement-menu .filter-presets button{border-color:#5a4520;color:var(--amber)}
+.movement-menu .filter-presets button:hover{border-color:var(--amber);background:#20180c}
+.movement-status{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 10px;border-bottom:1px solid #14281c}
+.movement-status b{display:block;color:var(--amber);font-size:10px;letter-spacing:.08em}
+.movement-status small{display:block;margin-top:4px;color:#6f8276;font-size:8px}
+.movement-status div{display:flex;gap:6px}
+.movement-status button{padding:7px 10px;border:1px solid #5a4520;background:#08120c;color:var(--amber);font:10px var(--term);letter-spacing:.06em;cursor:pointer}
+.movement-status button:hover{border-color:var(--amber);background:#20180c}
+@media(max-width:720px){.movement-menu{left:8px;right:8px;top:96px;bottom:8px;width:auto}}

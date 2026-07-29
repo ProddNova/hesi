@@ -30,6 +30,9 @@
 .playground-field b{font-size:9px;font-weight:400;color:#cbd4ce}
 .playground-field output{font-size:8px;color:var(--green)}
 .playground-field input[type="range"]{width:100%;accent-color:var(--green)}
+.playground-panel .playground-movement-open{width:100%;border-color:#9d6d20;background:#251805;color:#ffd49a}
+.playground-panel .playground-movement-open:hover{border-color:var(--amber);color:#fff0d8}
+.playground-note{margin:8px 0 0;color:#8c9d94;font-size:8px;line-height:1.35}
 .playground-view-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:12px}
 .playground-view-tabs button.active{border-color:var(--amber);color:var(--amber);background:#201506}
 .playground-check,.playground-color{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:5px 0 12px;color:#cbd4ce;font-size:9px}

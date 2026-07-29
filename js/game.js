@@ -28,6 +28,7 @@ import { DeveloperMap } from './dev-map.js?v=aa56cc4f53cb';
 import { DebugStats } from './debug-stats.js?v=aa56cc4f53cb';
 import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=aa56cc4f53cb';
 import { cameraTuningFromDocument, normalizeCameraTuning, DEFAULT_PICTURE, normalizePicture, pictureFromDocument, pictureSignature, setDocumentPicture } from './playground-config.js?v=aa56cc4f53cb';
+import { DEFAULT_MOVEMENT, DEG, MOVEMENT_FIELDS, MOVEMENT_GROUPS, MOVEMENT_PRESETS, clampMovementValue, formatMovementValue, movementChangeCount, movementFromDocument, movementSignature, normalizeMovement, setDocumentMovement } from './vehicle-movement.js?v=aa56cc4f53cb';
 import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=aa56cc4f53cb';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
@@ -115,8 +116,10 @@ class ShutokoNights {
     this.mobileFPS={startedAt:performance.now(),frames:0};
     // menuOpen means "a dev overlay owns the screen" — the driving update, the
     // touch controls and pointer lock all read it. debugOpen/filterOpen say
-    // WHICH one, because the two panels are mutually exclusive.
-    this.debug={menuOpen:false,debugOpen:false,filterOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
+    // WHICH one, because those two panels are mutually exclusive. movementOpen
+    // is tracked beside them but deliberately NOT part of menuOpen: MOVIMENTI is
+    // docked to the side and leaves the car driving (see setMovementMenuOpen).
+    this.debug={menuOpen:false,debugOpen:false,filterOpen:false,movementOpen:false,noclip:false,trafficDisabled:false,hitboxes:{roads:false,walls:false,vehicles:false,services:false,world:false},position:new THREE.Vector3(),yaw:0,pitch:0,moveSpeed:55,worldRefresh:0};
     // On-foot mode: step out of the car anywhere (G), walk in first person, and
     // step back in when close. The car and world freeze while walking.
     this.walk={active:false,position:new THREE.Vector3(),yaw:0,pitch:0,velocity:new THREE.Vector3(),height:1.7,groundY:0,carPos:new THREE.Vector3(),carHeading:0};
@@ -133,6 +136,7 @@ class ShutokoNights {
     // a bandwidth cost their profile already budgets against.
     this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
     this.setupFilterMenu();
+    this.setupMovementMenu();
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
     // the address bar settles. Reallocating WebGL's drawing buffer for each one
@@ -163,7 +167,11 @@ class ShutokoNights {
     return{unlocked:false,infiniteMoney:false,infiniteLives:false,infiniteFuel:false,timeScale:1,
       trafficDensity:1,trafficTruckRatio:0.09,trafficVanRatio:0.19,trafficSpeed:1,
       vhsAmount:DEFAULT_PICTURE.vhsAmount,motionBlur:DEFAULT_PICTURE.motionBlur,headlightBrightness:DEFAULT_PICTURE.headlightBrightness,
-      cameraShake:DEFAULT_PICTURE.cameraShake,cameraShakePace:DEFAULT_PICTURE.cameraShakePace,ps2Filter:{...PS2_FILTER_DEFAULTS}};
+      cameraShake:DEFAULT_PICTURE.cameraShake,cameraShakePace:DEFAULT_PICTURE.cameraShakePace,ps2Filter:{...PS2_FILTER_DEFAULTS},
+      // How the car moves (MOVIMENTI // 8). Same idea as the picture dials: the
+      // shipped record lives in code so a fresh browser drives correctly before
+      // the deployed document has been fetched (js/vehicle-movement.js).
+      movement:{...DEFAULT_MOVEMENT}};
   }
 
   createPerformanceProfile(){
@@ -216,6 +224,7 @@ class ShutokoNights {
     // A save written before the filter existed (or by hand) carries anything at
     // all here; normalize once, on load, so nothing downstream has to guard.
     this.admin.ps2Filter=normalizePS2Filter(this.admin.ps2Filter);
+    this.admin.movement=normalizeMovement(this.admin.movement);
     this.cameraMode=this.state.settings.camera||'chase';this.persist();
   }
 
@@ -286,7 +295,7 @@ class ShutokoNights {
       onRoad:true,
     };
     const effective=this.getEffectiveCar();this.audio?.setVehicle?.(effective);
-    this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
+    this.physics=new VehiclePhysics({...effective,fuel:this.state.fuel});this.physics.setMovementTuning(this.admin.movement);this.placeAtSpawn();this.setPhysicsFuel(this.state.fuel);
     this.playerMesh=this.createCarMesh(effective,true);this.roadScene.add(this.playerMesh);this.ensureCustomCarLoaded({silent:true,persist:false});
     try{this.traffic=new TrafficSystem(this.roadScene,this.map,{count:this.performanceProfile.trafficCount,density:1,maxVehicles:this.performanceProfile.maxTraffic,spawnRadius:this.performanceProfile.spawnRadius,despawnRadius:this.performanceProfile.despawnRadius,renderRadius:this.performanceProfile.trafficRenderRadius});this.applyTrafficAdmin();}catch(e){console.error('Traffic init',e);this.traffic=null;}
     this.garage=new GarageSystem(this.garageScene,this.camera,this.canvas,{
@@ -383,6 +392,10 @@ class ShutokoNights {
       const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'');
       if((e.code==='Digit0'||e.code==='Numpad0')&&!typing&&!e.repeat){e.preventDefault();this.toggleDebugMenu();return;}
       if((e.code==='Digit9'||e.code==='Numpad9')&&!typing&&!e.repeat){e.preventDefault();this.toggleFilterMenu();return;}
+      // MOVIMENTI // 8 belongs to the vehicle laboratory: it retunes how the
+      // player's car moves and publishes those values, so it is offered where
+      // the playground lives (the editor test game) rather than to a player.
+      if((e.code==='Digit8'||e.code==='Numpad8')&&!typing&&!e.repeat&&this.canTuneMovement()){e.preventDefault();this.toggleMovementMenu();return;}
       if(e.code==='KeyM'&&!typing&&!e.repeat){e.preventDefault();this.toggleDevMap();return;}
       if(e.code==='KeyI'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggle();return;}
       if(e.code==='KeyP'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggleRecording();return;}
@@ -513,7 +526,8 @@ class ShutokoNights {
     // Back to the shipped look, not to the save file's admin block — and then
     // straight back onto the published picture, which the loaded document
     // already carries (state is new, so nothing has been adopted yet).
-    this.admin=this.defaultAdmin();this._applyPictureToRuntime();this.adoptDocumentPicture(this.editorCarAssets);this.applyTrafficAdmin?.();
+    this.admin=this.defaultAdmin();this._applyPictureToRuntime();this.adoptDocumentPicture(this.editorCarAssets);
+    this.state.movementRevision=null;this._applyMovementToRuntime();this.adoptDocumentMovement(this.editorCarAssets);this.applyTrafficAdmin?.();
     this.run={score:0,combo:1,comboTimer:0,lives:3,nearMisses:0,bestRunCombo:1};this.fuelWarned=false;this.persist();this.refreshVehicle();this.ui.hideBoot();this.started=true;this.enterGarage('new');
   }
 
@@ -882,9 +896,10 @@ class ShutokoNights {
     this._syncOverlayState();
   }
   /**
-   * Both dev panels sit in the middle of the screen and both freeze the drive,
-   * so opening one closes the other. Everything that used to key off
-   * `debug.menuOpen` still works because this recomputes it from the two.
+   * Both centred dev panels freeze the drive, so opening one closes the other.
+   * Everything that used to key off `debug.menuOpen` still works because this
+   * recomputes it from the two. MOVIMENTI is deliberately NOT one of them: it
+   * is docked to the side and leaves the car driving (see setMovementMenuOpen).
    */
   _syncOverlayState(){
     const open=this.debug.debugOpen||this.debug.filterOpen;this.debug.menuOpen=open;
@@ -1059,6 +1074,184 @@ class ShutokoNights {
     }
     const pattern=document.getElementById('filter-dither-pattern');
     if(pattern&&document.activeElement!==pattern)pattern.value=filter.ditherPattern;
+  }
+
+  // ---------------------------------------------------------------------
+  // MOVIMENTI // 8 — how the player's car MOVES while driving.
+  //
+  // The record and its ranges live in js/vehicle-movement.js and are read by
+  // js/physics.js every substep, so this panel is only a view of them: the
+  // sections, the sliders, the units and the presets are all generated from
+  // MOVEMENT_GROUPS / MOVEMENT_FIELDS. Fifty-odd dials written out in
+  // index.html would be a table that goes stale the first time a range moves.
+  //
+  // It is a vehicle-laboratory tool (see canTuneMovement): it retunes the
+  // driving for everyone once published, which is not something to hand a
+  // player mid-run.
+  // ---------------------------------------------------------------------
+  /** Where MOVIMENTI is offered: the editor test game, playground or highway. */
+  canTuneMovement(){return !!(this.editorTest||this.playground?.active);}
+  setupMovementMenu(){
+    this.movementMenu=document.getElementById('movement-menu');
+    if(!this.movementMenu)return;
+    const presets=this.movementMenu.querySelector('[data-movement-presets]');
+    if(presets){
+      for(const name of Object.keys(MOVEMENT_PRESETS)){
+        const button=document.createElement('button');
+        button.type='button';button.dataset.movementPreset=name;button.textContent=name.toUpperCase();
+        button.addEventListener('click',()=>this.applyMovementPreset(name));
+        presets.append(button);
+      }
+    }
+    const groups=this.movementMenu.querySelector('[data-movement-groups]');
+    if(groups){
+      for(const group of MOVEMENT_GROUPS){
+        const details=document.createElement('details');
+        details.className='debug-traffic-panel';details.open=!!group.open;details.dataset.movementGroup=group.id;
+        const summary=document.createElement('summary');
+        const caption=document.createElement('span');
+        const title=document.createElement('b');title.textContent=group.label;
+        const hint=document.createElement('small');hint.textContent=group.hint;
+        caption.append(title,hint);
+        const tune=document.createElement('em');tune.textContent='TUNE';
+        summary.append(caption,tune);details.append(summary);
+        for(const field of MOVEMENT_FIELDS.filter(candidate=>candidate.group===group.id)){
+          const label=document.createElement('label');label.className='debug-range';
+          const row=document.createElement('span');
+          const value=document.createElement('b');value.id=`movement-${field.key}-val`;
+          row.append(document.createTextNode(`${field.label} `),value);
+          const input=document.createElement('input');
+          input.type='range';input.id=`movement-${field.key}`;input.min=field.min;input.max=field.max;input.step=field.step;
+          input.value=this.admin.movement?.[field.key]??DEFAULT_MOVEMENT[field.key];
+          // Same live-drag / commit-on-release contract as the other dev
+          // sliders: dragging retunes the car mid-corner, releasing writes the
+          // save (and publishes, in the editor test game).
+          input.addEventListener('input',e=>this.setMovementParam(field.key,e.target.value,false));
+          input.addEventListener('change',e=>this.setMovementParam(field.key,e.target.value,true));
+          label.append(row,input);details.append(label);
+        }
+        if(group.note){
+          const note=document.createElement('p');note.className='debug-range-note';note.textContent=group.note;details.append(note);
+        }
+        groups.append(details);
+      }
+    }
+    this.movementMenu.querySelector('[data-movement-action="close"]')?.addEventListener('click',()=>this.setMovementMenuOpen(false));
+    this.movementMenu.querySelector('[data-movement-action="reset"]')?.addEventListener('click',()=>this.applyMovementPreset('stock'));
+    this.movementMenu.querySelector('[data-movement-action="save"]')?.addEventListener('click',()=>this.publishMovement({immediate:true}));
+    document.getElementById('debug-open-movement')?.addEventListener('click',()=>this.setMovementMenuOpen(true));
+    const row=document.getElementById('debug-movement-row');if(row)row.hidden=!this.editorTest;
+    this.syncMovementControls();
+  }
+  toggleMovementMenu(force){this.setMovementMenuOpen(typeof force==='boolean'?force:!this.debug.movementOpen);}
+  /**
+   * Unlike DEBUG and FILTRO this panel does NOT freeze the drive and does not
+   * take `debug.menuOpen`: a lean, a dive or a turn-in rate can only be judged
+   * while the car is going round something, so the sliders have to be draggable
+   * mid-corner with the keys still driving. It is docked to the left edge for
+   * the same reason — the road, and the playground's own panel, stay visible.
+   */
+  setMovementMenuOpen(open){
+    open=!!open;
+    if(open&&!this.canTuneMovement())return;
+    if(open===this.debug.movementOpen)return;
+    this.debug.movementOpen=open;
+    this.movementMenu?.classList.toggle('hidden',!open);
+    this.movementMenu?.setAttribute('aria-hidden',String(!open));
+    if(open)this.syncMovementControls();
+  }
+  /** The record as it is right now, ready to hand to physics or to publish. */
+  currentMovement(){return normalizeMovement(this.admin.movement);}
+  setMovementParam(key,value,commit=true){
+    const current=this.currentMovement();
+    const next=clampMovementValue(key,value);
+    if(next===current[key]&&!commit)return;
+    this.admin.movement={...current,[key]:next};
+    this._applyMovementSettings(commit);
+  }
+  applyMovementPreset(name){
+    const preset=MOVEMENT_PRESETS[name];
+    if(!preset)return;
+    // A preset is a whole answer: anything it does not name goes back to the
+    // shipped value rather than keeping whatever was on the dial.
+    this.admin.movement=normalizeMovement(preset);
+    this._applyMovementSettings(true);
+    this.ui?.toast?.(`MOVIMENTI // ${name.toUpperCase()}`,'amber');
+  }
+  _applyMovementSettings(commit){
+    // Physics normalizes and hands back what it installed, so admin can never
+    // drift from the numbers the substeps are actually running.
+    this.admin.movement=this.physics?.setMovementTuning?.(this.admin.movement)||normalizeMovement(this.admin.movement);
+    this.syncMovementControls();
+    if(!commit)return;
+    this.debugStats?.event('movement_changed',{...this.admin.movement});
+    this.persist();this.publishMovement();
+  }
+  /** Pushes the record into the running car and back onto the panel. */
+  _applyMovementToRuntime(){
+    this.physics?.setMovementTuning?.(this.admin.movement);
+    this.syncMovementControls();
+  }
+  syncMovementControls(){
+    const movement=this.currentMovement();
+    for(const field of MOVEMENT_FIELDS){
+      const input=document.getElementById(`movement-${field.key}`);
+      if(input&&document.activeElement!==input)input.value=String(movement[field.key]);
+      const label=document.getElementById(`movement-${field.key}-val`);
+      if(label)label.textContent=formatMovementValue(field.key,movement[field.key]);
+    }
+    const summary=this.movementMenu?.querySelector('[data-movement-summary]');
+    if(summary){
+      const changed=movementChangeCount(movement);
+      summary.textContent=changed?`${changed} VALORI MODIFICATI`:'ASSETTO DI SERIE';
+    }
+  }
+  /**
+   * Takes the published record — but only once per published revision, for the
+   * same reason the picture does (see adoptDocumentPicture): a live panel has to
+   * hold its values across a reload, and a deploy still has to reach a player
+   * who has driven before.
+   */
+  adoptDocumentMovement(document){
+    const movement=movementFromDocument(document);
+    if(!movement)return false;
+    const revision=movementSignature(movement);
+    if(this.state.movementRevision===revision)return false;
+    this.state.movementRevision=revision;
+    this.admin.movement=movement;
+    this._applyMovementToRuntime();
+    this.persist();
+    return true;
+  }
+  /**
+   * Writes the record into the editor document. Test game only: that document
+   * is the build the editor serves, so this is the one route by which a value
+   * tuned while driving becomes a value everybody downloads.
+   *
+   * Debounced like the picture publish — it fires on every slider release and
+   * the document is a ~12 MB file with the textures embedded.
+   */
+  publishMovement({immediate=false}={}){
+    if(!this.editorTest)return;
+    clearTimeout(this._movementPublishTimer);
+    this._movementPublishTimer=setTimeout(()=>{this._movementPublishTimer=null;this._publishMovementNow();},immediate?0:600);
+  }
+  async _publishMovementNow(){
+    const document=this.editorCarAssets||blankCustomAssetsDocument();
+    const movement=setDocumentMovement(document,this.currentMovement());
+    this.editorCarAssets=document;
+    // Record the signature we are about to publish, so the next boot sees the
+    // document as already adopted instead of new values it has to take again.
+    this.state.movementRevision=movementSignature(movement);this.persist();
+    try{
+      const response=await fetch('/__hesi_editor_assets',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({document})});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok||!payload.ok)throw new Error(payload.error||`HTTP ${response.status}`);
+      this.ui?.toast?.('MOVIMENTI SALVATI // custom-assets.json','amber');
+    }catch(error){
+      console.warn('Movement publish',error);
+      this.ui?.toast?.(`SALVATAGGIO MOVIMENTI FALLITO // ${error.message}`,'red');
+    }
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
   updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}
@@ -1369,6 +1562,7 @@ class ShutokoNights {
     this.editorCarAssets=document;
     this.cameraTuning=cameraTuningFromDocument(document);
     this.adoptDocumentPicture(document);
+    this.adoptDocumentMovement(document);
     if(this.playgroundPanel?.document!==document)this.playgroundPanel?.setDocument(document);
     this.editorCarResolver=createRuntimeAssetPartResolver(document,this.map);
     // Player hitbox and light settings live beside its Modeler shape. Rebuild
@@ -1674,10 +1868,16 @@ class ShutokoNights {
   updateBodyClimb(p,dt){
     this._bodyClimb=this._bodyClimb||0;
     if(!dt||!this._bodyClimbFrom){this._bodyClimbFrom=p.clone();if(!dt)this._bodyClimb=0;return this._bodyClimb;}
+    // How much of the road's gradient the shell shows, how far it may be taken
+    // and how fast it gets there are three dials on the MOVIMENTI panel
+    // (js/vehicle-movement.js, group `body`): a ramp can read as anything from
+    // a flat brick to a car climbing hard.
+    const move=this.admin.movement||DEFAULT_MOVEMENT;
+    const limit=move.slopeLimitDeg*DEG;
     const from=this._bodyClimbFrom,horizontal=Math.hypot(p.x-from.x,p.z-from.z);
     if(horizontal>.12){
-      const target=clamp(Math.atan2(p.y-from.y,horizontal),-.2,.2);
-      this._bodyClimb=THREE.MathUtils.lerp(this._bodyClimb,target,1-Math.exp(-dt*5));
+      const target=clamp(Math.atan2(p.y-from.y,horizontal)*move.slopeFollow,-limit,limit);
+      this._bodyClimb=THREE.MathUtils.lerp(this._bodyClimb,target,1-Math.exp(-dt*move.slopeSmoothing));
       from.copy(p);
     }
     return this._bodyClimb;
