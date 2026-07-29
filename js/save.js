@@ -10,7 +10,7 @@ import {
   getCarSpec,
   getConditionEffects,
   hashSeed,
-} from './data.js?v=aa56cc4f53cb';
+} from './data.js?v=e1e7b1f036d9';
 
 export const SAVE_KEY = 'shutoko-nights.save';
 export const SAVE_VERSION = 4;

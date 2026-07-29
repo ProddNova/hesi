@@ -7,7 +7,7 @@
  * here means the live playground and normal gameplay can never silently use
  * different ranges or defaults.
  */
-import { PS2_FILTER_DEFAULTS, normalizePS2Filter } from './ps2-filter.js?v=aa56cc4f53cb';
+import { PS2_FILTER_DEFAULTS, normalizePS2Filter } from './ps2-filter.js?v=e1e7b1f036d9';
 export const DEFAULT_CAMERA_TUNING = Object.freeze({
   chase: Object.freeze({
     forward: -5.8,
