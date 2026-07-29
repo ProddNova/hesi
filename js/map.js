@@ -61,6 +61,7 @@ const FORWARD = new THREE.Vector3(0, 0, 1);
 const TMP_A = new THREE.Vector3();
 const TMP_B = new THREE.Vector3();
 const TMP_C = new THREE.Vector3();
+const TMP_DECK_L = new THREE.Vector3();
 const TMP_SURF_F = new THREE.Vector3();
 const TMP_SURF_U = new THREE.Vector3();
 const TMP_SURF_R = new THREE.Vector3();
@@ -4194,6 +4195,8 @@ export class HighwayMap {
     // center.normal is the DIRECTED normal (= base normal * direction)
     const alongDirected = baseOffset * resolvedDirection;
     const position = center.position.clone().addScaledVector(center.normal, alongDirected);
+    const bank = this._bankAt(route, center.distance);
+    this._liftLaneOntoDeck(route, position, center.distance, baseOffset, bank);
     const lookAhead = clamp(route.length * 0.002, 4, 14);
     const before = this._sampleCenter(route, center.distance - lookAhead * resolvedDirection, resolvedDirection).tangent;
     const after = this._sampleCenter(route, center.distance + lookAhead * resolvedDirection, resolvedDirection).tangent;
@@ -4225,11 +4228,13 @@ export class HighwayMap {
       normal: center.normal,
       right: center.normal.clone(),
       left: center.normal.clone().multiplyScalar(-1),
-      up: UP.clone(),
+      up: this._deckUp(center.tangent, center.normal, bank * resolvedDirection),
       quaternion,
       rotation: quaternion,
       heading,
       curvature,
+      bank,
+      grade: center.tangent.y,
       roadWidth: route.roadWidth,
       laneWidth: route.laneWidth,
       speedLimit: route.speedLimit,
@@ -4346,6 +4351,40 @@ export class HighwayMap {
       return a + (b - a) * t;
     }
     return this._rawBankAt(route, distance);
+  }
+
+  /**
+   * Raise a lane-centre point from the horizontal plane through the centreline
+   * onto the DECK, which is the surface everything else in the map is built
+   * from: y(s, l) = curveY(s) + tan(bank(s))·l + progressive branch offset,
+   * exactly what `_deckPoint` lays the asphalt on and what `getRoadInfo`
+   * hands physics. `lateral` is signed along the BASE normal, i.e. the value
+   * `_laneOffset` returns.
+   *
+   * Lane samples used to skip this, so a lane centre was only correct on the
+   * centreline itself. On a banked bend the outermost lane of a wide route sits
+   * ~7 m off-axis, and at the ±0.075 rad bank ceiling that is a half-metre
+   * error: traffic riding those samples floated over the asphalt on one side of
+   * the road and sank through it on the other.
+   */
+  _liftLaneOntoDeck(route, position, distance, lateral, bank) {
+    position.y += Math.tan(bank) * lateral
+      + this._progressiveBranchDeckOffsetAt(route, distance, lateral);
+    return position;
+  }
+
+  /**
+   * Surface normal of the banked deck, from a tangent/normal pair that may be
+   * flipped to a travel direction (pass `bank * direction` to match). Same
+   * construction as `_frameAt`: the deck's lateral direction crossed with its
+   * tangent. Direction-invariant by design — up is up whichever way you drive.
+   */
+  _deckUp(tangent, normal, bank, target = new THREE.Vector3()) {
+    TMP_DECK_L.set(normal.x, Math.tan(bank), normal.z);
+    target.crossVectors(TMP_DECK_L, tangent);
+    if (target.lengthSq() < EPSILON) return target.copy(UP);
+    if (target.y < 0) target.multiplyScalar(-1);
+    return target.normalize();
   }
 
   /** Instantaneous clamped-curvature bank — table source only. */
@@ -5168,6 +5207,9 @@ export class HighwayMap {
     const normal = horizontalNormal(tangent);
     const baseOffset = this._laneOffset(route, laneIndex, direction);
     const position = centerPosition.addScaledVector(normal, baseOffset * direction);
+    const bank = this._bankAt(route, normalizedDistance);
+    this._liftLaneOntoDeck(route, position, normalizedDistance, baseOffset, bank);
+    const up = this._deckUp(tangent, normal, bank * direction);
     const normalizedLaneRef = laneRef.routeId === route.id
       && (laneRef.laneIndex ?? laneRef.lane ?? 0) === laneIndex
       && (laneRef.direction ?? direction) === direction
@@ -5188,6 +5230,9 @@ export class HighwayMap {
       forward: tangent,
       normal,
       right: normal.clone(),
+      up,
+      bank,
+      grade: tangent.y,
       laneWidth: route.laneWidth,
       speedLimit: route.speedLimit,
       laneRef: normalizedLaneRef,
