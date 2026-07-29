@@ -70,36 +70,6 @@ class ShutokoNights {
   constructor(){
     this.canvas=document.getElementById('game-canvas');
     const bootParams=new URLSearchParams(location.search);this.editorTest=bootParams.has('editorTest');this.requestedPlayground=bootParams.get('playground')==='1';
-    // ?diag=native — draw at the display's real pixel count on a handheld.
-    //
-    // A phone never renders at native: qualityScale in applyRenderResolution is
-    // .4/.5/.62, so even High draws ~38% of the pixels and stretches the result
-    // over the screen. Desktop Medium and High both draw at 1.0. That is the
-    // one structural difference left between the two, and the speckling on the
-    // road has only ever been reported on the phone. setSurfaceMipBias exists
-    // to compensate for exactly this shortfall and did not settle it.
-    //
-    // This switch removes the variable instead of compensating for it, so the
-    // answer is a yes/no rather than a fourth inference from a screenshot: if
-    // the specks survive at native, sub-native rendering is not the cause and
-    // the whole resolution/filtering family is finally dead. Diagnostic only —
-    // absent from the URL, nothing here runs. Expect a low frame rate.
-    const diag=(bootParams.get('diag')||'').split(',');
-    this.diagNative=diag.includes('native');
-    // ?diag=nofilter — remove the VHS/PS2 post pass entirely. See the VHSEffect
-    // construction for why the in-game VHS setting cannot do this.
-    this.diagNoFilter=diag.includes('nofilter');
-    // ?diag=aa — give a handheld the multisampling a desktop already gets.
-    //
-    // A phone has none, anywhere: the context is built `antialias:!isHandheld`
-    // and the post target takes `samples:isHandheld?0:4`. Desktop gets both. So
-    // every test so far changed resolution or post-processing while leaving the
-    // phone with zero multisampling in every path — including ?diag=nofilter,
-    // which routes drawing straight to the un-multisampled default framebuffer.
-    //
-    // .devtests/antialias-probe.mjs measures this but runs on desktop, where it
-    // is on, so the handheld path has never actually been measured.
-    this.diagAA=diag.includes('aa');
     // Two different questions, conflated until 28 Jul 2026.
     //
     // isTouchDevice — can this machine be touched? A Windows laptop with a
@@ -128,22 +98,7 @@ class ShutokoNights {
     // fraction that picks the texel — it quantises the asphalt into a lattice
     // of repeated specks, the mobile-only "confetti". Three downgrades this
     // automatically on hardware without fragment highp.
-    // ?diag=aa forces the desktop multisampling path on. `antialias` can only
-    // be chosen at context creation, so it has to be a boot parameter.
-    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:this.diagAA||!this.isHandheld,powerPreference:'high-performance',alpha:false,precision:'highp'});
-    // What the device ACTUALLY granted, as opposed to what was asked for above.
-    // The comment above is a hypothesis about this machine's capabilities that
-    // has never been checked against the machine reporting the artefact: if
-    // fragment highp is missing, `precision:'highp'` above was silently
-    // downgraded and the confetti explanation stands; if it is present, that
-    // explanation is dead and the UV magnitude is not the story. Surfaced on
-    // the boot screen under any ?diag= so a photo settles it.
-    try{
-      const gl=this.renderer.getContext();
-      const high=gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT);
-      this.gpuFragmentHighp=!!high&&high.precision>0;
-      this.gpuPrecision=this.renderer.capabilities?.precision||'?';
-    }catch(e){this.gpuFragmentHighp=null;this.gpuPrecision='?';}
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:!this.isHandheld,powerPreference:'high-performance',alpha:false,precision:'highp'});
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=DEFAULT_LIGHTING.exposure;this.renderer.shadowMap.enabled=false;
     // Near plane at .3 keeps depth precision tight enough that coplanar road
     // details stop z-fighting at distance.
@@ -176,18 +131,7 @@ class ShutokoNights {
     // The pass owns multisampling once it is on, so the canvas MSAA above stops
     // being the anti-aliaser. Phones keep it off: a half-float colour buffer is
     // a bandwidth cost their profile already budgets against.
-    // ?diag=nofilter drops the whole post pass — render() then falls back to a
-    // plain renderer.render(). The settings toggle cannot do this: it only
-    // zeroes the tape amount, and VHSEffect.active() stays true while
-    // filterAffectsImage(filter) is, which pixelLines:368 keeps true. So the
-    // shipped picture is resampled to 368 lines and grained on every device no
-    // matter what the player selects, and there was no way to take it out.
-    //
-    // Two device asymmetries live in this pass and nowhere else: `samples`
-    // below is 4× MSAA on desktop and ZERO on a handheld, and the 368-line
-    // resample is stretched over ~1992 px of phone against ~1080 of monitor.
-    // Both survive ?diag=native, which is why that answered nothing.
-    this.vhs=this.diagNoFilter?null:new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:(this.diagAA||!this.isHandheld)?4:0,filter:this.admin.ps2Filter});
+    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
     this.setupFilterMenu();
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
@@ -1836,10 +1780,7 @@ class ShutokoNights {
     // High is locked. Stacking a .75 quality scale on top of an already-sub-1
     // dynamic scale is what made the default (Medium) look upscaled on PC.
     const q=this.renderQuality(),qualityScale=this.isHandheld?{low:.4,medium:.5,high:.62}:{low:.62,medium:1,high:1};
-    // ?diag=native bypasses BOTH the quality scale and the adaptive governor —
-    // the governor would immediately claw the resolution back down on a phone
-    // and quietly reintroduce the variable this switch exists to remove.
-    const scale=this.diagNative?1:(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
+    const scale=(qualityScale[q]||qualityScale.medium)*this.effectiveRenderScale();
     const dpr=Math.min(window.devicePixelRatio||1,3);
     const viewport=this._stableViewportSize||{width:innerWidth,height:innerHeight};
     let w=Math.round(viewport.width*dpr*scale),h=Math.round(viewport.height*dpr*scale);
@@ -1852,10 +1793,7 @@ class ShutokoNights {
     // pixelated". Desktop now carries the 8.5 MP headroom on every tier, and
     // the adaptive governor — which exists for precisely this — takes the frame
     // rate back if the GPU cannot hold it.
-    // The handheld cap is a thermal limit, so it too has to stand aside for the
-    // diagnostic — leaving it in place would clamp the frame back below native
-    // on exactly the devices the question is about.
-    const maxPixels=this.diagNative?Infinity:this.isHandheld?this.performanceProfile.maxPixels:Math.max(this.performanceProfile.maxPixels,8500000);const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
+    const maxPixels=this.isHandheld?this.performanceProfile.maxPixels:Math.max(this.performanceProfile.maxPixels,8500000);const px=w*h;if(px>maxPixels){const s=Math.sqrt(maxPixels/px);w=Math.round(w*s);h=Math.round(h*s);}
     w=Math.max(320,w);h=Math.max(200,h);
     if(this.canvas.width!==w||this.canvas.height!==h)this.renderer.setSize(w,h,false);
     this.vhs?.setSize(w,h);
@@ -1878,10 +1816,7 @@ class ShutokoNights {
     const node=document.getElementById('render-info');if(!node)return;
     const displayW=Math.round(viewport.width*dpr),displayH=Math.round(viewport.height*dpr);
     const native=w===displayW&&h===displayH;
-    // Naming the switch on the boot screen makes a photo of it self-documenting:
-    // "specks are still there" is only an answer if the frame was actually
-    // native when it was taken, and the ✓ above is what proves it.
-    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}${this.diagNative?' · DIAG:NATIVE':''}${this.diagNoFilter?' · DIAG:NOFILTER':''}${this.diagAA?' · DIAG:AA':''}${(this.diagNative||this.diagNoFilter||this.diagAA)?` · fragHighp:${this.gpuFragmentHighp===null?'?':this.gpuFragmentHighp?'YES':'NO'} · shader:${this.gpuPrecision}`:''}`;
+    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}`;
   }
   resize({force=false}={}){
     const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
