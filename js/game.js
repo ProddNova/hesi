@@ -84,7 +84,11 @@ class ShutokoNights {
     // the specks survive at native, sub-native rendering is not the cause and
     // the whole resolution/filtering family is finally dead. Diagnostic only —
     // absent from the URL, nothing here runs. Expect a low frame rate.
-    this.diagNative=(bootParams.get('diag')||'').split(',').includes('native');
+    const diag=(bootParams.get('diag')||'').split(',');
+    this.diagNative=diag.includes('native');
+    // ?diag=nofilter — remove the VHS/PS2 post pass entirely. See the VHSEffect
+    // construction for why the in-game VHS setting cannot do this.
+    this.diagNoFilter=diag.includes('nofilter');
     // Two different questions, conflated until 28 Jul 2026.
     //
     // isTouchDevice — can this machine be touched? A Windows laptop with a
@@ -146,7 +150,18 @@ class ShutokoNights {
     // The pass owns multisampling once it is on, so the canvas MSAA above stops
     // being the anti-aliaser. Phones keep it off: a half-float colour buffer is
     // a bandwidth cost their profile already budgets against.
-    this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
+    // ?diag=nofilter drops the whole post pass — render() then falls back to a
+    // plain renderer.render(). The settings toggle cannot do this: it only
+    // zeroes the tape amount, and VHSEffect.active() stays true while
+    // filterAffectsImage(filter) is, which pixelLines:368 keeps true. So the
+    // shipped picture is resampled to 368 lines and grained on every device no
+    // matter what the player selects, and there was no way to take it out.
+    //
+    // Two device asymmetries live in this pass and nowhere else: `samples`
+    // below is 4× MSAA on desktop and ZERO on a handheld, and the 368-line
+    // resample is stretched over ~1992 px of phone against ~1080 of monitor.
+    // Both survive ?diag=native, which is why that answered nothing.
+    this.vhs=this.diagNoFilter?null:new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
     this.setupFilterMenu();
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
@@ -1840,7 +1855,7 @@ class ShutokoNights {
     // Naming the switch on the boot screen makes a photo of it self-documenting:
     // "specks are still there" is only an answer if the frame was actually
     // native when it was taken, and the ✓ above is what proves it.
-    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}${this.diagNative?' · DIAG:NATIVE':''}`;
+    node.textContent=` · ${w}×${h}${native?' ✓':` → ${displayW}×${displayH}`} · dpr ${dpr.toFixed(2)} · ${quality.toUpperCase()}${this.diagNative?' · DIAG:NATIVE':''}${this.diagNoFilter?' · DIAG:NOFILTER':''}`;
   }
   resize({force=false}={}){
     const current={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
