@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DEG, normalizeMovement } from './vehicle-movement.js?v=aa56cc4f53cb';
 
 const G = 9.81;
 const TAU = Math.PI * 2;
@@ -8,33 +9,18 @@ const EPSILON = 1e-6;
 const clamp = THREE.MathUtils.clamp;
 
 // --- Handling feel ---------------------------------------------------------
-// How much of the tires' lateral grip a held steering input may ask for in a
-// steady corner. Deliberately below 1: the remainder is the margin the car
-// spends on bumps, on the throttle and on a lane change taken mid-corner. At
-// 1.0 every held turn is already a slide waiting for its trigger.
-const STEER_GRIP_BUDGET = 0.94;
-// Extra lock allowed on the way into a corner, before the lateral grip the
-// steering asked for has actually arrived. Fades to nothing as the corner loads.
-const TURN_IN_BOOST = 0.55;
-// A direction change must first unwind the lateral load from the previous
-// corner. Give that short transition more authority than a turn from straight;
-// it disappears as soon as the old load is gone and never raises steady lock.
-const DIRECTION_CHANGE_BOOST = 0.8;
-// When the car counts as sliding, measured in multiples of the rear tires' own
-// peak slip angle rather than in degrees — a soft tire on a wet surface is away
-// at an angle a sticky one is still gripping at. Nothing below onset is touched,
-// so ordinary hard cornering never meets the assists.
-const SLIDE_ONSET = 1;
-const SLIDE_RANGE = 1.15;
-// Fraction of the slide-cancelling steering angle handed to the driver, and the
-// surplus yaw rate (per second) the stability control removes at full slide.
-const COUNTER_STEER_ASSIST = 0.55;
-const STABILITY_YAW_GAIN = 2.6;
-// Drive force allowed past what is left of the driven axle's friction circle.
-const TRACTION_HEADROOM = 1.18;
-// Body attitude gradients, in radians per g, at the stock suspension rate.
-const ROLL_GRADIENT = 0.061;
-const PITCH_GRADIENT = 0.028;
+// Every feel number this file used to hold as a module constant — the steering
+// grip budget, the turn-in and direction-change boosts, where a slide starts,
+// how hard the assists work, the roll and pitch gradients, the yaw damping,
+// the road-height spring — now lives in js/vehicle-movement.js as one authored
+// record with a range and a default per entry. `this.movement` is that record;
+// DEFAULT_MOVEMENT reproduces the driving this file shipped with, so a physics
+// instance nobody has tuned behaves exactly as before.
+//
+// The playground's MOVIMENTI panel (key 8) drives it live and publishes it in
+// data/editor/custom-assets.json, the same route the camera and the picture
+// take. Read that module before changing a number here: a value that exists in
+// both places will drift.
 
 function finite(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
@@ -345,6 +331,10 @@ function buildSpec(carSpec = {}) {
 export class VehiclePhysics {
   constructor(carSpec = {}) {
     this.spec = buildSpec(carSpec);
+    // How the car moves, as opposed to what it is. Global and live-tunable
+    // (js/vehicle-movement.js); a spec may seed it, but the game keeps it in
+    // step through setMovementTuning() so changing car never loses the tuning.
+    this.movement = normalizeMovement(carSpec.movement ?? carSpec.movementTuning);
     this.transmissionMode = String(carSpec.transmissionMode ?? 'automatic').toLowerCase();
     this.position = new THREE.Vector3();
     this.previousPosition = new THREE.Vector3();
@@ -466,6 +456,18 @@ export class VehiclePhysics {
     return this;
   }
 
+  /**
+   * Installs a movement record. Safe to call on every slider drag: it only
+   * replaces a plain object of numbers, so the car keeps its position, its
+   * velocity and its current body attitude and simply starts moving by the new
+   * rules on the next substep. Anything missing or out of range comes back as
+   * the shipped default, so a half-written record can never reach a substep.
+   */
+  setMovementTuning(value) {
+    this.movement = normalizeMovement(value);
+    return this.movement;
+  }
+
   changeSpec(carSpec = {}, preserve = {}) {
     const oldCapacity = this.spec.fuelCapacity;
     const oldFuel = this.fuel;
@@ -515,8 +517,9 @@ export class VehiclePhysics {
   }
 
   _beginShift() {
-    this.shiftTimer = this.spec.shiftTime;
-    this.shiftCooldown = this.spec.shiftTime + 0.08;
+    const shiftTime = this.spec.shiftTime * this.movement.shiftTimeScale;
+    this.shiftTimer = shiftTime;
+    this.shiftCooldown = shiftTime + 0.08;
     this._events.push({ type: 'shift', gear: this.gear, time: this.time });
   }
 
@@ -591,6 +594,7 @@ export class VehiclePhysics {
   }
 
   _step(dt, input, roadInfo, settings) {
+    const move = this.movement;
     this.shiftTimer = Math.max(0, this.shiftTimer - dt);
     this.shiftCooldown = Math.max(0, this.shiftCooldown - dt);
 
@@ -619,14 +623,21 @@ export class VehiclePhysics {
     rearLoad = totalWeight - frontLoad;
 
     const lateralTransferFraction = clamp(Math.abs(this._lateralAcceleration) * this.spec.cgHeight / (G * this.spec.trackWidth), 0, 0.42);
-    const loadSensitivity = 1 - lateralTransferFraction * 0.14;
-    const muFront = this.spec.tireGrip * surface.grip * loadSensitivity;
-    let muRear = this.spec.tireGrip * surface.grip * loadSensitivity;
-    if (input.handbrake > 0) muRear *= THREE.MathUtils.lerp(1, 0.28, input.handbrake);
+    const loadSensitivity = 1 - lateralTransferFraction * move.loadSensitivity;
+    // The tire's own mu, scaled once here so the steering budget, the stability
+    // reference and the yaw ceiling all read the same grip the axles do.
+    const tireGrip = this.spec.tireGrip * move.gripScale;
+    const muFront = tireGrip * surface.grip * loadSensitivity;
+    let muRear = tireGrip * surface.grip * loadSensitivity;
+    if (input.handbrake > 0) muRear *= THREE.MathUtils.lerp(1, move.handbrakeRearGrip, input.handbrake);
 
-    const suspensionFactor = clamp(this.spec.suspensionStiffness, 0.55, 1.65);
-    const cornerFront = this.spec.cornerStiffnessFront * suspensionFactor;
-    const cornerRear = this.spec.cornerStiffnessRear * suspensionFactor;
+    // The suspension rate is the car's own, scaled by the movement record. It
+    // sets cornering stiffness AND divides the body's lean, so one dial moves
+    // grip and attitude together the way a real spring change does.
+    const suspensionFactor = clamp(this.spec.suspensionStiffness * move.suspensionRate, 0.35, 3.6);
+    const cornerFront = this.spec.cornerStiffnessFront * suspensionFactor * move.frontCornerScale;
+    const cornerRear = this.spec.cornerStiffnessRear * suspensionFactor * move.rearCornerScale;
+    const maxSteer = this.spec.maxSteer * move.steerLock;
     const frontGripLimit = muFront * frontLoad;
     const rearGripLimit = muRear * rearLoad;
     const assist = clamp(finite(settings.drivingAssist ?? settings.assist, 1), 0, 1);
@@ -636,12 +647,12 @@ export class VehiclePhysics {
     const rearSlip = Math.atan2(v - b * this.yawRate, effectiveU);
     const frontVelocityAngle = Math.atan2(v + a * this.yawRate, effectiveU);
     const rearPeakSlip = Math.max(0.02, rearGripLimit / Math.max(1, cornerRear));
-    const slide = smoothstep01((Math.abs(rearSlip) / rearPeakSlip - SLIDE_ONSET) / SLIDE_RANGE);
+    const slide = smoothstep01((Math.abs(rearSlip) / rearPeakSlip - move.slideOnset) / move.slideRange);
 
     // Steering, sized in grip rather than in degrees.
     //
     // `steerCommand` is the lock a held button may ask for: the angle a steady
-    // corner at STEER_GRIP_BUDGET of the tires' limit needs, understeer
+    // corner at `steerGripBudget` of the tires' limit needs, understeer
     // gradient included. It replaces a hand-tuned Ackermann fraction plus a
     // flat 0.024 rad allowance, which happened to land exactly on the limit for
     // one reference car and 20% PAST it for the lighter, softer starter car —
@@ -655,7 +666,7 @@ export class VehiclePhysics {
     // do while they are already spending their circle on stopping.
     const staticFront = totalWeight * this.spec.frontWeight;
     const understeerGradient = Math.max(0, staticFront / cornerFront - (totalWeight - staticFront) / cornerRear) / G;
-    const budgetLateral = this.spec.tireGrip * surface.grip * G * STEER_GRIP_BUDGET;
+    const budgetLateral = tireGrip * surface.grip * G * move.steerGripBudget;
     const steerSensitivity = clamp(finite(settings.steeringSensitivity, 1), 0.5, 1.6);
     // Turn-in. The steady-state angle alone reads as numb, because it is exactly
     // what the FINISHED corner needs and the car then has to wait for the yaw to
@@ -675,9 +686,9 @@ export class VehiclePhysics {
     const directionalLoad = this._lateralAcceleration * requestedTurn;
     const lateralDeficit = clamp(1 - directionalLoad / Math.max(1, budgetLateral), 0, 1);
     const opposingLoad = clamp(-directionalLoad / Math.max(1, budgetLateral), 0, 1);
-    const turnIn = 1 + (TURN_IN_BOOST * lateralDeficit + DIRECTION_CHANGE_BOOST * opposingLoad) * (1 - slide);
+    const turnIn = 1 + (move.turnInBoost * lateralDeficit + move.directionChangeBoost * opposingLoad) * (1 - slide);
     const steerCommand = Math.min(
-      this.spec.maxSteer,
+      maxSteer,
       budgetLateral * (this.spec.wheelbase / Math.max(4, u * u) + understeerGradient) * steerSensitivity * turnIn,
     );
 
@@ -690,10 +701,10 @@ export class VehiclePhysics {
     // stepped out. It stays shut while the car is merely cornering hard —
     // opening it there would let a held turn ask for ever more lock as the car
     // rotated into it, which is a divergence, not a driving aid.
-    const tracking = clamp(frontVelocityAngle * directionSign, -this.spec.maxSteer, this.spec.maxSteer);
+    const tracking = clamp(frontVelocityAngle * directionSign, -maxSteer, maxSteer);
     const counterReach = tracking * slide;
-    const upperLimit = Math.min(this.spec.maxSteer, Math.max(0, counterReach) + steerCommand);
-    const lowerLimit = Math.max(-this.spec.maxSteer, Math.min(0, counterReach) - steerCommand);
+    const upperLimit = Math.min(maxSteer, Math.max(0, counterReach) + steerCommand);
+    const lowerLimit = Math.max(-maxSteer, Math.min(0, counterReach) - steerCommand);
     let targetSteering = input.steer >= 0 ? input.steer * upperLimit : -input.steer * lowerLimit;
 
     // Counter-steer assist. A keyboard cannot feed in a precise opposite lock,
@@ -702,22 +713,28 @@ export class VehiclePhysics {
     // driver is steering into the slide on purpose, so drifting still works.
     if (assist > 0 && slide > 0) {
       const provoking = clamp(-input.steer * Math.sign(tracking || 1), 0, 1);
-      const help = tracking * slide * COUNTER_STEER_ASSIST * assist * (1 - provoking * 0.85);
+      const help = tracking * slide * move.counterSteerAssist * assist * (1 - provoking * 0.85);
       targetSteering = clamp(targetSteering + help, lowerLimit, upperLimit);
     }
 
     // Turn-in still ramps over ~0.26 s so binary input reads as a progressive
     // turn rather than a step; a large error (catching a slide) moves the wheel
     // proportionally faster, the way a driver's hands would.
-    const steerRate = Math.max(0.55, steerCommand / 0.26, Math.abs(targetSteering - this.steering) * 4) * dt;
+    const steerRate = Math.max(
+      move.steerRateFloor,
+      steerCommand / move.steerBuildTime,
+      Math.abs(targetSteering - this.steering) * move.steerCatchGain,
+    ) * dt;
     this.steering += clamp(targetSteering - this.steering, -steerRate, steerRate);
-    if (Math.abs(input.steer) < 0.02 && slide < 0.05) this.steering *= Math.exp(-dt * (5.5 + speed * 0.035));
+    if (Math.abs(input.steer) < 0.02 && slide < 0.05) {
+      this.steering *= Math.exp(-dt * (move.steerReturnRate + speed * move.steerReturnSpeedGain));
+    }
 
     const frontSlip = frontVelocityAngle - this.steering * directionSign;
     this._frontSlip = frontSlip;
     this._rearSlip = rearSlip;
 
-    const lowSpeedTireFactor = smoothstep01(speed / 2.2);
+    const lowSpeedTireFactor = smoothstep01(speed / move.tireWarmSpeed);
     let fyFront = saturate(-cornerFront * frontSlip * lowSpeedTireFactor, frontGripLimit);
     let fyRear = saturate(-cornerRear * rearSlip * lowSpeedTireFactor, rearGripLimit);
 
@@ -734,7 +751,7 @@ export class VehiclePhysics {
       const spare = (limit, lateral) => Math.sqrt(Math.max(
         0,
         limit * limit - Math.min(Math.abs(lateral), limit * 0.98) ** 2,
-      )) * TRACTION_HEADROOM;
+      )) * move.tractionHeadroom;
       let tractionLimit;
       if (this.spec.drivetrain === 'FWD') tractionLimit = spare(frontGripLimit, fyFront);
       else if (this.spec.drivetrain === 'AWD' || this.spec.drivetrain === '4WD') {
@@ -753,7 +770,12 @@ export class VehiclePhysics {
 
     const brakeDirection = Math.abs(u) > 0.25 ? Math.sign(u) : Math.sign(driveForce || 1);
     const serviceBrakeInput = this.gear < 0 ? input.throttle : input.brake;
-    const serviceBrake = serviceBrakeInput * this.spec.brakeForce;
+    const brakeForce = this.spec.brakeForce * move.brakeScale;
+    // The bias shift is a delta on the car's own figure, so one setting reads
+    // the same on every car: + moves the work forward (stable, understeering
+    // stop), − backwards (the tail gets light).
+    const brakeBias = clamp(this.spec.brakeBias + move.brakeBiasDelta, 0.05, 0.95);
+    const serviceBrake = serviceBrakeInput * brakeForce;
     // Road cars use ABS for the normal brake pedal. Previously the raw brake
     // force could exceed both axles' grip by 50-100%, `_gripCircle` marked all
     // four wheels as locked and removed most lateral authority. A tiny yaw
@@ -766,16 +788,16 @@ export class VehiclePhysics {
       limit * limit - Math.min(Math.abs(lateralForce), limit * 0.97) ** 2,
     )) * 0.96;
     const frontBrake = Math.min(
-      serviceBrake * this.spec.brakeBias,
+      serviceBrake * brakeBias,
       absLongitudinalCapacity(frontGripLimit, fyFront),
     );
     const rearBrake = Math.min(
-      serviceBrake * (1 - this.spec.brakeBias),
+      serviceBrake * (1 - brakeBias),
       absLongitudinalCapacity(rearGripLimit, fyRear),
     );
     let fxFront = driveFront - brakeDirection * frontBrake;
     let fxRear = driveRear - brakeDirection * rearBrake;
-    fxRear -= brakeDirection * input.handbrake * this.spec.brakeForce * 0.72;
+    fxRear -= brakeDirection * input.handbrake * brakeForce * move.handbrakeForce;
 
     const frontCircle = this._gripCircle(fxFront, fyFront, frontGripLimit, 0);
     const rearCircle = this._gripCircle(fxRear, fyRear, rearGripLimit, input.handbrake * 0.7);
@@ -797,14 +819,15 @@ export class VehiclePhysics {
     let forceY = frontBodyY + fyRear;
 
     // Street-car aero and rolling losses; neither creates meaningful downforce.
-    forceX += -0.5 * 1.225 * this.spec.dragArea * u * Math.abs(u);
-    forceY += -0.5 * 1.225 * this.spec.dragArea * 0.7 * v * Math.abs(v);
+    const dragArea = this.spec.dragArea * move.dragScale;
+    forceX += -0.5 * 1.225 * dragArea * u * Math.abs(u);
+    forceY += -0.5 * 1.225 * dragArea * move.lateralDrag * v * Math.abs(v);
     if (speed > 0.08) {
-      const rolling = this.spec.rollingResistance * totalWeight;
+      const rolling = this.spec.rollingResistance * move.rollingResistanceScale * totalWeight;
       forceX -= rolling * u / speed;
       forceY -= rolling * v / speed;
     }
-    forceX -= this.spec.mass * G * Math.sin(surface.grade);
+    forceX -= this.spec.mass * G * Math.sin(surface.grade) * move.gradeForce;
 
     if (speed < 1.2 && serviceBrakeInput > 0.2 && (this.gear < 0 ? input.brake : input.throttle) < 0.05) {
       const hold = Math.exp(-dt * 18 * serviceBrakeInput);
@@ -815,14 +838,18 @@ export class VehiclePhysics {
 
     const accelerationX = forceX / this.spec.mass;
     const accelerationY = forceY / this.spec.mass;
-    this._longitudinalAcceleration = THREE.MathUtils.lerp(this._longitudinalAcceleration, accelerationX, 1 - Math.exp(-dt * 9));
-    this._lateralAcceleration = THREE.MathUtils.lerp(this._lateralAcceleration, accelerationY, 1 - Math.exp(-dt * 9));
+    // The filtered accelerations are what the body attitude, the load transfer
+    // and the steering budget all read, so this rate is how quickly the whole
+    // car acknowledges a throttle, a brake or a turn.
+    const loadFollow = 1 - Math.exp(-dt * move.loadSmoothing);
+    this._longitudinalAcceleration = THREE.MathUtils.lerp(this._longitudinalAcceleration, accelerationX, loadFollow);
+    this._lateralAcceleration = THREE.MathUtils.lerp(this._lateralAcceleration, accelerationY, loadFollow);
 
     this.velocity.addScaledVector(forward, accelerationX * dt);
     this.velocity.addScaledVector(right, accelerationY * dt);
     if (surface.velocity) this.velocity.lerp(surface.velocity, clamp(surface.velocityInfluence * dt, 0, 1));
 
-    const inertia = this.spec.mass * (a * a + b * b) * 0.72;
+    const inertia = this.spec.mass * (a * a + b * b) * move.inertiaScale;
     let yawMoment = a * frontBodyY - b * fyRear;
     // Stability control: bleed off the yaw the steering never asked for. It is
     // asleep during ordinary cornering (it only fades in past the rear tires'
@@ -830,25 +857,25 @@ export class VehiclePhysics {
     // flick still rotates the car — it just stops a lift-off or a kerb turning
     // into a spin the driver has no way to answer.
     if (assist > 0 && slide > 0) {
-      const gripYawRate = this.spec.tireGrip * surface.grip * G / Math.max(4, Math.abs(u));
+      const gripYawRate = tireGrip * surface.grip * G / Math.max(4, Math.abs(u));
       const referenceYaw = clamp(
         u * this.steering * directionSign / Math.max(1, this.spec.wheelbase + understeerGradient * u * u),
         -gripYawRate,
         gripYawRate,
       );
       const authority = slide * assist * (input.handbrake > 0.1 ? 0.25 : 1);
-      yawMoment -= (this.yawRate - referenceYaw) * inertia * STABILITY_YAW_GAIN * authority;
+      yawMoment -= (this.yawRate - referenceYaw) * inertia * move.stabilityYawGain * authority;
     }
     const yawAcceleration = yawMoment / Math.max(1, inertia);
     this.yawRate += yawAcceleration * dt;
     // Heavier yaw damping right after an impact so wall/traffic hits shed
     // rotation in well under a second instead of an endless pirouette.
-    const impactDamping = this._postImpactTimer > 0 ? 2.6 : 0;
-    this.yawRate *= Math.exp(-dt * (0.32 + impactDamping + (speed < 1.5 ? 5 : 0)));
+    const impactDamping = this._postImpactTimer > 0 ? move.impactYawDamping : 0;
+    this.yawRate *= Math.exp(-dt * (move.yawDamping + impactDamping + (speed < 1.5 ? move.parkedYawDamping : 0)));
     // No car pirouettes at speed: the tires cannot hold the car on a radius
     // that tight. Past that rate the surplus is bled away rather than clipped,
     // so a big slide still looks like a slide instead of hitting a wall.
-    const sustainableYaw = this.spec.tireGrip * surface.grip * G / Math.max(5, speed) * 1.7 + 0.22;
+    const sustainableYaw = tireGrip * surface.grip * G / Math.max(5, speed) * move.yawLimit + move.yawLimitFloor;
     if (Math.abs(this.yawRate) > sustainableYaw) {
       const surplus = Math.abs(this.yawRate) - sustainableYaw;
       this.yawRate = Math.sign(this.yawRate) * (sustainableYaw + surplus * Math.exp(-dt * 7));
@@ -866,10 +893,21 @@ export class VehiclePhysics {
     // load-transfer angle the old targets used. That angle is how much weight
     // moves across the track, not how far the shell leans: it reached 16
     // degrees of roll and 8 of dive, where a firmish road car does about 3.5
-    // degrees per g of roll and 1.6 per g of dive. Stiffer suspension leans less.
-    const pitchTarget = clamp(-this._longitudinalAcceleration / G * PITCH_GRADIENT / suspensionFactor, -0.055, 0.05);
-    const rollTarget = clamp(-this._lateralAcceleration / G * ROLL_GRADIENT / suspensionFactor, -0.1, 0.1);
-    const bodyResponse = 1 - Math.exp(-dt * (5 + suspensionFactor * 3));
+    // degrees per g of roll and 1.6 per g of dive. Stiffer suspension leans
+    // less, and both gradients, both limits and the spring that chases them are
+    // on the MOVIMENTI panel (js/vehicle-movement.js, group `body`).
+    const rollLimit = move.rollLimitDeg * DEG;
+    const pitchTarget = clamp(
+      -this._longitudinalAcceleration / G * move.divePerGDeg * DEG / suspensionFactor,
+      -move.squatLimitDeg * DEG,
+      move.diveLimitDeg * DEG,
+    );
+    const rollTarget = clamp(
+      -this._lateralAcceleration / G * move.rollPerGDeg * DEG / suspensionFactor,
+      -rollLimit,
+      rollLimit,
+    );
+    const bodyResponse = 1 - Math.exp(-dt * (move.bodyResponse + suspensionFactor * move.bodyResponseStiffness));
     this.bodyPitch = THREE.MathUtils.lerp(this.bodyPitch, pitchTarget, bodyResponse);
     this.bodyRoll = THREE.MathUtils.lerp(this.bodyRoll, rollTarget, bodyResponse);
   }
@@ -896,9 +934,12 @@ export class VehiclePhysics {
 
   _applyRoadHeight(surface, dt) {
     if (!Number.isFinite(surface.height) || !surface.snapHeight) return;
-    const target = surface.height + this.spec.rideHeight;
+    const target = surface.height + this.spec.rideHeight + this.movement.rideHeightDelta;
     const error = target - this.position.y;
-    this._roadHeightVelocity += (error * 95 - this._roadHeightVelocity * 17) * dt;
+    // The spring that keeps the wheels on the road. A soft rate floats over
+    // crests, a hard one copies every joint in the deck; the damping is what
+    // decides whether it settles or wallows.
+    this._roadHeightVelocity += (error * this.movement.surfaceSpring - this._roadHeightVelocity * this.movement.surfaceDamping) * dt;
     this.position.y += this._roadHeightVelocity * dt;
     if (Math.abs(error) < 0.002) {
       this.position.y = target;
@@ -907,6 +948,7 @@ export class VehiclePhysics {
   }
 
   _engineForces(input, forwardSpeed, dt, settings) {
+    const move = this.movement;
     const engineThrottle = this.gear < 0 ? input.brake : input.throttle;
     this._lastThrottle = engineThrottle;
     const ratio = this._currentRatio();
@@ -918,7 +960,7 @@ export class VehiclePhysics {
       ? freeRevTarget
       : Math.max(this.spec.idleRPM, THREE.MathUtils.lerp(freeRevTarget, coupledRPM, clutchEngagement));
     if (this.shiftTimer > 0) rpmTarget = Math.max(this.spec.idleRPM, coupledRPM);
-    this.rpm += (rpmTarget - this.rpm) * (1 - Math.exp(-dt * (ratio === 0 ? 5.5 : 12)));
+    this.rpm += (rpmTarget - this.rpm) * (1 - Math.exp(-dt * (ratio === 0 ? 5.5 : 12) * move.rpmResponse));
     this.rpm = clamp(this.rpm, this.spec.idleRPM * 0.82, this.spec.redlineRPM + 500);
 
     if (this.fuel <= 0) this.engineRunning = false;
@@ -935,9 +977,9 @@ export class VehiclePhysics {
     this._engineTorque = torque;
     let driveForce = 0;
     if (ratio !== 0) {
-      const launchClutch = THREE.MathUtils.lerp(0.42, 1, smoothstep01(Math.abs(forwardSpeed) / 4));
+      const launchClutch = THREE.MathUtils.lerp(move.launchBite, 1, smoothstep01(Math.abs(forwardSpeed) / 4));
       driveForce = torque * ratio * this.spec.finalDrive * this.spec.efficiency / this.spec.wheelRadius * launchClutch * (1 - input.clutch);
-      const engineBrakingTorque = (1 - engineThrottle) * Math.min(95, 18 + this.rpm * 0.009);
+      const engineBrakingTorque = (1 - engineThrottle) * Math.min(95, 18 + this.rpm * 0.009) * move.engineBraking;
       if (Math.abs(forwardSpeed) > 0.3) driveForce -= Math.sign(forwardSpeed) * engineBrakingTorque * Math.abs(ratio) * this.spec.finalDrive / this.spec.wheelRadius;
     }
     this._driveForce = driveForce;
@@ -981,8 +1023,8 @@ export class VehiclePhysics {
     if (this.gear < 0) return;
     if (this.gear <= 0 && input.throttle > 0.05) this.gear = 1;
     const gearCount = this.spec.gearRatios.length;
-    const upThreshold = this.spec.redlineRPM * THREE.MathUtils.lerp(0.72, 0.94, input.throttle);
-    const downThreshold = this.spec.redlineRPM * THREE.MathUtils.lerp(0.31, 0.48, input.throttle);
+    const upThreshold = this.spec.redlineRPM * THREE.MathUtils.lerp(0.72, 0.94, input.throttle) * this.movement.upshiftRPM;
+    const downThreshold = this.spec.redlineRPM * THREE.MathUtils.lerp(0.31, 0.48, input.throttle) * this.movement.downshiftRPM;
     if (this.rpm > upThreshold && this.gear < gearCount) this.shiftUp();
     else if (this.rpm < downThreshold && this.gear > 1 && Math.abs(forwardSpeed) > 4) this.shiftDown();
   }
@@ -1105,7 +1147,11 @@ export class VehiclePhysics {
     if (severity > 1.2 && this._yawKickCooldown <= 0) {
       const point = asVector3(contact.point ?? contact.contactPoint, this.position);
       const arm = point.sub(this.position);
-      const kick = clamp((arm.x * normal.z - arm.z * normal.x) * severity * 0.03 + preImpactTangent * 0.006, -0.7, 0.7);
+      const kick = clamp(
+        ((arm.x * normal.z - arm.z * normal.x) * severity * 0.03 + preImpactTangent * 0.006) * this.movement.impactYawKick,
+        -0.7,
+        0.7,
+      );
       this.yawRate = clamp(this.yawRate + kick, -1.6, 1.6);
       this._yawKickCooldown = 0.45;
       this._postImpactTimer = Math.max(this._postImpactTimer, 0.9);

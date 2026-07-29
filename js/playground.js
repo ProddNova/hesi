@@ -6,6 +6,7 @@ import {
   setDocumentCameraTuning,
   setDocumentPicture,
 } from './playground-config.js?v=aa56cc4f53cb';
+import { movementChangeCount, setDocumentMovement } from './vehicle-movement.js?v=aa56cc4f53cb';
 import {
   CAR_HEADLIGHT_FIELDS,
   CAR_HITBOX_SETTING_FIELDS,
@@ -411,6 +412,22 @@ export class PlaygroundPanel {
     }
     content.append(rearSection.details);
 
+    // MOVIMENTI lives in its own left-docked panel (key 8) because it keeps the
+    // car driving while you drag: the whole point is to feel a lean or a dive
+    // change mid-corner. This section is the way in without a keyboard.
+    const movement = this.section('Movimenti del veicolo', 'Assetto, sospensioni, sterzo, aderenza, rotazione, freni');
+    const movementButton = element('button', 'playground-movement-open', 'APRI MOVIMENTI // 8');
+    movementButton.type = 'button';
+    movementButton.addEventListener('click', () => this.game.setMovementMenuOpen(true));
+    const changed = movementChangeCount(this.game.currentMovement?.());
+    movement.body.append(
+      movementButton,
+      element('p', 'playground-note', changed
+        ? `${changed} valori diversi dall'assetto di serie · si salvano con questo pannello`
+        : 'Assetto di serie · si salva con questo pannello'),
+    );
+    content.append(movement.details);
+
     const visual = this.section('Immagine e movimento', 'Controlli live già presenti nel menu debug');
     const visualFields = [
       ['Luminosità fari', 'headlightBrightness', 0, 2.5, 0.05, '×'],
@@ -445,8 +462,11 @@ export class PlaygroundPanel {
     setDocumentCameraTuning(this.document, this.camera);
     // The image dials on this panel are the same ones the dev panel drives, so
     // saving here publishes them too — otherwise the two routes to the same
-    // values would disagree about which one ships.
+    // values would disagree about which one ships. MOVIMENTI travels with them
+    // for the same reason: it has its own SALVA button, and a panel that saves
+    // "everything the playground tunes" must not quietly leave it behind.
     setDocumentPicture(this.document, this.game.currentPicture());
+    setDocumentMovement(this.document, this.game.currentMovement());
     if (this.status) this.status.textContent = 'Salvataggio nel gioco…';
     try {
       const response = await fetch('/__hesi_editor_assets', {
