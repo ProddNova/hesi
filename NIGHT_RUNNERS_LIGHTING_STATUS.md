@@ -570,3 +570,58 @@ stood on **one** side of the road.
 
 Shots: `node .devtests/lighting-probe.mjs <tag>` — the `ramp8-pa-approach` and
 `ramp8-pa-bay` spots were added to frame the reported hole.
+
+# One row, on the outer kerb (2026-07-29, same day)
+
+**Report:** "in ogni strada ci sono i lampioni sia sul lato interno che esterno
+della strada — lasciali solo sul lato esterno". This reverses half of the
+section above: the second row lit the far kerb, and with both rows up the user
+could see that the row they wanted gone was the one standing in the median.
+
+## Which row was which
+
+`_registerDataRoute` forces every data route one-way, so the walk's
+`route.bidirectional ? … : 1` always resolved to `side = 1` — the `+normal`
+kerb, i.e. the right of travel. On the paired corridors (wangan, k1, r1, c1,
+r9, r11, k5) the two carriageways face each other, so `+normal` is the **median**
+kerb for both of them: measured over the whole map, 3020 of 3296 first-row poles
+next to a twin stood in the gap between the decks. The mirror row was therefore
+the outer one, and the row frozen by the editor saves was the inner one.
+
+## Changes (`js/map.js`)
+
+- `_lampSideFor(route)` — samples the route, finds the nearest neighbouring
+  carriageway at each station (`_candidateRoutes` + `_projectToRoute`; ramps,
+  service roads and decks more than 8 m above/below are not twins) and returns
+  the kerb facing AWAY from it. Decided once per route and cached on
+  `route._lampSide`, so a row never jumps across the deck where the twin drifts
+  off; a route with nothing alongside keeps the original `+normal` kerb, and a
+  bidirectional route still alternates.
+- `_queueRouteLamps` takes no `mirror` argument any more;
+  `_buildMirrorSideLamps`, its `_buildWorld` call, `MIRROR_LAMP_POOL_WIDTH` /
+  `MIRROR_LAMP_POOL_GAIN` and `_lampHeadObstructed` are gone. The surviving row
+  is back to the full-strength pool (it is alone on the asphalt again).
+- The overhead-deck skip was NOT carried over to the single row: with it,
+  ramp_11 and ramp_12 (~690 m each, most of their length under the Wangan
+  viaduct) lost every lamp. The Tatsumi clearing still zero-scales anything
+  standing on the slab, and that path is index-safe (tombstones, not deletions).
+
+## Measured
+
+- `node .devtests/lamp-side-probe.mjs` — 2873 outer / 123 inner (was 3020 inner
+  / 276 outer on the first row).
+- `node .devtests/lamp-coverage-probe.mjs` — 4138 lampposts, one row on 63
+  routes; the only routes with no lamp at all are three 86–160 m ramp stubs
+  whose kerbs sit inside a neighbouring carriageway; 0 live instances standing
+  inside the Tatsumi clearing.
+- Saved editor instance ops: **118 on target, 4 drifted, 1 unresolved —
+  identical to before this change**. Getting there needed a migration: moving
+  the row re-pointed 47 lamp hides (they had been saved against the old inner
+  row and the mirror row), so each was re-matched to the same physical lamp in
+  its new position, 0 dropped. Pre-migration file:
+  `data/editor/hesi-world-build.json.bak-lampside` — restore it together with
+  the code if the lamp side is ever reverted.
+
+Shots: `node .devtests/lamp-topdown-shot.mjs <tag>` → `.devtests/shots/L-*.png`
+(the two overhead spots show the ribbon on the outer flanks and the median gap
+dark; the chase spot is the driver's view).
