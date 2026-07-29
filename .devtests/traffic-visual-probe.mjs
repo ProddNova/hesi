@@ -154,10 +154,9 @@ const panel = await page.evaluate(() => ({
   intensity: !!document.getElementById('debug-traffic-intensity'),
   truck: !!document.getElementById('debug-traffic-truck'),
   van: !!document.getElementById('debug-traffic-van'),
-  lanechange: !!document.getElementById('debug-traffic-lanechange'),
   speed: !!document.getElementById('debug-traffic-speed'),
 }));
-check('all 5 traffic sliders exist in dev panel', Object.values(panel).every(Boolean), JSON.stringify(panel));
+check('all 4 traffic sliders exist in dev panel', Object.values(panel).every(Boolean), JSON.stringify(panel));
 // Open the <details> so the sliders are visible for the screenshot.
 await page.evaluate(() => { const d = document.querySelector('.debug-traffic-panel'); if (d) d.open = true; });
 await page.waitForTimeout(100);
@@ -173,21 +172,18 @@ const reaction = await page.evaluate(() => {
   };
   drive('debug-traffic-truck', 30);
   drive('debug-traffic-intensity', 2.0);
-  drive('debug-traffic-lanechange', 0);
   drive('debug-traffic-speed', 130);
   const g = window.shutoko;
   return {
     truckWeight: g.traffic.typeWeights.truck,
     truckRatio: g.admin.trafficTruckRatio,
     density: g.traffic.density,
-    laneChangeRate: g.traffic.laneChangeRate,
     speedFactor: g.traffic.speedFactor,
   };
 });
 console.log('slider reaction:', JSON.stringify(reaction));
 check('truck slider updates class mix', Math.abs(reaction.truckWeight - 0.3) < 0.01 && Math.abs(reaction.truckRatio - 0.3) < 0.01);
 check('intensity slider updates density', Math.abs(reaction.density - 2.0) < 0.01);
-check('lane-change slider can disable lane changes (0)', reaction.laneChangeRate === 0);
 check('speed slider scales flow (1.3x)', Math.abs(reaction.speedFactor - 1.3) < 0.01);
 
 // Persistence round-trip: value survives reload.
