@@ -5,7 +5,7 @@ import {
   normalizeCameraTuning,
   setDocumentCameraTuning,
   setDocumentPicture,
-} from './playground-config.js?v=e1e7b1f036d9';
+} from './playground-config.js?v=aa56cc4f53cb';
 import {
   CAR_HEADLIGHT_FIELDS,
   CAR_HITBOX_SETTING_FIELDS,
@@ -13,7 +13,7 @@ import {
   carHeadlightSettings,
   carHitboxSettings,
   carRearLightSettings,
-} from './car-models.js?v=e1e7b1f036d9';
+} from './car-models.js?v=aa56cc4f53cb';
 
 const clamp = THREE.MathUtils.clamp;
 
