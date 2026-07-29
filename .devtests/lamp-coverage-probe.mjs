@@ -3,8 +3,8 @@
  * how many the Tatsumi clearing zeroes, and whether the instance indices the
  * editor saved still address the instances they were saved against.
  *
- * Both lamp rows are expected on every route: the first walk lights one kerb,
- * the mirror pass (_buildMirrorSideLamps) lights the other.
+ * One row per carriageway is expected, on the OUTER kerb (_lampSideFor); the
+ * opposite-kerb mirror pass was removed on 29 Jul 2026.
  *
  * Run: node .devtests/lamp-coverage-probe.mjs [--verbose]
  */
@@ -19,11 +19,9 @@ const originalLamps = proto._queueRouteLamps;
 
 const lamps = [];
 let currentRoute = null;
-let currentMirror = false;
-proto._queueRouteLamps = function patchedLamps(route, mirror) {
+proto._queueRouteLamps = function patchedLamps(route) {
   currentRoute = route;
-  currentMirror = !!mirror;
-  const result = originalLamps.call(this, route, mirror);
+  const result = originalLamps.call(this, route);
   currentRoute = null;
   return result;
 };
@@ -34,7 +32,7 @@ proto._instance = function patchedInstance(position, scale, quaternion, color, t
     lamps.push({
       route: currentRoute.id,
       kind: currentRoute.kind,
-      mirror: currentMirror,
+      side: this._lampSideFor(currentRoute),
       suppressed: bucket[bucket.length - 1].suppressed,
     });
   }
@@ -47,27 +45,23 @@ console.log(`world built in ${((Date.now() - started) / 1000).toFixed(1)} s`);
 
 const byRoute = new Map();
 for (const lamp of lamps) {
-  const entry = byRoute.get(lamp.route) || { kind: lamp.kind, first: 0, mirror: 0, suppressed: 0 };
-  entry[lamp.mirror ? 'mirror' : 'first'] += 1;
+  const entry = byRoute.get(lamp.route) || { kind: lamp.kind, count: 0, side: lamp.side, suppressed: 0 };
+  entry.count += 1;
   if (lamp.suppressed) entry.suppressed += 1;
   byRoute.set(lamp.route, entry);
 }
-const firstRow = lamps.filter((lamp) => !lamp.mirror).length;
-const mirrorRow = lamps.length - firstRow;
-console.log(`lampposts: ${firstRow} on the first kerb, ${mirrorRow} on the mirror kerb`);
+console.log(`lampposts: ${lamps.length} on ${byRoute.size} routes, one row each`);
 
 if (VERBOSE) {
   for (const [id, entry] of [...byRoute].sort((a, b) => a[0].localeCompare(b[0]))) {
     const length = Math.round(map.routes.get(id).length);
     console.log(`  ${id.padEnd(20)} ${entry.kind.padEnd(9)} len=${String(length).padStart(5)}`
-      + ` first=${String(entry.first).padStart(4)} mirror=${String(entry.mirror).padStart(4)}`
+      + ` lamps=${String(entry.count).padStart(4)} kerb=${entry.side > 0 ? '+normal' : '-normal'}`
       + ` zeroed=${entry.suppressed}`);
   }
 }
 
-const oneSided = [...byRoute].filter(([, entry]) => !entry.first || !entry.mirror);
 const unlit = [...map.routes.values()].filter((route) => !byRoute.has(route.id));
-console.log(`routes lit on one kerb only: ${oneSided.length ? oneSided.map(([id]) => id).join(', ') : 'none'}`);
 console.log(`routes with no lampposts at all: ${unlit.length
   ? unlit.map((route) => `${route.id} (${route.kind}, ${Math.round(route.length)} m)`).join(', ')
   : 'none'}`);

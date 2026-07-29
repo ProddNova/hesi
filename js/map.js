@@ -87,13 +87,6 @@ const SERVICE_DASH_PERIOD = 14;
 // Denser broken line marking a merge/exit boundary through junction zones.
 const ZONE_DASH_LENGTH = 3.0;
 const ZONE_DASH_PERIOD = 6;
-// Second (opposite-kerb) lamp row. Its poles and lenses are identical to the
-// first row's; only the ground decal is scaled back, because the first row's
-// pool already reaches across the carriageway and two full-strength additive
-// pools stacked on the same asphalt clip to white instead of reading sodium.
-// Together they land around 1.4x the old peak — brighter, still amber.
-const MIRROR_LAMP_POOL_WIDTH = 0.6;
-const MIRROR_LAMP_POOL_GAIN = 0.42;
 // ------------------------------------------------------------------
 // Emergency lay-bys (非常駐車帯 / piazzole di sosta d'emergenza)
 //
@@ -5897,9 +5890,6 @@ export class HighwayMap {
     this._buildLaybyDressing();
     this._buildZoneEntrances();
     this._buildTerrain();
-    // Dead last among the instancing passes, for the same index reason as the
-    // two above: the opposite-kerb lamp row only APPENDS to its buckets.
-    this._buildMirrorSideLamps();
     this._finalizeChunks();
     // Built last and outside the index-sensitive chunk buckets.
     this._buildTatsumiUnderdeckPools();
@@ -7484,9 +7474,8 @@ export class HighwayMap {
   /**
    * True when a deck passes overhead close enough that a `height` metre
    * lamppost planted at `base` would stab through it — the Tatsumi PA slab, or
-   * another carriageway flying over this one. Only the second (mirror) lamp row
-   * consults this: the first row's instance COUNT is frozen by the editor saves
-   * that address it by index, so it may move a pole but never drop one.
+   * another carriageway flying over this one. The lamp walk skips those
+   * stations rather than planting a pole through a soffit.
    */
   _lampHeadObstructed(base, route, height = 9.9) {
     if (this._tatsumiClearingArea === undefined) {
@@ -7524,19 +7513,12 @@ export class HighwayMap {
    * no draw calls, geometries or lights — the instanced planes are simply
    * bigger and individually tinted.
    *
-   * Every carriageway here is one-way, so the original single row stood on one
-   * kerb only and the far edge ran unlit. `mirror` re-runs the identical walk
-   * on the OPPOSITE edge so both sides of both roads carry a lamp row. It is a
-   * separate pass (see _buildMirrorSideLamps) purely for index safety, and it
-   * differs from the first row in two ways:
-   *
-   *  - its ground pool is narrower and dimmer, because the first row's pool
-   *    already washes most of the deck: two full-strength additive pools stack
-   *    into a blown-out white ribbon instead of a warm sodium one;
-   *  - it may skip a station outright (overhead deck, see _lampHeadObstructed),
-   *    which the first row must never do.
+   * ONE row per carriageway, on the OUTER kerb (see _lampSideFor). A second
+   * row on the opposite kerb was tried (29 Jul 2026) and taken out again: the
+   * user wants the poles on the outside of the corridor only, with the median
+   * gap dark.
    */
-  _queueRouteLamps(route, mirror = false) {
+  _queueRouteLamps(route) {
     const isService = route.kind === 'service';
     const isRamp = route.kind === 'ramp';
     const lampStep = isService ? 55 : (isRamp ? 70 : 42);
@@ -7550,7 +7532,10 @@ export class HighwayMap {
     const poolSodium = new THREE.Color(0xff8a2e);
     const tmpColor = new THREE.Color();
     const tmpAxis = new THREE.Vector3();
+    // One-way carriageways carry a single row, on the outer flank of the
+    // corridor; a bidirectional route still alternates kerbs.
     let lampSide = 1;
+    const outerSide = this._lampSideFor(route);
     for (let distance = lampStep * 0.4; distance < route.length; distance += lampStep) {
       const center = this._sampleCenter(route, distance, 1);
       const half = this._halfWidthAt(route, distance);
@@ -7565,8 +7550,7 @@ export class HighwayMap {
       // and lens instances keep their original positions so saved editor edits,
       // which address instances by index and verify by matrix, cannot move.
       const deckFrame = { ...frame, route, distance };
-      const rowSide = route.bidirectional ? (lampSide *= -1) : 1;
-      const side = mirror ? -rowSide : rowSide;
+      const side = route.bidirectional ? (lampSide *= -1) : outerSide;
       // Pole and lens ride the DRAWN edge (a lay-by carries them outward with
       // its parapet); the pools below stay sized/offset off the through-lane
       // half-width, so the light ribbon over the running lanes is unchanged.
@@ -7583,7 +7567,10 @@ export class HighwayMap {
         if (!this._insideTatsumiClearing(retreat, 0.6)) { mountHalf = half; base = retreat; }
       }
       if (this._barrierSuppressed(base, route, !!this._laybyAt(route, distance, side))) continue;
-      if (mirror && this._lampHeadObstructed(base, route)) continue;
+      // No overhead-deck skip here: this is the route's only row, and dropping
+      // every obstructed station left ramp_11/ramp_12 (~690 m each, most of it
+      // under the Wangan viaduct) completely unlit. The Tatsumi clearing still
+      // zero-scales anything standing on its slab, which is index-safe.
       // local +X of the lamp geometry maps to -normal under yawQuaternion;
       // mirror with a half turn for the other edge so the arm reaches the road
       const quaternion = yawQuaternion(center.baseTangent);
@@ -7608,7 +7595,7 @@ export class HighwayMap {
       // light under it. The pool's overhang past the deck edge is unchanged
       // either way (it is +0.1x its width in both cases).
       const poolLen = lampStep * (1.2 + jL * 0.2);
-      const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19) * (mirror ? MIRROR_LAMP_POOL_WIDTH : 1);
+      const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
       const poolOffset = side * (mountHalf - poolWidth * 0.4) + (jW - 0.5) * 1.6;
       // The pool is a big flat quad; the deck is banked AND graded. Orient it to
       // lie PARALLEL to the road surface so it hugs the asphalt instead of cutting
@@ -7627,7 +7614,7 @@ export class HighwayMap {
       pool.addScaledVector(frame.tangent, (jY - 0.5) * 4);
       // Additive instance tint doubles as per-lamp brightness jitter;
       // brighter lamps read a touch whiter, dimmer ones more amber.
-      tmpColor.copy(poolSodium).multiplyScalar((0.96 + jY * 0.26) * (mirror ? MIRROR_LAMP_POOL_GAIN : 1));
+      tmpColor.copy(poolSodium).multiplyScalar(0.96 + jY * 0.26);
       this._instance(pool, vec(poolWidth, 1, poolLen), poolQuat, tmpColor.getHex(), 'pool:lightPool');
 
       // Wet-asphalt reflection down the near lane, long enough to bridge the
@@ -7642,17 +7629,49 @@ export class HighwayMap {
   }
 
   /**
-   * Second lamp row, on the kerb opposite the one the first pass lit.
+   * Which kerb of a one-way carriageway carries the lamp row.
    *
-   * Deliberately a separate pass run AFTER every other instancing pass (the
-   * same discipline as _buildInfill and _buildLaybyDressing): it only ever
-   * APPENDS to the per-chunk instance buckets, so every index the editor saved
-   * against the original lamps, markings and props keeps pointing at the same
-   * instance. Folding these poles into the first walk would shift roughly half
-   * the world's instanced indices and silently move every saved edit.
+   * Every data route is registered one-way (`_registerDataRoute` forces it), so
+   * the walk used to drop the row on the `+normal` edge — whichever edge that
+   * happened to be. On the paired corridors (wangan, k1, r1, c1, r9, r11, k5)
+   * the two carriageways face each other, so `+normal` is the MEDIAN edge for
+   * both: the poles stood in the gap between the decks and the outer flanks ran
+   * bare. Put the row on the edge facing AWAY from the neighbouring carriageway
+   * instead, i.e. on the outside of the corridor.
+   *
+   * Decided ONCE per route (majority over stations, cached on the route) so a
+   * row never jumps across the deck where the twin drifts off; a route with no
+   * carriageway alongside keeps the original `+normal` edge. Ramps and service
+   * roads are ignored as neighbours — a short slip road running alongside must
+   * not flip a whole mainline.
    */
-  _buildMirrorSideLamps() {
-    for (const route of this.routes.values()) this._queueRouteLamps(route, true);
+  _lampSideFor(route) {
+    if (route._lampSide) return route._lampSide;
+    let toward = 0; // twin lies on the +normal side
+    let away = 0;
+    const step = Math.max(50, route.length / 80);
+    const delta = new THREE.Vector3();
+    for (let distance = step * 0.5; distance < route.length; distance += step) {
+      const center = this._sampleCenter(route, distance, 1);
+      const normal = horizontalNormal(center.baseTangent);
+      let nearest = null;
+      for (const { route: other, index } of this._candidateRoutes(center.position).values()) {
+        if (other === route || other.kind === 'ramp' || other.kind === 'service') continue;
+        const projection = this._projectToRoute(other, center.position, index);
+        if (projection.endOvershoot > 4) continue;
+        // A deck stacked over or under this one is not a twin carriageway.
+        if (Math.abs(projection.point.y - center.position.y) > 8) continue;
+        const gap = Math.abs(projection.signedLateral);
+        if (gap > 60) continue;
+        if (!nearest || gap < nearest.gap) nearest = { gap, point: projection.point };
+      }
+      if (!nearest) continue;
+      const offset = delta.copy(nearest.point).sub(center.position).dot(normal);
+      if (Math.abs(offset) < 1) continue;
+      if (offset > 0) toward += 1; else away += 1;
+    }
+    route._lampSide = toward > away ? -1 : 1;
+    return route._lampSide;
   }
 
   _queueRouteDetails(route) {
