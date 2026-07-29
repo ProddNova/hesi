@@ -12,6 +12,22 @@ const clamp = THREE.MathUtils.clamp;
 const EPSILON = 1e-6;
 const UP = new THREE.Vector3(0, 1, 0);
 
+// Scratch for the per-frame attitude basis (see _orientVehicle): traffic runs
+// this for every active vehicle every frame, so it allocates nothing.
+const TMP_FORWARD = new THREE.Vector3();
+const TMP_UP = new THREE.Vector3();
+const TMP_SURFACE_UP = new THREE.Vector3();
+const TMP_RIGHT = new THREE.Vector3();
+const TMP_BASIS = new THREE.Matrix4();
+// Ceiling on the visual pitch, as sin(angle). No real ramp on the network comes
+// near 20°; the clamp exists so a broken adapter tangent can only ever look
+// wrong, never stand a car on its nose.
+const MAX_PITCH_SIN = Math.sin(THREE.MathUtils.degToRad(20));
+// How fast the body settles onto a new surface attitude (1/s). Slower than the
+// tangent filter: grade and bank change over tens of metres, and chasing them
+// too tightly turns a junction hand-off into a visible flick of the body.
+const ATTITUDE_RESPONSE = 5;
+
 // Only three visual classes exist, by design: a passenger CAR (auto), a VAN /
 // box-truck (camioncino / furgone) and an articulated TIR (semi). They are
 // deliberately plain boxes — no wheels, no glass — so the effort goes into
@@ -404,6 +420,7 @@ export class TrafficSystem {
       velocity: new THREE.Vector3(),
       tangent: new THREE.Vector3(0, 0, 1),
       right: new THREE.Vector3(1, 0, 0),
+      up: new THREE.Vector3(0, 1, 0),
       heading: 0,
       speed: 0,
       targetSpeed: 0,
@@ -1285,7 +1302,8 @@ export class TrafficSystem {
     vehicle.tangent.copy(normalized.tangent);
     vehicle.right.copy(normalized.right);
     vehicle.heading = Math.atan2(vehicle.tangent.x, vehicle.tangent.z);
-    vehicle.mesh.rotation.set(0, vehicle.heading, 0);
+    this._surfaceUp(normalized, vehicle.up);
+    this._orientVehicle(vehicle);
     vehicle.laneRef = normalized.laneRef;
     vehicle.laneKey = this._laneKey(normalized.laneRef, normalized);
     vehicle.laneSample = normalized;
@@ -1734,7 +1752,10 @@ export class TrafficSystem {
       position,
       tangent,
       right,
-      up: asVector3(sample.up ?? sample.normal, UP).normalize(),
+      // `normal` is the lateral (driver's right) everywhere in this codebase,
+      // so it is never a candidate for up; _surfaceUp derives one from the
+      // tangent when the adapter has nothing to offer.
+      up: asVector3(sample.up ?? sample.surfaceNormal, UP).normalize(),
       laneRef: resolvedLaneRef,
       s: finite(sample.s ?? sample.distance ?? sample.offset, requestedS),
       length: finite(sample.length ?? sample.laneLength, this._laneLength(resolvedLaneRef)),
@@ -1870,11 +1891,65 @@ export class TrafficSystem {
     vehicle.tangent.lerp(sample.tangent, 1 - Math.exp(-dt * 8)).normalize();
     vehicle.right.set(vehicle.tangent.z, 0, -vehicle.tangent.x).normalize();
     vehicle.heading = Math.atan2(vehicle.tangent.x, vehicle.tangent.z);
-    vehicle.mesh.rotation.y = vehicle.heading;
+    vehicle.up.lerp(this._surfaceUp(sample, TMP_SURFACE_UP), 1 - Math.exp(-dt * ATTITUDE_RESPONSE)).normalize();
+    this._orientVehicle(vehicle);
     vehicle.velocity.subVectors(vehicle.position, vehicle.previousPosition).divideScalar(Math.max(EPSILON, dt));
     vehicle.laneSample = sample;
     this._setLights(vehicle, vehicle.braking);
     return true;
+  }
+
+  /**
+   * Surface normal to sit the body on. The map hands one out with the banked
+   * deck already folded in; any other adapter only has a tangent, so world up
+   * de-pitched by the grade is the best available answer (right on a slope,
+   * simply unbanked on a bend).
+   */
+  _surfaceUp(sample, target) {
+    const up = sample.up;
+    if (up?.isVector3 && Number.isFinite(up.x + up.y + up.z) && up.lengthSq() > EPSILON) {
+      return target.copy(up).normalize();
+    }
+    const tangent = sample.tangent;
+    target.copy(UP).addScaledVector(tangent, -UP.dot(tangent));
+    return target.lengthSq() < EPSILON ? target.copy(UP) : target.normalize();
+  }
+
+  /**
+   * Road attitude on the mesh: heading AND the grade and bank of the deck the
+   * car is standing on.
+   *
+   * The mesh used to be yaw-only, so on every slope and every banked bend the
+   * body stayed dead level while the asphalt tilted away underneath it. Half
+   * the car ended up buried in the deck and the other half hanging over it —
+   * the "traffic driving under the road" glitch — and on a crest a whole row of
+   * cars flickered as their sunken ends fought the surface for depth.
+   *
+   * Traffic geometry is built nose along local +Z with the underside at y=0, so
+   * a basis of (surface right, surface up, tangent) puts the flat underside on
+   * the surface's own tangent plane through the car's contact point. Both
+   * inputs are already smoothed per vehicle, so the attitude eases in.
+   */
+  _orientVehicle(vehicle) {
+    const forward = TMP_FORWARD.copy(vehicle.tangent);
+    forward.y = clamp(forward.y, -MAX_PITCH_SIN, MAX_PITCH_SIN);
+    if (forward.lengthSq() < EPSILON) {
+      vehicle.mesh.rotation.set(0, vehicle.heading, 0);
+      return;
+    }
+    forward.normalize();
+    // Re-orthogonalise: smoothing tangent and up independently leaves them a
+    // fraction off square, and makeBasis takes what it is given.
+    const up = TMP_UP.copy(vehicle.up);
+    up.addScaledVector(forward, -up.dot(forward));
+    if (up.lengthSq() < EPSILON) up.copy(UP).addScaledVector(forward, -UP.dot(forward));
+    if (up.lengthSq() < EPSILON) {
+      vehicle.mesh.rotation.set(0, vehicle.heading, 0);
+      return;
+    }
+    up.normalize();
+    const right = TMP_RIGHT.crossVectors(up, forward).normalize();
+    vehicle.mesh.quaternion.setFromRotationMatrix(TMP_BASIS.makeBasis(right, up, forward));
   }
 
   _advanceVehicleOnMap(vehicle, distance, context) {
