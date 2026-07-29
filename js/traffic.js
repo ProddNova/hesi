@@ -27,6 +27,13 @@ const MAX_PITCH_SIN = Math.sin(THREE.MathUtils.degToRad(20));
 // tangent filter: grade and bank change over tens of metres, and chasing them
 // too tightly turns a junction hand-off into a visible flick of the body.
 const ATTITUDE_RESPONSE = 5;
+// Largest hand-off gap still worth easing across (m). A junction gore is a few
+// lane widths, so anything wider is not a gore at all — it is two routes that
+// do not meet. `r11_0 -> ramp_14` is a 55 m continuation, and easing that one
+// dragged a car through 55 m of open air and terrain over about a second. Past
+// this the car simply arrives on the new route: a background car appearing at
+// the junction reads as nothing, a car swimming through the scenery does not.
+const MAX_BLEND_OFFSET = 12;
 
 // Only three visual classes exist, by design: a passenger CAR (auto), a VAN /
 // box-truck (camioncino / furgone) and an articulated TIR (semi). They are
@@ -1877,16 +1884,27 @@ export class TrafficSystem {
       // Route hand-off (junction ramp/merge). Blend out the lateral jump so the
       // car glides through the gore instead of popping across it.
       const jump = vehicle.position.distanceTo(sample.position);
-      if (jump > 1.1 && jump < 60) {
+      if (jump > 1.1 && jump < MAX_BLEND_OFFSET) {
         vehicle.blendOffset = vehicle.position.clone().sub(sample.position);
-        vehicle.blendOffset.y = clamp(vehicle.blendOffset.y, -2.5, 2.5);
+        // Horizontal only. Carrying the vertical mismatch across meant the car
+        // kept the OLD route's height for the ~1 s the blend takes to decay:
+        // where the new deck is higher it drove along buried in the asphalt,
+        // where it is lower it floated. Half the hand-offs on the network step
+        // by more than 5 cm and a tenth by more than 23 cm, so this was visible
+        // at a lot of exits. Height is the road's to give, never the blend's.
+        vehicle.blendOffset.y = 0;
       }
     }
     vehicle.position.copy(sample.position);
     if (vehicle.blendOffset) {
       vehicle.blendOffset.multiplyScalar(Math.exp(-dt * 2.6));
       if (vehicle.blendOffset.lengthSq() < 0.01) vehicle.blendOffset = null;
-      else vehicle.position.add(vehicle.blendOffset);
+      else {
+        vehicle.position.add(vehicle.blendOffset);
+        // Sliding sideways off the lane centre moves the car across a BANKED
+        // surface, so it has to climb or drop with it to stay on the deck.
+        vehicle.position.y += this._deckRiseAcross(sample, vehicle.blendOffset);
+      }
     }
     vehicle.tangent.lerp(sample.tangent, 1 - Math.exp(-dt * 8)).normalize();
     vehicle.right.set(vehicle.tangent.z, 0, -vehicle.tangent.x).normalize();
@@ -1897,6 +1915,22 @@ export class TrafficSystem {
     vehicle.laneSample = sample;
     this._setLights(vehicle, vehicle.braking);
     return true;
+  }
+
+  /**
+   * How far the deck rises under a sideways displacement from the lane centre.
+   * `_deckPoint` builds the surface as y = centreY + tan(bank)·lateral along
+   * the route's BASE normal, and a sample's `right` is that normal already
+   * flipped to the travel direction — so the displacement has to be un-flipped
+   * before the bank is applied. Zero for adapters that report no bank, which
+   * is the correct answer for a flat lane.
+   */
+  _deckRiseAcross(sample, offset) {
+    const bank = finite(sample.bank, 0);
+    const right = sample.right;
+    if (!bank || !right) return 0;
+    const lateral = offset.x * right.x + offset.z * right.z;
+    return Math.tan(bank) * (finite(sample.direction, 1) >= 0 ? 1 : -1) * lateral;
   }
 
   /**

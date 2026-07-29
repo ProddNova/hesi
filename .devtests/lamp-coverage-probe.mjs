@@ -101,7 +101,8 @@ const matrix = new THREE.Matrix4();
 const here = new THREE.Vector3();
 const there = new THREE.Vector3();
 let matched = 0;
-const drifted = [];
+const reindexed = [];
+const nudged = [];
 let unresolved = 0;
 for (const op of build.operations) {
   if (op.op !== 'instance') continue;
@@ -111,9 +112,20 @@ for (const op of build.operations) {
   here.setFromMatrixPosition(matrix);
   there.set(op.matrix[12], op.matrix[13], op.matrix[14]);
   const zeroed = mesh.userData?.tatsumiClearingSuppressedIndices?.includes(op.index);
-  if (here.distanceTo(there) < 0.05 || (zeroed && here.lengthSq() === 0)) matched += 1;
-  else drifted.push(`${op.mesh}#${op.index}`);
+  if (here.distanceTo(there) < 0.05 || (zeroed && here.lengthSq() === 0)) { matched += 1; continue; }
+  // Two very different failures used to land in one bucket. REINDEXED is the
+  // one this check exists for: the op now addresses a different instance
+  // entirely, so the saved edit lands on the wrong object — tens of metres
+  // away, and always horizontally. NUDGED is the same instance sitting at a
+  // slightly different height because a build pass deliberately moved that
+  // class of geometry (the ground decals were lowered onto the asphalt in
+  // Jul 2026). A nudged op still edits the object the user picked; it just
+  // pins it back to the height it had when they saved it.
+  const horizontal = Math.hypot(here.x - there.x, here.z - there.z);
+  if (horizontal < 0.05 && Math.abs(here.y - there.y) < 1) nudged.push(`${op.mesh}#${op.index}`);
+  else reindexed.push(`${op.mesh}#${op.index}`);
 }
-console.log(`saved editor instance ops: ${matched} still on target, ${drifted.length} drifted,`
-  + ` ${unresolved} unresolved`);
-if (drifted.length) console.log(`  drifted: ${drifted.join(', ')}`);
+console.log(`saved editor instance ops: ${matched} still on target, ${reindexed.length} reindexed,`
+  + ` ${nudged.length} nudged in place, ${unresolved} unresolved`);
+if (reindexed.length) console.log(`  reindexed (edit now lands elsewhere): ${reindexed.join(', ')}`);
+if (nudged.length) console.log(`  nudged (same instance, new height): ${nudged.join(', ')}`);
