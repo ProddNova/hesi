@@ -3,12 +3,12 @@ import * as THREE from 'three';
 // as data/routes.js but with the extractor's chord-polygon noise removed in
 // XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
 // any extractor run).
-import ROUTE_DATA from '../data/routes-smoothed.js?v=e1e7b1f036d9';
+import ROUTE_DATA from '../data/routes-smoothed.js?v=aa56cc4f53cb';
 // Per-route / per-side / per-chainage lateral barrier styles, authored in the
 // world editor's Barriers app (see js/road-barrier-styles.js for the catalogue
 // and the addressing rules). Routes absent from this document render the
 // shipped parapet exactly as before.
-import ROAD_BARRIER_DATA from '../data/road-barriers.js?v=e1e7b1f036d9';
+import ROAD_BARRIER_DATA from '../data/road-barriers.js?v=aa56cc4f53cb';
 import {
   BARRIER_MATERIALS,
   BARRIER_MATERIAL_NAMES,
@@ -17,12 +17,12 @@ import {
   barrierStyle,
   canonicalizeBarrierDocument,
   flattenBarrierSpans,
-} from './road-barrier-styles.js?v=e1e7b1f036d9';
-import { BUILDING_TYPES } from './building-types.js?v=e1e7b1f036d9';
-import { buildProgressiveTransitions } from './progressive-merge.js?v=e1e7b1f036d9';
-import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js?v=e1e7b1f036d9';
+} from './road-barrier-styles.js?v=aa56cc4f53cb';
+import { BUILDING_TYPES } from './building-types.js?v=aa56cc4f53cb';
+import { buildProgressiveTransitions } from './progressive-merge.js?v=aa56cc4f53cb';
+import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js?v=aa56cc4f53cb';
 // The shared interaction-point look (garage, PA lot, PA road gate).
-import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=e1e7b1f036d9';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=aa56cc4f53cb';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -9942,29 +9942,10 @@ export class HighwayMap {
     const normals = [];
     const uvs = [];
     const indices = [];
-    // Positions are localised to the area but the uvs were world-absolute, and
-    // that mismatch is the terrain's share of the "confetti" — the same defect
-    // tileAnchoredOrigin fixes for the road, which the ground never got.
-    //
-    // The network reaches ~26 km from the world origin, so a raw z/64 uv runs
-    // to several hundred. The texel is picked by the FRACTION, and the integer
-    // part has already spent most of the interpolator's bits before the GPU
-    // gets there. Desktop hides the residue; mobile GPUs carry varyings with
-    // fewer bits and quantise it into a lattice of repeated light/dark specks,
-    // on the ground, which is where it is reported — and being a varying
-    // precision problem it survives native resolution, the post pass, MSAA and
-    // fragment highp alike, all of which have now been ruled out on the device.
-    //
-    // Subtracting a WHOLE number of cells is free of visual consequence: the
-    // image repeats with period 1, so an integer shift samples exactly the same
-    // texel. Neighbouring areas differ by an exact integer, so the ground still
-    // tiles seamlessly across area boundaries.
-    const uvOriginX = Math.round(area.def.x / TERRAIN_CELL) * TERRAIN_CELL;
-    const uvOriginZ = Math.round(area.def.z / TERRAIN_CELL) * TERRAIN_CELL;
     const vertex = (x, y, z, normal) => {
       positions.push(x - area.def.x, y, z - area.def.z);
       normals.push(normal[0], normal[1], normal[2]);
-      uvs.push((x - uvOriginX) / TERRAIN_CELL, (z - uvOriginZ) / TERRAIN_CELL);
+      uvs.push(x / TERRAIN_CELL, z / TERRAIN_CELL);
       return positions.length / 3 - 1;
     };
     // Corners are [worldX, localY, worldZ]; winding is CCW seen from `normal`.
@@ -10090,23 +10071,6 @@ export class HighwayMap {
       }
     }
 
-    // Re-anchor to THIS mesh's own extent rather than to the area origin: an
-    // area spans kilometres, so area-relative uvs still ran to ~84 tiles, while
-    // a single terrain sheet is far smaller. Same invariant as above — the
-    // offsets are whole tiles, which in uv space is a whole number, so every
-    // vertex samples exactly the texel it did before.
-    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
-    for (let i = 0; i < uvs.length; i += 2) {
-      if (uvs[i] < minU) minU = uvs[i];
-      if (uvs[i] > maxU) maxU = uvs[i];
-      if (uvs[i + 1] < minV) minV = uvs[i + 1];
-      if (uvs[i + 1] > maxV) maxV = uvs[i + 1];
-    }
-    if (Number.isFinite(minU)) {
-      const offsetU = Math.round((minU + maxU) * 0.5);
-      const offsetV = Math.round((minV + maxV) * 0.5);
-      for (let i = 0; i < uvs.length; i += 2) { uvs[i] -= offsetU; uvs[i + 1] -= offsetV; }
-    }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
