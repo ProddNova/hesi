@@ -1,13 +1,23 @@
 /**
- * "EDITOR HUD" — the model behind the interface editor (dev panel, key 8).
+ * The interface theme: what the game reads, not what edits it.
  *
- * Everything the player reads is described here: the palette, the two font
- * families, every size/offset/visibility of the driving HUD, the in-game
- * keitai, the WANGAN MARKET terminal, the loading screen and the boot menu.
- * This module owns nothing but the SETTINGS — js/hud-editor.js builds the panel
- * from these tables and `applyHudTheme` writes the result into CSS custom
- * properties on <html>. There is no second copy of the ranges, the labels or
- * the defaults anywhere.
+ * Everything the player looks at is described here — the palette, the two font
+ * families, every size/offset/visibility of the driving HUD, the in-game keitai,
+ * the WANGAN MARKET terminal, the loading screen and the boot menu — as one
+ * table of fields with a default per device profile. `applyHudTheme()` turns a
+ * theme into CSS custom properties on <html> and styles.css reads them as
+ * `var(--hud-x, fallback)`.
+ *
+ * The editor is NOT here. It lives in tools/hesi-editor (toolbar → HUD), where
+ * the HUD is edited by dragging and resizing it on real device previews, and it
+ * writes the result into data/editor/custom-assets.json → `runtimeTuning.hud`.
+ * The playable build therefore ships the model and the values, never the panel:
+ * presets, value formatting and the edit operations live in
+ * tools/hesi-editor/src/hud/hud-vocabulary.js.
+ *
+ * Field `label`s do stay here, beside the ranges and defaults they belong to,
+ * because a second table of ~140 names is a synchronization hazard for the sake
+ * of a few kilobytes.
  *
  * Two rules shape the whole design:
  *
@@ -32,8 +42,8 @@
  * element — freezes each one at whatever hex it had when it was first touched.
  *
  * The authored theme travels in data/editor/custom-assets.json under
- * `runtimeTuning.hud`, the same way the picture does (see js/playground-config.js):
- * published from the test game, adopted once per revision by every client.
+ * `runtimeTuning.hud`, the same way the picture does (see js/playground-config.js),
+ * and the game applies what the document says on every boot.
  */
 
 /** The two profiles. `label` is what the panel's tabs say. */
@@ -186,6 +196,20 @@ export const HUD_THEME_SECTIONS = Object.freeze([
       range('blScale', 'GPS SCALA', { css: '--hud-bl-scale', desktop: 1, mobile: 1, min: 0.4, max: 2.5, step: 0.05, percent: true }),
       range('brX', 'QUADRANTI ORIZZONTALE', { css: '--hud-br-x', unit: 'px', desktop: 0, mobile: 0, min: -400, max: 400, step: 2 }),
       range('brY', 'QUADRANTI VERTICALE', { css: '--hud-br-y', unit: 'px', desktop: 0, mobile: 0, min: -500, max: 300, step: 2 }),
+
+      // The floating pieces get the same treatment as the four corners, so the
+      // editor can drag them too. Nudges, not positions: the authored anchors
+      // stay authored and a profile at zero is the original layout.
+      range('toastX', 'AVVISI ORIZZONTALE', { css: '--hud-toast-x', unit: 'px', desktop: 0, mobile: 0, min: -600, max: 600, step: 2 }),
+      range('toastY', 'AVVISI VERTICALE', { css: '--hud-toast-y', unit: 'px', desktop: 0, mobile: 0, min: -400, max: 600, step: 2 }),
+      range('toastScale', 'AVVISI SCALA', { css: '--hud-toast-scale', desktop: 1, mobile: 1, min: 0.4, max: 2.5, step: 0.05, percent: true }),
+      range('promptX', 'RICHIESTE ORIZZONTALE', { css: '--hud-prompt-x', unit: 'px', desktop: 0, mobile: 0, min: -600, max: 600, step: 2 }),
+      range('promptY', 'RICHIESTE VERTICALE', { css: '--hud-prompt-y', unit: 'px', desktop: 0, mobile: 0, min: -600, max: 400, step: 2 }),
+      range('splashX', 'NEAR MISS ORIZZONTALE', { css: '--hud-splash-x', unit: 'px', desktop: 0, mobile: 0, min: -600, max: 600, step: 2 }),
+      range('splashY', 'NEAR MISS VERTICALE', { css: '--hud-splash-y', unit: 'px', desktop: 0, mobile: 0, min: -400, max: 600, step: 2 }),
+      range('fpsX', 'FPS ORIZZONTALE', { css: '--hud-fps-x', unit: 'px', desktop: 0, mobile: 0, min: -600, max: 600, step: 2 }),
+      range('fpsY', 'FPS VERTICALE', { css: '--hud-fps-y', unit: 'px', desktop: 0, mobile: 0, min: -400, max: 600, step: 2 }),
+      range('fpsSize', 'CORPO FPS', { css: '--hud-fps-size', unit: 'px', scaled: true, desktop: 8, mobile: 8, min: 5, max: 30, step: 1 }),
 
       toggle('showScore', 'PUNTEGGIO', { css: '--hud-show-score', on: 'block', off: 'none', desktop: true, mobile: true }),
       toggle('showScoreLabel', 'ETICHETTA PUNTEGGIO', { css: '--hud-show-score-label', on: 'block', off: 'none', desktop: true, mobile: true }),
@@ -592,122 +616,6 @@ export function hudThemeSignature(theme) {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return `fnv1a32:${hash.toString(16).padStart(8, '0')}`;
-}
-
-/** The value shown beside a control: `46px`, `120%`, `SPENTO`, a role label. */
-export function formatHudValue(field, value) {
-  switch (field.type) {
-    case 'range': {
-      const amount = isFinitely(value) ? +value : 0;
-      if (field.zero && amount <= 0) return field.zero;
-      if (field.percent) return `${Math.round(amount * 100)}%`;
-      const decimals = (field.step || 1) < 1 ? 2 : 0;
-      return `${Number.parseFloat(amount.toFixed(decimals))}${field.unit ?? ''}`;
-    }
-    case 'color': return String(value).toUpperCase();
-    case 'role': return HUD_COLOR_ROLES.find((entry) => entry.id === value)?.label || String(value);
-    case 'font': return HUD_FONT_STACKS.find((entry) => entry.id === value)?.label || String(value);
-    case 'toggle': return value ? 'ON' : 'OFF';
-    default: return String(value ?? '');
-  }
-}
-
-/**
- * Presets. `default` is the shipped look and doubles as the panel's reset, so
- * "put it back" and "the theme this build ships with" can never be two things.
- * The others are patches: only the keys they name move, in the scopes they name.
- */
-export const HUD_THEME_PRESETS = Object.freeze({
-  default: Object.freeze({ label: 'ORIGINALE', patch: Object.freeze({}) }),
-  big: Object.freeze({
-    label: 'GRANDE',
-    patch: Object.freeze({
-      desktop: Object.freeze({ fontScale: 1.35, hudGlow: 1.35, clusterScale: 1.2 }),
-      mobile: Object.freeze({ fontScale: 1.3, hudGlow: 1.3, clusterScale: 1.25 }),
-    }),
-  }),
-  minimal: Object.freeze({
-    label: 'MINIMALE',
-    patch: Object.freeze({
-      shared: Object.freeze({ glowAlpha: 0.2, showBootKanji: false, showBootGrid: false, loadJitter: false }),
-      desktop: Object.freeze({
-        hudGlow: 0.15, hudShadow: 0.4, showScoreLabel: false, showLives: false, showComboBar: false,
-        showMinimap: false, showTach: false, showFuel: false, fontScale: 0.85, hudOpacity: 0.85,
-      }),
-      mobile: Object.freeze({
-        hudGlow: 0.15, hudShadow: 0.4, showScoreLabel: false, showLives: false, showComboBar: false,
-        showTach: false, showFuel: false, fontScale: 0.9, hudOpacity: 0.85,
-      }),
-    }),
-  }),
-  amber: Object.freeze({
-    label: 'AMBRA',
-    patch: Object.freeze({
-      shared: Object.freeze({
-        colorGreen: '#ffb02e', colorAmber: '#ffd58a', colorCyan: '#ff8a2e', colorPaper: '#f6e6c8',
-        loadTitleRole: 'amber', loadRingRole: 'amber', bootLogoAccentRole: 'cyan',
-      }),
-      desktop: Object.freeze({ scoreLabelRole: 'amber', bankRole: 'amber', areaLabelRole: 'amber', speedRole: 'amber' }),
-      mobile: Object.freeze({ scoreLabelRole: 'amber', bankRole: 'amber', areaLabelRole: 'amber', speedRole: 'amber' }),
-    }),
-  }),
-  clean: Object.freeze({
-    label: 'SENZA HUD',
-    patch: Object.freeze({
-      desktop: Object.freeze({
-        showScore: false, showScoreLabel: false, showCombo: false, showComboBar: false, showLives: false,
-        showBank: false, showMinimap: false, showArea: false, showCluster: false, showFps: false, showSplash: false,
-      }),
-      mobile: Object.freeze({
-        showScore: false, showScoreLabel: false, showCombo: false, showComboBar: false, showLives: false,
-        showBank: false, showMinimap: false, showArea: false, showCluster: false, showFps: false, showSplash: false,
-      }),
-    }),
-  }),
-});
-
-/** Applies a preset patch on top of the shipped defaults. */
-export function hudThemeFromPreset(name) {
-  const preset = HUD_THEME_PRESETS[name];
-  if (!preset) return null;
-  const theme = defaultHudTheme();
-  for (const scope of ['shared', ...HUD_DEVICE_IDS]) Object.assign(theme[scope], preset.patch[scope] || {});
-  return normalizeHudTheme(theme);
-}
-
-/**
- * Copies one device profile onto the other — "make the phone look like the PC"
- * without re-dragging sixty sliders. Fields whose two defaults differ on purpose
- * (the minimap, the FPS readout, the compact cluster scale) are copied too: the
- * point of the button is that the target becomes the source.
- */
-export function copyHudProfile(theme, from, to) {
-  const settings = normalizeHudTheme(theme);
-  if (!HUD_DEVICE_IDS.includes(from) || !HUD_DEVICE_IDS.includes(to) || from === to) return settings;
-  settings[to] = { ...settings[from] };
-  return normalizeHudTheme(settings);
-}
-
-/** Puts one section back to the shipped values, in one scope or in all of them. */
-export function resetHudSection(theme, sectionId, device = null) {
-  const settings = normalizeHudTheme(theme);
-  const section = HUD_THEME_SECTIONS.find((entry) => entry.id === sectionId);
-  if (!section) return settings;
-  for (const field of section.fields) {
-    const scopes = isShared(section, field) ? ['shared'] : (device ? [device] : HUD_DEVICE_IDS);
-    for (const scope of scopes) settings[scope][field.key] = defaultFor(section, field, scope === 'shared' ? 'desktop' : scope);
-  }
-  return normalizeHudTheme(settings);
-}
-
-/** Writes one field, returning a new theme. `scope` is 'shared' or a device id. */
-export function setHudField(theme, key, value, device = 'desktop') {
-  const settings = normalizeHudTheme(theme);
-  const entry = hudThemeField(key);
-  if (!entry) return settings;
-  const scope = isShared(entry.section, entry.field) ? 'shared' : (HUD_DEVICE_IDS.includes(device) ? device : 'desktop');
-  settings[scope][key] = normalizeHudValue(entry.section, entry.field, value, scope === 'shared' ? 'desktop' : scope);
-  return settings;
 }
 
 // ---------------------------------------------------------------------------

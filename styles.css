@@ -151,18 +151,18 @@ button:disabled{opacity:.38;cursor:default;pointer-events:none}
 .fuel b{font:10px var(--term);color:var(--paper);font-weight:400}
 
 /* --- prompts, splashes, toasts --- */
-.prompt{position:absolute;left:50%;bottom:21%;transform:translateX(-50%);display:var(--hud-show-prompt,flex);align-items:center;gap:11px;font:var(--hud-prompt-size,14px) var(--term);letter-spacing:.08em;color:var(--hud-prompt-color,var(--paper));padding:9px 20px 9px 10px;background:rgba(3,6,11,.85);border:1px solid #223041;text-shadow:0 0 8px rgba(226,232,221,.4);white-space:nowrap;box-shadow:0 8px 26px rgba(0,0,0,.55);animation:promptin .16s ease-out}
+.prompt{position:absolute;left:calc(50% + var(--hud-prompt-x,0px));bottom:calc(21% - var(--hud-prompt-y,0px));transform:translateX(-50%);display:var(--hud-show-prompt,flex);align-items:center;gap:11px;font:var(--hud-prompt-size,14px) var(--term);letter-spacing:.08em;color:var(--hud-prompt-color,var(--paper));padding:9px 20px 9px 10px;background:rgba(3,6,11,.85);border:1px solid #223041;text-shadow:0 0 8px rgba(226,232,221,.4);white-space:nowrap;box-shadow:0 8px 26px rgba(0,0,0,.55);animation:promptin .16s ease-out}
 @keyframes promptin{from{transform:translate(-50%,8px);opacity:0}}
 .prompt:before,.prompt:after{content:"";position:absolute;width:9px;height:9px;border:0 solid var(--green)}
 .prompt:before{left:-4px;top:-4px;border-width:2px 0 0 2px}
 .prompt:after{right:-4px;bottom:-4px;border-width:0 2px 2px 0}
 .prompt kbd{display:grid;place-items:center;min-width:30px;height:30px;padding:0 8px;color:#d8ccff;background:#241a44;border:1px solid #6a58a8;border-bottom-width:3px;border-radius:5px;font:400 14px var(--term);box-shadow:0 0 12px rgba(185,167,255,.35);text-shadow:0 0 6px rgba(185,167,255,.6)}
-.event-splash{position:absolute;display:var(--hud-show-splash,block);left:50%;top:27%;transform:translate(-50%,0) rotate(-4deg);font:italic 700 var(--hud-splash-size,46px) var(--disp);letter-spacing:.02em;color:var(--hud-splash-color,#ffffff);opacity:0;white-space:nowrap;
+.event-splash{position:absolute;display:var(--hud-show-splash,block);left:calc(50% + var(--hud-splash-x,0px));top:calc(27% + var(--hud-splash-y,0px));transform:translate(-50%,0) rotate(-4deg);font:italic 700 var(--hud-splash-size,46px) var(--disp);letter-spacing:.02em;color:var(--hud-splash-color,#ffffff);opacity:0;white-space:nowrap;
   text-shadow:2px 0 0 rgba(255,46,77,.75),-2px 0 0 rgba(65,216,242,.75),0 0 22px rgba(185,167,255,.65)}
 .event-splash b{color:var(--amber);text-shadow:2px 0 0 rgba(255,46,77,.75),-2px 0 0 rgba(65,216,242,.75),0 0 22px rgba(255,176,46,.7)}
 .event-splash.show{animation:splash 1.2s ease-out}
 @keyframes splash{0%{opacity:0;transform:translate(-50%,0) scale(1.45) rotate(-4deg)}10%,68%{opacity:1;transform:translate(-50%,0) scale(1) rotate(-4deg)}100%{opacity:0;transform:translate(-50%,-12px) scale(.96) rotate(-4deg)}}
-#toast-stack{position:absolute;right:2.5vw;top:12vh;display:var(--hud-show-toast,flex);flex-direction:column;gap:6px;align-items:flex-end}
+#toast-stack{position:absolute;right:2.5vw;top:12vh;display:var(--hud-show-toast,flex);transform:translate(var(--hud-toast-x,0px),var(--hud-toast-y,0px)) scale(var(--hud-toast-scale,1));transform-origin:right top;flex-direction:column;gap:6px;align-items:flex-end}
 .toast{font:var(--hud-toast-size,12px) var(--term);letter-spacing:.05em;color:var(--hud-toast-color,var(--paper));background:rgba(3,7,12,.9);border:1px solid #1c2836;padding:6px 12px;text-shadow:0 0 6px rgba(226,232,221,.3);animation:toast 3s forwards}
 .toast:before{content:"» ";color:var(--green)}
 @keyframes toast{0%{opacity:0;transform:translateX(30px)}8%,82%{opacity:1;transform:none}100%{opacity:0;transform:translateY(-5px)}}
@@ -330,9 +330,14 @@ button:disabled{opacity:.38;cursor:default;pointer-events:none}
    TOUCH LAYER (structure preserved, palette matched)
    ========================================================================== */
 .touch-controls,.rotate-hint,.noclip-only,.drone-help-touch,.mobile-fps{display:none}
-/* The FPS readout is a compact-HUD element, so it is off by default here and
-   on inside the touch profile below. Both ends read the same property. */
-.mobile-fps{display:var(--hud-show-fps,none)}
+/* The FPS readout is a compact-HUD element, so it is off by default here and on
+   inside the touch profile below — both ends read the same property. Its looks
+   and position live here rather than in the media query, so a theme that turns
+   it on for a PC gets the same readout instead of an unplaced block. */
+.mobile-fps{position:fixed;display:var(--hud-show-fps,none);left:max(11px,env(safe-area-inset-left));top:max(96px,calc(env(safe-area-inset-top) + 88px));
+  padding:3px 5px;border-left:2px solid var(--green);background:rgba(2,10,6,.62);color:var(--green);
+  font:var(--hud-fps-size,8px) var(--term);letter-spacing:.08em;text-shadow:0 0 6px var(--green-soft);
+  transform:translate(var(--hud-fps-x,0px),var(--hud-fps-y,0px))}
 
 @media (pointer:coarse), (max-width:700px) {
   button{min-height:44px}
@@ -372,16 +377,16 @@ button:disabled{opacity:.38;cursor:default;pointer-events:none}
   .lives i{width:var(--hud-life-size,11px);height:var(--hud-life-size,11px)}.lives span{display:none}
   .hud-tr{right:max(10px,calc(env(safe-area-inset-right) + 128px));top:max(9px,env(safe-area-inset-top))}
   .bank b{font-size:var(--hud-bank-size,17px)}.bank small{font-size:var(--hud-bank-label-size,7px)}
-  .mobile-fps{position:fixed;left:max(11px,env(safe-area-inset-left));top:max(96px,calc(env(safe-area-inset-top) + 88px));display:var(--hud-show-fps,block);padding:3px 5px;border-left:2px solid var(--green);background:rgba(2,10,6,.62);color:var(--green);font:8px var(--term);letter-spacing:.08em;text-shadow:0 0 6px var(--green-soft)}
+  .mobile-fps{display:var(--hud-show-fps,block);font-size:var(--hud-fps-size,8px)}
   .hud-bl{left:8px;bottom:max(8px,env(safe-area-inset-bottom))}
   #minimap-wrap{display:var(--hud-show-minimap,none)}
   .area-chip b{font-size:var(--hud-area-size,15px)}.area-chip small{font-size:var(--hud-area-label-size,7px)}
   .hud-br{left:50%;right:auto;bottom:max(4px,env(safe-area-inset-bottom));transform:translateX(-50%) translate(var(--hud-br-x,0px),var(--hud-br-y,0px))}
   .cluster{transform:scale(calc(.62 * var(--hud-cluster-scale,1)));transform-origin:center bottom;gap:7px;padding:8px 10px}
-  .event-splash{top:22%;max-width:88vw;font-size:var(--hud-splash-size,30px)}
+  .event-splash{top:calc(22% + var(--hud-splash-y,0px));max-width:88vw;font-size:var(--hud-splash-size,30px)}
   #toast-stack{top:max(60px,calc(env(safe-area-inset-top) + 50px));right:max(8px,env(safe-area-inset-right));max-width:72vw}
   .toast{font-size:var(--hud-toast-size,9px)}
-  .prompt{bottom:33%;max-width:74vw;text-align:center;font-size:var(--hud-prompt-size,11px);padding:8px 10px;white-space:normal}
+  .prompt{bottom:calc(33% - var(--hud-prompt-y,0px));max-width:74vw;text-align:center;font-size:var(--hud-prompt-size,11px);padding:8px 10px;white-space:normal}
   .prompt kbd{display:none}
 
   .phone{position:fixed;inset:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) auto;width:min(var(--hud-phone-width,360px),96vw);height:auto;filter:drop-shadow(0 8px 30px #000)}
@@ -498,38 +503,3 @@ button:disabled{opacity:.38;cursor:default;pointer-events:none}
 .filter-presets button{padding:7px 10px;border:1px solid #22485a;background:#08120c;color:var(--cyan);font:10px var(--term);letter-spacing:.06em;cursor:pointer}
 .filter-presets button:hover{border-color:var(--cyan);background:#0d1c22}
 
-/* EDITOR HUD // 8. The same shell again, tinted lavender — the third panel had
-   to be told apart from the other two at a glance. Wider and taller than both:
-   it is the only one with a hundred controls, a device switch and a JSON box.
-   Everything inside reuses .debug-range / .debug-toggle / .debug-select, so a
-   control added to the model looks like the dev panels without new CSS. */
-.hud-editor{width:min(520px,calc(100vw - 20px));max-height:calc(100dvh - 20px);border-color:#3b3160;box-shadow:0 24px 90px #000,5px 5px 0 rgba(185,167,255,.22)}
-.hud-editor header{border-bottom-color:var(--lav);background:linear-gradient(100deg,#150f26,#08060e)}
-.hud-editor header small{color:var(--lav)}
-.hud-editor .debug-traffic-panel summary em{color:var(--lav)}
-.hud-editor-body{padding-bottom:16px}
-/* Which profile is being edited. Two big targets, because on a phone this is
-   the control that decides whether the numbers you drag are that phone's. */
-.hud-editor-tabs{padding:11px 10px;border-bottom:1px solid #241c3a}
-.hud-editor-tabs>b{display:block;color:#8f83b8;font-size:9px;letter-spacing:.14em}
-.hud-editor-tabs>div{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
-.hud-editor-tabs button{display:grid;gap:2px;padding:9px 8px;border:1px solid #3b3160;background:#0a0813;color:#b6abd8;font:12px var(--term);letter-spacing:.1em;text-align:left;text-shadow:none;box-shadow:none}
-.hud-editor-tabs button small{font:8px var(--term);letter-spacing:.06em;color:#6d6390}
-.hud-editor-tabs button.active{border-color:var(--lav);background:#1a1330;color:#fff;box-shadow:inset 0 0 14px rgba(185,167,255,.14)}
-.hud-editor-tabs button:hover{border-color:var(--lav);color:#fff}
-.hud-editor-search{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #241c3a}
-.hud-editor-search span{color:#8f83b8;font-size:9px;letter-spacing:.14em}
-.hud-editor-search input{flex:1;min-width:0;padding:7px 9px;border:1px solid #3b3160;background:#0a0813;color:var(--lav);font:11px var(--term)}
-.hud-editor-search input:focus{outline:1px solid var(--lav);border-color:var(--lav)}
-.hud-editor-row[hidden],.hud-editor-section[hidden]{display:none!important}
-.hud-editor-note{display:block;padding:0 2px 4px;color:#6f6592;font:8px var(--term);letter-spacing:.04em}
-.hud-editor-color input[type=color]{width:64px;height:30px;padding:0;border:1px solid #3b3160;background:#0a0813;cursor:pointer}
-.hud-editor-text input[type=text]{min-width:0;width:230px;max-width:65%;padding:7px 8px;border:1px solid #3b3160;background:#0a0813;color:var(--lav);font:11px var(--term)}
-.hud-editor-text input[type=text]:focus{outline:1px solid var(--lav);border-color:var(--lav)}
-.hud-editor-section-reset{width:calc(100% - 20px);margin:8px 10px 10px;padding:8px;border:1px solid #3b3160;background:#0a0813;color:#b6abd8;font:9px var(--term);letter-spacing:.12em}
-.hud-editor-section-reset:hover{border-color:var(--lav);color:#fff;box-shadow:none}
-.hud-editor-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}
-.hud-editor-actions button{padding:9px 8px;border:1px solid #3b3160;background:#0a0813;color:var(--lav);font:10px var(--term);letter-spacing:.08em}
-.hud-editor-actions button:hover{border-color:var(--lav);color:#fff;box-shadow:none}
-.hud-editor-json{width:calc(100% - 20px);height:150px;margin:0 10px;padding:8px;border:1px solid #3b3160;background:#07050d;color:#b6abd8;font:10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
-.hud-editor-json:focus{outline:1px solid var(--lav);border-color:var(--lav)}
