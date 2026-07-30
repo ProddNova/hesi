@@ -388,6 +388,42 @@ fields), and the older plain-texture-id form still loads unchanged. Archetype
 model replacements live beside them as `worldModels: { "<geometry>:<material>":
 "custom:NNNN" }` and are applied by `applyWorldModelOverrides`.
 
+## HUD (the interface)
+
+The toolbar's **HUD** button opens the interface editor: the game's real HUD in
+two live device frames, PC (1280×720) and phone (393×851), with a pointer overlay
+on top. Click a piece of it, drag it where you want it, pull a corner to resize
+it. The right column carries what a pointer cannot say — colours, palette roles,
+font families, text strings, on/off switches — for the selected element first and
+then every section of the theme.
+
+**The frame you touch is the profile you edit.** Drag something in the phone frame
+and only the phone's numbers move. There is no mode switch, and no preview that
+shows the desktop layout wearing phone values: each frame is an iframe with its own
+viewport, so the compact-HUD media query genuinely applies in the phone one — its
+minimap really is gone, its cluster really is at .62, its touch buttons really are
+there.
+
+Five screens, from the screen switch in the header: **Guida** (the driving HUD),
+**Telefono** (the in-game keitai), **Terminale** (WANGAN MARKET), **Caricamento**
+and **Avvio**. 23 grabbable widgets across them.
+
+- **Drag** writes nudge fields, never absolute coordinates: the authored anchors
+  and the four responsive layout variants under them stay as they are, so a theme
+  at zero is the shipped game and every drag is reversible.
+- **Corner handles** resize the way that element can be resized — a scale
+  multiplier (HUD corners, boot logo), real pixels (phone shell, loading bar), a
+  type size (prompt, splash, loading title), or the terminal's window margin.
+- **Keyboard**: arrows nudge 2 px (10 with Shift), `V` hides, `R` restores that
+  widget, `Ctrl+Z` undoes, `Esc` closes. Shift while dragging damps to a quarter.
+- **Save** writes `runtimeTuning.hud` into `data/editor/custom-assets.json` and
+  asks an open **Test Game** to reload, so a running game restyles itself.
+
+The playable build contains no editor: it reads that section on boot and applies it
+as CSS custom properties. Nothing published means the shipped 2002 look, exactly.
+Full write-up, including the limitations, in
+[HUD_EDITOR_STATUS.md](../../HUD_EDITOR_STATUS.md).
+
 ## Commits (map versions)
 
 The Project tab has a **Map versions** panel (also reachable with the

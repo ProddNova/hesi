@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rgbaFromHex } from './hud-theme.js?v=aa56cc4f53cb';
+import { createGauge, instrumentColors, paintDial, paintMinimap, speedConfig, tachConfig } from './hud-instruments.js?v=aa56cc4f53cb';
 
 export class GameUI {
   constructor(callbacks = {}) {
@@ -91,158 +91,27 @@ export class GameUI {
      redline); only the needle is redrawn per frame on top of the face. */
   initGauges() {
     this.gauges = {};
-    const tach = this.$('gauge-tach'), speedo = this.$('gauge-speed');
-    if (tach) this.gauges.tach = { canvas: tach, ctx: tach.getContext('2d'), face: null, faceKey: '', disp: 0 };
-    if (speedo) this.gauges.speedo = { canvas: speedo, ctx: speedo.getContext('2d'), face: null, faceKey: '', disp: 0 };
+    const tach = createGauge(this.$('gauge-tach')), speedo = createGauge(this.$('gauge-speed'));
+    if (tach) this.gauges.tach = tach;
+    if (speedo) this.gauges.speedo = speedo;
     // Webfonts load after the first faces are prerendered: drop the cache so
     // they are re-baked with the real dot/terminal glyphs.
     document.fonts?.ready?.then(() => { for (const g of Object.values(this.gauges || {})) g.faceKey = ''; });
   }
 
-  /**
-   * The colours the two canvas instruments paint with, sampled from the HUD
-   * theme's custom properties (see js/hud-theme.js, panel on key 8).
-   *
-   * A 2D context cannot resolve `var(--x)` the way a declaration can, so these
-   * have to be read out of the computed style — which is why they are hex here
-   * rather than palette roles, and why the read is cached against the theme's
-   * revision stamp instead of being repeated for every frame of every dial.
-   *
-   * The fallbacks are the values these instruments were painted with before the
-   * editor existed; .devtests/hud-theme.test.mjs asserts they still match the
-   * defaults, so a theme nobody has touched draws the original gauges.
-   */
-  themeColors() {
-    const root = document.documentElement;
-    const revision = root.dataset.hudRevision || '';
-    if (this._colorsRevision === revision && this._colors) return this._colors;
-    const style = getComputedStyle(root);
-    const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
-    this._colors = {
-      dialFace: read('--hud-dial-face', '#0a0f15'),
-      dialNeedle: read('--hud-dial-needle', '#ff2e4d'),
-      dialTick: read('--hud-dial-tick', '#8cffab'),
-      dialLabel: read('--hud-dial-label', '#b6ffcc'),
-      dialGlow: read('--hud-dial-glow', '#5cff8a'),
-      mapBg: read('--hud-map-bg', '#020a06'),
-      mapRoute: read('--hud-map-route', '#35ff85'),
-      mapRouteAlt: read('--hud-map-route-alt', '#1d3f2c'),
-      mapService: read('--hud-map-service', '#3affd2'),
-      mapGarage: read('--hud-map-garage', '#ff4d6d'),
-      mapPlayer: read('--hud-map-player', '#ffffff'),
-    };
-    this._colorsRevision = revision;
-    return this._colors;
-  }
-
+  /* Analog dial cluster: the painters live in js/hud-instruments.js so the HUD
+     editor can draw the same dials in its preview without a running game. */
   drawGauges(speed, rpm, redline) {
     if (!this.gauges) this.initGauges();
-    const tachMax = Math.max(5, Math.ceil(redline / 1000)) * 1000;
-    if (this.gauges.tach) this.drawDial(this.gauges.tach, { value: rpm, max: tachMax, redlineAt: redline, majorEvery: 1000, minorEvery: 250, labelEvery: 1000, fmt: v => String(v / 1000), sub: '×1000 RPM' });
-    if (this.gauges.speedo) this.drawDial(this.gauges.speedo, { value: speed, max: 280, majorEvery: 20, minorEvery: 10, labelEvery: 40, fmt: v => String(v), sub: 'km/h' });
-  }
-
-  drawDial(g, cfg) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const host = g.canvas.parentElement;
-    const css = Math.max(48, Math.round(Math.min(host.clientWidth || 120, host.clientHeight || 120)));
-    const px = Math.round(css * dpr);
-    if (g.canvas.width !== px) { g.canvas.width = px; g.canvas.height = px; }
-    const theme = this.themeColors();
-    // The face is an expensive cached bitmap, so its key has to carry the
-    // colours it was painted with: without them a re-themed dial would keep the
-    // previous face until the canvas changed size.
-    const key = `${px}|${cfg.max}|${cfg.redlineAt || 0}|${theme.dialFace}${theme.dialNeedle}${theme.dialTick}${theme.dialLabel}${theme.dialGlow}`;
-    if (g.faceKey !== key) { g.face = this.renderDialFace(px, cfg, theme); g.faceKey = key; }
-    const x = g.ctx;
-    x.clearRect(0, 0, px, px);
-    if (g.face) x.drawImage(g.face, 0, 0);
-    g.disp = (g.disp ?? cfg.value) + (cfg.value - (g.disp ?? cfg.value)) * .38;
-    const a0 = Math.PI * .75, a1 = Math.PI * 2.25;
-    const a = a0 + Math.max(0, Math.min(cfg.max, g.disp)) / cfg.max * (a1 - a0);
-    x.save(); x.translate(px / 2, px / 2); x.rotate(a);
-    x.strokeStyle = theme.dialNeedle; x.lineWidth = px * .021; x.lineCap = 'round';
-    x.shadowColor = theme.dialNeedle; x.shadowBlur = px * .04;
-    x.beginPath(); x.moveTo(-px * .12, 0); x.lineTo(px * .395, 0); x.stroke();
-    x.shadowBlur = 0;
-    x.fillStyle = theme.dialFace; x.beginPath(); x.arc(0, 0, px * .052, 0, 7); x.fill();
-    x.strokeStyle = theme.dialGlow; x.lineWidth = px * .012; x.stroke();
-    x.restore();
-  }
-
-  renderDialFace(px, cfg, theme = this.themeColors()) {
-    const f = document.createElement('canvas'); f.width = px; f.height = px;
-    const x = f.getContext('2d'), c = px / 2;
-    const a0 = Math.PI * .75, a1 = Math.PI * 2.25;
-    const ang = v => a0 + Math.max(0, Math.min(cfg.max, v)) / cfg.max * (a1 - a0);
-    x.fillStyle = theme.dialFace; x.beginPath(); x.arc(c, c, px * .485, 0, 7); x.fill();
-    x.strokeStyle = rgbaFromHex(theme.dialGlow, .16); x.lineWidth = px * .008;
-    x.beginPath(); x.arc(c, c, px * .44, 0, 7); x.stroke();
-    if (cfg.redlineAt) {
-      x.strokeStyle = theme.dialNeedle; x.lineWidth = px * .026; x.shadowColor = theme.dialNeedle; x.shadowBlur = px * .025;
-      x.beginPath(); x.arc(c, c, px * .415, ang(cfg.redlineAt), a1); x.stroke(); x.shadowBlur = 0;
-    }
-    for (let v = 0; v <= cfg.max + 1e-6; v += cfg.minorEvery) {
-      const major = Math.abs(v / cfg.majorEvery - Math.round(v / cfg.majorEvery)) < 1e-6;
-      const a = ang(v), ca = Math.cos(a), sa = Math.sin(a);
-      const r1 = px * .425, r2 = major ? px * .355 : px * .385;
-      x.strokeStyle = major ? theme.dialTick : rgbaFromHex(theme.dialTick, .4);
-      x.lineWidth = major ? px * .013 : px * .007;
-      if (major) { x.shadowColor = theme.dialGlow; x.shadowBlur = px * .018; }
-      x.beginPath(); x.moveTo(c + ca * r2, c + sa * r2); x.lineTo(c + ca * r1, c + sa * r1); x.stroke();
-      x.shadowBlur = 0;
-      if (major && v % cfg.labelEvery === 0) {
-        const lr = px * .275;
-        x.fillStyle = theme.dialLabel; x.font = `${Math.round(px * .082)}px "RoundedTit","Rounded",sans-serif`;
-        x.textAlign = 'center'; x.textBaseline = 'middle';
-        x.shadowColor = theme.dialGlow; x.shadowBlur = px * .022;
-        x.fillText(cfg.fmt(v), c + ca * lr, c + sa * lr);
-        x.shadowBlur = 0;
-      }
-    }
-    x.fillStyle = rgbaFromHex(theme.dialTick, .5); x.font = `${Math.round(px * .05)}px "Rounded",sans-serif`;
-    x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.fillText(cfg.sub, c, c - px * .155);
-    return f;
+    const colors = instrumentColors();
+    if (this.gauges.tach) paintDial(this.gauges.tach, { ...tachConfig(redline), value: rpm }, { colors });
+    if (this.gauges.speedo) paintDial(this.gauges.speedo, { ...speedConfig(), value: speed }, { colors });
   }
 
   drawMinimap(data, player, services = [], largeCanvas = null) {
     if (!data?.routes?.length && !Array.isArray(data)) return;
     this.lastMinimap = { data, player, services };
-    const canvas = largeCanvas || this.$('minimap');
-    const c = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    const theme = this.themeColors();
-    c.fillStyle = theme.mapBg; c.fillRect(0, 0, w, h);
-    const routes = data.routes || data;
-    const all = routes.flatMap(r => r.points || r);
-    if (!all.length) return;
-    const xs = all.map(p => p.x), zs = all.map(p => p.z ?? p.y);
-    const bounds = data.bounds || { minX:Math.min(...xs), maxX:Math.max(...xs), minZ:Math.min(...zs), maxZ:Math.max(...zs) };
-    const pad = largeCanvas ? 22 : 12;
-    const scale = Math.min((w-pad*2)/Math.max(1,bounds.maxX-bounds.minX),(h-pad*2)/Math.max(1,bounds.maxZ-bounds.minZ));
-    const tx = x => w/2+(x-(bounds.minX+bounds.maxX)/2)*scale;
-    const ty = z => h/2-(z-(bounds.minZ+bounds.maxZ)/2)*scale; // +Z = north = up
-    routes.forEach((r, idx) => {
-      const pts = r.points || r;
-      c.beginPath();
-      pts.forEach((p,i) => i ? c.lineTo(tx(p.x),ty(p.z??p.y)) : c.moveTo(tx(p.x),ty(p.z??p.y)));
-      if (r.closed) c.closePath();
-      c.strokeStyle = r.color || (idx === 0 ? theme.mapRoute : theme.mapRouteAlt);
-      c.lineWidth = largeCanvas ? 4 : 2; c.stroke();
-    });
-    services.forEach(s => {
-      c.fillStyle = s.garage ? theme.mapGarage : theme.mapService;
-      c.fillRect(tx(s.position?.x ?? s.x)-3,ty(s.position?.z ?? s.z)-3,6,6);
-      if (largeCanvas) { c.fillStyle='#9fdcb4'; c.font='10px monospace'; c.fillText(s.name || 'PA',tx(s.position?.x ?? s.x)+6,ty(s.position?.z ?? s.z)-5); }
-    });
-    if (player) {
-      const x=tx(player.x), y=ty(player.z);
-      // North-up canvas (y = -z): heading 0 (+Z) points straight up, so the
-      // up-drawn arrow rotates by the heading directly.
-      c.save(); c.translate(x,y); c.rotate(player.heading ?? 0);
-      c.fillStyle=theme.mapPlayer; c.beginPath(); c.moveTo(0,-7);c.lineTo(5,5);c.lineTo(0,2);c.lineTo(-5,5);c.closePath();c.fill(); c.restore();
-    }
+    paintMinimap(largeCanvas || this.$('minimap'), { data, player, services, large: !!largeCanvas });
   }
 
   prompt(text, visible = true) {

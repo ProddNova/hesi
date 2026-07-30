@@ -22,6 +22,7 @@ import { CustomAssetStore } from './world/custom-asset-store.js';
 import { assembleDefinitionFromEntities, assetPartResolver, registerCustomAssets } from './world/custom-asset-integration.js';
 import { ModelerPanel } from './modeler/modeler-panel.js';
 import { SurfacesPanel } from './surfaces/surfaces-panel.js';
+import { HudPanel } from './hud/hud-panel.js';
 import { FaceTextureController } from './interaction/face-texture-controller.js';
 import { applyWorldModelOverrides, applyWorldTextureOverrides } from '/js/custom-assets.js';
 import { SkyboxController } from './world/skybox-controller.js';
@@ -64,6 +65,7 @@ export async function createEditorApp(root) {
   let customAssetStore = null;
   let modeler = null;
   let surfaces = null;
+  let hud = null;
   // Saved models that stand in for an instanced archetype's generated shape;
   // one pass swaps the geometry of every copy in the map.
   const applyWorldModels = () => {
@@ -257,6 +259,11 @@ export async function createEditorApp(root) {
   shell.onToolbar('open-modeler', () => {
     if (modeler) modeler.open();
     else shell.setStatus('The Modeler is available once the world has loaded');
+  });
+  shell.onToolbar('open-hud', () => {
+    // The HUD editor needs no world: it previews the game's own markup and
+    // stylesheet, so it opens the moment the editor is up.
+    hud?.open().catch((error) => shell.setStatus(`HUD · ${error.message}`));
   });
   shell.onToolbar('open-world-textures', () => {
     if (surfaces) surfaces.open();
@@ -830,6 +837,14 @@ export async function createEditorApp(root) {
       },
       onOpenChange: (open) => viewport.setNavigationBlocked(open, 'surfaces-overlay'),
     });
+    // HUD: the interface itself — the driving HUD, the phone, the terminal, the
+    // loading and boot screens — edited by dragging real previews.
+    hud = new HudPanel({
+      host: shell.root,
+      store: customAssetStore,
+      onStatus: (message) => shell.setStatus(message),
+      onOpenChange: (open) => viewport.setNavigationBlocked(open, 'hud-overlay'),
+    });
     shell.setAssets(assetRegistry.catalog());
     syncViewState();
     persistence = new ProjectPersistence({
@@ -902,6 +917,7 @@ export async function createEditorApp(root) {
     window.removeEventListener('pagehide', dispose);
     unsubscribeRegistry();
     modeler?.dispose();
+    hud?.dispose();
     placement?.dispose();
     roadEdit?.dispose();
     barrierOverlay?.dispose();
@@ -948,6 +964,8 @@ export async function createEditorApp(root) {
     get barrierPersistence() { return barrierPersistence; },
     get barrierDocument() { return barrierDocument; },
     get modeler() { return modeler; },
+    get surfaces() { return surfaces; },
+    get hud() { return hud; },
     get customAssetStore() { return customAssetStore; },
     get skyboxController() { return skyboxController; },
     get adapter() { return adapter; },
