@@ -21,6 +21,22 @@ export function resolveRoadSurfaceRoute(entity, hitPoint, adapter, routeEntities
   return routeEntitiesById?.get(nearest?.route?.id) || entity;
 }
 
+/**
+ * Roads rebuilt live from an edited centreline (HighwayMap.refreshEditorRouteGeometry)
+ * are meshes created after the pick index was built, so nothing resolves them.
+ * They carry their route id instead, which keeps the road clickable — and keeps
+ * it clickable a second time, right after it was edited.
+ */
+export function resolveRoadPreviewRoute(object, routeEntitiesById) {
+  let current = object;
+  while (current) {
+    const routeId = current.userData?.editorRoadPreview;
+    if (typeof routeId === 'string') return routeEntitiesById?.get(routeId) || null;
+    current = current.parent;
+  }
+  return null;
+}
+
 export function isEditorHelper(object) {
   let current = object;
   while (current) {
@@ -156,7 +172,8 @@ export class SelectionManager {
     const seen = new Set();
     for (const hit of hits) {
       if (isEditorHelper(hit.object) || !isActuallyVisible(hit.object)) continue;
-      const pickedEntity = this.adapter.resolveSelection?.(hit.object, hit.instanceId);
+      const pickedEntity = this.adapter.resolveSelection?.(hit.object, hit.instanceId)
+        || resolveRoadPreviewRoute(hit.object, this.routeEntitiesById);
       const entity = resolveRoadSurfaceRoute(pickedEntity, hit.point, this.adapter, this.routeEntitiesById);
       if (!this.canSelect(entity) || seen.has(entity.id)) continue;
       seen.add(entity.id);

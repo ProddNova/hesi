@@ -159,6 +159,58 @@ try {
   await page.waitForTimeout(900);
   await page.screenshot({ path: path.join(SHOTS, '2-after-move.png') });
 
+  // --- 1b. the edited road stays clickable -------------------------------
+  // Reported: "dopo che seleziono una volta e modifico la strada poi non me la
+  // fa più selezionare". The rebuilt meshes are created after the editor's pick
+  // index was built, so without their route marker nothing resolves them.
+  const reselect = await page.evaluate((id) => {
+    const app = window.hesiEditor;
+    const map = app.adapter.map;
+    const camera = app.viewport.camera;
+    const rect = app.viewport.canvas.getBoundingClientRect();
+    const group = map._editorRouteGeometry.get(id);
+    camera.updateMatrixWorld(true);
+    group.updateMatrixWorld(true);
+    const Raycaster = app.selection.raycaster.constructor;
+    const Vector2 = app.selection.pointer.constructor;
+    // Cast at the centre of the viewport and report what the rebuilt road
+    // resolves to, the same path SelectionManager.pick takes.
+    const results = [];
+    for (let sx = -0.5; sx <= 0.5; sx += 0.1) {
+      for (let sy = -0.5; sy <= 0.5; sy += 0.1) {
+        const caster = new Raycaster();
+        caster.setFromCamera(new Vector2(sx, sy), camera);
+        for (const hit of caster.intersectObject(group, true)) {
+          results.push({
+            resolvedByIndex: Boolean(app.adapter.resolveSelection?.(hit.object, hit.instanceId)),
+            marker: hit.object.userData?.editorRoadPreview || null,
+            client: {
+              x: rect.left + (sx + 1) * rect.width * 0.5,
+              y: rect.top + (1 - sy) * rect.height * 0.5,
+            },
+          });
+        }
+      }
+    }
+    return { hits: results.length, sample: results[0] || null };
+  }, ROUTE_ID);
+  check('the rebuilt road is hit by the selection raycast', reselect.hits > 0, `${reselect.hits} hits`);
+  check('the rebuilt road carries its route marker', reselect.sample?.marker === ROUTE_ID,
+    JSON.stringify(reselect.sample));
+
+  // Deselect, then click the rebuilt asphalt: it has to select the road again.
+  await page.evaluate(() => window.hesiEditor.selection.clear('probe'));
+  await page.waitForFunction(() => window.hesiEditor.roadEdit?.active === false, null, { timeout: 10000 });
+  await page.mouse.click(Math.round(reselect.sample.client.x), Math.round(reselect.sample.client.y));
+  await page.waitForTimeout(400);
+  const reselected = await page.evaluate(() => ({
+    selected: window.hesiEditor.selection.selected?.metadata?.routeId || null,
+    type: window.hesiEditor.selection.selected?.type || null,
+    editing: window.hesiEditor.roadEdit?.active === true,
+  }));
+  check('clicking the edited road selects it again', reselected.selected === ROUTE_ID && reselected.editing,
+    JSON.stringify(reselected));
+
   // --- 2. deleting the whole road ----------------------------------------
   const removeButton = page.getByTestId('road-remove');
   check('the Road panel offers Delete road', await removeButton.count() > 0,

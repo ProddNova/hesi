@@ -119,3 +119,33 @@ runs on an empty draft and restores the developer's file afterwards.
   visible pause after each committed point move on those two routes.
 - `Apply to Game` is still what writes production data. Nothing here changes the
   draft/publish split.
+
+---
+
+## Follow-up (same day): the edited road was no longer clickable
+
+Reported right after the fix above: *"dopo che seleziono una volta e modifico la
+strada poi non me la fa più selezionare"*.
+
+Caused by the live rebuild. The editor's pick index (`entity-discovery.js`
+`pickIndex`, a WeakMap) is built once when the world is discovered, so the meshes
+`refreshEditorRouteGeometry` creates afterwards are in no index at all:
+`adapter.resolveSelection(hit.object)` returned `null`, the hit was dropped, and
+clicking the road you had just edited did nothing. Confirmed in the probe —
+`resolvedByIndex: false` on every hit against the rebuilt group.
+
+- `refreshEditorRouteGeometry` now tags the whole preview subtree with
+  `userData.editorRoadPreview = routeId`.
+- `SelectionManager.pick` falls back to `resolveRoadPreviewRoute()`, which walks
+  up to that marker and resolves straight to the route entity.
+- Preview meshes were also renamed off the `chunk <key> <material>` namespace:
+  that name is an address (entity discovery, saved build ops) and a second mesh
+  answering to it would be ambiguous.
+
+Probe coverage added: raycast the rebuilt group, deselect, click the rebuilt
+asphalt, assert the road is selected and route editing is active again —
+`clicking the edited road selects it again · {"selected":"ramp_2","type":"road-route","editing":true}`.
+
+Note on the smoke test: its garage face-texture step is flaky (a texture-load
+race). It failed once and passed on a clean re-run with no code change in
+between; it is unrelated to roads.

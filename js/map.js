@@ -2011,18 +2011,31 @@ export class HighwayMap {
     } finally {
       this._routeEmission = null;
     }
+    // Preview meshes are renamed off the `chunk <key> <material>` namespace on
+    // purpose: that name is an address (entity discovery, saved build ops), and
+    // a second mesh answering to it would be ambiguous.
     for (const [key, materials] of emission.buckets) {
       for (const [materialName, bucket] of materials) {
         if (!bucket.positions.length) continue;
-        group.add(this._mergedBucketMesh(key, materialName, bucket));
+        const mesh = this._mergedBucketMesh(key, materialName, bucket);
+        mesh.name = `road preview ${routeId} ${key} ${materialName}`;
+        group.add(mesh);
       }
     }
     for (const [key, types] of emission.instances) {
       for (const [type, records] of types) {
         if (!records.length) continue;
-        group.add(this._instancedChunkMesh(key, type, records, { register: false }));
+        const mesh = this._instancedChunkMesh(key, type, records, { register: false });
+        mesh.name = `road preview ${routeId} ${key} ${type}`;
+        group.add(mesh);
       }
     }
+    // The editor's pick index was built once, at world discovery, so these fresh
+    // meshes are not in it: without a marker the rebuilt road stops being
+    // clickable (the selection manager reads this to resolve a hit straight
+    // back to the route). Tag the whole subtree, not just the group, because a
+    // raycast reports the leaf mesh.
+    group.traverse((object) => { object.userData.editorRoadPreview = routeId; });
     this.group.add(group);
     this._editorRouteGeometry.set(routeId, group);
     return true;
