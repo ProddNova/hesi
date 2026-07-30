@@ -35,6 +35,19 @@ const routeJsonBackupSnapshot = await snapshotFile(ROUTE_JSON_BACKUP_PATH);
 const routeModuleSnapshot = await snapshotFile(ROUTE_MODULE_PATH);
 const routeModuleBackupSnapshot = await snapshotFile(ROUTE_MODULE_BACKUP_PATH);
 
+// The saved road draft is the developer's own work, and it is now honoured
+// verbatim by HighwayMap — a hidden Tatsumi connector really is 5 km down. Run
+// the road coverage against an empty draft so the smoke test measures the
+// editor, not whatever roads happen to be edited locally. The snapshot above is
+// restored in the finally block.
+await writeFile(ROAD_SOURCE_PATH, `${JSON.stringify({
+  version: 1,
+  source: 'data/routes-smoothed.json',
+  routes: {},
+  syntheticRoutes: {},
+  removedRoutes: [],
+}, null, 2)}\n`);
+
 const child = spawn(process.execPath, ['tools/hesi-editor/server.mjs'], {
   cwd: ROOT,
   env: { ...process.env, HESI_EDITOR_PORT: String(PORT) },
@@ -216,6 +229,22 @@ try {
     const staleIndex = routes.findIndex((route) => route.id === 'tatsumi_pa_exit');
     if (staleIndex >= 0) routes.splice(staleIndex, 1);
   });
+  // The published route data may already carry an editor override for this
+  // connector — including one that hides it as a two-point stub, which the
+  // runtime now honours. Editing needs interior handles, so put the generated
+  // polyline back before measuring the synthetic-route UX.
+  await page.evaluate(() => {
+    const controller = window.hesiEditor.roadEdit;
+    const generated = controller.runtimeRoute?.generatedPoints;
+    if (!Array.isArray(generated) || controller.route.points.length >= 4) return;
+    controller.route.points.splice(0, controller.route.points.length, ...generated.map((point) => [...point]));
+    controller.activeHandle = null;
+    // Deliberately not _afterRouteMutation: this is test setup, not an edit,
+    // and the checks below assert an untouched draft.
+    controller._applyRuntimePreview();
+    controller._refreshHelpers();
+  });
+  await page.waitForFunction(() => window.hesiEditor.roadEdit.route.points.length >= 4);
   await resetViewportScroll();
   const syntheticBaseline = await page.evaluate(() => {
     const app = window.hesiEditor;
@@ -292,12 +321,13 @@ try {
     || deletedSynthetic.runtime !== deletedSynthetic.source) {
     throw new Error(`Right-click point deletion did not update live collision: ${JSON.stringify({ syntheticBaseline, deletedSynthetic })}`);
   }
-  const syntheticDraftNavigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+  // Save Draft keeps the world it just saved on screen: the road's geometry has
+  // already been rebuilt from the edited curve, so there is nothing to reload.
   await page.keyboard.press('Control+S');
-  await syntheticDraftNavigation;
   await page.waitForFunction(() => window.hesiEditor?.adapter?.strategy === 'real'
     && window.hesiEditor.roadEdit?.route?.id === 'tatsumi_pa_exit'
-    && window.hesiEditor.roadEdit?.synthetic === true, null, { timeout: 60000 });
+    && window.hesiEditor.roadEdit?.synthetic === true
+    && window.hesiEditor.roadEdit.hasDirty() === false, null, { timeout: 60000 });
   await page.waitForSelector('[data-testid="loading-overlay"]', { state: 'hidden' });
   const savedSynthetic = await page.evaluate(async () => {
     const response = await fetch('/__hesi_editor_routes', { cache: 'no-store' });

@@ -103,6 +103,9 @@ export async function createEditorApp(root) {
   const finishActiveInteractions = () => {
     transformManager?.finishActiveDrag();
     roadEdit?.finishActiveDrag({ commit: true });
+    // A debounced geometry rebuild must land before anything is written out,
+    // so what is saved is what is on screen.
+    roadEdit?.flushGeometryRebuild();
   };
   const runProjectTask = (task) => {
     if (activeProjectTask) {
@@ -156,9 +159,10 @@ export async function createEditorApp(root) {
     }
     syncPublishState();
     if (savedRoads) {
-      // Asphalt, route samples and collision already follow every drag frame.
-      // Saving persists that live state without tearing down the editor world.
-      shell.setStatus('Road draft saved · live editor preview kept in place · playable game unchanged');
+      // Asphalt, markings, barriers, route samples and collision were already
+      // rebuilt when each edit was committed. Saving persists that live state
+      // without tearing down the editor world.
+      shell.setStatus('Road draft saved · the rebuilt roads stay on screen · playable game unchanged');
       return result;
     }
     shell.setStatus('Draft saved · editor project and road source updated · playable game unchanged');
@@ -576,6 +580,7 @@ export async function createEditorApp(root) {
         Number(detail?.z),
       ),
       'road-point-delete': () => roadEdit?.deleteActivePoint(),
+      'road-remove': () => roadEdit?.setActiveRouteRemoved(detail !== false),
       'road-point-step': () => roadEdit?.stepActivePoint(Number(detail) || 1),
       'road-point-focus': () => roadEdit?.focusActivePoint(),
       'project-save': () => runProjectTask(() => saveDraftWorkspace({ name: detail.name })),

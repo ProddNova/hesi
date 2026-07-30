@@ -57,7 +57,26 @@ export function validateProductionRouteDocument(document) {
 }
 
 export function blankRoadRouteOverrides() {
-  return { version: 1, source: PRODUCTION_JSON_PATH, routes: {}, syntheticRoutes: {} };
+  return { version: 1, source: PRODUCTION_JSON_PATH, routes: {}, syntheticRoutes: {}, removedRoutes: [] };
+}
+
+const ROUTE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
+
+/**
+ * Roads the editor deleted outright. A centreline needs at least two points, so
+ * "delete the road" cannot be expressed by removing points — it is its own
+ * operation, and it is reversible: any `points` override for the same route is
+ * kept, so restoring the road brings its edited shape back with it.
+ */
+function canonicalRemovedRoutes(value, label) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array of route ids`);
+  const ids = new Set();
+  for (const id of value) {
+    if (typeof id !== 'string' || !ROUTE_ID_PATTERN.test(id)) throw new TypeError(`${label} contains an invalid route id: ${id}`);
+    ids.add(id);
+  }
+  return [...ids].sort();
 }
 
 /**
@@ -93,11 +112,12 @@ export function canonicalizeRoadRouteOverrides(document, { production = null, dr
   }
   const syntheticRoutes = {};
   for (const id of syntheticIds) {
-    if (!/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(id)) throw new TypeError(`Synthetic road route override has an invalid id: ${id}`);
+    if (!ROUTE_ID_PATTERN.test(id)) throw new TypeError(`Synthetic road route override has an invalid id: ${id}`);
     if (productionRoutes?.has(id)) throw new TypeError(`Synthetic road route override duplicates a production route: ${id}`);
     syntheticRoutes[id] = canonicalSyntheticEntry(syntheticDocument[id], `Synthetic road route override ${id}`);
   }
-  return { version: 1, source: PRODUCTION_JSON_PATH, routes, syntheticRoutes };
+  const removedRoutes = canonicalRemovedRoutes(document.removedRoutes, 'Road route overrides removedRoutes');
+  return { version: 1, source: PRODUCTION_JSON_PATH, routes, syntheticRoutes, removedRoutes };
 }
 
 export function mergeRoadRouteUpdates(previous, updates, production) {
@@ -106,11 +126,25 @@ export function mergeRoadRouteUpdates(previous, updates, production) {
   const seen = new Set();
   const routes = { ...base.routes };
   const syntheticRoutes = { ...base.syntheticRoutes };
+  const removedRoutes = new Set(base.removedRoutes);
   const productionIds = new Set(validateProductionRouteDocument(production).routes.map((route) => route.id));
   for (const update of updates) {
     if (!isRecord(update) || typeof update.id !== 'string' || !update.id.trim()) throw new TypeError('Every road route update needs a non-empty string id');
     if (seen.has(update.id)) throw new TypeError(`Duplicate road route update: ${update.id}`);
     seen.add(update.id);
+    // A delete/restore rides alongside the centreline rather than replacing it:
+    // the route's edited shape is kept so restoring brings it back.
+    if (update.removed === true || update.removed === false) {
+      if (!ROUTE_ID_PATTERN.test(update.id)) throw new TypeError(`Road route removal has an invalid route id: ${update.id}`);
+      if (!productionIds.has(update.id) && update.synthetic !== true) {
+        throw new TypeError(`Road route removal references unknown production route: ${update.id}`);
+      }
+      if (update.removed) removedRoutes.add(update.id);
+      else removedRoutes.delete(update.id);
+      // Removal-only update: nothing to say about the centreline, so whatever
+      // override the route already carries is left exactly as it is.
+      if (update.points === undefined) continue;
+    }
     if (productionIds.has(update.id)) {
       routes[update.id] = { points: canonicalPoints(update.points, `Road route update ${update.id}.points`) };
     } else if (update.synthetic === true) {
@@ -122,7 +156,10 @@ export function mergeRoadRouteUpdates(previous, updates, production) {
       throw new TypeError(`Road route update references unknown production route: ${update.id}`);
     }
   }
-  return canonicalizeRoadRouteOverrides({ ...base, routes, syntheticRoutes }, { production, dropUnknown: true });
+  return canonicalizeRoadRouteOverrides(
+    { ...base, routes, syntheticRoutes, removedRoutes: [...removedRoutes] },
+    { production, dropUnknown: true },
+  );
 }
 
 export function applyRoadRouteOverrides(production, overrides) {
@@ -136,6 +173,9 @@ export function applyRoadRouteOverrides(production, overrides) {
     source: SOURCE_PATH,
     routes: Object.keys(source.routes).sort(),
     syntheticRoutes: structuredClone(source.syntheticRoutes),
+    // js/map.js reads this back and registers those routes without geometry
+    // and outside the spatial index (see HighwayMap._applyEditorRouteRemovals).
+    removedRoutes: [...source.removedRoutes],
   };
   return output;
 }

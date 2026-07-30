@@ -114,3 +114,39 @@ test('stale overrides for removed production routes are dropped, not fatal', () 
   assert.deepEqual(published.routes[0].points, [[0, 1, 0], [11, 1, 0], [20, 1, 0]]);
   assert.deepEqual(published.meta.editorRoadOverrides.routes, ['a']);
 });
+
+test('deleting a road is its own reversible override that keeps the edited shape', () => {
+  const shaped = mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{
+    id: 'a', points: [[0, 1, 0], [14, 1, 3], [20, 1, 0]],
+  }], production());
+  const deleted = mergeRoadRouteUpdates(shaped, [{ id: 'a', removed: true }], production());
+  assert.deepEqual(deleted.removedRoutes, ['a']);
+  // The centreline survives the deletion, so restoring brings the shape back.
+  assert.deepEqual(deleted.routes.a.points[1], [14, 1, 3]);
+  const published = applyRoadRouteOverrides(production(), deleted);
+  assert.deepEqual(published.meta.editorRoadOverrides.removedRoutes, ['a']);
+  assert.deepEqual(published.routes[0].points[1], [14, 1, 3]);
+
+  const restored = mergeRoadRouteUpdates(deleted, [{ id: 'a', removed: false }], production());
+  assert.deepEqual(restored.removedRoutes, []);
+  assert.deepEqual(restored.routes.a.points[1], [14, 1, 3]);
+});
+
+test('runtime routes can be deleted and malformed removals are rejected', () => {
+  const removedSynthetic = mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{
+    id: 'tatsumi_pa_exit', synthetic: true, removed: true, points: [[0, 0, 0], [8, 0, 0]],
+  }], production());
+  assert.deepEqual(removedSynthetic.removedRoutes, ['tatsumi_pa_exit']);
+  assert.throws(
+    () => mergeRoadRouteUpdates(blankRoadRouteOverrides(), [{ id: 'missing', removed: true }], production()),
+    /unknown production route/,
+  );
+  assert.throws(
+    () => canonicalizeRoadRouteOverrides({ ...blankRoadRouteOverrides(), removedRoutes: ['../bad'] }, { production: production() }),
+    /invalid route id/,
+  );
+  assert.throws(
+    () => canonicalizeRoadRouteOverrides({ ...blankRoadRouteOverrides(), removedRoutes: 'a' }, { production: production() }),
+    /must be an array/,
+  );
+});

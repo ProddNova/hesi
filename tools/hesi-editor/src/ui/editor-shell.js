@@ -1656,6 +1656,7 @@ export function createEditorShell(root) {
     head.append(element('b', '', 'Road editing'));
     if (roadState.synthetic) head.append(element('span', 'road-badge', 'runtime route'));
     if (roadState.closed) head.append(element('span', 'road-badge', 'loop'));
+    if (roadState.removed) head.append(element('span', 'road-badge', 'deleted'));
     const name = element('div', 'road-name', roadState.name || roadState.routeId);
     name.title = roadState.routeId;
     const facts = element('div', 'road-facts');
@@ -1726,13 +1727,27 @@ export function createEditorShell(root) {
     }
     roadPanel.append(point);
 
+    // Deleting the whole road: a centreline always keeps at least two points,
+    // so removing points can never take a road out — this is that operation.
+    const roadActions = element('div', 'road-actions');
+    const removeRoad = button(
+      roadState.removed ? 'Restore road' : 'Delete road',
+      'road-remove',
+      { title: roadState.removed ? 'Bring this road back with the shape it had' : 'Take this whole road out of the world — reversible, and it keeps its edited shape' },
+    );
+    if (!roadState.removed) removeRoad.classList.add('danger');
+    removeRoad.dataset.testid = 'road-remove';
+    removeRoad.addEventListener('click', () => triggerAction('road-remove', !roadState.removed));
+    roadActions.append(removeRoad);
+    roadPanel.append(roadActions);
+
     const hints = element('ul', 'road-hints');
     for (const hint of [
-      'Drag an orange point to reshape the road — the asphalt preview follows live.',
+      'Drag an orange point to reshape the road — the asphalt, markings and barriers are rebuilt as soon as you let go.',
       'Use the X/Y/Z arrows on a selected point to edit its elevation and plan position.',
       'Right-click (or double-click) the road to add a point there.',
-      'Right-click a point, or press Del, to remove it.',
-      'Esc keeps the edited road on screen as a draft surface. The merged chunk asphalt still shows the old alignment until Apply to Game rebuilds the world.',
+      'Right-click a point, or press Del, to remove it. Delete road removes the whole road.',
+      'Ramp ends stay glued to the road they join: the rebuilt geometry blends them exactly the way the game will.',
     ]) hints.append(element('li', '', hint));
     roadPanel.append(hints);
 

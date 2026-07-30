@@ -281,7 +281,11 @@ async function saveRoadRouteUpdates(updates) {
   return {
     path: ROAD_ROUTE_PATHS.source,
     bytes: Buffer.byteLength(serialized),
-    routes: [...Object.keys(document.routes), ...Object.keys(document.syntheticRoutes)].sort(),
+    routes: [...new Set([
+      ...Object.keys(document.routes),
+      ...Object.keys(document.syntheticRoutes),
+      ...document.removedRoutes,
+    ])].sort(),
   };
 }
 
@@ -321,7 +325,11 @@ async function saveBarrierDocument(document) {
 async function publishRoadRoutes() {
   const production = await readProductionRoutes();
   const overrides = await readRoadRouteOverrides(production);
-  const routeIds = [...Object.keys(overrides.routes), ...Object.keys(overrides.syntheticRoutes)].sort();
+  const routeIds = [...new Set([
+    ...Object.keys(overrides.routes),
+    ...Object.keys(overrides.syntheticRoutes),
+    ...overrides.removedRoutes,
+  ])].sort();
   if (!routeIds.length) throw new Error(`No saved road route edits found in ${ROAD_ROUTE_PATHS.source}; edit and Save a road first`);
   const output = applyRoadRouteOverrides(production, overrides);
   const json = serializeProductionRoutes(output);

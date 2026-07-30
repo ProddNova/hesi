@@ -66,6 +66,9 @@ const TMP_SURF_F = new THREE.Vector3();
 const TMP_SURF_U = new THREE.Vector3();
 const TMP_SURF_R = new THREE.Vector3();
 const TMP_MAT = new THREE.Matrix4();
+// Zero-scale instance transform: how an instance is hidden without touching the
+// index it sits at (see _eraseBakedRouteGeometry and the Tatsumi tombstones).
+const ZERO_SCALE_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
 // Unit axes + scratch vector for projecting an instance's oriented box onto the
 // Tatsumi deck frame (see _tatsumiClearingBlocks).
 const TMP_X = new THREE.Vector3(1, 0, 0);
@@ -214,6 +217,19 @@ const WATER_DRIFT = [0.9, 1.7];
 // Apply the total once, at the authoritative data-control-point boundary, so
 // curves and every system derived from them inherit exactly the same lift
 // without changing X/Z or any route-to-route height difference.
+/**
+ * The route network object HighwayMap actually builds from.
+ *
+ * This module imports the route data through a cache-busted specifier, so
+ * `import('/data/routes-smoothed.js')` elsewhere resolves to a DIFFERENT module
+ * record with its own copy of the document. The world editor applies its saved
+ * road draft by mutating the document before constructing HighwayMap; going
+ * through this accessor is what guarantees it mutates the one that gets read.
+ */
+export function getRouteNetworkData() {
+  return ROUTE_DATA;
+}
+
 export const ROAD_NETWORK_BASE_Y_OFFSET = 15.0;
 export const ROAD_NETWORK_EXTRA_Y_OFFSET = 10.0;
 export const ROAD_NETWORK_Y_OFFSET = ROAD_NETWORK_BASE_Y_OFFSET + ROAD_NETWORK_EXTRA_Y_OFFSET;
@@ -824,6 +840,16 @@ export class HighwayMap {
     this._chunks = new Map();
     this._chunkBuckets = new Map();   // key -> matName -> {positions, indices, colors|null}
     this._chunkInstances = new Map(); // key -> typeName -> records[]
+    // Editor live road geometry (see refreshEditorRouteGeometry). Every route's
+    // own emission is recorded while the world is built so a single route's
+    // baked asphalt can later be erased in place and re-emitted from its edited
+    // curve, without regenerating the whole map.
+    this._routeEmission = null;
+    this._routeEmissionRanges = new Map(); // routeId -> {buckets, instances, meshes}
+    this._bucketMeshes = new Map();        // `${chunkKey}\0${material}` -> merged mesh
+    this._instanceMeshes = new Map();      // `${chunkKey}\0${type}` -> instanced mesh
+    this._editorRouteGeometry = new Map(); // routeId -> {group, restore}
+    this._removedRouteIds = this._readEditorRemovedRoutes();
     this._carPaintLightChunks = new Map(); // key -> nearby emissive fixture records
     // Per-copy record of every building box (see _pushBuildingBox). Buildings
     // are merged quads, not instances, so this is the ONLY trace of where each
@@ -840,6 +866,7 @@ export class HighwayMap {
     this._applyEditorSyntheticRouteOverrides();
     this._finalizeNetwork();
     this._defineLaybys();
+    this._applyEditorRouteRemovals();
     this._buildWorld();
     if (this.options.progressiveCorridorDebug) this._buildProgressiveCorridorDebugOverlay();
     if (this.options.progressiveMergeHandoffDebug) this._buildP2HandoffDebugOverlay();
@@ -1535,6 +1562,15 @@ export class HighwayMap {
       dataLength: routeData.length,
       paId: routeData.paId || null,
     });
+    // Everything applyEditorDataRouteEdit needs to redo the endpoint anchoring
+    // on an edited centreline, decided exactly as it was decided here.
+    route.editorSource = {
+      routeData,
+      startEdge: startEdge || null,
+      endEdge: endEdge || null,
+      anchorsStart: Boolean(divergeInfo),
+      anchorsEnd: Boolean(mergeInfo),
+    };
 
     if (divergeInfo) {
       const edge = this._addEdge({
@@ -1822,13 +1858,273 @@ export class HighwayMap {
     return true;
   }
 
+  // ------------------------------------------------------------------
+  // Editor road editing: WYSIWYG previews, live geometry, route removal
+  // ------------------------------------------------------------------
+
+  /**
+   * Apply an edited centreline to a DATA route exactly the way a fresh world
+   * build would: the branch endpoints are re-blended onto their host through
+   * _anchorEndpoint before the curve is replaced.
+   *
+   * Without this the editor previewed the raw handles while the next world
+   * build re-anchored them, so a saved ramp edit came back looking like it had
+   * never been applied (the two disagreed by tens of metres near the mouths).
+   * `pointArrays` are runtime-space [x, y, z] — reversed and Y-offset — which
+   * is what the road controller already produces.
+   */
+  applyEditorDataRouteEdit(routeId, pointArrays) {
+    const route = this.routes.get(routeId);
+    const source = route?.editorSource;
+    if (!source || !Array.isArray(pointArrays) || pointArrays.length < 2) {
+      return this.applyEditorRouteOverride(routeId, pointArrays, { endpointTolerance: Infinity });
+    }
+    let points = pointArrays.map((point) => vec(point[0], point[1], point[2]));
+    if (points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z))) return false;
+    // The anchoring maths reads only lanes/kind/speedLimit plus the polyline's
+    // own drop and length, so a shallow copy carrying the EDITED geometry
+    // reproduces the registration-time decision on the new shape.
+    const routeData = {
+      ...source.routeData,
+      points: points.map((point) => [point.x, point.y, point.z]),
+      length: this._polylineLength(points, false),
+    };
+    const endDrop = Math.abs(points[0].y - points[points.length - 1].y);
+    const steep = endDrop > routeData.length * 0.05;
+    const anchorSpan = steep ? 30 : Math.min(95, Math.max(30, routeData.length * 0.22));
+    const doubleAnchored = source.anchorsStart && source.anchorsEnd;
+    if (source.anchorsStart) {
+      const info = this._anchorEndpoint(points, routeData, source.startEdge, 'start', anchorSpan, doubleAnchored);
+      if (info) points = info.points;
+    }
+    if (source.anchorsEnd) {
+      const info = this._anchorEndpoint(points, routeData, source.endEdge, 'end', anchorSpan, doubleAnchored);
+      if (info) points = info.points;
+    }
+    return this.applyEditorRouteOverride(
+      routeId,
+      points.map((point) => [point.x, point.y, point.z]),
+      { endpointTolerance: Infinity },
+    );
+  }
+
+  /** Route ids the editor marked as deleted, from the published override meta. */
+  _readEditorRemovedRoutes() {
+    const removed = ROUTE_DATA.meta?.editorRoadOverrides?.removedRoutes;
+    return new Set(Array.isArray(removed) ? removed.filter((id) => typeof id === 'string' && id) : []);
+  }
+
+  /**
+   * A road the editor deleted. The registration survives (edges, junctions and
+   * service areas hold references to it and a dangling id crashes the network
+   * finalizer), but the route emits no geometry and leaves the spatial index,
+   * so it is invisible, undrivable and carries no traffic.
+   */
+  setEditorRouteRemoved(routeId, removed = true) {
+    const route = this.routes.get(routeId);
+    if (!route) return false;
+    if (Boolean(route.removed) === Boolean(removed)) return true;
+    route.removed = Boolean(removed);
+    if (route.removed) this._removedRouteIds.add(routeId);
+    else this._removedRouteIds.delete(routeId);
+    this._indexRouteSamples(route, !route.removed);
+    if (route.removed) {
+      this.clearEditorRouteGeometry(routeId);
+      this._eraseBakedRouteGeometry(routeId);
+    } else {
+      this._restoreBakedRouteGeometry(routeId);
+    }
+    return true;
+  }
+
+  /** Adds or removes one route's samples from the spatial index. */
+  _indexRouteSamples(route, present) {
+    for (const [key, entries] of this._grid) {
+      const filtered = entries.filter((entry) => entry.route !== route);
+      if (filtered.length) this._grid.set(key, filtered);
+      else this._grid.delete(key);
+    }
+    if (!present) return;
+    route.samples.forEach((sample, index) => {
+      const key = this._gridKey(sample.position.x, sample.position.z);
+      if (!this._grid.has(key)) this._grid.set(key, []);
+      this._grid.get(key).push({ route, index });
+    });
+  }
+
+  _applyEditorRouteRemovals() {
+    for (const routeId of this._removedRouteIds) {
+      const route = this.routes.get(routeId);
+      if (!route) continue;
+      route.removed = true;
+      this._indexRouteSamples(route, false);
+    }
+  }
+
+  _beginRouteEmission(routeId) {
+    this._routeEmission = { routeId, mode: 'track', buckets: new Map(), instances: new Map(), meshes: [] };
+  }
+
+  _endRouteEmission() {
+    const emission = this._routeEmission;
+    this._routeEmission = null;
+    if (!emission) return;
+    const buckets = [];
+    for (const entry of emission.buckets.values()) {
+      const end = entry.bucket.positions.length / 3;
+      if (end > entry.start) buckets.push({ key: entry.key, materialName: entry.materialName, start: entry.start, end });
+    }
+    const instances = [];
+    for (const entry of emission.instances.values()) {
+      const end = entry.records.length;
+      if (end > entry.start) instances.push({ key: entry.key, type: entry.type, start: entry.start, end });
+    }
+    if (buckets.length || instances.length || emission.meshes.length) {
+      this._routeEmissionRanges.set(emission.routeId, { buckets, instances, meshes: emission.meshes });
+    }
+  }
+
+  /**
+   * Editor live update: show one route's CURRENT curve as real world geometry.
+   *
+   * The baked asphalt is merged per chunk per material, so a moved route cannot
+   * simply be re-meshed. Instead the vertex range this route contributed to
+   * every merged mesh is collapsed in place (zero-area triangles, indices
+   * untouched — nothing the editor addresses by index moves) and the same
+   * generator is re-run in capture mode into a standalone group. That is what
+   * makes dragging a point change the road instead of only the orange overlay.
+   */
+  refreshEditorRouteGeometry(routeId) {
+    const route = this.routes.get(routeId);
+    if (!route || route.removed) return false;
+    this._eraseBakedRouteGeometry(routeId);
+    this.clearEditorRouteGeometry(routeId, { restoreBaked: false });
+    this._prepareRenderFrames(route);
+    const group = new THREE.Group();
+    group.name = `editor road preview ${routeId}`;
+    group.userData.editorRoadPreview = routeId;
+    const emission = { routeId, mode: 'capture', buckets: new Map(), instances: new Map(), meshes: [], group };
+    this._routeEmission = emission;
+    try {
+      this._buildRouteGeometry(route);
+      this._queueRouteDetails(route);
+    } finally {
+      this._routeEmission = null;
+    }
+    for (const [key, materials] of emission.buckets) {
+      for (const [materialName, bucket] of materials) {
+        if (!bucket.positions.length) continue;
+        group.add(this._mergedBucketMesh(key, materialName, bucket));
+      }
+    }
+    for (const [key, types] of emission.instances) {
+      for (const [type, records] of types) {
+        if (!records.length) continue;
+        group.add(this._instancedChunkMesh(key, type, records, { register: false }));
+      }
+    }
+    this.group.add(group);
+    this._editorRouteGeometry.set(routeId, group);
+    return true;
+  }
+
+  /** Drops the live preview group; by default the baked geometry comes back. */
+  clearEditorRouteGeometry(routeId, { restoreBaked = true } = {}) {
+    const group = this._editorRouteGeometry.get(routeId);
+    if (group) {
+      this._editorRouteGeometry.delete(routeId);
+      group.removeFromParent();
+      group.traverse((object) => {
+        object.geometry?.dispose?.();
+        if (object.isInstancedMesh) object.dispose?.();
+      });
+    }
+    if (restoreBaked) this._restoreBakedRouteGeometry(routeId);
+    return Boolean(group);
+  }
+
+  /** Collapses this route's share of every merged/instanced chunk mesh. */
+  _eraseBakedRouteGeometry(routeId) {
+    const ranges = this._routeEmissionRanges.get(routeId);
+    if (!ranges || ranges.erased) return false;
+    ranges.erased = true;
+    ranges.saved = { buckets: [], instances: [], meshes: [] };
+    for (const range of ranges.buckets) {
+      const mesh = this._bucketMeshes.get(`${range.key} ${range.materialName}`);
+      const position = mesh?.geometry?.getAttribute?.('position');
+      if (!position) continue;
+      const from = range.start * 3;
+      const to = Math.min(range.end, position.count) * 3;
+      if (to <= from) continue;
+      ranges.saved.buckets.push({ mesh, from, values: position.array.slice(from, to) });
+      // Collapse every vertex of the range onto its first one: the triangles
+      // stay in the index buffer but have zero area, so they never rasterise.
+      const [x, y, z] = [position.array[from], position.array[from + 1], position.array[from + 2]];
+      for (let offset = from; offset < to; offset += 3) {
+        position.array[offset] = x;
+        position.array[offset + 1] = y;
+        position.array[offset + 2] = z;
+      }
+      position.needsUpdate = true;
+    }
+    for (const range of ranges.instances) {
+      const mesh = this._instanceMeshes.get(`${range.key} ${range.type}`);
+      if (!mesh) continue;
+      const saved = [];
+      for (let index = range.start; index < Math.min(range.end, mesh.count); index += 1) {
+        const matrix = new THREE.Matrix4();
+        mesh.getMatrixAt(index, matrix);
+        saved.push({ index, matrix });
+        mesh.setMatrixAt(index, ZERO_SCALE_MATRIX);
+      }
+      if (saved.length) {
+        ranges.saved.instances.push({ mesh, saved });
+        mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    for (const mesh of ranges.meshes) {
+      ranges.saved.meshes.push({ mesh, visible: mesh.visible });
+      mesh.visible = false;
+    }
+    return true;
+  }
+
+  _restoreBakedRouteGeometry(routeId) {
+    const ranges = this._routeEmissionRanges.get(routeId);
+    if (!ranges?.erased) return false;
+    for (const { mesh, from, values } of ranges.saved.buckets) {
+      const position = mesh.geometry?.getAttribute?.('position');
+      if (!position) continue;
+      position.array.set(values, from);
+      position.needsUpdate = true;
+    }
+    for (const { mesh, saved } of ranges.saved.instances) {
+      for (const { index, matrix } of saved) mesh.setMatrixAt(index, matrix);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    for (const { mesh, visible } of ranges.saved.meshes) mesh.visible = visible;
+    ranges.erased = false;
+    ranges.saved = null;
+    return true;
+  }
+
   _applyEditorSyntheticRouteOverrides() {
     const overrides = ROUTE_DATA.meta?.editorRoadOverrides?.syntheticRoutes;
     if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return;
     for (const [routeId, entry] of Object.entries(overrides)) {
-      if (this._syntheticOverrideIsStale(routeId, entry?.points, entry?.base)) {
-        console.warn(`Shutoko map: stale synthetic route override skipped (no longer reaches its lot): ${routeId}`);
+      // A `base` stamp means the editor authored this override deliberately, on
+      // a connector it had in front of it. That edit is the user's data and is
+      // applied verbatim — including when the stamp no longer matches, which
+      // happens as soon as ANY edit to the host ramp re-generates the connector.
+      // Silently reverting it there is how a saved edit "came back" on the next
+      // load. Only unstamped (pre-stamp) files still face the geometric guard.
+      const stamped = Array.isArray(entry?.base) && entry.base.length >= 2;
+      if (!stamped && this._syntheticOverrideIsStale(routeId, entry?.points, null)) {
+        console.warn(`Shutoko map: unstamped synthetic route override skipped (no longer reaches its lot): ${routeId}`);
         continue;
+      }
+      if (stamped && !this._matchesGeneratedBase(this.routes.get(routeId), entry.base)) {
+        console.info(`Shutoko map: synthetic route override applied over regenerated geometry (edit it again to re-stamp): ${routeId}`);
       }
       // Endpoint moves are deliberate editor output here, so accept them.
       if (!this.applyEditorRouteOverride(routeId, entry?.points, { endpointTolerance: Infinity })) {
@@ -1920,6 +2216,9 @@ export class HighwayMap {
       const normal = horizontalNormal(tangent);
       const sample = { u, distance: u * route.length, point, position: point, tangent, normal };
       route.samples.push(sample);
+      // A route the editor deleted stays registered but out of the index, so
+      // re-preparing its samples must not put it back (see setEditorRouteRemoved).
+      if (route.removed) continue;
       const key = this._gridKey(point.x, point.z);
       if (!this._grid.has(key)) this._grid.set(key, []);
       this._grid.get(key).push({ route, index: route.samples.length - 1 });
@@ -5144,8 +5443,8 @@ export class HighwayMap {
     }
     if (typeof randomSource !== 'function') randomSource = Math.random;
     const allowed = allowedRoutes
-      ? allowedRoutes.map((id) => this._resolveRoute(id).route).filter((route) => route.traffic)
-      : [...this.routes.values()].filter((route) => route.traffic);
+      ? allowedRoutes.map((id) => this._resolveRoute(id).route).filter((route) => route.traffic && !route.removed)
+      : [...this.routes.values()].filter((route) => route.traffic && !route.removed);
     const totalLength = allowed.reduce((sum, route) => sum + route.length, 0);
     let pick = randomSource() * totalLength;
     let route = allowed[0];
@@ -5162,7 +5461,7 @@ export class HighwayMap {
   getTrafficLanes(position, radius) {
     const searchRadius = Number.isFinite(radius) ? radius : Infinity;
     const routeAllowed = (route) => {
-      if (!route.traffic) return false;
+      if (!route.traffic || route.removed) return false;
       if (!position || !Number.isFinite(searchRadius)) return true;
       return route.samples.some((sample) => xzDistanceSq(position, sample.point) <= (searchRadius + 180) ** 2);
     };
@@ -5551,10 +5850,20 @@ export class HighwayMap {
 
   _bucket(position, materialName) {
     const key = this._chunkKey(position.x, position.z);
-    if (!this._chunkBuckets.has(key)) this._chunkBuckets.set(key, new Map());
-    const buckets = this._chunkBuckets.get(key);
+    const emission = this._routeEmission;
+    // Capture mode redirects the very same generator into a private bucket set
+    // so one route can be re-emitted into a standalone group.
+    const store = emission?.mode === 'capture' ? emission.buckets : this._chunkBuckets;
+    if (!store.has(key)) store.set(key, new Map());
+    const buckets = store.get(key);
     if (!buckets.has(materialName)) buckets.set(materialName, { positions: [], indices: [], uvs: [] });
-    return buckets.get(materialName);
+    const bucket = buckets.get(materialName);
+    if (emission?.mode === 'track' && !emission.buckets.has(`${key} ${materialName}`)) {
+      // The world loop emits one route at a time, so everything appended to a
+      // bucket between begin/end belongs to this route: one contiguous range.
+      emission.buckets.set(`${key} ${materialName}`, { key, materialName, bucket, start: bucket.positions.length / 3 });
+    }
+    return bucket;
   }
 
   /** Push a quad a→b→c→d. Optional uv = [u0, v0, u1, v1]: a=(u0,v0), b=(u1,v0), c=(u1,v1), d=(u0,v1). */
@@ -5643,9 +5952,14 @@ export class HighwayMap {
 
   _instance(position, scale, quaternion = null, color = null, type = 'box:concrete') {
     const key = this._chunkKey(position.x, position.z);
-    if (!this._chunkInstances.has(key)) this._chunkInstances.set(key, new Map());
-    const types = this._chunkInstances.get(key);
+    const emission = this._routeEmission;
+    const store = emission?.mode === 'capture' ? emission.instances : this._chunkInstances;
+    if (!store.has(key)) store.set(key, new Map());
+    const types = store.get(key);
     if (!types.has(type)) types.set(type, []);
+    if (emission?.mode === 'track' && !emission.instances.has(`${key} ${type}`)) {
+      emission.instances.set(`${key} ${type}`, { key, type, records: types.get(type), start: types.get(type).length });
+    }
     const suppressed = this._suppressServiceAreaObjects || this._tatsumiClearingBlocks(position, scale, quaternion);
     types.get(type).push({
       position: position.clone(),
@@ -5659,7 +5973,9 @@ export class HighwayMap {
     });
     const materialName = type.slice(type.indexOf(':') + 1);
     const paintLight = CAR_PAINT_LIGHT_MATERIALS[materialName];
-    if (paintLight && !suppressed) {
+    // A capture is a throwaway editor preview: it must not append to the
+    // persistent car-paint light index (re-emitting a route would grow it).
+    if (paintLight && !suppressed && emission?.mode !== 'capture') {
       if (!this._carPaintLightChunks.has(key)) this._carPaintLightChunks.set(key, []);
       this._carPaintLightChunks.get(key).push({
         position: position.clone(),
@@ -5777,6 +6093,12 @@ export class HighwayMap {
 
   _addChunkMesh(mesh, positionForChunk = null, alwaysVisible = false) {
     const p = positionForChunk || mesh.position;
+    const emission = this._routeEmission;
+    if (emission?.mode === 'capture') {
+      emission.group.add(mesh);
+      return mesh;
+    }
+    if (emission?.mode === 'track') emission.meshes.push(mesh);
     const suppressed = this._suppressServiceAreaObjects
       || (!mesh.userData?.tatsumiClearingSurface && this._insideTatsumiClearing(p));
     if (suppressed) {
@@ -5800,29 +6122,72 @@ export class HighwayMap {
     return mesh;
   }
 
+  /** One merged chunk mesh from a filled bucket. Shared with editor previews. */
+  _mergedBucketMesh(key, materialName, bucket) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
+    if (bucket.uvs.length) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
+    geometry.setIndex(bucket.indices.length > 65535 * 3 || bucket.positions.length / 3 > 65535
+      ? new THREE.Uint32BufferAttribute(bucket.indices, 1)
+      : new THREE.Uint16BufferAttribute(bucket.indices, 1));
+    // Replace the per-quad 0..1 UVs (which stretch a painted texture over
+    // each segment) with world-anchored ones. Flat surfaces — asphalt and
+    // the lane lines on it — get the planar XZ projection; upright ones —
+    // barriers, rails, walls — get the wall projection that stands the
+    // image full height and tiles it along the run.
+    if (PLANAR_UV_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWorldSurfaceUVs(geometry);
+    else if (WALL_UV_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWallSurfaceUVs(geometry);
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geometry, this.materials[materialName] || this.materials.concrete);
+    mesh.name = `chunk ${key} ${materialName}`;
+    return mesh;
+  }
+
+  /** One instanced chunk mesh from a record list. Shared with editor previews. */
+  _instancedChunkMesh(key, type, records, { register = true } = {}) {
+    const identityQuat = new THREE.Quaternion();
+    const [geoName, matName] = type.split(':');
+    const material = this.materials[matName] || this.materials.concrete;
+    const hasColors = records.some((record) => record.color !== null && record.color !== undefined);
+    let instanceMaterial = material;
+    if (hasColors) {
+      instanceMaterial = material.clone();
+      instanceMaterial.color.set(0xffffff);
+      this._ownedTextures.add({ dispose: () => instanceMaterial.dispose() });
+    }
+    const mesh = new THREE.InstancedMesh(this._unitGeometries[geoName] || this._unitGeometries.box, instanceMaterial, records.length);
+    mesh.name = `chunk ${key} ${type}`;
+    const suppressedIndices = [];
+    records.forEach((record, index) => {
+      TMP_MAT.compose(record.position, record.quaternion || identityQuat, record.scale);
+      mesh.setMatrixAt(index, TMP_MAT);
+      if (hasColors) mesh.setColorAt(index, new THREE.Color(record.color ?? material.color));
+      if (record.suppressed) suppressedIndices.push(index);
+    });
+    if (suppressedIndices.length) mesh.userData.tatsumiClearingSuppressedIndices = suppressedIndices;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.frustumCulled = true;
+    mesh.computeBoundingSphere?.();
+    // Editor previews stay out of the animation/quality registries: those are
+    // world-lifetime lists and a preview mesh is disposed on the next edit.
+    if (register) {
+      if (matName === 'redBlink') this.blinkers.push(mesh);
+      if (this._effectTypes?.has(matName)) this._effectMeshes.push(mesh);
+    }
+    if (this._effectTypes?.has(matName)) mesh.visible = this._quality !== 'low';
+    return mesh;
+  }
+
   _finalizeChunks() {
     // merged buffer geometry per chunk per material
     for (const [key, buckets] of this._chunkBuckets) {
       const chunk = this._chunkFor(key);
       for (const [materialName, bucket] of buckets) {
         if (!bucket.positions.length) continue;
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
-        if (bucket.uvs.length) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
-        geometry.setIndex(bucket.indices.length > 65535 * 3 || bucket.positions.length / 3 > 65535
-          ? new THREE.Uint32BufferAttribute(bucket.indices, 1)
-          : new THREE.Uint16BufferAttribute(bucket.indices, 1));
-        // Replace the per-quad 0..1 UVs (which stretch a painted texture over
-        // each segment) with world-anchored ones. Flat surfaces — asphalt and
-        // the lane lines on it — get the planar XZ projection; upright ones —
-        // barriers, rails, walls — get the wall projection that stands the
-        // image full height and tiles it along the run.
-        if (PLANAR_UV_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWorldSurfaceUVs(geometry);
-        else if (WALL_UV_SURFACE_MATERIAL_NAMES.includes(materialName)) applyWallSurfaceUVs(geometry);
-        geometry.computeVertexNormals();
-        geometry.computeBoundingSphere();
-        const mesh = new THREE.Mesh(geometry, this.materials[materialName] || this.materials.concrete);
-        mesh.name = `chunk ${key} ${materialName}`;
+        const mesh = this._mergedBucketMesh(key, materialName, bucket);
+        this._bucketMeshes.set(`${key} ${materialName}`, mesh);
         chunk.group.add(mesh);
       }
     }
@@ -5837,39 +6202,12 @@ export class HighwayMap {
       box: unitBox, plane: unitPlane, pool: unitPool,
       lamppost: this._lampGeometry(), jetfan: this._jetFanGeometry(),
     };
-    const identityQuat = new THREE.Quaternion();
     for (const [key, types] of this._chunkInstances) {
       const chunk = this._chunkFor(key);
       for (const [type, records] of types) {
         if (!records.length) continue;
-        const [geoName, matName] = type.split(':');
-        const material = this.materials[matName] || this.materials.concrete;
-        const hasColors = records.some((record) => record.color !== null && record.color !== undefined);
-        let instanceMaterial = material;
-        if (hasColors) {
-          instanceMaterial = material.clone();
-          instanceMaterial.color.set(0xffffff);
-          this._ownedTextures.add({ dispose: () => instanceMaterial.dispose() });
-        }
-        const mesh = new THREE.InstancedMesh(this._unitGeometries[geoName] || unitBox, instanceMaterial, records.length);
-        mesh.name = `chunk ${key} ${type}`;
-        const suppressedIndices = [];
-        records.forEach((record, index) => {
-          TMP_MAT.compose(record.position, record.quaternion || identityQuat, record.scale);
-          mesh.setMatrixAt(index, TMP_MAT);
-          if (hasColors) mesh.setColorAt(index, new THREE.Color(record.color ?? material.color));
-          if (record.suppressed) suppressedIndices.push(index);
-        });
-        if (suppressedIndices.length) mesh.userData.tatsumiClearingSuppressedIndices = suppressedIndices;
-        mesh.instanceMatrix.needsUpdate = true;
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-        mesh.frustumCulled = true;
-        mesh.computeBoundingSphere?.();
-        if (matName === 'redBlink') this.blinkers.push(mesh);
-        if (this._effectTypes?.has(matName)) {
-          this._effectMeshes.push(mesh);
-          mesh.visible = this._quality !== 'low';
-        }
+        const mesh = this._instancedChunkMesh(key, type, records);
+        this._instanceMeshes.set(`${key} ${type}`, mesh);
         chunk.group.add(mesh);
       }
     }
@@ -5885,8 +6223,18 @@ export class HighwayMap {
     this._prepareJunctionMouths();
     for (const route of this.routes.values()) {
       this._prepareRenderFrames(route);
-      this._buildRouteGeometry(route);
-      this._queueRouteDetails(route);
+      // A route the editor removed keeps its registration (edges, junctions and
+      // service areas still reference it) but contributes no geometry, and
+      // _applyEditorRouteRemovals already took it out of the spatial index, so
+      // nothing drives on or collides with the ghost.
+      if (route.removed) continue;
+      this._beginRouteEmission(route.id);
+      try {
+        this._buildRouteGeometry(route);
+        this._queueRouteDetails(route);
+      } finally {
+        this._endRouteEmission();
+      }
     }
     this._dressGores();
     this._buildBridge();
@@ -10290,6 +10638,7 @@ export class HighwayMap {
     let minZ = Infinity;
     let maxZ = -Infinity;
     for (const route of this.routes.values()) {
+      if (route.removed) continue;
       const count = Math.max(12, Math.ceil(route.length / (route.kind === 'service' || route.kind === 'ramp' ? 40 : 110)));
       const points = [];
       for (let i = 0; i <= count; i += 1) {

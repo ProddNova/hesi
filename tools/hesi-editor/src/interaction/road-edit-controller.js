@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { deletePoint, findRoute, insertPointAfter, movePoint, nearestSegment } from './road-edit-ops.js';
+import { loadRouteNetworkData } from '../world/map-module.js';
 
-const ROUTES_MODULE_URL = '/data/routes-smoothed.js';
 const ROUTE_EDIT_TYPES = new Set(['road-route', 'service-route']);
 const LINE_COLOR = 0xffb020;
 const HANDLE_COLOR = 0xffb020;
@@ -56,6 +56,14 @@ export class RoadEditController {
     // does not regenerate the baked asphalt, so the overlay has to stay until
     // the world itself is rebuilt.
     this.editedRoutes = new Set();
+    // Routes whose baked chunk asphalt has been swapped for live geometry
+    // regenerated from the edited curve, and the pending removals for the ones
+    // the user deleted outright.
+    this.liveGeometryRoutes = new Set();
+    this.removedRoutes = new Map();
+    this._rebuildTimer = null;
+    this._pendingRebuildRoute = null;
+    this._rebuildCost = new Map();
     this.overlays = new Map();
     this.raycaster = new THREE.Raycaster();
     this.raycaster.params.Line.threshold = 6;
@@ -278,7 +286,7 @@ export class RoadEditController {
       redo: () => { movePoint(route, index, after); this._afterRouteMutation(route, synthetic); },
       undo: () => { movePoint(route, index, before); this._afterRouteMutation(route, synthetic); },
     });
-    this.onStatus('Road point moved');
+    this.onStatus('Road point moved · rebuilding the road geometry');
     return true;
   }
 
@@ -319,14 +327,16 @@ export class RoadEditController {
   get dirtyRouteIds() { return [...this.dirty]; }
 
   dirtyRouteUpdates() {
-    return [...this.dirtyRoutes.values()].map(({ route, synthetic, base }) => ({
+    return [...this.dirtyRoutes.values()].map(({ route, synthetic, base, removed }) => ({
       id: route.id,
       points: structuredClone(route.points),
       // Stamp synthetic saves with the generated polyline this edit was drawn
       // on top of. Without it HighwayMap cannot tell a deliberate reshape of a
-      // PA connector from an override left over from an older lot fit, and
-      // discards the edit on the next load (see _syntheticOverrideIsStale).
+      // PA connector from an override left over from an older lot fit.
       ...(synthetic ? { synthetic: true, ...(base ? { base: structuredClone(base) } : {}) } : {}),
+      // Deleting a road is recorded beside its centreline, never instead of it,
+      // so restoring the road brings the edited shape back with it.
+      ...(removed === null || removed === undefined ? {} : { removed: Boolean(removed) }),
     }));
   }
 
@@ -373,6 +383,8 @@ export class RoadEditController {
       activeIndex: index,
       activePoint: index != null ? [...points[index]] : null,
       dirtyCount: this.dirty.size,
+      removed: this.isActiveRouteRemoved(),
+      liveGeometry: this.liveGeometryRoutes.has(this.route.id),
     });
   }
 
@@ -445,18 +457,26 @@ export class RoadEditController {
     }
   }
 
-  _markDirty(route, synthetic = this.synthetic) {
+  _markDirty(route, synthetic = this.synthetic, { removed = null } = {}) {
     this.dirty.add(route.id);
     this.editedRoutes.add(route.id);
     // The stamp is looked up per route id rather than read off the active
     // route, so an undo replayed after selecting a different road still
     // records the base its own edit was authored against.
-    this.dirtyRoutes.set(route.id, { route, synthetic, base: synthetic ? this.syntheticBases.get(route.id) || null : null });
+    const previous = this.dirtyRoutes.get(route.id);
+    this.dirtyRoutes.set(route.id, {
+      route,
+      synthetic,
+      base: synthetic ? this.syntheticBases.get(route.id) || null : null,
+      removed: removed ?? previous?.removed ?? null,
+    });
     this.onDirty(route.id, true);
   }
 
   _loadRouteData() {
-    this._routeDataPromise ??= import(ROUTES_MODULE_URL).then((module) => module.default);
+    // The very document HighwayMap built from, draft included — not a second
+    // copy of the module (see world/map-module.js).
+    this._routeDataPromise ??= loadRouteNetworkData();
     return this._routeDataPromise;
   }
 
@@ -485,7 +505,7 @@ export class RoadEditController {
     const route = this.route;
     if (!route || !Number.isInteger(index)) return false;
     if (route.points.length <= 2) {
-      this.onStatus('A road needs at least 2 points');
+      this.onStatus('A road needs at least 2 points · use Delete road in the Road panel to take the whole road out');
       return false;
     }
     const snapshot = [...route.points[index]];
@@ -526,9 +546,99 @@ export class RoadEditController {
   }
 
   _applyRuntimePreview({ includeDrag = false } = {}) {
-    if (!this.runtimeRoute || !this.adapter?.map?.applyEditorRouteOverride) return false;
+    const map = this.adapter?.map;
+    if (!this.runtimeRoute || !map?.applyEditorRouteOverride) return false;
     const points = this._runtimePointArrays({ includeDrag });
-    return this.adapter.map.applyEditorRouteOverride(this.route.id, points, { endpointTolerance: Infinity });
+    // Data routes get the same endpoint anchoring a world build applies, so the
+    // preview and the next build agree. Skipping it is what made a saved ramp
+    // edit look like it had never been applied: the build re-blended the ends.
+    if (!this.synthetic && map.applyEditorDataRouteEdit) {
+      return map.applyEditorDataRouteEdit(this.route.id, points);
+    }
+    return map.applyEditorRouteOverride(this.route.id, points, { endpointTolerance: Infinity });
+  }
+
+  /**
+   * Replaces the route's baked asphalt with geometry regenerated from the curve
+   * it now has. Debounced: a rebuild costs tens of milliseconds on a ramp but
+   * seconds on the 26 km Bayshore carriageways, so the delay adapts to what the
+   * last rebuild of this route actually cost.
+   */
+  _scheduleGeometryRebuild(routeId) {
+    if (!routeId || !this.adapter?.map?.refreshEditorRouteGeometry) return;
+    this._pendingRebuildRoute = routeId;
+    clearTimeout(this._rebuildTimer);
+    const delay = (this._rebuildCost.get(routeId) || 0) > 900 ? 1400 : 220;
+    this._rebuildTimer = setTimeout(() => this._rebuildGeometryNow(routeId), delay);
+  }
+
+  _rebuildGeometryNow(routeId) {
+    clearTimeout(this._rebuildTimer);
+    this._rebuildTimer = null;
+    this._pendingRebuildRoute = null;
+    const map = this.adapter?.map;
+    if (this._disposed || !map?.refreshEditorRouteGeometry) return false;
+    const started = performance.now();
+    const rebuilt = map.refreshEditorRouteGeometry(routeId);
+    const cost = performance.now() - started;
+    this._rebuildCost.set(routeId, cost);
+    if (!rebuilt) return false;
+    this.liveGeometryRoutes.add(routeId);
+    // The live geometry IS the road now; a retained orange draft would only
+    // z-fight with it.
+    this._disposeOverlay(routeId);
+    if (routeId === this.route?.id) this.onStatus(`Road geometry rebuilt · ${Math.round(cost)} ms · Save Draft to keep it`);
+    this._emitState();
+    return true;
+  }
+
+  /** Flushes a pending rebuild (Save Draft, Apply to Game, deactivation). */
+  flushGeometryRebuild() {
+    if (this._pendingRebuildRoute) this._rebuildGeometryNow(this._pendingRebuildRoute);
+  }
+
+  /**
+   * Deletes the whole road. A centreline always keeps at least two points, so
+   * this is the only way to take a road out — and it is reversible from the
+   * same button until the draft is saved and beyond (the removal is recorded as
+   * its own override entry, and the route's edited shape is kept).
+   */
+  setActiveRouteRemoved(removed = true) {
+    const route = this.route;
+    const map = this.adapter?.map;
+    if (!route || !map?.setEditorRouteRemoved) return false;
+    const routeId = route.id;
+    const synthetic = this.synthetic;
+    // Restoring has to put back the road as the user last shaped it, not the
+    // baked alignment it had before any editing.
+    const hadLiveGeometry = this.liveGeometryRoutes.has(routeId);
+    const apply = (next) => {
+      map.setEditorRouteRemoved(routeId, next);
+      if (next) {
+        this.liveGeometryRoutes.delete(routeId);
+        this._disposeOverlay(routeId);
+      } else if (hadLiveGeometry) {
+        this._rebuildGeometryNow(routeId);
+      }
+      this.removedRoutes.set(routeId, next);
+      this._markDirty(route, synthetic, { removed: next });
+      if (routeId === this.route?.id) {
+        this._refreshHelpers();
+        this._emitState();
+      }
+    };
+    this.history.execute({
+      label: `${removed ? 'Delete' : 'Restore'} road · ${route.name}`,
+      redo: () => apply(Boolean(removed)),
+      undo: () => apply(!removed),
+    });
+    this.onStatus(removed ? 'Road deleted · Save Draft to keep it' : 'Road restored');
+    return true;
+  }
+
+  isActiveRouteRemoved() {
+    const routeId = this.route?.id;
+    return Boolean(routeId && (this.removedRoutes.get(routeId) ?? this.adapter?.map?.routes?.get(routeId)?.removed));
   }
 
   _refreshDraggedLinePoint(index, handlePosition) {
@@ -565,6 +675,9 @@ export class RoadEditController {
       this._applyRuntimePreview();
       this._refreshHelpers();
     }
+    // The whole point of the fix: a committed point move regenerates the
+    // route's real asphalt, markings and barriers in place. No save, no reload.
+    if (route && !this.removedRoutes.get(route.id)) this._scheduleGeometryRebuild(route.id);
     this._emitState();
   }
 
@@ -619,9 +732,14 @@ export class RoadEditController {
   _deactivate() {
     this._activateToken = null;
     this.finishActiveDrag({ commit: false });
+    this.flushGeometryRebuild();
     clearInterval(this._refreshTimer);
     this._refreshTimer = null;
-    const editedRouteId = this.route && this.editedRoutes.has(this.route.id) ? this.route.id : null;
+    // Once the route's own geometry has been rebuilt there is nothing stale to
+    // paper over, so no draft overlay is retained.
+    const editedRouteId = this.route && this.editedRoutes.has(this.route.id) && !this.liveGeometryRoutes.has(this.route.id)
+      ? this.route.id
+      : null;
     this.activeEntity = null;
     this.route = null;
     this.runtimeRoute = null;
@@ -890,6 +1008,9 @@ export class RoadEditController {
 
   dispose() {
     if (this._disposed) return;
+    clearTimeout(this._rebuildTimer);
+    this._rebuildTimer = null;
+    this._pendingRebuildRoute = null;
     this._disposed = true;
     this._deactivate();
     for (const routeId of [...this.overlays.keys()]) this._disposeOverlay(routeId);

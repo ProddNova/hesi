@@ -5,8 +5,9 @@
  * Publish is a separate server action that validates and merges that source
  * into data/routes-smoothed.json + .js, which js/map.js and the game consume.
  */
+import { loadRouteNetworkData } from '../world/map-module.js';
+
 const ROUTES_ENDPOINT = '/__hesi_editor_routes';
-const ROUTES_MODULE_URL = '/data/routes-smoothed.js';
 
 export function createRoutePersistence({ onStatus = () => {} } = {}) {
   const responseJson = async (response) => {
@@ -27,14 +28,16 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
      *   channel HighwayMap already replays during construction.
      * - Draft entries whose route no longer exists are skipped with a status
      *   warning instead of failing the whole editor load.
+     *
+     * The document comes from js/map.js itself (see world/map-module.js).
+     * Importing '/data/routes-smoothed.js' directly returns a SECOND module
+     * record — mutating that one left HighwayMap building from the published
+     * data, which is why a saved road draft used to survive neither Save Draft
+     * nor a reload.
      */
     async loadDraftIntoModule() {
       const payload = await responseJson(await fetch(ROUTES_ENDPOINT, { cache: 'no-store' }));
-      const module = await import(ROUTES_MODULE_URL);
-      const production = module.default;
-      if (!production || typeof production !== 'object' || !Array.isArray(production.routes)) {
-        throw new Error('Route data module did not export a document with a routes array');
-      }
+      const production = await loadRouteNetworkData();
       const byId = new Map(production.routes.map((route) => [route.id, route]));
       const samePoints = (left, right) => JSON.stringify(left) === JSON.stringify(right);
       const record = (holder, key) => holder[key] = (holder[key] && typeof holder[key] === 'object' && !Array.isArray(holder[key])) ? holder[key] : {};
@@ -62,13 +65,21 @@ export function createRoutePersistence({ onStatus = () => {} } = {}) {
           };
         }
       }
+      // Deleted roads travel the same channel: HighwayMap reads them straight
+      // off the module meta, so the editor's world builds without them exactly
+      // as the game will once the draft is applied.
+      const savedRemovedRoutes = Array.isArray(payload.document?.removedRoutes) ? payload.document.removedRoutes : [];
+      const overrideMeta = record(record(production, 'meta'), 'editorRoadOverrides');
+      const previousRemoved = Array.isArray(overrideMeta.removedRoutes) ? overrideMeta.removedRoutes : [];
+      if (previousRemoved.join('|') !== savedRemovedRoutes.join('|')) pending = true;
+      overrideMeta.removedRoutes = [...savedRemovedRoutes];
       const ids = [...Object.keys(savedRoutes).filter((id) => !skipped.includes(id)), ...Object.keys(savedSyntheticRoutes)].sort();
       if (skipped.length) {
         onStatus(`Skipped ${skipped.length} saved road draft${skipped.length === 1 ? '' : 's'} no longer in production data · ${skipped.join(', ')}`);
       } else if (ids.length) {
         onStatus(`Editor map includes ${ids.length} saved road route draft${ids.length === 1 ? '' : 's'}${pending ? ' · playable game not updated yet' : ''}`);
       }
-      return { ...payload, routes: ids, pending, skipped };
+      return { ...payload, routes: ids, removedRoutes: savedRemovedRoutes, pending, skipped };
     },
 
     async save(updates) {

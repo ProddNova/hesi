@@ -446,6 +446,8 @@ input, select { accent-color: var(--accent); }
 .road-coord input:focus { border-color: var(--accent); outline: none; }
 .road-point-coords .tool-button, .road-point-actions .tool-button { min-height: 25px; padding: 2px 9px; font-size: 11px; }
 .road-point-actions { display: flex; gap: 5px; }
+.road-actions { display: flex; gap: 5px; }
+.road-actions .tool-button { min-height: 25px; padding: 2px 9px; font-size: 11px; }
 .road-hint-line { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .road-hints { margin: 0; padding-left: 16px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
 .road-hints li + li { margin-top: 2px; }

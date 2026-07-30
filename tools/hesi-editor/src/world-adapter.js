@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { discoverHesiEntities } from './world/entity-discovery.js';
+import { loadMapModule } from './world/map-module.js';
 import { objectRenderMetadata, sourceTransform } from './world/world-metadata.js';
 import { stableIndex } from './world/stable-id.js';
 
@@ -422,7 +423,7 @@ function localToGps(origin, x, z) {
 
 async function makeFullWorld(onProgress) {
   onProgress('Importing the production HESI map generator');
-  const { HighwayMap } = await import('/js/map.js?v=20260722b');
+  const { HighwayMap } = await loadMapModule();
   onProgress('Generating real routes, structures, terrain, and props');
   await new Promise((resolve) => requestAnimationFrame(resolve));
   const map = new HighwayMap({ quality: 'low', applyFog: false });
