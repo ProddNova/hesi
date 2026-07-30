@@ -4,6 +4,15 @@
     "name": "HESI Main World"
   },
   "entityOverrides": {
+    "generated-prop-batch:6-n7-concrete-chunk-6-7-concrete-34": {
+      "visible": false
+    },
+    "generated-prop-batch:6-n7-exitgreen-chunk-6-7-exitgreen-35": {
+      "visible": false
+    },
+    "generated-prop-batch:6-n7-matrix-chunk-6-7-matrix-36": {
+      "visible": false
+    },
     "generated-prop-batch:6-n7-unknown-garage-transition-marker-10": {
       "transform": {
         "position": [
