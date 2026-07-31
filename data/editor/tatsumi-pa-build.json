@@ -1,7 +1,7 @@
 {
   "version": 1,
   "scene": "tatsumi_pa",
-  "generatedAt": "2026-07-26T23:30:57.786Z",
+  "generatedAt": "2026-07-31T20:09:32.632Z",
   "project": {
     "draftSignature": "fnv1a32:306beaea",
     "name": "HESI Tatsumi PA",
@@ -120,7 +120,7 @@
       "position": [
         0,
         1.65,
-        14.5
+        27.5
       ],
       "quaternion": [
         0,

@@ -24,7 +24,7 @@ const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 // walkable pocket behind the gate, not the whole deck. Grown from 46x30 once
 // the lot got its real dressing: the service building and its arched canopy
 // alone are ~30 m across, and the comb needs depth to lean into.
-export const PA_LOT = Object.freeze({ width: 64, depth: 44 });
+export const PA_LOT = Object.freeze({ width: 80, depth: 56 });
 
 export class TatsumiPaSystem {
   constructor(scene, camera, canvas, callbacks = {}) {
@@ -175,7 +175,10 @@ export class TatsumiPaSystem {
     // child, so saved childIndex operations keep resolving (cf. GarageSystem).
     this.carDisplay = new THREE.Group();
     this.carDisplay.name = 'Parked car';
-    this.carDisplay.position.set(0, 0.05, -3);
+    // Parked in the kerbside bay, clear of the canopy's leading edge: the
+    // forecourt in front of the building is 16 m deep at the real proportions
+    // (see js/tatsumi-pa-lot.js), so the car cannot sit under it.
+    this.carDisplay.position.set(0, 0.05, 2);
     this.carDisplay.rotation.y = -Math.PI / 2;
     this.root.add(this.carDisplay);
 

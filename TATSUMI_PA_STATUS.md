@@ -255,16 +255,35 @@ scene and has been reverted — `js/map.js` carries no reference to this module.
 
 ### Layout (scene frame: X across, Z depth, +Z is the gate)
 
-- **Back wall** — the service building (30 × 6 × 3.4), its backlit green
-  glass-block wall with dark mullions, the toilets with トイレ/TOILET, and the
-  6-machine vending row under a flat canopy on steel posts.
-- **Over the forecourt** — the arched canopy: 7 white steel ribs × 8 segments
-  with green glazing between them, longitudinal purlins, a fascia beam, three
-  columns on the parking side and the far springing landing on the building
-  roof. Built with an explicit basis (local X across the lot, local Z along the
-  arc), which a yaw quaternion cannot give.
-- **Forecourt edge** — kerb + pipe railing, split around the walkway, with a
-  zebra from the parking to the doors.
+- **Back wall** — the service building (30 × 6 × 3.4) with a tiled dado; the
+  backlit glass-block wall is a canvas texture of individual pressed-glass
+  blocks in a steel surround, not a green panel with drawn-on mullions; the
+  toilets with トイレ/TOILET; and a 7-machine vending bank whose fronts are
+  textured with product rows and price strips, under a flat canopy with a white
+  soffit and a lit fascia, plus the tall lit pylon at the corner.
+- **Over the forecourt** — THE CANOPY, which is what the place is recognised
+  by, at real proportions: 26 m along the frontage, 16 m of forecourt covered,
+  crown ~10.5 m over a 5 m eave. It is an ARCH in section (a dome flattens it
+  into a disc — that reads worse than the plain vault it replaced), with the
+  arch amplitude TAPERED towards both ends so they sweep down to the eave line
+  instead of being a cylinder cut off square, plus a rake towards the building
+  and a sweep along the frontage so the rim is not planar. Glazing is one
+  parametric surface over the (u, s) grid, vertex-coloured by how high the arch
+  stands — bright across the crown, deep green at the eaves. On it: 9 ribs
+  across, 6 purlins along, one alternating brace per bay (which is what gives
+  the reference lozenges without a scribble of full diagonals), a bold white rim
+  running both eaves and closing round the swept ends, two stayed columns in
+  front of the building, and the flying strut with its knuckle off the
+  cantilevered end.
+
+  That 16 m depth is why `PA_LOT` went 64 × 44 → 80 × 56 and why the parked car
+  moved to z = +2: squeezed into the old 9 m forecourt this arch reads as a lid,
+  and the car sat under it.
+
+- **Forecourt edge** — the kerb BOWS out into the parking and turns back at both
+  ends (the reference kerb is a curve, and the lot is laid out around it), with
+  the pipe railing following it, a break for the walkway and a zebra to the
+  doors. The 二輪車 board is the white square with the motorcycle pictogram.
 - **Parking** — parallel bays along the kerb (the middle one is the stall
   `TatsumiPaSystem` parks YOU in, at z = −3); the 45° large-vehicle comb with
   大型 painted in every bay and two box trucks on one side; the 小型 row with
@@ -273,8 +292,8 @@ scene and has been reverted — `js/map.js` carries no reference to this module.
   `exitPortal` at refresh time so it follows whatever the saved build pinned.
 - **Lighting** — the saved build hides all four original sodium masts, so the
   lot brings its own: four cool-white masts with PointLights, a green wash
-  under the canopy, a warm one on the vending row. Every one is tagged
-  `userData.gameSceneLight`.
+  under the shell, a warm one on the vending row. The masts are twin-headed
+  like the reference. Every light is tagged `userData.gameSceneLight`.
 
 `PA_LOT` grew 46 × 30 → 64 × 44: the building and its canopy alone are ~30 m
 across and the comb needs depth to lean into. The deck plane and the perimeter

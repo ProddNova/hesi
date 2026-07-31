@@ -114,12 +114,12 @@ const shoot = async (name) => {
 };
 const want = (name) => !ONLY || ONLY === name;
 
-if (want('pa-spawn')) { await place(0, 1.2, 0, -0.05); await shoot('pa-spawn'); }
-if (want('pa-building')) { await place(2, -1, 0.15, 0.12); await shoot('pa-building'); }
-if (want('pa-comb')) { await place(-14, 6, -0.9, 0.02); await shoot('pa-comb'); }
-if (want('pa-small')) { await place(18, 4, 1.9, 0.0); await shoot('pa-small'); }
-if (want('pa-gate')) { await place(0, 4, Math.PI, 0.05); await shoot('pa-gate'); }
-if (want('pa-plan')) { await overhead(46); await shoot('pa-plan'); }
+if (want('pa-spawn')) { await place(0, 6.2, 0, -0.02); await shoot('pa-spawn'); }
+if (want('pa-building')) { await place(2, -1, 0.12, 0.16); await shoot('pa-building'); }
+if (want('pa-comb')) { await place(-20, 10, -0.75, 0.05); await shoot('pa-comb'); }
+if (want('pa-small')) { await place(24, 6, 1.9, 0.0); await shoot('pa-small'); }
+if (want('pa-gate')) { await place(0, 8, Math.PI, 0.05); await shoot('pa-gate'); }
+if (want('pa-plan')) { await overhead(58); await shoot('pa-plan'); }
 
 await browser.close();
 server.close();
