@@ -1,5 +1,5 @@
-import { PSX_CAR_MODELS } from './psx-car-pack.js?v=aa56cc4f53cb';
-import { normalizeLocalLight } from './lighting-config.js?v=aa56cc4f53cb';
+import { PSX_CAR_MODELS } from './psx-car-pack.js?v=48d2ded68c0c';
+import { normalizeLocalLight } from './lighting-config.js?v=48d2ded68c0c';
 
 /**
  * Shared catalogue for every vehicle shape the Modeler can replace.

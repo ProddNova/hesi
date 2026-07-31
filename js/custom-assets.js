@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=aa56cc4f53cb';
-import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=aa56cc4f53cb';
+import { BUILDING_ROOF_SLOT, BUILDING_TYPES } from './building-types.js?v=48d2ded68c0c';
+import { BARRIER_MATERIALS } from './road-barrier-styles.js?v=48d2ded68c0c';
 import {
   CAR_HITBOX_SETTING_FIELDS,
   CAR_HEADLIGHT_FIELDS,
@@ -9,9 +9,9 @@ import {
   CAR_REAR_LIGHT_FIELDS,
   TRAFFIC_CAR_SETTING_FIELDS,
   isCarModelTarget,
-} from './car-models.js?v=aa56cc4f53cb';
-import { CAMERA_TUNING_FIELDS, PICTURE_FIELDS } from './playground-config.js?v=aa56cc4f53cb';
-import { PS2_DITHER_PATTERNS, PS2_FILTER_FIELDS } from './ps2-filter.js?v=aa56cc4f53cb';
+} from './car-models.js?v=48d2ded68c0c';
+import { CAMERA_TUNING_FIELDS, PICTURE_FIELDS } from './playground-config.js?v=48d2ded68c0c';
+import { PS2_DITHER_PATTERNS, PS2_FILTER_FIELDS } from './ps2-filter.js?v=48d2ded68c0c';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //

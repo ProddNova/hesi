@@ -3,12 +3,12 @@ import * as THREE from 'three';
 // as data/routes.js but with the extractor's chord-polygon noise removed in
 // XZ (raw OSM data stays in data/routes.js — regenerate with the tool after
 // any extractor run).
-import ROUTE_DATA from '../data/routes-smoothed.js?v=aa56cc4f53cb';
+import ROUTE_DATA from '../data/routes-smoothed.js?v=48d2ded68c0c';
 // Per-route / per-side / per-chainage lateral barrier styles, authored in the
 // world editor's Barriers app (see js/road-barrier-styles.js for the catalogue
 // and the addressing rules). Routes absent from this document render the
 // shipped parapet exactly as before.
-import ROAD_BARRIER_DATA from '../data/road-barriers.js?v=aa56cc4f53cb';
+import ROAD_BARRIER_DATA from '../data/road-barriers.js?v=48d2ded68c0c';
 import {
   BARRIER_MATERIALS,
   BARRIER_MATERIAL_NAMES,
@@ -17,16 +17,12 @@ import {
   barrierStyle,
   canonicalizeBarrierDocument,
   flattenBarrierSpans,
-} from './road-barrier-styles.js?v=aa56cc4f53cb';
-import { BUILDING_TYPES } from './building-types.js?v=aa56cc4f53cb';
-import { buildProgressiveTransitions, isAppendedPairMerge } from './progressive-merge.js?v=aa56cc4f53cb';
-import { progressiveMergePrototypesForFlow } from './progressive-merge-prototypes.js?v=aa56cc4f53cb';
+} from './road-barrier-styles.js?v=48d2ded68c0c';
+import { BUILDING_TYPES } from './building-types.js?v=48d2ded68c0c';
+import { buildProgressiveTransitions, isAppendedPairMerge } from './progressive-merge.js?v=48d2ded68c0c';
+import { progressiveMergePrototypesForFlow } from './progressive-merge-prototypes.js?v=48d2ded68c0c';
 // The shared interaction-point look (garage, PA lot, PA road gate).
-import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=aa56cc4f53cb';
-// The Tatsumi No.1 PA lot itself (stalls, building, arched canopy, lot lamps).
-// Its own module because it builds AFTER _finalizeChunks, straight into the
-// group, outside every index-sensitive chunk bucket — see the file header.
-import { buildTatsumiPaLot } from './tatsumi-pa-lot.js?v=aa56cc4f53cb';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=48d2ded68c0c';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -7032,9 +7028,6 @@ export class HighwayMap {
     this._buildTatsumiUnderdeckPools();
     this._buildTatsumiBayLamps();
     this._buildMergeRoadMarkings();
-    // The PA lot last of all: it needs _unitGeometries, and building it here
-    // means it cannot touch a single instance index the editor saved against.
-    buildTatsumiPaLot(this);
   }
 
   _buildEnvironment() {

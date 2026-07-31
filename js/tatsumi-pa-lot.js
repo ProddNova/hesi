@@ -1,62 +1,38 @@
 import * as THREE from 'three';
 
 /**
- * Tatsumi No.1 PA — the real lot, built from the reference photography.
+ * Tatsumi No.1 PA — the lot you stand in.
  *
- * The deck itself (rectangle, elevation, aisle, connectors, spawn, garage
- * trigger) is fitted in map.js `_defineTatsumiDeck`; this module only dresses
- * it. What it lays out, following the aerials and the two driver-eye shots:
+ * This is the dressing for the WALKABLE zone (js/tatsumi-pa.js), the scene you
+ * arrive in through the lay-by gate with your car parked in front of you. The
+ * drivable deck out on the expressway stays a bare paved clearing; everything
+ * the reference photographs show — the service building with its backlit green
+ * glass-block wall, the arched green-lit canopy over the forecourt, the vending
+ * row under its flat canopy, the 45° large-vehicle comb with 大型 painted in
+ * every bay, the 小型 small-car row — is built here, at the scale you walk it.
  *
- *   ramp kerb   — the signature 45° large-vehicle comb, 大型 painted in every
- *                 bay, box trucks nose-in against the back kerb, and a second
- *                 perpendicular large-vehicle block at the exit end;
- *   aisle       — one-way, edge lines and straight arrows, kept clear end to
- *                 end because the entry/exit connectors ride it;
- *   far kerb    — the 小型 small-car row and one wide accessible bay, then the
- *                 forecourt: a curved kerb island carrying the service
- *                 building, its green glass-block wall, the toilets, the
- *                 vending row under a flat canopy, and the arched green-lit
- *                 roof that is the thing you actually recognise the PA by.
+ * EDITOR CONTRACT
  *
- * WHY IT IS ITS OWN PASS, OUTSIDE THE CHUNK BUCKETS
+ * TatsumiPaSystem's children are addressed by build-order index, and the saved
+ * build (data/editor/tatsumi-pa-build.json) hides children 5..10. Everything
+ * here is therefore APPENDED after every existing child, as a handful of named
+ * groups — one per part, so the editor can move or hide "PA building" without
+ * touching "PA parking", and nothing that already had an index can move.
  *
- * The deck is a suppression rectangle: `_instance` zero-scales anything placed
- * inside it and `_addChunkMesh` hides it, which is what keeps the lot a bare
- * paved clearing and what the old `_buildTatsumiPaDressing` tombstones live
- * in. Two consequences, and this module is shaped by both:
+ * COLLISION
  *
- *  - the sanctioned way to put VISIBLE geometry on the deck is to build after
- *    `_finalizeChunks`, straight into `map.group`, flagged
- *    `userData.tatsumiClearingSurface` — the same door `_buildZoneEntrances`
- *    and `_buildTatsumiBayLamps` go through;
- *  - the user's saved editor edits address props by (mesh name, instance
- *    index) in the chunk meshes. Nothing here touches those buckets, so this
- *    whole lot cannot move a single saved edit — and the old dressing is left
- *    running, still suppressed, precisely because its tombstones are what hold
- *    those indices open.
- *
- * Everything is visual. Lot collision stays the flat deck slab, as before.
+ * Solid pieces are individual meshes pushed onto `pa.staticColliders`
+ * (refreshColliders takes their world AABB). Repeated flat/overhead pieces —
+ * paint, mullions, arch ribs and glazing — go into InstancedMesh batches, which
+ * must NOT be colliders: one AABB over a whole batch would wall off the lot.
  */
 
 const FORWARD = new THREE.Vector3(0, 0, 1);
-const IDENTITY = new THREE.Quaternion();
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 
-const vec = (x, y, z) => new THREE.Vector3(x, y, z);
-
-function mulberry32(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state += 0x6d2b79f5;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Local +Z onto `direction` (flattened), matching map.js `yawQuaternion`. */
-function yawQuaternion(direction) {
-  const flat = vec(direction.x, 0, direction.z);
+/** Local +Z onto a flat direction (same convention as map.js). */
+function yawQuaternion(x, z) {
+  const flat = V(x, 0, z);
   if (flat.lengthSq() < 1e-10) return new THREE.Quaternion();
   flat.normalize();
   return new THREE.Quaternion().setFromUnitVectors(FORWARD, flat);
@@ -65,19 +41,16 @@ function yawQuaternion(direction) {
 /**
  * Road paint that is TEXT: white glyphs stacked down a transparent tile.
  *
- * Orientation matters more than the glyphs do. The tile's top row lands on the
- * decal's local -Z, so a decal whose +Z points AT the driver reads the right
- * way up from the seat, first character farthest — which is how road text is
- * painted. Every caller here passes the direction from the paint to the aisle.
+ * The tile's top row lands on the decal's local −Z, so a decal whose +Z points
+ * AT the reader shows the right way up with the first character farthest —
+ * which is how road text is actually painted. Every caller passes the direction
+ * from the paint towards whoever reads it.
  */
-function paintTextMaterial(map, glyphs) {
-  const key = `paLotPaint:${glyphs}`;
-  if (map._signMaterials.has(key)) return map._signMaterials.get(key);
+function paintTextMaterial(cache, glyphs) {
+  if (cache.has(glyphs)) return cache.get(glyphs);
   let material;
   if (typeof document === 'undefined') {
-    // Headless (probes): no canvas, so the text becomes plain paint. Same
-    // instance count and the same placement either way.
-    material = map.materials.marking;
+    material = new THREE.MeshLambertMaterial({ color: 0xcfcdb8 });
   } else {
     const characters = [...glyphs];
     const cell = 128;
@@ -100,460 +73,378 @@ function paintTextMaterial(map, glyphs) {
     texture.anisotropy = 8;
     if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = true;
-    map._ownedTextures.add(texture);
-    // Lambert like the `marking` palette entry, for the same reason: a Basic
-    // material would glow white under the dark night mix. depthWrite off +
-    // polygon offset keeps it off the slab without floating.
     material = new THREE.MeshLambertMaterial({
-      map: texture,
-      color: 0xd8d6bf,
-      transparent: true,
-      depthWrite: false,
-      fog: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      map: texture, color: 0xcfcdb8, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
     });
   }
-  map._signMaterials.set(key, material);
+  cache.set(glyphs, material);
   return material;
 }
 
 /**
- * Dress the Tatsumi deck. Called from `HighwayMap._buildWorld`, last, after
- * `_finalizeChunks` (it needs `map._unitGeometries`).
+ * Build the lot into `pa` (a TatsumiPaSystem). `lot` is its footprint, so the
+ * layout follows whatever PA_LOT says instead of hard-coding the walls.
+ *
+ * Returns the groups and the lights it added, so the caller can keep a handle
+ * on them.
  */
-export function buildTatsumiPaLot(map) {
-  const area = (map.serviceAreas || []).find((candidate) => candidate.id === 'tatsumi_pa');
-  if (!area || area.dressing !== 'tatsumi' || !map._unitGeometries) return null;
+export function buildTatsumiPaStructure(pa, lot) {
+  const HALF_X = lot.width * 0.5;
+  const HALF_Z = lot.depth * 0.5;
 
-  const random = mulberry32((map.seed ^ 0x7a75c1a1) >>> 0);
-  const R = area.rampSideSign ?? -1;        // large-vehicle side (the ramp_8 kerb)
-  const F = -R;                             // far side: small cars, building
-  const halfL = area.length * 0.5;
-  const halfW = area.width * 0.5;
-  const aisleV = area.aisleV ?? 0;
-  const aisleHalf = area.tatsumiPlan?.aisleHalf ?? 3.3;
-  const tangent = area.tangent;
-  const outward = area.normal;
-
-  // Deck frame: u along the one-way flow, v across (+v is `area.normal`).
-  const at = (u, v, y = 0) => {
-    const point = area.center.clone().addScaledVector(tangent, u).addScaledVector(outward, v);
-    point.y = area.elevation + y;
-    return point;
+  // ------------------------------------------------------------------
+  // Materials. Flat-shaded lambert like the rest of the scene; the lit
+  // surfaces are Basic so they hold up with the masts switched off (the
+  // saved build hides the four original ones).
+  // ------------------------------------------------------------------
+  const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
+  const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({ color, ...extra });
+  const M = {
+    paint: lambert(0xcfcdb8),
+    concrete: lambert(0x8a9099, { emissive: 0x1a1d22 }),
+    dark: lambert(0x272a31),
+    wall: lambert(0x2a3039),
+    steel: lambert(0xaab2bc, { emissive: 0x23262c }),
+    glassBlock: basic(0x4dbb87),
+    // The canopy is a LIT PANEL, not a light source. Unshaded Basic green at
+    // full strength turns the whole lot into a neon tent; these are the
+    // reference's deeper green, brighter across the crown than at the
+    // springings, which is also what makes the arc read as an arc.
+    canopyCrown: basic(0x1e7d50),
+    canopyMid: basic(0x176544),
+    canopySpring: basic(0x104a33),
+    canopyLight: basic(0xfff2c9),
+    truck: lambert(0xe8eef4),
+    glass: lambert(0x0e1620),
+    lampHead: basic(0xeafff4),
+    blue: basic(0x1d47a0),
+    exitGreen: basic(0x2fae6a),
   };
-  const direction = (angle) => vec(
-    tangent.x * Math.cos(angle) + outward.x * Math.sin(angle),
-    0,
-    tangent.z * Math.cos(angle) + outward.z * Math.sin(angle),
-  );
-  const facing = (angle) => yawQuaternion(direction(angle));
-  const ALONG = facing(0);
+  const carColors = [0xb3324a, 0x3a68b6, 0xcfcfd4, 0x18191d, 0xd8a63a, 0x2d7a52, 0x74306e];
+  const carMaterials = carColors.map((color) => lambert(color));
+  const textCache = new Map();
 
   // ------------------------------------------------------------------
-  // Emission: one InstancedMesh per (geometry, material), into map.group.
+  // Emission helpers
   // ------------------------------------------------------------------
-  const parts = new Map();
-  const put = (name, geometry, material, position, scale, quaternion = null, color = null) => {
-    let part = parts.get(name);
-    if (!part) {
-      part = { geometry, material, records: [] };
-      parts.set(name, part);
+  const groups = {};
+  const group = (name) => {
+    if (!groups[name]) {
+      const created = new THREE.Group();
+      created.name = name;
+      groups[name] = created;
     }
-    part.records.push({ position, scale, quaternion, color });
+    return groups[name];
   };
-  const prop = (type, position, scale, quaternion = null, color = null) => {
-    const [geometryName, materialName] = type.split(':');
-    put(type, map._unitGeometries[geometryName] || map._unitGeometries.box,
-      map.materials[materialName] || map.materials.concrete, position, scale, quaternion, color);
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  const unitPlane = new THREE.PlaneGeometry(1, 1);
+  unitPlane.rotateX(-Math.PI * 0.5);   // flat, normal +Y
+
+  // Batched (never a collider).
+  const batches = new Map();
+  const batch = (key, geometry, material, position, scale, quaternion = null) => {
+    let entry = batches.get(key);
+    if (!entry) { entry = { key, geometry, material, records: [] }; batches.set(key, entry); }
+    entry.records.push({ position, scale, quaternion });
   };
-  // Box sizes are (across, up, along) in the box's OWN frame; `angle` turns
-  // that frame in the deck plane (0 = along the flow, +pi/2 = toward +v).
-  const box = (type, u, v, y, size, angle = 0, color = null) =>
-    prop(type, at(u, v, y), size, facing(angle), color);
-  // Flat paint: a thin slab, same convention as the rest of the generator.
-  const line = (u, v, width, length, angle = 0) =>
-    prop('box:marking', at(u, v, 0.03), vec(width, 0.03, length), facing(angle));
-  const text = (glyphs, u, v, width, length, angle) =>
-    put(`text ${glyphs}`, map._unitGeometries.pool, paintTextMaterial(map, glyphs),
-      at(u, v, 0.05), vec(width, 1, length), facing(angle));
-  const pool = (u, v, width, length) =>
-    prop('pool:lightPool', at(u, v, 0.07), vec(width, 1, length), ALONG);
+  /** Flat paint slab. `angle` turns it about Y (0 = long axis on Z). */
+  const paint = (x, z, width, length, angle = 0) =>
+    batch('paint', unitBox, M.paint, V(x, 0.02, z), V(width, 0.04, length),
+      yawQuaternion(Math.sin(angle), Math.cos(angle)));
+  const text = (glyphs, x, z, width, length, angle) =>
+    batch(`text:${glyphs}`, unitPlane, paintTextMaterial(textCache, glyphs),
+      V(x, 0.035, z), V(width, 1, length), yawQuaternion(Math.sin(angle), Math.cos(angle)));
 
-  // Bands. The aisle is the one thing nothing may stand in: both connectors
-  // ride it and the player spawns on it at u = 0.
-  const kerbR = R * (halfW - 0.6);
-  const kerbF = F * (halfW - 0.6);
-  const edgeR = aisleV + R * (aisleHalf + 0.5);
-  const edgeF = aisleV + F * (aisleHalf + 0.5);
-
-  // ------------------------------------------------------------------
-  // 1. Deck edges and the one-way aisle
-  // ------------------------------------------------------------------
-  for (const side of [R, F]) {
-    line(0, side * (halfW - 0.3), 0.3, area.length - 1, 0);
-    // Cheap white delineators: the lot is deliberately open-edged (no
-    // parapet — see TATSUMI_PA_STATUS), so the edge has to read some other way.
-    for (let u = -halfL + 6; u <= halfL - 6; u += 9) {
-      box('box:concrete', u, side * (halfW - 0.45), 0.45, vec(0.12, 0.9, 0.12));
-    }
-  }
-  line(8, edgeR, 0.15, 168, 0);
-  line(-32, edgeF, 0.15, 82, 0);
-  line(66.5, edgeF, 0.15, 45, 0);
-  for (const u of [-72, -34, 4, 42, 78]) {   // straight-ahead arrows down the aisle
-    line(u - 0.9, aisleV, 0.34, 2.4);
-    // Both barbs have to END at the tip, or the head opens downstream and the
-    // arrow reads as pointing back up the aisle.
-    for (const side of [-1, 1]) {
-      const angle = side * 0.85;
-      prop('box:marking',
-        at(u + 1.4 - Math.cos(angle) * 0.75, aisleV - side * Math.sin(Math.abs(angle)) * 0.75, 0.03),
-        vec(0.3, 0.03, 1.5), facing(angle), null);
-    }
-  }
-  // Wedge gores at both gates, the way the real strip tapers into them.
-  for (const [uFrom, uTo, side, gate] of [
-    [-halfL + 2, -halfL + 20, F, 'from'], [-halfL + 2, -halfL + 20, R, 'from'],
-    [halfL - 9, halfL - 2, F, 'to'], [halfL - 7, halfL - 2, R, 'to'],
-  ]) {
-    const vIn = side === F ? edgeF : edgeR;
-    const vOut = side * (halfW - 0.9);
-    for (let u = uFrom; u <= uTo; u += 2.4) {
-      const t = gate === 'from' ? (u - uFrom) / (uTo - uFrom) : (uTo - u) / (uTo - uFrom);
-      const span = (vOut - vIn) * (0.12 + 0.88 * t);
-      if (Math.abs(span) < 1.2) continue;
-      prop('box:marking', at(u, vIn + span * 0.5, 0.03),
-        vec(0.42, 0.03, Math.abs(span) / 0.87), facing(side * 1.05), null);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // 2. Large-vehicle comb, 45° nose-in against the ramp kerb
-  //
-  // Trucks turn in forward off the aisle, so every bay leans downstream:
-  // mouth at the aisle upstream, nose on the back kerb downstream. That lean
-  // is the shape the whole lot is recognisable by from the air.
-  // ------------------------------------------------------------------
-  const bayAngle = R * Math.PI * 0.25;
-  const bayAxis = { u: Math.cos(bayAngle), v: Math.sin(bayAngle) };
-  const bayDepth = Math.abs(kerbR - edgeR);
-  const bayLength = bayDepth * Math.SQRT2;
-  const COMB_PITCH = 5.1;
-  const COMB_FROM = -68;
-  const COMB_BAYS = 20;
-  // Cool whites: the lot lamps are warm, and a body tinted anywhere near cream
-  // comes out tan under them instead of the reference's white box trucks.
-  const truckColors = [0xf2f6f8, 0xe8eef4, 0xdde7f0, 0xeef0f2];
-  const parkTruck = (u, v, angle, color) => {
-    const nose = { u: Math.cos(angle), v: Math.sin(angle) };
-    const offset = (distance, y, type, size, tint = null) =>
-      box(type, u + nose.u * distance, v + nose.v * distance, y, size, angle, tint);
-    offset(0, 0.5, 'box:concreteDark', vec(2.25, 0.7, 8.6));
-    offset(-2.0, 2.05, 'box:parkedBody', vec(2.5, 2.9, 6.0), color);
-    offset(3.2, 1.5, 'box:parkedBody', vec(2.35, 2.2, 2.3), color);
-    offset(4.32, 2.0, 'box:parkedGlass', vec(2.1, 1.0, 0.16));
+  // Individual mesh, optionally solid.
+  const solids = [];
+  const piece = (groupName, geometry, material, position, { rotationY = 0, quaternion = null, solid = false, name = '' } = {}) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(position);
+    if (quaternion) mesh.quaternion.copy(quaternion);
+    else mesh.rotation.y = rotationY;
+    if (name) mesh.name = name;
+    group(groupName).add(mesh);
+    if (solid) solids.push(mesh);
+    return mesh;
   };
-  for (let i = 0; i <= COMB_BAYS; i += 1) {
-    const u = COMB_FROM + i * COMB_PITCH;
-    line(u - bayAxis.u * bayLength * 0.5, kerbR - bayAxis.v * bayLength * 0.5,
-      0.14, bayLength, bayAngle);
-    if (i === COMB_BAYS) break;
-    const centreU = u + COMB_PITCH * 0.5;
-    text('大型', centreU - bayAxis.u * 4.6, kerbR - bayAxis.v * 4.6, 2.1, 4.6, bayAngle + Math.PI);
-    if (random() < 0.45) {
-      parkTruck(centreU - bayAxis.u * 4.9, kerbR - bayAxis.v * 4.9, bayAngle,
-        truckColors[Math.floor(random() * truckColors.length)]);
-    }
-  }
+  const boxPiece = (groupName, material, x, y, z, sx, sy, sz, options = {}) =>
+    piece(groupName, new THREE.BoxGeometry(sx, sy, sz), material, V(x, y, z), options);
 
   // ------------------------------------------------------------------
-  // 3. Perpendicular large-vehicle block at the exit end
+  // 1. The service building — the back wall of the lot
   // ------------------------------------------------------------------
-  const BLOCK_FROM = 44;
-  const BLOCK_PITCH = 5.2;
-  const BLOCK_BAYS = 8;
-  const blockDepth = 9.0;
-  for (let i = 0; i <= BLOCK_BAYS; i += 1) {
-    const u = BLOCK_FROM + i * BLOCK_PITCH;
-    line(u, kerbR - R * blockDepth * 0.5, 0.14, blockDepth, Math.PI * 0.5);
-    if (i === BLOCK_BAYS) break;
-    const centreU = u + BLOCK_PITCH * 0.5;
-    text('大型', centreU, kerbR - R * 3.2, 1.9, 4.2, -R * Math.PI * 0.5);
-    if (random() < 0.45) {
-      parkTruck(centreU, kerbR - R * 4.4, R * Math.PI * 0.5,
-        truckColors[Math.floor(random() * truckColors.length)]);
-    }
-  }
-  line(BLOCK_FROM + BLOCK_BAYS * BLOCK_PITCH * 0.5, kerbR - R * blockDepth,
-    0.15, BLOCK_BAYS * BLOCK_PITCH, 0);
-
-  // ------------------------------------------------------------------
-  // 4. Small-car row, backed in against the far kerb
-  // ------------------------------------------------------------------
-  const SMALL_PITCH = 2.55;
-  const SMALL_FROM = -70;
-  const SMALL_BAYS = 30;
-  const smallDepth = area.tatsumiPlan?.smallDepth ?? 5.0;
-  const smallFront = kerbF - F * smallDepth;
-  const carColors = [0xb3324a, 0x3a68b6, 0xcfcfd4, 0x18191d, 0xd8a63a, 0x74306e, 0x2d7a52, 0x8a2f24];
-  const parkCar = (u, v, angle, color) => {
-    const nose = { u: Math.cos(angle), v: Math.sin(angle) };
-    box('box:parkedBody', u, v, 0.62, vec(1.78, 0.62, 4.3), angle, color);
-    box('box:parkedGlass', u - nose.u * 0.35, v - nose.v * 0.35, 1.12,
-      vec(1.62, 0.48, 2.15), angle);
-  };
-  for (let i = 0; i <= SMALL_BAYS; i += 1) {
-    const u = SMALL_FROM + i * SMALL_PITCH;
-    line(u, kerbF - F * smallDepth * 0.5, 0.12, smallDepth, Math.PI * 0.5);
-    if (i === SMALL_BAYS) break;
-    const centreU = u + SMALL_PITCH * 0.5;
-    text('小型', centreU, kerbF - F * 3.5, 1.5, 2.9, -F * Math.PI * 0.5);
-    if (random() < 0.55) {
-      parkCar(centreU, kerbF - F * 2.35, -F * Math.PI * 0.5 + (random() - 0.5) * 0.08,
-        carColors[Math.floor(random() * carColors.length)]);
-    }
-  }
-  line(SMALL_FROM + SMALL_BAYS * SMALL_PITCH * 0.5, smallFront, 0.15, SMALL_BAYS * SMALL_PITCH, 0);
-  // One wide accessible bay closing the row, kept empty, blue pad.
-  const accessibleU = SMALL_FROM + SMALL_BAYS * SMALL_PITCH + 1.9;
-  line(accessibleU + 1.9, kerbF - F * smallDepth * 0.5, 0.12, smallDepth, Math.PI * 0.5);
-  line(accessibleU, smallFront, 0.15, 3.8, 0);
-  box('box:marker', accessibleU, kerbF - F * 2.6, 0.028, vec(3.2, 0.02, 4.4), Math.PI * 0.5);
-
-  // ------------------------------------------------------------------
-  // 5. Forecourt island — the curved kerb the building sits behind
-  //
-  // A straight front closed by quarter-turns back to the deck edge: from
-  // above that is the rounded end the aerials show, and on the ground it is
-  // what stops the aisle from running into the vending row.
-  // ------------------------------------------------------------------
-  const ISLAND_FROM = 21;
-  const ISLAND_TO = 39;
-  const ISLAND_V = F * 5.4;
-  const ISLAND_RADIUS = 4.2;
-  const kerbPiece = (u, v, angle, length) =>
-    box('box:concrete', u, v, 0.11, vec(0.42, 0.22, length), angle);
-  for (let u = ISLAND_FROM; u <= ISLAND_TO; u += 1.3) kerbPiece(u, ISLAND_V, 0, 1.34);
-  for (const end of [-1, 1]) {
-    const cornerU = end < 0 ? ISLAND_FROM : ISLAND_TO;
-    const steps = 7;
-    for (let step = 0; step < steps; step += 1) {
-      const phi = ((step + 0.5) / steps) * Math.PI * 0.5;
-      const u = cornerU + end * ISLAND_RADIUS * Math.sin(phi);
-      const v = ISLAND_V + F * ISLAND_RADIUS * (1 - Math.cos(phi));
-      // Tangent of the quarter-turn, in the deck frame: +u toward +v.
-      kerbPiece(u, v, Math.atan2(F * Math.sin(phi), end * Math.cos(phi)),
-        ISLAND_RADIUS * (Math.PI * 0.5 / steps) * 1.1);
-    }
-    const straightU = cornerU + end * ISLAND_RADIUS;
-    const from = ISLAND_V + F * ISLAND_RADIUS;
-    const to = F * (halfW - 0.6);
-    kerbPiece(straightU, (from + to) * 0.5, Math.PI * 0.5, Math.abs(to - from));
-  }
-  // Zebra from the aisle onto the island's upstream end.
-  for (let i = 0; i < 5; i += 1) {
-    line(11.5 + i * 1.15, (edgeF + ISLAND_V) * 0.5, 0.6, Math.abs(ISLAND_V - edgeF), Math.PI * 0.5);
-  }
-
-  // ------------------------------------------------------------------
-  // 6. The service building: toilets, the green glass-block wall, the doors
-  // ------------------------------------------------------------------
-  const BUILDING_U = 30;
-  const buildingV = F * (halfW - 3.2);
-  const buildingFront = buildingV - F * 2.8;
-  box('box:garage', BUILDING_U, buildingV, 1.65, vec(5.6, 3.3, 21));
-  box('box:concreteDark', BUILDING_U, buildingV, 3.45, vec(6.2, 0.3, 21.6));
-  // Backlit glass block, the wall that makes the whole forecourt read green.
-  box('box:konbini', 23.8, buildingFront - F * 0.06, 1.55, vec(0.16, 1.9, 8.4));
-  for (let u = 19.8; u <= 28.1; u += 0.84) {
-    box('box:concreteDark', u, buildingFront - F * 0.15, 1.55, vec(0.1, 2.0, 0.09));
+  const BUILDING_Z = -HALF_Z + 5;          // 6 m deep, 2 m clear of the wall
+  const BUILDING_FRONT = BUILDING_Z + 3;
+  const BUILDING_W = Math.min(30, lot.width - 16);
+  boxPiece('PA building', M.wall, 0, 1.7, BUILDING_Z, BUILDING_W, 3.4, 6, { solid: true, name: 'PA building block' });
+  boxPiece('PA building', M.dark, 0, 3.55, BUILDING_Z, BUILDING_W + 1, 0.3, 6.6);
+  // Backlit glass block: the wall that makes the whole forecourt read green.
+  const glassFrom = -BUILDING_W * 0.5 + 2;
+  const glassTo = glassFrom + 10;
+  boxPiece('PA building', M.glassBlock, (glassFrom + glassTo) * 0.5, 1.55, BUILDING_FRONT + 0.04, 10, 1.9, 0.16);
+  for (let x = glassFrom; x <= glassTo + 0.01; x += 0.83) {
+    batch('trim', unitBox, M.dark, V(x, 1.55, BUILDING_FRONT + 0.13), V(0.09, 2.0, 0.1));
   }
   for (const y of [0.68, 1.24, 1.86, 2.42]) {
-    box('box:concreteDark', 23.8, buildingFront - F * 0.15, y, vec(0.1, 0.09, 8.4));
+    batch('trim', unitBox, M.dark, V((glassFrom + glassTo) * 0.5, y, BUILDING_FRONT + 0.13), V(10, 0.09, 0.1));
   }
-  // Toilet entrance: dark opening, lit header, sign.
-  box('box:parkedGlass', 30.4, buildingFront - F * 0.05, 1.2, vec(0.14, 2.4, 3.4));
-  box('box:canopy', 30.4, buildingFront - F * 0.12, 2.62, vec(0.12, 0.32, 3.6));
-  box('box:concrete', 30.4, buildingFront - F * 0.9, 0.09, vec(1.6, 0.18, 3.6));
+  // Toilets: dark opening, lit header, step.
+  boxPiece('PA building', M.glass, 0.5, 1.2, BUILDING_FRONT + 0.05, 3.4, 2.4, 0.14);
+  boxPiece('PA building', M.canopyLight, 0.5, 2.62, BUILDING_FRONT + 0.12, 3.6, 0.32, 0.12);
+  boxPiece('PA building', M.concrete, 0.5, 0.09, BUILDING_FRONT + 0.9, 3.6, 0.18, 1.6);
 
   // ------------------------------------------------------------------
-  // 7. Vending row under its flat canopy, and the forecourt railing
+  // 2. Vending row under its flat canopy
   // ------------------------------------------------------------------
   const vendingColors = [0xff5f6d, 0x8ad9ff, 0xfff2c9, 0xff5f6d, 0x8ad9ff, 0xffb0d0];
+  const VEND_FROM = 4.6;
   for (let i = 0; i < 6; i += 1) {
-    const u = 33.2 + i * 1.4;
-    box('box:concreteDark', u, buildingFront - F * 0.5, 1.03, vec(0.9, 2.06, 1.28));
-    box('box:vending', u, buildingFront - F * 0.96, 1.2, vec(0.1, 1.5, 1.12), 0, vendingColors[i]);
+    const x = VEND_FROM + i * 1.45;
+    boxPiece('PA vending', M.dark, x, 1.03, BUILDING_FRONT + 0.55, 1.3, 2.06, 0.9, { solid: true });
+    boxPiece('PA vending', basic(vendingColors[i]), x, 1.2, BUILDING_FRONT + 1.02, 1.14, 1.5, 0.1);
   }
-  box('box:concreteDark', 34.5, buildingFront - F * 0.4, 3.75, vec(2.9, 0.3, 15));
-  box('box:canopy', 34.5, buildingFront - F * 0.5, 3.55, vec(1.8, 0.08, 13));
-  for (const u of [32, 36.5, 41]) {
-    box('box:railMetal', u, buildingFront - F * 1.5, 1.85, vec(0.22, 3.7, 0.22));
+  const flatCanopyX = VEND_FROM + 3.6;
+  boxPiece('PA vending', M.dark, flatCanopyX, 3.75, BUILDING_FRONT + 1.5, 11.5, 0.3, 3.4);
+  boxPiece('PA vending', M.canopyLight, flatCanopyX, 3.55, BUILDING_FRONT + 1.5, 9.5, 0.08, 1.8);
+  for (const x of [flatCanopyX - 4.6, flatCanopyX, flatCanopyX + 4.6]) {
+    boxPiece('PA vending', M.steel, x, 1.85, BUILDING_FRONT + 2.9, 0.22, 3.7, 0.22, { solid: true });
   }
-  // Forecourt railing, just inside the kerb (the one you stand at with a can).
-  const railV = ISLAND_V + F * 0.5;
-  for (const y of [0.55, 0.98]) box('box:railMetal', 30.5, railV, y, vec(0.07, 0.07, 17));
-  for (let u = 22.5; u <= 38.5; u += 2) box('box:railMetal', u, railV, 0.5, vec(0.08, 1.0, 0.08));
 
   // ------------------------------------------------------------------
-  // 8. The arched canopy
+  // 3. The arched canopy over the forecourt
   //
-  // A barrel vault across the forecourt: white steel ribs and purlins with
-  // green-lit glazing between them. Built rib-segment by rib-segment because
-  // each piece needs its own basis — local X along the deck, local Z along
-  // the arc — which a yaw quaternion cannot give.
+  // A barrel vault: white steel ribs and purlins with green-lit glazing
+  // between them. Each piece needs its own basis — local X across the lot,
+  // local Z along the arc — which a yaw quaternion cannot give.
   // ------------------------------------------------------------------
-  const ARCH_U = 29;
-  const ARCH_LENGTH = 22;
-  const ARCH_RIBS = 7;
-  const ARCH_SEGMENTS = 8;
-  const archNear = F * 6.6;
-  const archFar = F * (halfW - 0.5);
+  const ARCH_X = -1;
+  const ARCH_SPAN = Math.min(26, BUILDING_W - 4);
+  const KERB_Z = -5.2;
+  const archNear = KERB_Z + 0.6;
+  const archFar = BUILDING_FRONT - 0.2;
+  const RIBS = 7;
+  const SEGMENTS = 8;
   const archPoint = (s) => ({
-    v: archNear + (archFar - archNear) * s,
+    z: archNear + (archFar - archNear) * s,
     y: 5.2 + 0.4 * s + 3.7 * Math.sin(Math.PI * (s ** 0.92)),
   });
-  const archBasis = (dv, dy) => {
-    const zAxis = vec(outward.x * dv, dy, outward.z * dv).normalize();
-    const xAxis = vec(tangent.x, 0, tangent.z).normalize();
-    const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
-    return {
-      quaternion: new THREE.Quaternion().setFromRotationMatrix(
-        new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis),
-      ),
-      normal: yAxis,
-    };
-  };
-  const ribPitch = ARCH_LENGTH / (ARCH_RIBS - 1);
-  for (let segment = 0; segment < ARCH_SEGMENTS; segment += 1) {
-    const a = archPoint(segment / ARCH_SEGMENTS);
-    const b = archPoint((segment + 1) / ARCH_SEGMENTS);
-    const dv = b.v - a.v;
+  const ribPitch = ARCH_SPAN / (RIBS - 1);
+  const shades = [M.canopySpring, M.canopyMid, M.canopyCrown];
+  for (let segment = 0; segment < SEGMENTS; segment += 1) {
+    const a = archPoint(segment / SEGMENTS);
+    const b = archPoint((segment + 1) / SEGMENTS);
+    const dz = b.z - a.z;
     const dy = b.y - a.y;
-    const span = Math.hypot(dv, dy);
-    const { quaternion, normal } = archBasis(dv, dy);
-    const midV = (a.v + b.v) * 0.5;
+    const span = Math.hypot(dz, dy);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(FORWARD, V(0, dy / span, dz / span));
+    const midZ = (a.z + b.z) * 0.5;
     const midY = (a.y + b.y) * 0.5;
-    for (let gap = 0; gap < ARCH_RIBS - 1; gap += 1) {   // glazing
-      const u = ARCH_U - ARCH_LENGTH * 0.5 + (gap + 0.5) * ribPitch;
-      // Dimmed off the palette's exit green, brighter across the crown than at
-      // the springings: at full strength the roof is a neon slab that owns the
-      // whole aerial, and the reference is a lit panel, not a light source.
-      // Instance colour REPLACES the base (the clone goes white), so this is
-      // the absolute colour — exitGreen scaled, not a multiplier.
-      const crown = 0.5 + 0.4 * Math.sin(Math.PI * ((segment + 0.5) / ARCH_SEGMENTS));
-      const shade = new THREE.Color(0.216 * crown, 0.898 * crown, 0.498 * crown).getHex();
-      put('box:exitGreen', map._unitGeometries.box, map.materials.exitGreen,
-        at(u, midV, midY), vec(ribPitch - 0.12, 0.12, span - 0.1), quaternion, shade);
+    // Brighter across the crown than at the springings: a lit panel, not a
+    // light source. Three shades instead of a per-instance colour so the
+    // batches stay on shared materials.
+    const lift = Math.sin(Math.PI * ((segment + 0.5) / SEGMENTS));
+    const shade = shades[lift > 0.86 ? 2 : lift > 0.55 ? 1 : 0];
+    for (let gap = 0; gap < RIBS - 1; gap += 1) {
+      const x = ARCH_X - ARCH_SPAN * 0.5 + (gap + 0.5) * ribPitch;
+      batch(`glaze${shades.indexOf(shade)}`, unitBox, shade,
+        V(x, midY, midZ), V(ribPitch - 0.12, 0.12, span - 0.1), quaternion);
     }
-    for (let rib = 0; rib < ARCH_RIBS; rib += 1) {       // ribs, under the glazing
-      const u = ARCH_U - ARCH_LENGTH * 0.5 + rib * ribPitch;
-      const position = at(u, midV, midY).addScaledVector(normal, -0.24);
-      put('box:railMetal', map._unitGeometries.box, map.materials.railMetal,
-        position, vec(0.3, 0.34, span + 0.06), quaternion);
+    for (let rib = 0; rib < RIBS; rib += 1) {
+      const x = ARCH_X - ARCH_SPAN * 0.5 + rib * ribPitch;
+      // Ribs hang under the glazing — from below they read across the green,
+      // which is the thing the reference is recognisable by.
+      batch('rib', unitBox, M.steel,
+        V(x, midY - 0.22, midZ), V(0.3, 0.34, span + 0.06), quaternion);
     }
   }
-  for (let node = 0; node <= ARCH_SEGMENTS; node += 1) { // longitudinal purlins
-    const point = archPoint(node / ARCH_SEGMENTS);
-    box('box:railMetal', ARCH_U, point.v, point.y - 0.3, vec(0.2, 0.2, ARCH_LENGTH));
+  for (let node = 0; node <= SEGMENTS; node += 1) {
+    const point = archPoint(node / SEGMENTS);
+    batch('purlin', unitBox, M.steel, V(ARCH_X, point.y - 0.3, point.z), V(ARCH_SPAN, 0.2, 0.2));
   }
   const springing = archPoint(0);
-  box('box:railMetal', ARCH_U, springing.v, springing.y, vec(0.46, 0.46, ARCH_LENGTH + 1.4));
-  for (const u of [ARCH_U - 9.5, ARCH_U, ARCH_U + 9.5]) {
-    box('box:barrier', u, archNear, springing.y * 0.5, vec(0.36, springing.y, 0.36));
+  const crownFar = archPoint(1);
+  boxPiece('PA canopy', M.steel, ARCH_X, springing.y, springing.z, ARCH_SPAN + 1.4, 0.46, 0.46);
+  for (const x of [ARCH_X - ARCH_SPAN * 0.38, ARCH_X, ARCH_X + ARCH_SPAN * 0.38]) {
+    boxPiece('PA canopy', M.concrete, x, springing.y * 0.5, springing.z, 0.36, springing.y, 0.36, { solid: true });
     // The far springing lands on the building roof; short posts close the gap.
-    const far = archPoint(1);
-    box('box:railMetal', u, archFar, (far.y + 3.6) * 0.5, vec(0.2, far.y - 3.6, 0.2));
+    boxPiece('PA canopy', M.steel, x, (crownFar.y + 3.6) * 0.5, archFar, 0.2, crownFar.y - 3.6, 0.2);
   }
-  // The forecourt glow the aerials pick the PA out by.
-  pool(ARCH_U, F * 9.5, 19, 30);
-  pool(BUILDING_U + 6, buildingFront - F * 2.0, 8, 16);
 
   // ------------------------------------------------------------------
-  // 9. Lot lighting — cool white, unlike the sodium row on the expressway
+  // 4. Forecourt kerb, railing and the walkway to the doors
   // ------------------------------------------------------------------
-  const lamp = (u, side) => {
-    const poleV = side * (halfW - 1.1);
-    const quaternion = facing(side > 0 ? 0 : Math.PI);
-    prop('lamppost:concrete', at(u, poleV, 0), vec(1, 1, 1), quaternion);
-    prop('box:lampWhite', at(u, poleV - side * 2.28, 9.36), vec(1.2, 0.12, 0.4), quaternion);
-    pool(u, poleV - side * 4.2, 13, 17);
-  };
-  for (const u of [-62, -26, 10, 46, 78]) lamp(u, R);
-  for (const u of [-62, -26, 6, 58, 82]) lamp(u, F);
-
-  // ------------------------------------------------------------------
-  // 10. Signage
-  // ------------------------------------------------------------------
-  const signs = [];
-  const board = (label, background, width, height, u, v, y, angle, posted = true) => {
-    // The post is instanced either way: a headless build (probes) has no
-    // canvas for the board itself, and should still produce the same lot.
-    if (posted) {
-      const post = y - height * 0.5;
-      box('box:concrete', u, v, post * 0.5, vec(0.16, post, 0.16));
+  const KERB_FROM = -BUILDING_W * 0.5 - 1;
+  const KERB_TO = BUILDING_W * 0.5 + 1;
+  const GAP_FROM = -2;                    // the way in, in front of the doors
+  const GAP_TO = 3;
+  for (const [from, to] of [[KERB_FROM, GAP_FROM], [GAP_TO, KERB_TO]]) {
+    batch('kerb', unitBox, M.concrete, V((from + to) * 0.5, 0.11, KERB_Z), V(to - from, 0.22, 0.42));
+    for (const y of [0.55, 0.98]) {
+      boxPiece('PA forecourt', M.steel, (from + to) * 0.5, y, KERB_Z - 0.45, to - from, 0.07, 0.07, { solid: y > 0.9 });
     }
-    if (typeof document === 'undefined') return;
-    const mesh = map._makeSignMesh(label, background, width, height, width > 3.2);
-    mesh.position.copy(at(u, v, y));
-    mesh.quaternion.copy(facing(angle));
-    mesh.userData.tatsumiClearingSurface = true;
-    mesh.name = `Tatsumi PA sign ${label}`;
-    signs.push(mesh);
-  };
-  board('辰巳第一PA|TATSUMI No.1 PA', '#175ba5', 6.4, 2.2, -halfL + 8, F * (halfW - 2.2), 4.0, Math.PI);
-  board('P', '#1958a8', 1.9, 1.9, -halfL + 8, R * (halfW - 2.2), 3.4, Math.PI);
-  board('トイレ|TOILET', '#175ba5', 3.2, 1.35, 30.4, buildingFront - F * 0.42, 2.95, -F * Math.PI * 0.5, false);
-  board('二輪車|MOTORCYCLE', '#123a72', 1.5, 1.5, 22.5, ISLAND_V + F * 1.6, 2.4, -F * Math.PI * 0.5);
-  board('出口|EXIT', '#0f6a3f', 3.4, 1.5, halfL - 6, R * (halfW - 2.2), 3.3, Math.PI);
+    for (let x = from + 1; x < to; x += 2) {
+      batch('railpost', unitBox, M.steel, V(x, 0.5, KERB_Z - 0.45), V(0.08, 1.0, 0.08));
+    }
+  }
+  for (let i = 0; i < 5; i += 1) {   // zebra: parking -> doors
+    paint(GAP_FROM + 0.6 + i * 0.95, KERB_Z - 1.8, 0.55, 3.4);
+  }
 
   // ------------------------------------------------------------------
-  // 11. Finalize
+  // 5. Parking — parallel bays along the kerb (yours is the middle one),
+  //    the 45° large-vehicle comb on one side, the 小型 row on the other
+  // ------------------------------------------------------------------
+  const BAY_Z = -3;                  // the stall TatsumiPaSystem parks you in
+  for (let i = -2; i <= 3; i += 1) paint(i * 5.6 - 2.8, BAY_Z, 0.12, 2.8);
+  paint(0, BAY_Z - 1.4, 28, 0.12);
+  const parkCar = (x, z, rotationY, index) => {
+    boxPiece('PA parking', carMaterials[index % carMaterials.length], x, 0.62, z, 4.3, 0.62, 1.78, { rotationY, solid: true });
+    boxPiece('PA parking', M.glass, x - Math.cos(rotationY) * 0.35, 1.12, z + Math.sin(rotationY) * 0.35, 2.15, 0.48, 1.62, { rotationY });
+  };
+  parkCar(-11.2, BAY_Z, 0, 1);
+  parkCar(11.2, BAY_Z, 0, 4);
+
+  // 45° comb, nose to the wall: box trucks lean the way they turn in.
+  const COMB_X = -HALF_X + 1.5;
+  const combAxis = V(-Math.SQRT1_2, 0, -Math.SQRT1_2);   // mouth -> nose
+  const combLength = 15;
+  const combAngle = Math.atan2(combAxis.x, combAxis.z);
+  const parkTruck = (x, z, angle) => {
+    const nose = V(Math.sin(angle), 0, Math.cos(angle));
+    const at = (distance) => V(x + nose.x * distance, 0, z + nose.z * distance);
+    const chassis = at(0); boxPiece('PA parking', M.dark, chassis.x, 0.5, chassis.z, 2.25, 0.7, 8.6, { rotationY: angle, solid: true });
+    const body = at(-2.0); boxPiece('PA parking', M.truck, body.x, 2.05, body.z, 2.5, 2.9, 6.0, { rotationY: angle, solid: true });
+    const cab = at(3.2); boxPiece('PA parking', M.truck, cab.x, 1.5, cab.z, 2.35, 2.2, 2.3, { rotationY: angle, solid: true });
+    const screen = at(4.32); boxPiece('PA parking', M.glass, screen.x, 2.0, screen.z, 2.1, 1.0, 0.16, { rotationY: angle });
+  };
+  const combStations = [-13, -8, -3, 2];
+  for (const z of combStations) {
+    paint(COMB_X - combAxis.x * combLength * 0.5, z - combAxis.z * combLength * 0.5, 0.14, combLength, combAngle);
+    text('大型', COMB_X - combAxis.x * 4.6, z - combAxis.z * 4.6 + 2.55, 2.1, 4.6, combAngle + Math.PI);
+  }
+  paint(COMB_X - combAxis.x * combLength * 0.5, combStations[combStations.length - 1] + 5 - combAxis.z * combLength * 0.5,
+    0.14, combLength, combAngle);
+  parkTruck(COMB_X - combAxis.x * 4.9, combStations[1] + 2.55 - combAxis.z * 4.9, combAngle);
+  parkTruck(COMB_X - combAxis.x * 4.9, combStations[3] + 2.55 - combAxis.z * 4.9, combAngle);
+
+  // 小型 row, backed in against the far wall.
+  const SMALL_X = HALF_X - 1.5;
+  const SMALL_DEPTH = 5;
+  const SMALL_PITCH = 2.6;
+  const smallFrom = -12;
+  const smallCount = 10;
+  for (let i = 0; i <= smallCount; i += 1) {
+    paint(SMALL_X - SMALL_DEPTH * 0.5, smallFrom + i * SMALL_PITCH, SMALL_DEPTH, 0.12);
+    if (i === smallCount) break;
+    const z = smallFrom + (i + 0.5) * SMALL_PITCH;
+    text('小型', SMALL_X - 3.5, z, 2.9, 1.5, -Math.PI * 0.5);
+    if (i % 3 === 1) parkCar(SMALL_X - 2.35, z, 0, i);
+  }
+  paint(SMALL_X - SMALL_DEPTH, smallFrom + smallCount * SMALL_PITCH * 0.5, 0.15, smallCount * SMALL_PITCH);
+  // One wide accessible bay closing the row, blue pad, kept empty.
+  const accessibleZ = smallFrom + smallCount * SMALL_PITCH + 1.9;
+  paint(SMALL_X - SMALL_DEPTH * 0.5, accessibleZ + 1.9, SMALL_DEPTH, 0.12);
+  batch('pad', unitPlane, M.blue, V(SMALL_X - 2.6, 0.03, accessibleZ), V(4.4, 1, 3.2));
+
+  // ------------------------------------------------------------------
+  // 6. The gate back to the expressway, framing the exit marker
+  // ------------------------------------------------------------------
+  // Built at the group's LOCAL origin and the group is then snapped onto the
+  // exit portal: the portal is what the saved build pins (op childIndex 10)
+  // and what refreshExitMarkers derives the exit point from, so the frame has
+  // to follow it rather than assume the wall.
+  for (const x of [-3.4, 3.4]) {
+    boxPiece('PA gate', M.concrete, x, 1.7, 0, 0.8, 3.4, 0.8, { solid: true });
+  }
+  boxPiece('PA gate', M.concrete, 0, 3.6, 0, 8, 0.5, 0.8);
+  boxPiece('PA gate', M.exitGreen, 0, 3.05, -0.45, 5.4, 0.5, 0.1);
+  group('PA gate').position.set(0, 0, pa.exitPortal?.position.z ?? (HALF_Z - 0.5));
+
+  // ------------------------------------------------------------------
+  // 7. Lighting. The saved build hides the four original sodium masts, so the
+  //    lot brings its own: cool white on the kerbs (the expressway keeps the
+  //    sodium), a green wash under the canopy, a warm one on the vending row.
+  // ------------------------------------------------------------------
+  const lights = [];
+  const addLight = (light, x, y, z) => {
+    light.position.set(x, y, z);
+    light.userData.gameSceneLight = true;
+    group('PA lighting').add(light);
+    lights.push(light);
+    return light;
+  };
+  for (const [x, z] of [[-HALF_X + 8, -8], [HALF_X - 8, -8], [-HALF_X + 8, HALF_Z - 8], [HALF_X - 8, HALF_Z - 8]]) {
+    boxPiece('PA lighting', M.dark, x, 4.2, z, 0.28, 8.4, 0.28);
+    boxPiece('PA lighting', M.lampHead, x, 8.4, z, 1.5, 0.22, 0.6);
+    addLight(new THREE.PointLight(0xd8f0e8, 11, 40, 1.6), x, 8, z);
+  }
+  addLight(new THREE.PointLight(0x8fe8bd, 9, 30, 1.8), ARCH_X, 5.4, (archNear + archFar) * 0.5);
+  addLight(new THREE.PointLight(0xffe9c4, 5, 18, 2), flatCanopyX, 3.2, BUILDING_FRONT + 1.6);
+
+  // ------------------------------------------------------------------
+  // 8. Signage
+  // ------------------------------------------------------------------
+  const sign = (groupName, label, width, height, x, y, z, rotationY, background = '#175ba5') => {
+    if (typeof document === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = Math.round(512 * height / width);
+    const context = canvas.getContext('2d');
+    context.fillStyle = background;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = 'rgba(238,243,232,0.95)';
+    context.lineWidth = Math.max(3, canvas.height * 0.04);
+    context.strokeRect(6, 6, canvas.width - 12, canvas.height - 12);
+    const lines = label.split('|');
+    context.fillStyle = '#f0f3e5';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    lines.forEach((line, index) => {
+      const size = canvas.height / (lines.length + 0.6);
+      context.font = `bold ${Math.round(size * (index ? 0.68 : 0.92))}px sans-serif`;
+      context.fillText(line, canvas.width * 0.5, canvas.height * (index + 0.62) / (lines.length + 0.24));
+    });
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = 8;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: texture }));
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotationY;
+    mesh.name = `PA sign ${label}`;
+    group(groupName).add(mesh);
+    return mesh;
+  };
+  sign('PA building', 'トイレ|TOILET', 3.2, 1.35, 0.5, 2.95, BUILDING_FRONT + 0.2, 0);
+  sign('PA building', '辰巳第一PA|TATSUMI No.1 PA', 6.4, 2.2, -BUILDING_W * 0.5 + 5, 4.9, BUILDING_Z - 3.1, Math.PI);
+  sign('PA forecourt', '二輪車|MOTORCYCLE', 1.5, 1.5, KERB_FROM + 1.5, 2.2, KERB_Z + 0.6, 0, '#123a72');
+  boxPiece('PA forecourt', M.concrete, KERB_FROM + 1.5, 0.72, KERB_Z + 0.6, 0.16, 1.45, 0.16);
+
+  // ------------------------------------------------------------------
+  // 9. Finalize: one InstancedMesh per batch, then the groups, appended in a
+  //    fixed order so saved editor indices stay reproducible.
   // ------------------------------------------------------------------
   const matrix = new THREE.Matrix4();
-  const meshes = [];
-  for (const [name, part] of parts) {
-    const tinted = part.records.some((record) => record.color !== null && record.color !== undefined);
-    // Per-instance colour needs a white base, exactly like _instancedChunkMesh.
-    const material = tinted ? part.material.clone() : part.material;
-    if (tinted) material.color.set(0xffffff);
-    const mesh = new THREE.InstancedMesh(part.geometry, material, part.records.length);
-    mesh.name = `Tatsumi PA lot ${name}`;
-    // The lot is the thing that is MEANT to stand inside the clearing
-    // rectangle (see _addChunkMesh / _buildZoneEntrances).
-    mesh.userData.tatsumiClearingSurface = true;
-    part.records.forEach((record, index) => {
-      matrix.compose(record.position, record.quaternion || IDENTITY, record.scale);
+  const identity = new THREE.Quaternion();
+  for (const entry of batches.values()) {
+    const mesh = new THREE.InstancedMesh(entry.geometry, entry.material, entry.records.length);
+    mesh.name = `PA lot ${entry.key}`;
+    entry.records.forEach((record, index) => {
+      matrix.compose(record.position, record.quaternion || identity, record.scale);
       mesh.setMatrixAt(index, matrix);
-      if (tinted) mesh.setColorAt(index, new THREE.Color(record.color ?? part.material.color));
     });
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere?.();
-    map.group.add(mesh);
-    meshes.push(mesh);
+    group('PA paint').add(mesh);
   }
-  for (const sign of signs) map.group.add(sign);
+  const order = ['PA paint', 'PA parking', 'PA building', 'PA vending', 'PA canopy', 'PA forecourt', 'PA gate', 'PA lighting'];
+  for (const name of order) if (groups[name]) pa.root.add(groups[name]);
+  for (const mesh of solids) pa.staticColliders.push(mesh);
 
-  // The lamp lenses and the lit canopy are fixtures like any other: let the
-  // player's paint shader pick them up, the way the bay lamps do.
-  const paintLight = { lampWhite: { range: 26, strength: 0.7 } };
-  for (const u of [-62, -26, 10, 46, 78]) {
-    const point = at(u, R * (halfW - 1.1) - R * 2.28, 9.36);
-    const key = map._chunkKey(point.x, point.z);
-    if (!map._carPaintLightChunks.has(key)) map._carPaintLightChunks.set(key, []);
-    map._carPaintLightChunks.get(key).push({
-      position: point,
-      materialName: 'lampWhite',
-      range: paintLight.lampWhite.range,
-      strength: paintLight.lampWhite.strength,
-      distanceSq: Infinity,
-    });
-  }
-
-  return { meshes: meshes.length, instances: [...parts.values()].reduce((sum, part) => sum + part.records.length, 0) };
+  return { groups, lights, solids: solids.length };
 }
 
-export default buildTatsumiPaLot;
+export default buildTatsumiPaStructure;

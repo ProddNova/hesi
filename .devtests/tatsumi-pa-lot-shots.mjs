@@ -1,15 +1,17 @@
 /**
- * Reference shots of the Tatsumi No.1 PA lot (js/tatsumi-pa-lot.js), framed to
- * match the photographs the layout was built from.
+ * Reference shots of the WALKABLE Tatsumi No.1 PA (js/tatsumi-pa-lot.js), the
+ * scene you arrive in through the lay-by gate. Framed to match the
+ * photographs the layout was built from.
  *
- *  1. lot-plan     — whole strip from above (the aerial).
- *  2. lot-comb     — driver's eye down the 45° large-vehicle comb.
- *  3. lot-building — driver's eye at the arched canopy / vending row.
- *  4. lot-forecourt— the island kerb and railing from the aisle.
- *  5. lot-entry    — arriving through the entry gate.
+ *  1. pa-spawn     — exactly what you see when you get out of the car.
+ *  2. pa-building  — the arched canopy, vending row and glass-block wall.
+ *  3. pa-comb      — the 45° large-vehicle comb with the box trucks.
+ *  4. pa-small     — the 小型 row.
+ *  5. pa-gate      — looking back at the way out.
+ *  6. pa-plan      — the whole lot from above (layout check).
  *
  * Run: node .devtests/tatsumi-pa-lot-shots.mjs [suffix] [--case=name]
- * Writes .devtests/shots/LOT-<case>[-suffix].png
+ * Writes .devtests/shots/PALOT-<case>[-suffix].png
  */
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
@@ -57,89 +59,67 @@ page.on('pageerror', (error) => console.error('pageerror:', String(error)));
 await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => window.shutoko && !!window.shutoko.map, null, { timeout: 60000 });
 await page.tap('#new-game-button');
-await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeout: 8000 });
+await page.waitForFunction(() => window.shutoko.mode === 'garage', null, { timeout: 15000 });
 await page.evaluate(() => window.shutoko.exitGarage());
-await page.waitForFunction(() => window.shutoko.mode === 'driving', null, { timeout: 5000 });
-await page.evaluate(() => {
-  const g = window.shutoko;
-  (g.traffic?.pool || []).forEach((v) => { if (v.mesh) v.mesh.visible = false; });
-});
+await page.waitForFunction(() => window.shutoko.mode === 'driving', null, { timeout: 10000 });
+await page.evaluate(() => window.shutoko.enterTatsumiPa());
+await page.waitForFunction(() => window.shutoko.mode === 'pa', null, { timeout: 15000 });
+await page.waitForTimeout(1200);
 
 console.log(await page.evaluate(() => {
-  let meshes = 0; let instances = 0;
-  const paint = [];
-  window.shutoko.map.group.traverse((o) => {
-    if (!o.name?.startsWith('Tatsumi PA lot')) return;
-    meshes += 1; instances += o.count || 0;
-    if (!o.name.includes('text')) return;
-    const image = o.material.map?.image;
-    // Is the painted glyph tile actually a tile with ink on it?
-    let ink = 0;
-    if (image?.getContext) {
-      const data = image.getContext('2d').getImageData(0, 0, image.width, image.height).data;
-      for (let i = 3; i < data.length; i += 4) if (data[i] > 8) ink += 1;
+  const pa = window.shutoko.tatsumiPa;
+  const parts = [];
+  let ink = '';
+  pa.root.traverse((o) => {
+    if (o.isInstancedMesh && o.name?.startsWith('PA lot')) {
+      parts.push(`${o.name} x${o.count}`);
+      const image = o.material.map?.image;
+      if (image?.getContext) {
+        const data = image.getContext('2d').getImageData(0, 0, image.width, image.height).data;
+        let painted = 0;
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 8) painted += 1;
+        ink += `\n  ${o.name} ${image.width}x${image.height} ink=${painted}`;
+      }
     }
-    paint.push(`${o.name} ${image ? `${image.width}x${image.height}` : 'NO TEXTURE'} ink=${ink}`);
   });
-  return `lot meshes ${meshes}, instances ${instances}\n${paint.join('\n')}`;
+  const groups = pa.root.children.filter((c) => c.name?.startsWith('PA ')).map((c) => c.name);
+  return `groups: ${groups.join(', ')}\ncolliders: ${pa.colliders.length}\nbatches: ${parts.join(', ')}${ink}`;
 }));
 
-const place = async (spec) => {
-  const setup = await page.evaluate((s) => {
-    const g = window.shutoko;
-    const area = (g.map.serviceAreas || []).find((candidate) => candidate.id === 'tatsumi_pa');
-    if (!area) return null;
-    if (!g.debug.noclip) g.setNoclip(true);
-    const heading = Math.atan2(area.tangent.x, area.tangent.z);
-    const position = area.center.clone()
-      .addScaledVector(area.tangent, s.u || 0)
-      .addScaledVector(area.normal, s.v || 0);
-    position.y = area.elevation + (s.up || 0);
-    return { position: { x: position.x, y: position.y, z: position.z }, yaw: heading + (s.yaw || 0) };
-  }, spec);
-  if (!setup) throw new Error('tatsumi area missing');
-  await page.evaluate(({ s, p }) => {
-    const g = window.shutoko;
-    g.debug.position.set(s.position.x, s.position.y, s.position.z);
-    g.debug.yaw = s.yaw;
-    g.debug.pitch = p;
-  }, { s: setup, p: spec.pitch || 0 });
-  await page.waitForTimeout(900);
+const place = async (x, z, yaw, pitch = 0) => {
+  await page.evaluate(({ x: px, z: pz, yaw: py, pitch: pp }) => {
+    const pa = window.shutoko.tatsumiPa;
+    pa.position.set(px, pa.playerHeight, pz);
+    pa.yaw = py;
+    pa.pitch = pp;
+    pa.updateCamera();
+  }, { x, z, yaw, pitch });
+  await page.waitForTimeout(500);
+};
+// updateCamera() runs every frame off pa.position/yaw/pitch, so the camera has
+// to be driven through those, not set directly.
+const overhead = async (y) => {
+  await page.evaluate((height) => {
+    const pa = window.shutoko.tatsumiPa;
+    pa.position.set(0, height, 0.01);
+    pa.yaw = 0;
+    pa.pitch = -1.5;
+    pa.updateCamera();
+  }, y);
+  await page.waitForTimeout(500);
 };
 const shoot = async (name) => {
-  await page.screenshot({ path: join(OUT, `LOT-${name}${SUFFIX}.png`) });
-  console.log(`shot LOT-${name}${SUFFIX}.png`);
+  await page.screenshot({ path: join(OUT, `PALOT-${name}${SUFFIX}.png`) });
+  console.log(`shot PALOT-${name}${SUFFIX}.png`);
 };
 const want = (name) => !ONLY || ONLY === name;
 
-if (want('lot-plan')) {
-  await place({ u: 0, v: 0, up: 150, yaw: Math.PI * 0.5, pitch: -Math.PI * 0.5 + 0.001 });
-  await shoot('lot-plan');
-}
-if (want('lot-comb')) {
-  await place({ u: -50, v: 1, up: 1.5, yaw: 0.5, pitch: -0.06 });
-  await shoot('lot-comb');
-}
-if (want('lot-building')) {
-  await place({ u: 8, v: 0, up: 1.5, yaw: 0.42, pitch: 0.06 });
-  await shoot('lot-building');
-}
-if (want('lot-forecourt')) {
-  await place({ u: 44, v: 1, up: 1.5, yaw: Math.PI - 0.55, pitch: 0.05 });
-  await shoot('lot-forecourt');
-}
-if (want('lot-entry')) {
-  await place({ u: -86, v: 1, up: 1.5, yaw: 0, pitch: -0.02 });
-  await shoot('lot-entry');
-}
-if (want('lot-paint')) {   // close plan over the comb: bay lines + painted 大型
-  await place({ u: -50, v: -6, up: 26, yaw: Math.PI * 0.5, pitch: -Math.PI * 0.5 + 0.001 });
-  await shoot('lot-paint');
-}
-if (want('lot-paint-small')) {
-  await place({ u: -50, v: 8, up: 22, yaw: Math.PI * 0.5, pitch: -Math.PI * 0.5 + 0.001 });
-  await shoot('lot-paint-small');
-}
+if (want('pa-spawn')) { await place(0, 1.2, 0, -0.05); await shoot('pa-spawn'); }
+if (want('pa-building')) { await place(2, -1, 0.15, 0.12); await shoot('pa-building'); }
+if (want('pa-comb')) { await place(-14, 6, -0.9, 0.02); await shoot('pa-comb'); }
+if (want('pa-small')) { await place(18, 4, 1.9, 0.0); await shoot('pa-small'); }
+if (want('pa-gate')) { await place(0, 4, Math.PI, 0.05); await shoot('pa-gate'); }
+if (want('pa-plan')) { await overhead(46); await shoot('pa-plan'); }
 
 await browser.close();
 server.close();

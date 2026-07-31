@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=aa56cc4f53cb';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=48d2ded68c0c';
 
 const V = (x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
 

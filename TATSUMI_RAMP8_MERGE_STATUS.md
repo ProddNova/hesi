@@ -47,6 +47,7 @@ map can actually build:
 | P2 | `J48:merge:wangan_1:ramp_41:end` | legacy | host-lanes | unchanged |
 | P3 | `J13:merge:wangan_0:ramp_8:end` | **live** | **appended** | this work |
 | P4 | `J38:diverge:wangan_0:ramp_30:start` | **live** | **appended** | this model, reversed — see [WANGAN_RAMP30_DIVERGE_STATUS.md](WANGAN_RAMP30_DIVERGE_STATUS.md) |
+| P5 | `J39:merge:ramp_3:ramp_30:end` | **live** | **appended** | this model on a two-lane host (4 → 3 → 2) — see [RAMP30_RAMP3_MERGE_STATUS.md](RAMP30_RAMP3_MERGE_STATUS.md) |
 
 Before this, the live game built **no** progressive records at all. P1/P2 stay
 legacy-bound and byte-identical (`progressive-merge-probe` still reports P2 at

@@ -1,5 +1,19 @@
 # Progressive Merge Checkpoint Status
 
+## Amendment (2026-07-31): P5 runs the merge model on a two-lane host
+
+**P5** (`J39:merge:ramp_3:ramp_30:end`) is P3's model where the host is a
+two-lane ramp: ramp 30 arrives on two lanes appended outside ramp 3's paved
+edge and they are closed one at a time (4 → 3 → 2) before the joined
+carriageway continues as R11 Daiba. The model is now keyed on the branch pair
+rather than on a three-lane host (`APPENDED_PAIR_MERGE_HOST_LANES`), and the
+junction itself is created by `applyContinuationMerges` — OSM records both
+ramps as *continuing* into R11 and nothing between them, so the builder had no
+junction there at all. See
+[RAMP30_RAMP3_MERGE_STATUS.md](RAMP30_RAMP3_MERGE_STATUS.md).
+
+The live flow therefore builds **three** records, pinned `P3, P4, P5`.
+
 ## Amendment (2026-07-31): P4 is P3 run backwards
 
 **P4** (`J38:diverge:wangan_0:ramp_30:start`) is the inverse of P3 on the same

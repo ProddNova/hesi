@@ -1,6 +1,10 @@
 import * as THREE from 'three';
-import { BARRIER_MATERIALS, BARRIER_STYLES } from './road-barrier-styles.js?v=aa56cc4f53cb';
-import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=aa56cc4f53cb';
+import { BARRIER_MATERIALS, BARRIER_STYLES } from './road-barrier-styles.js?v=48d2ded68c0c';
+import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=48d2ded68c0c';
+// The lot's real dressing — building, arched canopy, vending, stall rows —
+// built from the reference photographs of 辰巳第一PA. Its own module because it
+// is APPENDED after every editor-addressable child (see the note in build()).
+import { buildTatsumiPaStructure } from './tatsumi-pa-lot.js?v=48d2ded68c0c';
 
 // Tatsumi No.1 PA — the walkable zone behind the lay-by gate.
 //
@@ -17,8 +21,10 @@ import { createHologramMarker, animateHologramMarker, hologramBaseLift } from '.
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 
 // Lot footprint in metres. The real strip is a ~190 m wedge; this is the
-// walkable pocket behind the gate, not the whole deck.
-export const PA_LOT = Object.freeze({ width: 46, depth: 30 });
+// walkable pocket behind the gate, not the whole deck. Grown from 46x30 once
+// the lot got its real dressing: the service building and its arched canopy
+// alone are ~30 m across, and the comb needs depth to lean into.
+export const PA_LOT = Object.freeze({ width: 64, depth: 44 });
 
 export class TatsumiPaSystem {
   constructor(scene, camera, canvas, callbacks = {}) {
@@ -179,6 +185,12 @@ export class TatsumiPaSystem {
     this.root.add(this.exitMarkers);
     this.beacons.push(this.exitMarkers);
 
+    // The lot itself, appended LAST — after every child the saved build
+    // addresses by index (data/editor/tatsumi-pa-build.json hides 5..10), so
+    // nothing above can move. Solid pieces register themselves as static
+    // colliders, so the refresh below picks them up.
+    this.structure = buildTatsumiPaStructure(this, PA_LOT);
+
     this.refreshColliders();
   }
 
@@ -233,6 +245,10 @@ export class TatsumiPaSystem {
   refreshExitMarkers() {
     const portal = this.exitPortal?.position || V(0, 0, PA_LOT.depth / 2 - 0.5);
     this.exitPoint = V(portal.x, 0, portal.z - 1.6);
+    // The gate frame stands on the portal wherever the saved build put it —
+    // unless the editor has moved the frame itself, which wins.
+    const gate = this.structure?.groups?.['PA gate'];
+    if (gate && !gate.userData.editorBuildTransformApplied) gate.position.set(portal.x, 0, portal.z);
     if (this.exitMarkers && !this.exitMarkers.userData.editorBuildTransformApplied) {
       // The disc's base stands hologramBaseLift() above its anchor, so a
       // code-placed marker drops by that much to touch the asphalt.

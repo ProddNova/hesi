@@ -94,16 +94,18 @@ export const PROGRESSIVE_MERGE_PROTOTYPES = Object.freeze([
     // junction itself is created by `applyContinuationMerges` (js/map.js) —
     // OSM records both ramps as continuing into R11 and nothing between them.
     branchAnchor: 'appended',
-    // The parallel run here is ~200 m, not the Wangan's 400: the default blend
-    // would derive its alignment from the host over more than a third of the
-    // whole ramp and drag its approach tens of metres off the OSM curve.
+    // Ramp 30 closes on ramp 3 at ~27deg, so it needs a longer run onto the
+    // appended slots than the generic formula's 190 m gives it: at 190 m it is
+    // still turning where the two decks meet, their cross-slopes disagree by up
+    // to 0.85 m across the section, and the classifier reads a deck-ownership
+    // break (measured: 100 m -> 8 break rows, 150 -> 4, 190 -> 2, 240 -> 0).
     branchBlendLength: 240,
     // Ramp 30's tail is cut where the parallel run starts, so its data heights
     // stop describing anything at the glue line: ramp 3 is banked there and its
     // deck 7.10 m out is 0.4-0.8 m above its centreline. The appended slots are
     // that deck, so the tail rides it.
     branchDeckFollowsHost: true,
-    pin: Object.freeze({ x: 1170.3, y: 27.2, z: -5298.9 }),
+    pin: Object.freeze({ x: 1170.3, y: 51.45, z: -5298.9 }),
   }),
 ]);
 

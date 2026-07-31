@@ -1,35 +1,35 @@
 import * as THREE from 'three';
-import * as MapModule from './map.js?v=aa56cc4f53cb';
-import * as PhysicsModule from './physics.js?v=aa56cc4f53cb';
-import * as TrafficModule from './traffic.js?v=aa56cc4f53cb';
-import * as Data from './data.js?v=aa56cc4f53cb';
-import * as SaveModule from './save.js?v=aa56cc4f53cb';
-import * as AudioModule from './audio.js?v=aa56cc4f53cb';
-import { GarageSystem } from './garage.js?v=aa56cc4f53cb';
-import { TatsumiPaSystem } from './tatsumi-pa.js?v=aa56cc4f53cb';
-import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=aa56cc4f53cb';
+import * as MapModule from './map.js?v=48d2ded68c0c';
+import * as PhysicsModule from './physics.js?v=48d2ded68c0c';
+import * as TrafficModule from './traffic.js?v=48d2ded68c0c';
+import * as Data from './data.js?v=48d2ded68c0c';
+import * as SaveModule from './save.js?v=48d2ded68c0c';
+import * as AudioModule from './audio.js?v=48d2ded68c0c';
+import { GarageSystem } from './garage.js?v=48d2ded68c0c';
+import { TatsumiPaSystem } from './tatsumi-pa.js?v=48d2ded68c0c';
+import { applyEditorBuilds, createRuntimeAssetPartResolver } from './editor-map-patch.js?v=48d2ded68c0c';
 // Same specifier as editor-map-patch.js so both share one module instance
 // (and one texture cache/budget); a ?v= query here would fork the module.
-import { blankCustomAssetsDocument, buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget, MAX_TEXTURE_SIZE } from './custom-assets.js?v=aa56cc4f53cb';
+import { blankCustomAssetsDocument, buildCustomAssetGroup, fetchCustomAssetsDocument, optimizeStaticCustomAssetGroup, setTextureSizeBudget, MAX_TEXTURE_SIZE } from './custom-assets.js?v=48d2ded68c0c';
 import {
   carHeadlightSettings,
   carHitboxSettings,
   carModelEntry,
   carModelTarget,
   carPaintSettings,
-} from './car-models.js?v=aa56cc4f53cb';
-import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=aa56cc4f53cb';
-import { detectHandheld } from './device-profile.js?v=aa56cc4f53cb';
-import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=aa56cc4f53cb';
-import { PS2_FILTER_DEFAULTS, PS2_FILTER_FIELDS, PS2_FILTER_PRESETS, PS2_DITHER_PATTERNS, normalizePS2Filter, clampFilterValue, formatFilterValue } from './ps2-filter.js?v=aa56cc4f53cb';
-import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=aa56cc4f53cb';
-import { GameUI } from './ui.js?v=aa56cc4f53cb';
-import { DeveloperMap } from './dev-map.js?v=aa56cc4f53cb';
-import { DebugStats } from './debug-stats.js?v=aa56cc4f53cb';
-import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=aa56cc4f53cb';
-import { cameraTuningFromDocument, normalizeCameraTuning, DEFAULT_PICTURE, normalizePicture, pictureFromDocument, pictureSignature, setDocumentPicture } from './playground-config.js?v=aa56cc4f53cb';
-import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=aa56cc4f53cb';
-import { ReplaySystem } from './replay.js?v=aa56cc4f53cb';
+} from './car-models.js?v=48d2ded68c0c';
+import { applyCarPaint, updateCarPaintLights } from './car-paint.js?v=48d2ded68c0c';
+import { detectHandheld } from './device-profile.js?v=48d2ded68c0c';
+import { VHSEffect, MAX_SPEED_BLUR, MAX_VHS_AMOUNT, MAX_MOTION_BLUR_LEVEL } from './vhs-effect.js?v=48d2ded68c0c';
+import { PS2_FILTER_DEFAULTS, PS2_FILTER_FIELDS, PS2_FILTER_PRESETS, PS2_DITHER_PATTERNS, normalizePS2Filter, clampFilterValue, formatFilterValue } from './ps2-filter.js?v=48d2ded68c0c';
+import { createSoftSpotLight, DEFAULT_LIGHTING } from './lighting-config.js?v=48d2ded68c0c';
+import { GameUI } from './ui.js?v=48d2ded68c0c';
+import { DeveloperMap } from './dev-map.js?v=48d2ded68c0c';
+import { DebugStats } from './debug-stats.js?v=48d2ded68c0c';
+import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=48d2ded68c0c';
+import { cameraTuningFromDocument, normalizeCameraTuning, DEFAULT_PICTURE, normalizePicture, pictureFromDocument, pictureSignature, setDocumentPicture } from './playground-config.js?v=48d2ded68c0c';
+import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=48d2ded68c0c';
+import { ReplaySystem } from './replay.js?v=48d2ded68c0c';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
