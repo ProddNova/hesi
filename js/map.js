@@ -19,10 +19,14 @@ import {
   flattenBarrierSpans,
 } from './road-barrier-styles.js?v=aa56cc4f53cb';
 import { BUILDING_TYPES } from './building-types.js?v=aa56cc4f53cb';
-import { buildProgressiveTransitions } from './progressive-merge.js?v=aa56cc4f53cb';
+import { buildProgressiveTransitions, isAppendedPairMerge } from './progressive-merge.js?v=aa56cc4f53cb';
 import { progressiveMergePrototypesForFlow } from './progressive-merge-prototypes.js?v=aa56cc4f53cb';
 // The shared interaction-point look (garage, PA lot, PA road gate).
 import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=aa56cc4f53cb';
+// The Tatsumi No.1 PA lot itself (stalls, building, arched canopy, lot lamps).
+// Its own module because it builds AFTER _finalizeChunks, straight into the
+// group, outside every index-sensitive chunk bucket — see the file header.
+import { buildTatsumiPaLot } from './tatsumi-pa-lot.js?v=aa56cc4f53cb';
 
 /**
  * Shutoko Nights world module — the real Shuto Expressway, rebuilt from
@@ -93,7 +97,7 @@ const ZONE_DASH_PERIOD = 6;
 // Host chainage past a merge's openingStart at which the transition's own lane
 // divider has converged onto the branch's centreline. Until then the branch
 // keeps painting its own (see mouthPaintLat).
-const PROGRESSIVE_DIVIDER_HANDOFF = 16;
+export const PROGRESSIVE_DIVIDER_HANDOFF = 16;
 // ------------------------------------------------------------------
 // Emergency lay-bys (非常駐車帯 / piazzole di sosta d'emergenza)
 //
@@ -779,6 +783,114 @@ function reverseNetworkData(data) {
   };
 }
 
+/**
+ * Junctions the extractor recorded as two carriageways "continuing" into the
+ * same node when they physically MERGE into one another first.
+ *
+ * `ramp_30` (Wangan -> R11 Daiba) and `ramp_3` (the opposite Wangan
+ * carriageway's exit) both run down to the head of `r11_1`. OSM gives each of
+ * them a continuation edge onto R11 and nothing between the two, so the
+ * builder had no junction there at all: no mouth, no marking opening, no rail
+ * handling — just two 9.00 m decks converging until they overlapped by 6.6 m
+ * of coplanar asphalt at the shared node. What the two roads actually do is
+ * merge: ramp 30 arrives alongside ramp 3 and joins it, and the joined
+ * carriageway continues as R11.
+ *
+ * The rewrite is measured, not authored: the branch is cut at the first data
+ * point where it comes within `gap` of the host centreline (the head of the
+ * parallel run — everything beyond it is the overlap), and the continuation
+ * edge is replaced by a merge edge onto the host at that point. Endpoint
+ * anchoring, the mouth system and the progressive model then treat it exactly
+ * like any other merge.
+ */
+const CONTINUATION_MERGES = Object.freeze([
+  Object.freeze({ branch: 'ramp_30', host: 'ramp_3', gap: 12.5 }),
+]);
+
+function planarDistanceToPolyline(point, polyline) {
+  let best = Infinity;
+  for (let i = 1; i < polyline.length; i += 1) {
+    const a = polyline[i - 1];
+    const b = polyline[i];
+    const vx = b[0] - a[0];
+    const vz = b[2] - a[2];
+    const lengthSquared = vx * vx + vz * vz;
+    const t = lengthSquared > 0
+      ? clamp(((point[0] - a[0]) * vx + (point[2] - a[2]) * vz) / lengthSquared, 0, 1)
+      : 0;
+    best = Math.min(best, Math.hypot(a[0] + t * vx - point[0], a[2] + t * vz - point[2]));
+  }
+  return best;
+}
+
+function polylineArcLength(points) {
+  let arc = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    arc += Math.hypot(points[i][0] - points[i - 1][0], points[i][2] - points[i - 1][2]);
+  }
+  return arc;
+}
+
+/** Distance along `polyline` of the point nearest `point` (planar). */
+function polylineDistanceAt(point, polyline) {
+  let arc = 0;
+  let best = { distance: 0, offset: Infinity };
+  for (let i = 1; i < polyline.length; i += 1) {
+    const a = polyline[i - 1];
+    const b = polyline[i];
+    const vx = b[0] - a[0];
+    const vz = b[2] - a[2];
+    const segment = Math.hypot(vx, vz);
+    const lengthSquared = vx * vx + vz * vz;
+    const t = lengthSquared > 0
+      ? clamp(((point[0] - a[0]) * vx + (point[2] - a[2]) * vz) / lengthSquared, 0, 1)
+      : 0;
+    const offset = Math.hypot(a[0] + t * vx - point[0], a[2] + t * vz - point[2]);
+    if (offset < best.offset) best = { distance: arc + t * segment, offset };
+    arc += segment;
+  }
+  return best.distance;
+}
+
+function applyContinuationMerges(data) {
+  const routes = [...data.routes];
+  let edges = [...(data.edges || [])];
+  for (const spec of CONTINUATION_MERGES) {
+    const branchIndex = routes.findIndex((route) => route.id === spec.branch);
+    const host = routes.find((route) => route.id === spec.host);
+    const branch = routes[branchIndex];
+    if (!branch || !host || branch.closed || host.closed) continue;
+    // Head of the parallel run: the first point close enough to the host that
+    // the two paved edges are about to meet. Everything past it is the
+    // overlap the merge replaces.
+    const cut = branch.points.findIndex((point) => planarDistanceToPolyline(point, host.points) <= spec.gap);
+    if (cut < 2 || cut >= branch.points.length - 1) {
+      console.warn('Shutoko map: continuation merge not applied (no parallel run):', spec.branch);
+      continue;
+    }
+    const points = branch.points.slice(0, cut + 1);
+    const length = polylineArcLength(points);
+    const clip = (zones) => (zones || [])
+      .map((zone) => ({ ...zone, start: Math.min(zone.start, length), end: Math.min(zone.end, length) }))
+      .filter((zone) => zone.end - zone.start > 1);
+    routes[branchIndex] = {
+      ...branch, points, length, tunnels: clip(branch.tunnels), bridges: clip(branch.bridges),
+    };
+    const terminal = points[points.length - 1];
+    // The continuation the branch no longer makes: its traffic reaches R11
+    // through the host now.
+    edges = edges.filter((edge) => !(edge.from.route === spec.branch
+      && edge.from.distance > branch.length - 50));
+    edges.push({
+      from: { route: spec.branch, distance: length },
+      to: { route: spec.host, distance: polylineDistanceAt(terminal, host.points) },
+      kind: 'merge',
+      point: [terminal[0], terminal[2]],
+    });
+  }
+  return { ...data, routes, edges };
+}
+
 export class HighwayMap {
   constructor(sceneOrOptions = null, maybeOptions = {}) {
     const isScene = sceneOrOptions && sceneOrOptions.isScene;
@@ -1421,7 +1533,15 @@ export class HighwayMap {
   _defineNetwork() {
     // Left-hand (Japanese) traffic is the default; options.legacyFlow keeps
     // the original mirrored right-hand flow for comparison probes.
-    const data = this.options.legacyFlow === true ? ROUTE_DATA : reverseNetworkData(ROUTE_DATA);
+    // `progressiveMerges: false` is the before/after comparison build, so it
+    // keeps the raw extractor topology too — the junction rewrite exists to
+    // carry a progressive record, and without one the branch would be glued
+    // onto an equal-width host's own lanes, i.e. onto its centreline.
+    const data = this.options.legacyFlow === true
+      ? ROUTE_DATA
+      : (this.options.progressiveMerges === false
+        ? reverseNetworkData(ROUTE_DATA)
+        : applyContinuationMerges(reverseNetworkData(ROUTE_DATA)));
     this.networkMeta = data.meta;
     this.groups = new Map((data.groups || []).map((group) => [group.id, group]));
     this._terrainSlabs = data.terrain || [];
@@ -1592,6 +1712,19 @@ export class HighwayMap {
       });
       edge.side = divergeInfo.side;
       if (startEdge) startEdge._handled = true;
+      if (divergeInfo.anchoredSpan) {
+        // Same lock as the merge tail, at the other end: this stretch is derived
+        // from the host carriageway, so a control point dragged inside it either
+        // does nothing or silently deforms the diverge treatment built on it.
+        const terminal = route.points[0];
+        route.protectedSegments = [...(route.protectedSegments || []), {
+          id: `${route.id}:diverge-head`,
+          span: divergeInfo.anchoredSpan,
+          anchor: { x: terminal.x, y: terminal.y, z: terminal.z },
+          label: `${route.name || route.id} diverge head`,
+          reason: `the diverge alignment off ${divergeInfo.hostId} is derived from the host carriageway`,
+        }];
+      }
     }
     if (mergeInfo) {
       const host = this.routes.get(mergeInfo.hostId);
@@ -1669,14 +1802,27 @@ export class HighwayMap {
     // model exists to replace. Such a branch instead arrives on lanes
     // APPENDED outside the host's paved edge, runs alongside, and is closed by
     // the transition's own downstream taper.
-    const appendedCarriageway = this._progressiveAppendedMerge(routeData.id, host.id, which);
+    const appendedPrototype = this._progressiveAppendedBranch(routeData.id, host.id, which);
+    const appendedCarriageway = !!appendedPrototype;
     const lateral = appendedCarriageway
       ? side * (host.lanes + branchLanes) * hostLaneWidth * 0.5
       : side * Math.max(0, host.lanes - branchLanes) * hostLaneWidth * 0.5;
 
+    // A branch whose tail is CUT from the middle of its own grade (the
+    // continuation merges: the extractor ran it all the way to the shared node
+    // and its data heights were only ever validated there) has no height of its
+    // own at the glue line. Its appended lanes ARE the host's deck extended
+    // outwards, so they must sit on that deck — including its superelevation,
+    // which on a banked host is 0.4-0.8 m at 7 m out and is exactly the offset
+    // that stops the mouth clip from seeing one surface. A branch whose data
+    // endpoint IS the mouth keeps the data heights it was measured with.
+    const followsHostDeck = appendedPrototype?.branchDeckFollowsHost === true;
     const edgePoint = (distance) => {
-      const sample = this._sampleCenter(host, this._normalizeDistance(host, distance), 1);
-      return sample.position.clone().addScaledVector(sample.normal, lateral);
+      const station = this._normalizeDistance(host, distance);
+      const sample = this._sampleCenter(host, station, 1);
+      const point = sample.position.clone().addScaledVector(sample.normal, lateral);
+      if (followsHostDeck) point.y += Math.tan(this._bankAt(host, station)) * lateral;
+      return point;
     };
 
     // BLENDED TAPER: over the first `blendLength` of the branch, each point
@@ -1701,8 +1847,15 @@ export class HighwayMap {
     // keeps raw geometry.
     let polylineArc = 0;
     for (let i = 1; i < ordered.length; i += 1) polylineArc += ordered[i].distanceTo(ordered[i - 1]);
+    // A progressive record may declare its own blend: the generic formula is
+    // sized for a mainline merge, and a junction whose parallel run is half
+    // that long would otherwise derive its branch's alignment from the host
+    // far past the stretch the two carriageways actually share.
     const blendLength = Math.min(
-      Math.max(anchorSpan * 2, Math.min(anchorSpan > 31 ? speedNeed : 0, lengthCap, 240)),
+      appendedPrototype?.branchBlendLength ?? Math.max(
+        anchorSpan * 2,
+        Math.min(anchorSpan > 31 ? speedNeed : 0, lengthCap, 240),
+      ),
       polylineArc * 0.8,
     );
     const alongSign = which === 'start' ? 1 : -1;
@@ -1718,11 +1871,14 @@ export class HighwayMap {
       const station = hostDistanceAtMouth + alongSign * travelled;
       const hostEdge = edgePoint(station);
       const rawY = ordered[i].y;
+      const deckY = hostEdge.y;
       const mixed = hostEdge.lerp(ordered[i], smooth);
       // PLAN blend only: the extractor already holds the branch's heights
       // to the host's deck profile through the taper — data heights are
-      // the validated truth.
-      mixed.y = rawY;
+      // the validated truth. A cut tail has no such truth at the glue line
+      // (see `followsHostDeck`): its height leaves the host's banked deck on
+      // the same weight its plan does, so both are tangent-continuous.
+      mixed.y = followsHostDeck ? deckY + (rawY - deckY) * smooth : rawY;
       blended.push(mixed);
     }
     const rest = ordered.slice(restFrom);
@@ -1741,6 +1897,7 @@ export class HighwayMap {
         hostId: host.id,
         hostDistance: this._normalizeDistance(host, hostDistanceAtMouth - 30),
         side,
+        anchoredSpan: appendedCarriageway ? blendLength + 30 : null,
       };
     }
     return {
@@ -1757,22 +1914,26 @@ export class HighwayMap {
   }
 
   /**
-   * True when this endpoint belongs to an allow-listed progressive merge that
-   * declares `branchAnchor: 'appended'` and is actually going to be built.
+   * The allow-listed progressive prototype this endpoint belongs to, when it
+   * declares `branchAnchor: 'appended'` and is actually going to be built
+   * (null otherwise — the caller treats it as a boolean).
    * A record without that declaration keeps the legacy host-lane glue it was
    * engineered and measured against. The check runs during route
    * registration, long before `buildProgressiveTransitions`, so it reads the
    * same flow-selected allow-list rather than a transition record; the
    * `progressiveMerges: false` comparison build keeps the legacy glue line.
+   *
+   * A diverge is anchored the same way for the same reason, read backwards:
+   * its head leaves ON the appended slots the host opened for it instead of
+   * cutting out of the host's own outer lanes.
    */
-  _progressiveAppendedMerge(branchRouteId, hostRouteId, which) {
-    if (this.options.progressiveMerges === false) return false;
+  _progressiveAppendedBranch(branchRouteId, hostRouteId, which) {
+    if (this.options.progressiveMerges === false) return null;
     this._progressivePrototypes ??= progressiveMergePrototypesForFlow(this.options.legacyFlow === true);
-    return this._progressivePrototypes.some((prototype) => prototype.branchAnchor === 'appended'
-      && prototype.type === 'merge'
+    return this._progressivePrototypes.find((prototype) => prototype.branchAnchor === 'appended'
       && prototype.which === which
       && prototype.hostRouteId === hostRouteId
-      && prototype.branchRouteId === branchRouteId);
+      && prototype.branchRouteId === branchRouteId) || null;
   }
 
   /** Point at arc distance along a raw point list (negative = from the end). */
@@ -4262,9 +4423,15 @@ export class HighwayMap {
     const host = mouth.host;
     const half = frame.half;
     const completedMerge = (route._progressiveTransitionsAsBranch || []).find((transition) => {
-      if (transition.topology !== '2+3-merge') return false;
       const hostS = transition.hostAtBranch(frame.distance);
-      return hostS !== null && hostS >= transition.fiveLaneStart - 1e-4;
+      if (hostS === null) return false;
+      if (isAppendedPairMerge(transition)) return hostS >= transition.fiveLaneStart - 1e-4;
+      // The 3+2 diverge is the same statement read backwards: while the exiting
+      // pair is still ON the appended slots the progressive host envelope is the
+      // sole pavement owner, so the ramp's own ribbon would be a duplicate under
+      // the five-lane deck.
+      if (transition.topology === '3+2-diverge') return hostS <= transition.fiveLaneEnd + 1e-4;
+      return false;
     });
     if (completedMerge) {
       // At FULL 5 the ramp's real lane centres have reached the two appended
@@ -4896,11 +5063,17 @@ export class HighwayMap {
         // true, so collision follows the same visible surface union instead
         // of putting an invisible wall through the source lane centre.
         if (hostS !== null && phase === 'approach' && zone.progressive.type === 'merge') return false;
-        if (hostS !== null && zone.progressive.topology === '2+3-merge'
+        if (hostS !== null && isAppendedPairMerge(zone.progressive)
           && hostS >= zone.progressive.fiveLaneStart - 1e-4) {
           // Visible ramp geometry terminates at the same full-five handoff.
           // Collision must not resurrect that source corridor as the host
           // envelope subsequently absorbs its two temporary lanes.
+          return true;
+        }
+        if (hostS !== null && zone.progressive.topology === '3+2-diverge'
+          && hostS <= zone.progressive.fiveLaneEnd + 1e-4) {
+          // Mirror: the ramp's visible geometry only begins where it leaves the
+          // appended slots. Upstream of that the five-lane host deck carries it.
           return true;
         }
         if (hostS !== null) {
@@ -6859,6 +7032,9 @@ export class HighwayMap {
     this._buildTatsumiUnderdeckPools();
     this._buildTatsumiBayLamps();
     this._buildMergeRoadMarkings();
+    // The PA lot last of all: it needs _unitGeometries, and building it here
+    // means it cannot touch a single instance index the editor saved against.
+    buildTatsumiPaLot(this);
   }
 
   _buildEnvironment() {
@@ -8698,7 +8874,12 @@ export class HighwayMap {
                 && frame.distance <= zone.progressive.markingSettleEnd + 0.01;
               const transitionOwns = zone.progressive.type === 'merge'
                 ? phase && phase !== 'approach'
-                : (!!phase || ownsEdgeSettle);
+                : (zone.progressive.topology === '3+2-diverge'
+                  // Mirror of the merge's approach release: once the ramp has
+                  // left the appended slots it is an ordinary carriageway again
+                  // and paints its own lines.
+                  ? (!!phase && frame.distance <= zone.progressive.transferCompleteBranch + 0.01)
+                  : (!!phase || ownsEdgeSettle));
               if (transitionOwns) {
                 return {
                   lateral: null,
@@ -8790,7 +8971,10 @@ export class HighwayMap {
       }
       for (const transition of route._progressiveTransitionsAsHost || []) {
         if (transition.sideSign !== side) continue;
-        suppress.push(...this._zoneIntervalPieces(route, transition.hostInterval));
+        suppress.push(...this._zoneIntervalPieces(
+          route,
+          transition.hostEdgeSuppressInterval || transition.hostInterval,
+        ));
       }
       suppress.sort((a, b) => a[0] - b[0]);
       const kept = [];
@@ -8839,14 +9023,23 @@ export class HighwayMap {
       this._markingOwner = `progressive:${transition.id}`;
       if (transition.type === 'diverge') {
         const path = (id) => transition.markingPaths.find((candidate) => candidate.id === id);
+        // Each temporary boundary is painted only while it is a distinct line:
+        // a staged widening keeps its second divider coincident with the outer
+        // edge until the lane it separates actually opens.
+        const outerSpan = transition.outerMarkingInterval
+          ?? [transition.approachStart, transition.transferComplete];
+        const innerSpan = transition.innerMarkingInterval
+          ?? [transition.openingStart, transition.transferComplete];
+        const dividerSpan = transition.dividerMarkingInterval
+          ?? [transition.openingStart, transition.transferComplete];
         this._markingTag = 'progressiveOuterEdge';
         this._markingBoundary = `progressive-outer-edge:${transition.id}`;
         this._paintProgressivePathStrip(
           route,
           path('aux-outer-marking'),
           'marking',
-          transition.approachStart,
-          transition.transferComplete,
+          outerSpan[0],
+          outerSpan[1],
           0.16,
         );
         this._markingTag = 'progressiveAuxBoundary';
@@ -8859,8 +9052,8 @@ export class HighwayMap {
           ZONE_DASH_PERIOD,
           ZONE_DASH_LENGTH,
           6,
-          transition.openingStart,
-          transition.transferComplete,
+          innerSpan[0],
+          innerSpan[1],
         );
         this._markingTag = 'progressiveExitDivider';
         this._markingBoundary = `progressive-exit-divider:${transition.id}`;
@@ -8889,8 +9082,8 @@ export class HighwayMap {
           dividerPeriod,
           dividerLength,
           dividerPhase,
-          transition.openingStart,
-          transition.transferComplete,
+          dividerSpan[0],
+          dividerSpan[1],
         );
         continue;
       }
@@ -11352,7 +11545,12 @@ export class HighwayMap {
             candidate.transition.temporaryLaneCount,
             ...candidate.transition.absorptionSteps.map((step) => step.toLaneCount),
           ]
-          : null,
+          : (candidate.active && candidate.transition.openingSteps?.length
+            ? [
+              candidate.transition.openingSteps[0].fromLaneCount,
+              ...candidate.transition.openingSteps.map((step) => step.toLaneCount),
+            ]
+            : null),
         status: candidate.active ? candidate.transition.automationStatus : `deferred-${candidate.classification.category}`,
         teleportRouteId: candidate.hostRouteId,
         distance: candidate.distance,

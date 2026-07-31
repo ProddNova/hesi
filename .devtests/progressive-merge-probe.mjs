@@ -6,8 +6,9 @@
  *   node .devtests/progressive-merge-probe.mjs --legacy   # records disabled
  */
 import * as THREE from 'three';
-import { HighwayMap } from '../js/map.js';
+import { HighwayMap, PROGRESSIVE_DIVIDER_HANDOFF } from '../js/map.js';
 import { progressiveMergePrototypesForFlow } from '../js/progressive-merge-prototypes.js';
+import { isAppendedPairMerge } from '../js/progressive-merge.js';
 
 const LEGACY = process.argv.includes('--legacy');
 // The prototype set is flow-bound: P1/P2 exist only in the original network
@@ -123,8 +124,31 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     const last = transition.pavedEnvelope.at(-1);
     if (first.extraWidth > 0.002) fail(id, 'transition does not begin at stable host width');
     if (transition.type === 'diverge') {
-      if (last.extraWidth < transition.auxiliaryTotalWidth) {
+      // The host may not withdraw its widening before the branch owns the exit.
+      // For a diverge that transfers at the end of its sampled span that is the
+      // final row; for one which hands over earlier (an appended-anchor exit)
+      // the same statement is evaluated at the measured handoff instead. The
+      // union is then checked directly: the branch pavement must stay in
+      // contact with the retreating host edge for the whole transfer.
+      const ownershipStation = transition.divergeHandoffStart ?? transition.transitionEnd;
+      const heldRows = transition.pavedEnvelope.filter((row) => (
+        row.hostS >= transition.parallelStart - 0.01 && row.hostS <= ownershipStation + 0.01
+      ));
+      const heldWidth = heldRows.length
+        ? Math.min(...heldRows.map((row) => row.extraWidth))
+        : 0;
+      if (heldWidth < transition.auxiliaryTotalWidth - 0.02) {
         fail(id, 'host envelope closes before branch ownership');
+      }
+      if (transition.divergeHandoffComplete !== null
+        && transition.divergeHandoffComplete !== undefined) {
+        for (const row of transition.sourceZone.samples) {
+          if (row.hU < ownershipStation - 0.01 || row.hU > transition.divergeHandoffComplete + 0.01) continue;
+          const envelope = transition.envelopeAt(row.hU);
+          if (row.innerEdge > row.hostHalf + envelope.extra + 0.05) {
+            fail(id, `paved union opens a hole at ${row.hU.toFixed(1)}`);
+          }
+        }
       }
     } else if (last.extraWidth > 0.002) fail(id, 'merge does not finalize at stable host width');
 
@@ -138,12 +162,15 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         || transition.auxiliaryLaneCount !== 2)) {
       fail(id, 'P4 is not an explicit temporary 2+2 diverge');
     }
-    if (transition.topology === '2+3-merge'
-      && (transition.temporaryLaneCount !== 5
+    // The appended-pair merge is a shape, not a lane count: the branch's two
+    // lanes are appended outside the host's and closed one at a time, on a
+    // three-lane host (P2/P3, 5 -> 4 -> 3) or a two-lane one (P5, 4 -> 3 -> 2).
+    if (isAppendedPairMerge(transition)
+      && (transition.temporaryLaneCount !== transition.hostLaneCount + 2
         || transition.auxiliaryLaneCount !== 2
-        || transition.finalLaneCount !== 3
+        || transition.finalLaneCount !== transition.hostLaneCount
         || transition.absorptionSteps.length !== 2)) {
-      fail(id, 'not an explicit 5 -> 4 -> 3 merge');
+      fail(id, `not an explicit ${transition.hostLaneCount + 2} -> ${transition.hostLaneCount + 1} -> ${transition.hostLaneCount} merge`);
     }
     if (id === P2_ID && transition.topology !== '2+3-merge') fail(id, 'P2 lost its 2+3 topology');
     const expectedFinalLanes = transition.type === 'diverge'
@@ -186,7 +213,7 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         ? [transition.hostRouteId, transition.branchRouteId]
         // A 2+3 merge's outer temporary lane is still the branch's own deck
         // through the opening and becomes host-owned at the handoff.
-        : (transition.topology === '2+3-merge'
+        : (isAppendedPairMerge(transition)
           ? [transition.branchRouteId, transition.hostRouteId]
           : [transition.hostRouteId]);
       if (!info || !allowedRouteIds.includes(info.routeId)) {
@@ -209,7 +236,7 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     }
     const expectedOwnership = transition.type === 'diverge'
       ? [transition.hostRouteId, transition.branchRouteId]
-      : (transition.topology === '2+3-merge'
+      : (isAppendedPairMerge(transition)
         ? [transition.branchRouteId, transition.hostRouteId]
         : [transition.hostRouteId]);
     if (routeSequence.join(',') !== expectedOwnership.join(',')) {
@@ -268,7 +295,27 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         - transition.auxOuterMarkingLateralAt(transition.openingStart)) > 0.01) {
         fail(id, 'solid-to-dash lateral step');
       }
-      const branchFrame = map._frameAt(transition.sourceZone.branch, transition.transferCompleteBranch);
+      // Each transition-owned line is graded where it actually hands the
+      // boundary back, which is the end of its own paint span. For a diverge
+      // that owns every boundary to the end of its sampled span those spans all
+      // terminate at the last station, so this is the same test.
+      const handoverPoint = (pathId, span) => {
+        const points = transition.markingPaths.find((path) => path.id === pathId)?.points;
+        if (!points?.length) return null;
+        const station = span?.[1] ?? points.at(-1).hostS;
+        let best = points[0];
+        for (const point of points) {
+          if (Math.abs(point.hostS - station) < Math.abs(best.hostS - station)) best = point;
+        }
+        return Math.abs(best.hostS - station) > 0.5 ? null : best.position;
+      };
+      const branchFrameAtHost = (span) => map._frameAt(
+        transition.sourceZone.branch,
+        span?.[1] === undefined
+          ? transition.transferCompleteBranch
+          : (transition.branchAtHost(span[1]) ?? transition.transferCompleteBranch),
+      );
+      const branchFrame = branchFrameAtHost(transition.innerMarkingInterval);
       const feedLaneBoundary = map._deckPoint(
         branchFrame,
         map._laneOffset(transition.sourceZone.branch, transition.branchFeedLane, 1)
@@ -278,8 +325,7 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
           ),
         0.055,
       );
-      const innerMarkingEnd = transition.markingPaths
-        .find((path) => path.id === 'aux-inner-marking')?.points.at(-1)?.position;
+      const innerMarkingEnd = handoverPoint('aux-inner-marking', transition.innerMarkingInterval);
       if (!innerMarkingEnd || worldPoint(innerMarkingEnd).distanceTo(feedLaneBoundary) > 0.1) {
         fail(id, 'inner marking misses the real branch edge-line target');
       }
@@ -289,19 +335,19 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         - standardSettledEdge) > 0.01) {
         fail(id, 'dash-to-solid branch-edge settle step');
       }
-      const branchDivider = map._deckPoint(branchFrame, 0, 0.055);
-      const dividerMarkingEnd = transition.markingPaths
-        .find((path) => path.id === 'aux-divider-marking')?.points.at(-1)?.position;
+      const dividerFrame = branchFrameAtHost(transition.dividerMarkingInterval);
+      const branchDivider = map._deckPoint(dividerFrame, 0, 0.055);
+      const dividerMarkingEnd = handoverPoint('aux-divider-marking', transition.dividerMarkingInterval);
       if (!dividerMarkingEnd || worldPoint(dividerMarkingEnd).distanceTo(branchDivider) > 0.1) {
         fail(id, 'transition divider misses the real branch divider target');
       }
+      const outerFrame = branchFrameAtHost(transition.outerMarkingInterval);
       const branchOuterEdge = map._deckPoint(
-        branchFrame,
-        -transition.sourceZone.hostwardSign * (branchFrame.half - 0.75),
+        outerFrame,
+        -transition.sourceZone.hostwardSign * (outerFrame.half - 0.75),
         0.055,
       );
-      const outerMarkingEnd = transition.markingPaths
-        .find((path) => path.id === 'aux-outer-marking')?.points.at(-1)?.position;
+      const outerMarkingEnd = handoverPoint('aux-outer-marking', transition.outerMarkingInterval);
       if (!outerMarkingEnd || worldPoint(outerMarkingEnd).distanceTo(branchOuterEdge) > 0.1) {
         fail(id, 'outer solid does not remain on the branch outer edge');
       }
@@ -323,16 +369,23 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         if (firstAbsorptionPieces.some((piece) => piece.sTo > firstDropEnd + 0.01)) {
           fail(id, 'first absorption divider survives into the four-lane section');
         }
-        const stations = [
-          transition.parallelStart,
-          transition.absorptionStart,
-          transition.secondAbsorptionStart,
-        ];
-        for (const station of stations) {
+        // Both temporary lanes exist up to the first absorption; past it the
+        // divider is retired (it IS the outer edge of the one lane left), so
+        // there is no lane between them to keep open — only the marking
+        // shoulder that separates a divider from an edge line. Grading the
+        // retired boundary against a full lane gap measured the Wangan's own
+        // 0.55 m shoulder and passed by 0.05 m; on a ramp-width carriageway
+        // the same correct geometry has 0.20 m there.
+        const paired = [transition.parallelStart, transition.absorptionStart];
+        const retired = [transition.secondAbsorptionStart];
+        for (const station of paired.concat(retired)) {
           const outer = transition.outerMarkingLateralAt(station) * transition.sideSign;
           const divider = transition.auxDividerLateralAt(station) * transition.sideSign;
           const inner = transition.boundaryLateralAt(station) * transition.sideSign;
-          if (outer < divider + 0.5 || divider < inner + transition.auxiliaryWidth - 0.7) {
+          const gap = paired.includes(station)
+            ? 0.5
+            : Math.min(0.5, transition.auxiliaryMarkingShoulder) - 0.01;
+          if (outer < divider + gap || divider < inner + transition.auxiliaryWidth - 0.7) {
             fail(id, `crossed/pinched progressive markings at ${station.toFixed(1)}`);
           }
         }
@@ -347,7 +400,24 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     for (const piece of branchRoutePaint) {
       const middle = (piece.sFrom + piece.sTo) * 0.5;
       const phase = transition.phaseAtBranch(middle);
-      const claimed = transition.type === 'merge' ? phase && phase !== 'approach' : !!phase;
+      // The invariant is "no route-local paint where the transition owns the
+      // boundary", not "no route-local paint inside the record". A merge takes
+      // ownership at its opening; a diverge holds it until its transfer
+      // completes, which for most is the end of the sampled span.
+      // ...with ONE boundary the transition deliberately does not own yet: a
+      // merge's own lane divider only converges onto the branch's centreline
+      // PROGRESSIVE_DIVIDER_HANDOFF past the opening, so the branch keeps
+      // painting the line between its two lanes until then (map.js
+      // `mouthPaintLat`) rather than running them with nothing in between.
+      const hostS = transition.hostAtBranch(middle);
+      const dividerHeldByBranch = transition.type === 'merge'
+        && transition.auxiliaryLaneCount > 1
+        && piece.markingType === 'laneDivider'
+        && hostS !== null
+        && hostS < transition.openingStart + PROGRESSIVE_DIVIDER_HANDOFF;
+      const claimed = transition.type === 'merge'
+        ? phase && phase !== 'approach' && !dividerHeldByBranch
+        : !!phase && middle <= transition.transferCompleteBranch + 0.01;
       if (claimed) fail(id, `branch route paint survives ${phase} at ${middle.toFixed(1)}`);
     }
 

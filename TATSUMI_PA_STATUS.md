@@ -240,3 +240,78 @@ QA: `node .devtests/hologram-marker-shots.mjs` → `HOLO-garage`, `HOLO-pa-gate`
 (+ `-drone`, the only angle the bay walls do not block) and `HOLO-pa-lot`.
 `tatsumi-pa-zone-probe` 10/10, `editor-build-ops-probe` unchanged at 96/101 on
 target with the same 5 pre-existing drifts.
+
+---
+
+## Amendment (31 Jul 2026): the lot is built — `js/tatsumi-pa-lot.js`
+
+The deck had been a bare paved clearing since the suppression rectangle went
+in: `_buildTatsumiPaDressing` still runs, but `_suppressServiceAreaObjects`
+zero-scales all 196 of its instances, so nothing of it was ever visible. This
+checkpoint builds the real lot from the reference photography (SRP driver-eye
+and aerial shots of 辰巳第一PA) as a new pass in its own module, called last
+from `_buildWorld`.
+
+### Why a separate pass instead of un-suppressing the old dressing
+
+Two constraints, and the module is shaped by both:
+
+- the deck is a suppression rectangle — `_instance` zero-scales anything placed
+  in it and `_addChunkMesh` hides it. The sanctioned way in is to build AFTER
+  `_finalizeChunks`, straight into `map.group`, flagged
+  `userData.tatsumiClearingSurface`, exactly like `_buildZoneEntrances` and
+  `_buildTatsumiBayLamps`;
+- saved editor edits address props by (mesh name, instance index) in the chunk
+  meshes. This pass never touches those buckets, so it cannot move one — and
+  the old dressing is deliberately left running, still suppressed, because its
+  tombstones are what hold those indices open.
+
+### What it lays out (deck frame: u along the flow, v across)
+
+- **ramp kerb** — the 45° large-vehicle comb, 20 bays leaning downstream with
+  大型 painted in each, white box trucks nose-in at ~45 % occupancy; plus a
+  perpendicular 8-bay large-vehicle block at the exit end (u 44…86).
+- **aisle** — edge lines both sides, straight arrows, wedge gores at both
+  gates. Kept clear end to end: both connectors ride it and the spawn is on it.
+- **far kerb** — 30 小型 small-car bays backed in at ~55 % occupancy, one wide
+  accessible bay, then the forecourt.
+- **forecourt** — a curved kerb island (straight front closed by quarter-turns
+  back to the deck edge, the rounded end the aerials show), the service
+  building with its backlit green glass-block wall, toilets + sign, a 6-machine
+  vending row under a flat canopy, and the pipe railing you stand at.
+- **the arched canopy** — a barrel vault over the forecourt: 7 white steel ribs
+  × 8 segments with dimmed-green glazing between them, longitudinal purlins, a
+  fascia beam and three columns on the aisle side, the far springing landing on
+  the building roof. Built with an explicit basis (local X along the deck,
+  local Z along the arc), which a yaw quaternion cannot give.
+- **lot lighting** — 10 cool-white lamps on the two kerbs (the expressway keeps
+  sodium), their pools, plus forecourt pools under the canopy.
+- **signage** — 辰巳第一PA / P at the entry, トイレ on the building, 二輪車 on
+  the island, 出口 at the exit gate.
+
+Road TEXT is a canvas tile of stacked glyphs on a horizontal plane. Orientation
+is the load-bearing part: the tile's top row lands on the decal's local −Z, so
+every call passes the direction from the paint TO the driver — that is what
+makes it read the right way up from the seat with the first character farthest,
+the way road paint is actually laid.
+
+536 instances in 18 InstancedMeshes plus 5 sign meshes. Everything is visual;
+lot collision is still the flat deck slab.
+
+### Verification
+
+- `node .devtests/tatsumi-pa-lot-shots.mjs` (new) — `LOT-lot-plan` (aerial),
+  `-comb`, `-building`, `-forecourt`, `-entry`, `-paint`, `-paint-small`. The
+  script also asserts the painted-glyph tiles actually carry ink
+  (大型 7223 px, 小型 6630 px) rather than silently rendering blank.
+- `node .devtests/editor-build-ops-probe.mjs` — no drift (the saved build
+  currently carries 0 hide ops, so this only proves the pass adds none).
+
+### Known gaps
+
+- Seen from directly overhead the canopy reads as a filled green roof; the real
+  aerial shows a dark roof with a lit arc rim.
+- The deck perimeter stays open-edged (no parapet), per the 23 Jul decision —
+  only white delineator posts mark it. The reference does show a barrier there.
+- The walkable PA pocket (`js/tatsumi-pa.js`, 46 × 30 m behind the lay-by gate)
+  is a different scene and is still deliberately empty.

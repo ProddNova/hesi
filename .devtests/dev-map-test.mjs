@@ -82,9 +82,15 @@ const prototypePins = await page.evaluate(() => {
   dm.fitNetwork();
   dm._drawStatic();
   const dpr = dm._dpr;
-  // Live (left-hand) flow: P1/P2 are legacy-flow-bound and absent here; P3 is
-  // the Tatsumi PA ramp merge, authored against this network sense.
-  const expected = ['J13:merge:wangan_0:ramp_8:end'];
+  // Live (left-hand) flow: P1/P2 are legacy-flow-bound and absent here. P3 is
+  // the Tatsumi PA ramp merge, P4 its inverse (the Wangan exit onto ramp 30)
+  // and P5 the same merge model on a two-lane host (ramp 30 joining ramp 3 at
+  // the head of R11); all three are authored against this network sense.
+  const expected = [
+    'J13:merge:wangan_0:ramp_8:end',
+    'J38:diverge:wangan_0:ramp_30:start',
+    'J39:merge:ramp_3:ramp_30:end',
+  ];
   const pins = dm.network.prototypePins;
   const rendered = pins.every((pin) => {
     const s = dm.worldToScreen(pin.x, pin.z);
@@ -102,7 +108,7 @@ const prototypePins = await page.evaluate(() => {
   return {
     count: pins.length,
     idsMatch: pins.map((pin) => pin.id).every((id, index) => id === expected[index]),
-    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P3',
+    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P3,P4,P5',
     finite: pins.every((pin) => Number.isFinite(pin.x + pin.y + pin.z + pin.distance)),
     metadataComplete: pins.every((pin) => ['progressive-prototype', 'deferred-progressive-candidate'].includes(pin.category)
       && ['merge', 'diverge'].includes(pin.type)
@@ -120,6 +126,8 @@ const prototypePins = await page.evaluate(() => {
       deferred: pins.filter((pin) => pin.category === 'deferred-progressive-candidate').length,
     },
     p3: pins.find((pin) => pin.pinId === 'P3'),
+    p4: pins.find((pin) => pin.pinId === 'P4'),
+    p5: pins.find((pin) => pin.pinId === 'P5'),
     rendered,
     info: document.querySelector('[data-info="prototypes"]')?.textContent || '',
   };
@@ -128,16 +136,26 @@ const prototypePins = await page.evaluate(() => {
 // reversed network flips both junction senses, so the map builds them only
 // under options.legacyFlow (see js/map.js) and they cannot appear here. Their
 // geometry stays validated by the progressive probe suite, which constructs
-// legacyFlow maps. P3 is authored against the live flow and must be pinned.
-check('developer map pins exactly the live-flow prototype (P3)',
-  prototypePins.count === 1 && prototypePins.idsMatch && prototypePins.labelsMatch,
+// legacyFlow maps. P3/P4 are authored against the live flow and must be pinned.
+check('developer map pins exactly the live-flow prototypes (P3, P4, P5)',
+  prototypePins.count === 3 && prototypePins.idsMatch && prototypePins.labelsMatch,
   prototypePins.info);
 check('P3 pin is active with complete metadata and renders',
   prototypePins.metadataComplete && prototypePins.finite && prototypePins.rendered
-  && prototypePins.categoryCounts.active === 1 && prototypePins.categoryCounts.deferred === 0
+  && prototypePins.categoryCounts.active === 3 && prototypePins.categoryCounts.deferred === 0
   && prototypePins.p3?.topology === '2+3-merge'
   && prototypePins.p3?.temporaryLaneCount === 5 && prototypePins.p3?.finalLaneCount === 3,
   JSON.stringify(prototypePins.p3 || null));
+check('P4 pin is the inverse 3+2 diverge',
+  prototypePins.p4?.topology === '3+2-diverge'
+  && prototypePins.p4?.temporaryLaneCount === 5 && prototypePins.p4?.finalLaneCount === 5
+  && prototypePins.p4?.type === 'diverge',
+  JSON.stringify(prototypePins.p4 || null));
+check('P5 pin is the 2+2 merge onto a two-lane host',
+  prototypePins.p5?.topology === '2+2-merge'
+  && prototypePins.p5?.temporaryLaneCount === 4 && prototypePins.p5?.finalLaneCount === 2
+  && prototypePins.p5?.type === 'merge',
+  JSON.stringify(prototypePins.p5 || null));
 
 const prototypeInteractions = await page.evaluate(() => {
   const g = window.shutoko;

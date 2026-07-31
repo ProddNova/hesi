@@ -18,7 +18,7 @@ const CORE = [
   './js/game.js', './js/map.js', './js/progressive-merge.js', './js/progressive-merge-prototypes.js',
   './js/editor-map-patch.js', './js/lighting-config.js', './js/custom-assets.js', './js/building-types.js', './js/skybox-config.js', './js/skybox.js',
   './js/physics.js', './js/traffic.js', './js/data.js', './js/psx-car-pack.js', './js/car-models.js', './js/car-paint.js', './js/playground-config.js', './js/playground.js', './js/vhs-effect.js', './js/ps2-filter.js',
-  './js/save.js', './js/audio.js', './js/garage.js', './js/tatsumi-pa.js', './js/ui.js', './js/dev-map.js', './js/debug-stats.js',
+  './js/save.js', './js/audio.js', './js/garage.js', './js/tatsumi-pa.js', './js/tatsumi-pa-lot.js', './js/ui.js', './js/dev-map.js', './js/debug-stats.js',
   './js/road-barrier-styles.js', './data/routes-smoothed.js', './data/road-barriers.js'
 ];
 

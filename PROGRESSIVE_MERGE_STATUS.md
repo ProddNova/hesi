@@ -1,5 +1,17 @@
 # Progressive Merge Checkpoint Status
 
+## Amendment (2026-07-31): P4 is P3 run backwards
+
+**P4** (`J38:diverge:wangan_0:ramp_30:start`) is the inverse of P3 on the same
+three-lane Wangan carriageway: the mainline opens two appended lanes one at a
+time (3 → 4 → 5), holds them, and ramp 30 leaves as a rigid two-lane
+carriageway off those slots. Topology tag `3+2-diverge`; every landmark is the
+2+3 merge's own measurement taken on the reversed branch rows.
+`branchAnchor: 'appended'` now applies to diverges as well. See
+[WANGAN_RAMP30_DIVERGE_STATUS.md](WANGAN_RAMP30_DIVERGE_STATUS.md).
+
+The live flow therefore builds **two** records, pinned `P3, P4`.
+
 ## Amendment (2026-07-31): the live flow now builds P3
 
 The allow-list is flow-bound rather than legacy-only. Prototypes carry `flow`,

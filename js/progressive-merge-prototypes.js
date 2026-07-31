@@ -58,6 +58,53 @@ export const PROGRESSIVE_MERGE_PROTOTYPES = Object.freeze([
     branchAnchor: 'appended',
     pin: Object.freeze({ x: 3150.58, y: 48.41, z: -4244.33 }),
   }),
+  Object.freeze({
+    pinId: 'P4',
+    id: 'J38:diverge:wangan_0:ramp_30:start',
+    label: 'Wangan 3+2 progressive diverge',
+    flow: 'live',
+    type: 'diverge',
+    topology: '3+2-diverge',
+    hostRouteId: 'wangan_0',
+    branchRouteId: 'ramp_30',
+    which: 'start',
+    // The exact inverse of P3 on the same three-lane Wangan carriageway: the
+    // mainline opens two extra lanes OUTSIDE its paved edge one at a time
+    // (3 -> 4 -> 5), holds them, and the ramp leaves as a rigid two-lane
+    // carriageway off those appended slots. `appended` is what makes that
+    // possible — the host-lane glue line would start the ramp on the Wangan's
+    // own outer lanes and turn the exit back into a diagonal cut across the
+    // mainline.
+    branchAnchor: 'appended',
+    pin: Object.freeze({ x: 1701.81, y: 32.87, z: -5140.93 }),
+  }),
+  Object.freeze({
+    pinId: 'P5',
+    id: 'J39:merge:ramp_3:ramp_30:end',
+    label: 'R11 Daiba 2+2 progressive merge',
+    flow: 'live',
+    type: 'merge',
+    topology: '2+2-merge',
+    hostRouteId: 'ramp_3',
+    branchRouteId: 'ramp_30',
+    which: 'end',
+    // P3's model on a two-lane host: ramp 30 arrives on two lanes APPENDED
+    // outside ramp 3's paved edge (4 lanes), and they are closed one at a time
+    // (4 -> 3 -> 2) before the joined carriageway continues as R11. The
+    // junction itself is created by `applyContinuationMerges` (js/map.js) —
+    // OSM records both ramps as continuing into R11 and nothing between them.
+    branchAnchor: 'appended',
+    // The parallel run here is ~200 m, not the Wangan's 400: the default blend
+    // would derive its alignment from the host over more than a third of the
+    // whole ramp and drag its approach tens of metres off the OSM curve.
+    branchBlendLength: 240,
+    // Ramp 30's tail is cut where the parallel run starts, so its data heights
+    // stop describing anything at the glue line: ramp 3 is banked there and its
+    // deck 7.10 m out is 0.4-0.8 m above its centreline. The appended slots are
+    // that deck, so the tail rides it.
+    branchDeckFollowsHost: true,
+    pin: Object.freeze({ x: 1170.3, y: 27.2, z: -5298.9 }),
+  }),
 ]);
 
 export const PROGRESSIVE_MERGE_PROTOTYPE_IDS = new Set(

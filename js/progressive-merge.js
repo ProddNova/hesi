@@ -38,7 +38,22 @@ function unwrappedHostDistance(zone, distance) {
 
 const P1_TWO_PLUS_TWO_DIVERGE_ID = 'J2:diverge:c1_0:r1_0:start';
 
-function laneMappings(zone, branchExitLanes = [0], auxiliaryLaneCount = 1) {
+/**
+ * Merge topologies that append the branch's two lanes outside the host's paved
+ * edge and close them one at a time: topology tag -> the host lane count it
+ * contracts for.
+ */
+export const APPENDED_PAIR_MERGE_HOST_LANES = Object.freeze({
+  '2+3-merge': 3,
+  '2+2-merge': 2,
+});
+
+/** TRUE for a built transition running the appended-pair merge model. */
+export function isAppendedPairMerge(transition) {
+  return APPENDED_PAIR_MERGE_HOST_LANES[transition?.topology] !== undefined;
+}
+
+function laneMappings(zone, branchExitLanes = [0], auxiliaryLaneCount = 1, stagedOpening = false) {
   const { host, branch, kind, side } = zone;
   const outerHostLane = side > 0 ? 0 : host.lanes - 1;
   const mappings = Array.from({ length: host.lanes }, (_, lane) => ({
@@ -73,6 +88,19 @@ function laneMappings(zone, branchExitLanes = [0], auxiliaryLaneCount = 1) {
       mappings[mappings.length - 1].temporary = 'aux:0';
       mappings[mappings.length - 1].outcome = 'absorbed-into-outer-host-lane';
     }
+  } else if (stagedOpening && auxiliaryLaneCount === 2 && branchExitLanes.length >= 2) {
+    // The exact reverse of the staged 2+3 absorption: aux:0 opens out of the
+    // outer host lane first, then aux:1 opens out of aux:0.
+    branchExitLanes.slice(0, 2).forEach((lane, auxiliaryLane) => {
+      mappings.push({
+        source: auxiliaryLane === 0 ? `host:${outerHostLane}` : 'aux:0',
+        temporary: `aux:${auxiliaryLane}`,
+        final: `branch:${lane}`,
+        outcome: auxiliaryLane === 0
+          ? 'opens-first-from-outer-host-lane'
+          : 'opens-second-from-aux:0',
+      });
+    });
   } else {
     branchExitLanes.forEach((lane, index) => {
       mappings.push({
@@ -89,7 +117,8 @@ function laneMappings(zone, branchExitLanes = [0], auxiliaryLaneCount = 1) {
 function buildRecord(map, zone, prototype) {
   const rows = [...zone.samples].sort((left, right) => left.hU - right.hU);
   const branchRows = [...zone.samples].sort((left, right) => left.bS - right.bS);
-  const approachStart = rows[0].hU;
+  let approachStart = rows[0].hU;
+  const sourceTransitionStart = rows[0].hU;
   const sourceTransitionEnd = rows[rows.length - 1].hU;
   let transitionEnd = sourceTransitionEnd;
   let length = transitionEnd - approachStart;
@@ -121,11 +150,23 @@ function buildRecord(map, zone, prototype) {
   // (5 -> 4 -> 3) instead of being collapsed into the legacy single auxiliary
   // lane. The allow-list carries the topology, so a second approved location
   // (P3, the Tatsumi ramp) shares this model instead of copying its ID test.
-  const twoPlusThreeMerge = prototype.topology === '2+3-merge'
-    && zone.kind === 'merge'
+  //
+  // The model is a function of the branch pair, not of the host's lane count:
+  // P5 runs it on a two-lane host (`2+2-merge`, ramp 30 joining ramp 3), where
+  // the same two appended lanes are closed 4 -> 3 -> 2.
+  const twoPlusThreeMerge = zone.kind === 'merge'
+    && zone.branch.lanes === 2
+    && APPENDED_PAIR_MERGE_HOST_LANES[prototype.topology] === zone.host.lanes;
+  // The 3+2 diverge is that model read backwards on the same carriageway: the
+  // three-lane mainline opens two normal-width lanes OUTSIDE its paved edge one
+  // at a time (3 -> 4 -> 5), holds them, and the branch leaves as a rigid
+  // two-lane carriageway off those appended slots. Every landmark is the merge's
+  // own measurement taken on the reversed branch rows.
+  const threePlusTwoDiverge = prototype.topology === '3+2-diverge'
+    && zone.kind === 'diverge'
     && zone.host.lanes === 3
     && zone.branch.lanes === 2;
-  const auxiliaryLaneCount = twoPlusTwo || twoPlusThreeMerge ? 2 : 1;
+  const auxiliaryLaneCount = twoPlusTwo || twoPlusThreeMerge || threePlusTwoDiverge ? 2 : 1;
   const targetExtraWidth = auxiliaryWidth * auxiliaryLaneCount;
   const hostEdgeMarkingShoulder = Math.max(0, (zone.host.shoulder || 0) - 0.75);
   const branchEdgeMarkingShoulder = Math.max(0, (zone.branch.shoulder || 0) - 0.75);
@@ -143,7 +184,7 @@ function buildRecord(map, zone, prototype) {
       - zone.hostwardSign * map._laneOffset(zone.branch, left, 1)
     ))
     : [0];
-  const branchExitLanes = twoPlusTwo || twoPlusThreeMerge
+  const branchExitLanes = twoPlusTwo || twoPlusThreeMerge || threePlusTwoDiverge
     ? orderedBranchLanes
     : [orderedBranchLanes[0]];
   const branchFeedLane = branchExitLanes[0];
@@ -163,13 +204,17 @@ function buildRecord(map, zone, prototype) {
     const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
     return zone.side * projection.signedLateral;
   };
-  const firstCrossing = (valueAt, target) => {
-    for (let index = 0; index < branchRows.length; index += 1) {
-      const right = branchRows[index];
+  // `rows` defaults to the branch rows in travel order. A diverge measures the
+  // same crossings on the REVERSED rows: its branch leaves the appended slots
+  // where a merge's arrives on them, so the identical descent exists — it is
+  // simply traversed from the separated end backwards.
+  const firstCrossing = (valueAt, target, rows = branchRows) => {
+    for (let index = 0; index < rows.length; index += 1) {
+      const right = rows[index];
       const rightValue = valueAt(right);
       if (rightValue < target) continue;
       if (index === 0) return right;
-      const left = branchRows[index - 1];
+      const left = rows[index - 1];
       const leftValue = valueAt(left);
       const t = clamp((target - leftValue) / Math.max(1e-6, rightValue - leftValue), 0, 1);
       return {
@@ -178,12 +223,12 @@ function buildRecord(map, zone, prototype) {
         hU: left.hU + (right.hU - left.hU) * t,
       };
     }
-    return branchRows.at(-1);
+    return rows.at(-1);
   };
-  const firstDescendingCrossing = (valueAt, target) => {
-    for (let index = 1; index < branchRows.length; index += 1) {
-      const left = branchRows[index - 1];
-      const right = branchRows[index];
+  const firstDescendingCrossing = (valueAt, target, rows = branchRows) => {
+    for (let index = 1; index < rows.length; index += 1) {
+      const left = rows[index - 1];
+      const right = rows[index];
       const leftValue = valueAt(left);
       const rightValue = valueAt(right);
       if (leftValue < target || rightValue > target) continue;
@@ -196,16 +241,41 @@ function buildRecord(map, zone, prototype) {
         half: left.half + (right.half - left.half) * t,
       };
     }
-    return branchRows.at(-1);
+    return rows.at(-1);
   };
+  const branchHostwardPavementOutwardAt = (row) => {
+    const target = map._deckPoint(row.frame, zone.hostwardSign * row.half);
+    const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
+    return zone.side * projection.signedLateral;
+  };
+  // Reversed rows read the departure of an appended-anchor diverge with the
+  // merge's own descending measurements: the branch comes DOWN onto the slot
+  // centre as the station walks back from lateral separation.
+  const reversedBranchRows = threePlusTwoDiverge ? [...branchRows].reverse() : null;
+  // The last station at which the exiting pair still sits exactly on the two
+  // appended slots — the mirror of the merge's FULL 5 handoff.
+  const divergeHandoffRow = threePlusTwoDiverge
+    ? firstDescendingCrossing(
+      branchExitOutwardAt,
+      Math.abs(parallelExitCentreLateral),
+      reversedBranchRows,
+    )
+    : null;
+  // Where the branch's hostward pavement edge leaves the host's outer lane
+  // line: plan/paint ownership is fully back with the branch here.
+  const divergeOpeningRow = threePlusTwoDiverge
+    ? firstDescendingCrossing(branchHostwardPavementOutwardAt, hostLaneEdge, reversedBranchRows)
+    : null;
   const alignmentRow = zone.kind === 'diverge'
-    ? firstCrossing(branchExitOutwardAt, Math.abs(parallelExitCentreLateral))
+    ? (divergeHandoffRow ?? firstCrossing(branchExitOutwardAt, Math.abs(parallelExitCentreLateral)))
     : null;
   const physicalSplitRow = zone.kind === 'diverge'
     ? firstCrossing((row) => row.innerEdge - row.hostHalf, -0.3)
     : null;
+  // Exterior ownership passes to the branch where it leaves the slots; for a
+  // host-lane-anchored diverge that is still the width-based measurement.
   const exteriorHandoffRow = zone.kind === 'diverge'
-    ? firstCrossing((row) => row.unionOuter - row.hostHalf, targetExtraWidth)
+    ? (divergeHandoffRow ?? firstCrossing((row) => row.unionOuter - row.hostHalf, targetExtraWidth))
     : null;
   // Rail quads are emitted only when both neighbouring surface frames are
   // visible. For P4's two-lane exit, keeping the first host frame *after* the
@@ -228,14 +298,27 @@ function buildRecord(map, zone, prototype) {
       : exteriorHandoffRow.hU;
     return resolvedHostRailRelease;
   };
+  // Rail quads are emitted only between two visible neighbouring frames, so the
+  // exterior parapet changes owner on a frame, not on the analytic station. The
+  // host releases on its last emitted frame at or before the handoff and the
+  // branch picks the same edge up on its first frame beyond that, which is the
+  // only pairing that neither doubles the wall nor loses a whole frame of it.
+  let resolvedDivergeRailHold = null;
+  const resolveDivergeRailHold = () => {
+    if (resolvedDivergeRailHold !== null) return resolvedDivergeRailHold;
+    const candidates = (zone.host.surfaceFrames || [])
+      .map((frame) => unwrappedHostDistance(zone, frame.distance))
+      .filter((hostS) => (
+        hostS >= parallelStart - 1e-4 && hostS <= divergeHandoffStart + 1e-4
+      ));
+    resolvedDivergeRailHold = candidates.length
+      ? Math.max(...candidates)
+      : divergeHandoffStart;
+    return resolvedDivergeRailHold;
+  };
   const sourceGoreClearanceRow = zone.kind === 'diverge'
     ? firstCrossing((row) => row.innerEdge - row.hostHalf, 1.5)
     : null;
-  const branchHostwardPavementOutwardAt = (row) => {
-    const target = map._deckPoint(row.frame, zone.hostwardSign * row.half);
-    const projection = map._projectToRoute(zone.host, target, map._hostSeedIndex(zone.host, row.hS));
-    return zone.side * projection.signedLateral;
-  };
   // For J48, topology is determined from the real three-lane host edge, not
   // from the old two-lane prototype's marking-opening station. OPENING is the
   // first physical contact between the ramp pavement and the exterior lane
@@ -307,14 +390,79 @@ function buildRecord(map, zone, prototype) {
       railOpeningStart = openingStart;
     }
   }
+  // ---- 3+2 diverge: the same four stages, walked the other way -------------
+  const divergeHandoffStart = threePlusTwoDiverge ? divergeHandoffRow.hU : null;
+  const divergeHandoffComplete = threePlusTwoDiverge ? divergeOpeningRow.hU : null;
+  let divergeStageLength = null;
+  let divergeDepartureShift = null;
+  let firstOpeningEnd = null;      // 3 -> 4 complete
+  let secondOpeningStart = null;   // 4 -> 5 begins
+  let railOpeningEnd = null;       // separating parapets may resume
+  if (threePlusTwoDiverge) {
+    const sourceTerminalRow = zone.which === 'start' ? branchRows.at(-1) : branchRows[0];
+    // One stage is the run in which the branch's own geometry moves one normal
+    // lane width — measured on its departure, exactly as the merge measures it
+    // on its approach. Every plateau and taper upstream inherits that rate, so
+    // the widening reads at the same pace as the exit it feeds.
+    divergeDepartureShift = Math.abs(
+      branchExitOutwardAt(sourceTerminalRow) - Math.abs(parallelExitCentreLateral)
+    );
+    const departureSpan = Math.abs(sourceTerminalRow.hU - divergeHandoffStart);
+    divergeStageLength = departureSpan * auxiliaryWidth / Math.max(1e-6, divergeDepartureShift);
+    transitionEnd = sourceTerminalRow.hU;
+    parallelStart = divergeHandoffStart - divergeStageLength;   // FULL 5 established
+    secondOpeningStart = parallelStart - divergeStageLength;    // 4 -> 5 taper start
+    firstOpeningEnd = secondOpeningStart - divergeStageLength;  // 4-lane plateau start
+    openingStart = firstOpeningEnd - divergeStageLength;        // 3 -> 4 taper start
+    approachStart = openingStart - divergeStageLength;
+    length = transitionEnd - approachStart;
+    if (appendedBranch) {
+      // Mirror of the merge's rail release: the two paved edges are closer than
+      // the 0.90 m two 0.42 m-inset parapets need until this station, so both
+      // owners stay released and the gap is the painted gore it is in reality.
+      const railClearanceRow = firstDescendingCrossing(
+        (row) => branchHostwardPavementOutwardAt(row) - row.hostHalf,
+        0.9,
+        reversedBranchRows,
+      );
+      railOpeningEnd = Math.max(railClearanceRow.hU, divergeHandoffComplete);
+    } else {
+      railOpeningEnd = divergeHandoffComplete;
+    }
+  }
+  // The generic A-B rule refuses to paint the branch's hostward edge and its own
+  // divider anywhere inside the junction's marking opening. The transition
+  // therefore keeps both of those boundaries until the opening actually ends,
+  // instead of handing back at its own handoff and leaving the gore blank.
+  const branchOpeningEnd = threePlusTwoDiverge
+    ? clamp(
+      zone.markingOpening?.branch?.[1] ?? divergeOpeningRow.bS,
+      divergeOpeningRow.bS,
+      branchRows.at(-1).bS,
+    )
+    : null;
+  const hostStationAtBranch = (distance) => {
+    let upper = 1;
+    while (upper < branchRows.length && branchRows[upper].bS < distance) upper += 1;
+    if (upper >= branchRows.length) return branchRows.at(-1).hU;
+    const left = branchRows[upper - 1];
+    const right = branchRows[upper];
+    const span = Math.max(1e-6, right.bS - left.bS);
+    return left.hU + (right.hU - left.hU) * ((distance - left.bS) / span);
+  };
+  const branchOpeningEndHost = threePlusTwoDiverge
+    ? hostStationAtBranch(branchOpeningEnd)
+    : null;
   let absorptionStart = clamp(
     Math.min(approachStart + length * 0.68, compatibleEnd - 8),
     parallelStart + 24,
     transitionEnd - 24,
   );
-  if (zone.kind === 'diverge' && !twoPlusTwo) {
+  if (zone.kind === 'diverge' && !twoPlusTwo && !threePlusTwoDiverge) {
     absorptionStart = clamp(alignmentRow.hU, parallelStart + 4, transitionEnd - 4);
   }
+  // The departure IS this model's absorption phase, read the other way.
+  if (threePlusTwoDiverge) absorptionStart = divergeHandoffStart;
   let firstAbsorptionEnd = null;
   let secondAbsorptionStart = null;
   if (twoPlusThreeMerge) {
@@ -482,6 +630,95 @@ function buildRecord(map, zone, prototype) {
     // factor, so it cannot jump or narrow while the rigid ramp pair hands off.
     return targetExtraWidth * geometry.factor;
   };
+  /**
+   * The 3+2 diverge's departure, which is `mergeHandoffGeometryAt` reversed:
+   * the rigid two-lane cross-section starts ON the two appended host slots and
+   * rotates onto the branch's own alignment as the branch geometry leaves them.
+   * Plan and height ownership move together with one factor, so no lane sample
+   * can flip decks on its own.
+   */
+  const divergeHandoffGeometryAt = (distance, lift = 0.035) => {
+    if (!threePlusTwoDiverge) return null;
+    const hostS = clamp(
+      unwrappedHostDistance(zone, distance),
+      divergeHandoffStart,
+      transitionEnd,
+    );
+    const branchS = branchDistanceAtHost(hostS);
+    const hostFrame = map._frameAt(zone.host, map._normalizeDistance(zone.host, hostS));
+    const branchFrame = map._frameAt(zone.branch, branchS);
+    const sourceCentre = map._deckPoint(branchFrame, branchExitCentreLateral, lift);
+    const temporaryCentre = map._deckPoint(hostFrame, parallelExitCentreLateral, lift);
+    const sourceOutwardPoint = map._deckPoint(
+      branchFrame,
+      branchExitCentreLateral - zone.hostwardSign,
+      lift,
+    );
+    const temporaryOutwardPoint = map._deckPoint(
+      hostFrame,
+      parallelExitCentreLateral + zone.side,
+      lift,
+    );
+    const sourceOutward = sourceOutwardPoint.sub(sourceCentre).normalize();
+    const temporaryOutward = temporaryOutwardPoint.sub(temporaryCentre).normalize();
+    const factor = quintic((hostS - divergeHandoffStart)
+      / Math.max(1e-6, divergeHandoffComplete - divergeHandoffStart));
+    const centre = temporaryCentre.clone().multiplyScalar(1 - factor)
+      .add(sourceCentre.clone().multiplyScalar(factor));
+    const outward = temporaryOutward.multiplyScalar(1 - factor)
+      .add(sourceOutward.multiplyScalar(factor))
+      .normalize();
+    return {
+      hostS,
+      branchS,
+      factor,
+      centre,
+      outward,
+      pointAt(outwardOffset) {
+        const point = centre.clone().addScaledVector(outward, outwardOffset);
+        const hostProjection = map._projectToRoute(
+          zone.host,
+          point,
+          map._hostSeedIndex(zone.host, hostS),
+        );
+        const hostDeckY = hostProjection.point.y
+          + Math.tan(map._bankAt(zone.host, hostProjection.distance))
+            * hostProjection.signedLateral;
+        const branchProjection = map._projectToRoute(
+          zone.branch,
+          point,
+          map._hostSeedIndex(zone.branch, branchS),
+        );
+        const sourceFrame = map._frameAt(zone.branch, branchProjection.distance);
+        const branchDeckY = sourceFrame.position.y
+          + Math.tan(sourceFrame.bank) * branchProjection.signedLateral;
+        point.y = hostDeckY + (branchDeckY - hostDeckY) * factor + lift;
+        return point;
+      },
+    };
+  };
+  /**
+   * Staged host-owned width for the 3+2 diverge. Two normal lanes appear one at
+   * a time with a full plateau between them, hold for one stage, then hand the
+   * corridor back to the branch across the measured departure.
+   */
+  const divergeEnvelopeFactorAt = (distance) => {
+    if (distance <= openingStart) return 0;
+    if (distance < firstOpeningEnd) {
+      return quintic((distance - openingStart) / (firstOpeningEnd - openingStart)) * 0.5;
+    }
+    if (distance <= secondOpeningStart) return 0.5;
+    if (distance < parallelStart) {
+      return 0.5 + quintic((distance - secondOpeningStart)
+        / (parallelStart - secondOpeningStart)) * 0.5;
+    }
+    if (distance <= divergeHandoffStart) return 1;
+    if (distance >= divergeHandoffComplete) return 0;
+    // The branch's own deck already supplies the rest of the crossable union
+    // here, so the host-owned addition retreats by exactly the same measured
+    // transfer factor that carries the exiting pair off the slots.
+    return 1 - divergeHandoffGeometryAt(distance, 0).factor;
+  };
 
   const record = {
     id: zone.id,
@@ -505,8 +742,17 @@ function buildRecord(map, zone, prototype) {
     mergeOpeningLateralShift,
     mergeHandoffLateralShift,
     mergeStageLength,
-    fiveLaneStart: twoPlusThreeMerge ? parallelStart : null,
-    fiveLaneEnd: twoPlusThreeMerge ? absorptionStart : null,
+    divergeStageLength,
+    divergeHandoffStart,
+    divergeHandoffComplete,
+    divergeDepartureShift,
+    firstOpeningEnd,
+    secondOpeningStart,
+    railOpeningEnd,
+    // FULL 5 is one interval in both senses: the merge reaches it and starts
+    // giving lanes back, the diverge holds it and starts handing the pair over.
+    fiveLaneStart: twoPlusThreeMerge || threePlusTwoDiverge ? parallelStart : null,
+    fiveLaneEnd: twoPlusThreeMerge || threePlusTwoDiverge ? absorptionStart : null,
     absorptionStart,
     firstAbsorptionEnd,
     secondAbsorptionStart,
@@ -524,19 +770,33 @@ function buildRecord(map, zone, prototype) {
     transferComplete: zone.kind === 'diverge'
       ? transitionEnd
       : (twoPlusThreeMerge ? mergeHandoffComplete : null),
-    goreStart: zone.kind === 'diverge' ? transitionEnd : null,
+    goreStart: zone.kind === 'diverge'
+      ? (threePlusTwoDiverge ? divergeHandoffComplete : transitionEnd)
+      : null,
     sourceGoreClearanceStart: sourceGoreClearanceRow?.hU ?? null,
     alignmentBranchStart: alignmentRow?.bS ?? null,
     physicalSplitBranchStart: physicalSplitRow?.bS ?? null,
     exteriorHandoffBranchStart: exteriorHandoffRow?.bS ?? null,
-    transferCompleteBranch: zone.kind === 'diverge' ? branchRows.at(-1).bS : null,
+    // A 3+2 diverge finishes its transfer where the branch's hostward pavement
+    // leaves the host's outer lane line, not at the end of the sampled span:
+    // downstream of that the ramp is an ordinary separate carriageway and paints
+    // its own lines.
+    transferCompleteBranch: zone.kind === 'diverge'
+      ? (threePlusTwoDiverge ? divergeOpeningRow.bS : branchRows.at(-1).bS)
+      : null,
     markingSettleEnd: zone.kind === 'diverge'
-      ? Math.min(zone.branch.length, branchRows.at(-1).bS + 12)
+      ? (threePlusTwoDiverge
+        ? branchOpeningEnd
+        : Math.min(zone.branch.length, branchRows.at(-1).bS + 12))
       : null,
     branchSettleEnd: zone.kind === 'diverge'
-      ? Math.min(zone.branch.length, branchRows.at(-1).bS + 32)
+      ? (threePlusTwoDiverge
+        ? branchOpeningEnd
+        : Math.min(zone.branch.length, branchRows.at(-1).bS + 32))
       : null,
-    goreBranchStart: zone.kind === 'diverge' ? branchRows.at(-1).bS : null,
+    goreBranchStart: zone.kind === 'diverge'
+      ? (threePlusTwoDiverge ? divergeHandoffRow.bS : branchRows.at(-1).bS)
+      : null,
     sourceGoreClearanceBranchStart: sourceGoreClearanceRow?.bS ?? null,
     length,
     phaseOrder: [...PROGRESSIVE_PHASES],
@@ -555,11 +815,35 @@ function buildRecord(map, zone, prototype) {
     targetExtraWidth,
     topology: twoPlusTwo
       ? '2+2-diverge'
-      : (twoPlusThreeMerge ? '2+3-merge' : `${zone.host.lanes}+1-transition`),
+      : (twoPlusThreeMerge
+        ? prototype.topology
+        : (threePlusTwoDiverge ? '3+2-diverge' : `${zone.host.lanes}+1-transition`)),
     branchInterval: [...zone.branchSpan],
     hostInterval: [approachStart, transitionEnd],
     crossableInterval: [openingStart, transitionEnd],
-    laneMappings: laneMappings(zone, branchExitLanes, auxiliaryLaneCount),
+    // Paint spans. The exterior solid owns the whole host interval (it is the
+    // host's own edge line outside the widening); the two temporary boundaries
+    // exist only while they are distinct lines.
+    outerMarkingInterval: [
+      approachStart,
+      threePlusTwoDiverge ? divergeHandoffComplete : transitionEnd,
+    ],
+    // The host's own edge line is only replaced while the transition actually
+    // owns that boundary. Past the departure the ramp is a separate carriageway
+    // and the mainline's normal edge line must come back, or the last 60 m of
+    // the record would have no exterior line at all.
+    hostEdgeSuppressInterval: threePlusTwoDiverge
+      ? [approachStart, divergeHandoffComplete]
+      : [approachStart, transitionEnd],
+    innerMarkingInterval: [
+      openingStart,
+      threePlusTwoDiverge ? divergeHandoffComplete : transitionEnd,
+    ],
+    dividerMarkingInterval: [
+      threePlusTwoDiverge ? secondOpeningStart : openingStart,
+      threePlusTwoDiverge ? branchOpeningEndHost : transitionEnd,
+    ],
+    laneMappings: laneMappings(zone, branchExitLanes, auxiliaryLaneCount, threePlusTwoDiverge),
     branchFeedLane,
     branchExitLanes: [...branchExitLanes],
     survivingLanes: Array.from({ length: zone.host.lanes }, (_, lane) => `host:${lane}`),
@@ -580,6 +864,22 @@ function buildRecord(map, zone, prototype) {
         lane: 'aux:0',
         from: secondAbsorptionStart,
         to: transitionEnd,
+      },
+    ] : [],
+    openingSteps: threePlusTwoDiverge ? [
+      {
+        fromLaneCount: 3,
+        toLaneCount: 4,
+        lane: 'aux:0',
+        from: openingStart,
+        to: firstOpeningEnd,
+      },
+      {
+        fromLaneCount: 4,
+        toLaneCount: 5,
+        lane: 'aux:1',
+        from: secondOpeningStart,
+        to: parallelStart,
       },
     ] : [],
     separatedLanes: zone.kind === 'diverge'
@@ -615,12 +915,31 @@ function buildRecord(map, zone, prototype) {
         // spanning the drivable throat while the paved envelope widens.
         return 'off';
       }
+      if (threePlusTwoDiverge) {
+        // Mirror of the merge: the host parapet rides the widened envelope up
+        // to the handoff, then releases for the gore and comes back on its own
+        // edge as soon as the two paved edges are 0.90 m apart again.
+        if (hostS <= resolveDivergeRailHold() + 1e-4 || hostS >= railOpeningEnd) return 'on';
+        return 'off';
+      }
       if (zone.kind !== 'diverge') return 'on';
       if (hostS <= resolveHostRailRelease() + 1e-4) return 'on';
       if (hostS < transitionEnd) return 'off';
       return 'on';
     },
     branchRailModeAt(distance, sideSign) {
+      if (threePlusTwoDiverge) {
+        if (distance < branchRows[0].bS - 0.01 || distance > branchRows.at(-1).bS + 0.01) return null;
+        const hostS = this.hostAtBranch(distance);
+        if (hostS === null) return null;
+        if (sideSign === zone.hostwardSign) return hostS >= railOpeningEnd ? 'on' : 'off';
+        // The exterior parapet has exactly one owner: the branch picks it up on
+        // its first frame beyond the host's terminal, so the two never double.
+        if (sideSign === -zone.hostwardSign) {
+          return hostS > resolveDivergeRailHold() + 1e-4 ? 'on' : 'off';
+        }
+        return null;
+      }
       if (twoPlusThreeMerge) {
         if (distance < branchRows[0].bS - 0.01 || distance > branchRows.at(-1).bS + 0.01) return null;
         const hostS = this.hostAtBranch(distance);
@@ -657,6 +976,17 @@ function buildRecord(map, zone, prototype) {
       return left.bS + (right.bS - left.bS) * ((hostS - left.hU) / span);
     },
     branchDeckHostBlendAt(distance) {
+      if (threePlusTwoDiverge) {
+        // The exiting pair sits on the host's own banked plane while it is on
+        // the appended slots, and is released onto its own deck by the same
+        // factor that carries it off them.
+        const hostS = this.hostAtBranch(distance);
+        if (hostS === null) return 0;
+        if (hostS <= divergeHandoffStart) return 1;
+        if (hostS >= divergeHandoffComplete) return 0;
+        return 1 - quintic((hostS - divergeHandoffStart)
+          / (divergeHandoffComplete - divergeHandoffStart));
+      }
       if (zone.kind === 'diverge') {
         const branchEnd = branchRows.at(-1).bS;
         if (distance < branchRows[0].bS - 0.01) return 0;
@@ -737,6 +1067,11 @@ function buildRecord(map, zone, prototype) {
     },
     laneCountAt(distance) {
       const value = unwrappedHostDistance(zone, distance);
+      if (threePlusTwoDiverge) {
+        if (value < firstOpeningEnd) return 3;
+        if (value < parallelStart) return 4;
+        return 5;
+      }
       if (!twoPlusThreeMerge) {
         return value < transitionEnd ? this.temporaryLaneCount : this.finalLaneCount;
       }
@@ -746,7 +1081,9 @@ function buildRecord(map, zone, prototype) {
     },
     widthFactorAt(distance) {
       const value = unwrappedHostDistance(zone, distance);
-      if (value < openingStart || value > transitionEnd) return 0;
+      if (value < approachStart || value > transitionEnd) return 0;
+      if (threePlusTwoDiverge) return divergeEnvelopeFactorAt(value);
+      if (value < openingStart) return 0;
       if (twoPlusThreeMerge && value <= parallelStart) {
         return mergeEnvelopeExtraAt(value) / targetExtraWidth;
       }
@@ -887,6 +1224,24 @@ function buildRecord(map, zone, prototype) {
       );
     }
   }
+  if (threePlusTwoDiverge) {
+    sampleStations.push(
+      firstOpeningEnd,
+      secondOpeningStart,
+      divergeHandoffStart,
+      divergeHandoffComplete,
+      railOpeningEnd,
+    );
+    // The whole 7.10 m is handed back over one short measured departure; sample
+    // it at the same quarter-metre resolution the merge samples its opening.
+    const departureSamples = Math.max(2, Math.ceil(targetExtraWidth / 0.25));
+    for (let index = 1; index < departureSamples; index += 1) {
+      sampleStations.push(
+        divergeHandoffStart
+        + (divergeHandoffComplete - divergeHandoffStart) * index / departureSamples,
+      );
+    }
+  }
   sampleStations.sort((left, right) => left - right);
   const stations = sampleStations.filter((station, index) => (
     Number.isFinite(station) && (index === 0 || Math.abs(station - sampleStations[index - 1]) > 1e-4)
@@ -987,7 +1342,36 @@ function buildRecord(map, zone, prototype) {
       );
       let lateral;
       let position;
-      if (zone.kind === 'diverge') {
+      if (threePlusTwoDiverge) {
+        const outwardOffset = -auxiliaryTotalWidth * 0.5
+          + auxiliaryWidth * (auxiliaryLane + 0.5);
+        if (hostS > divergeHandoffStart) {
+          // The rigid pair leaves the slots exactly as the merge's arrives on
+          // them; downstream of the measured handoff it IS the ramp's own
+          // cross-section, so no separate rotation is invented.
+          position = divergeHandoffGeometryAt(hostS, 0.035).pointAt(outwardOffset);
+          lateral = position.clone().sub(frame.position).dot(frame.normal);
+        } else {
+          // Staged emergence: aux:0 grows out of the outer host lane, then
+          // aux:1 grows out of aux:0's slot, each over one measured stage with
+          // a full four-lane plateau between them.
+          const innerAuxiliaryLateral = zone.side * (hostLaneEdge + auxiliaryWidth * 0.5);
+          if (auxiliaryLane === 0) {
+            const opening = quintic((hostS - openingStart)
+              / Math.max(1e-6, firstOpeningEnd - openingStart));
+            lateral = outerHostLateral + (innerAuxiliaryLateral - outerHostLateral) * opening;
+          } else if (hostS <= secondOpeningStart) {
+            const opening = quintic((hostS - openingStart)
+              / Math.max(1e-6, firstOpeningEnd - openingStart));
+            lateral = outerHostLateral + (innerAuxiliaryLateral - outerHostLateral) * opening;
+          } else {
+            const opening = quintic((hostS - secondOpeningStart)
+              / Math.max(1e-6, parallelStart - secondOpeningStart));
+            lateral = innerAuxiliaryLateral + (fullLateral - innerAuxiliaryLateral) * opening;
+          }
+          position = map._deckPoint(frame, lateral, 0.035);
+        }
+      } else if (zone.kind === 'diverge') {
         if (hostS > divergePathStart) {
           const outwardOffset = -auxiliaryTotalWidth * 0.5
             + auxiliaryWidth * (auxiliaryLane + 0.5);
@@ -1067,7 +1451,33 @@ function buildRecord(map, zone, prototype) {
       const branchS = zone.kind === 'diverge' || twoPlusThreeMerge
         ? record.branchAtHost(hostS)
         : null;
-      if (twoPlusThreeMerge && boundaryIndex !== null && hostS <= parallelStart) {
+      if (threePlusTwoDiverge && boundaryIndex !== null) {
+        const innerLateral = zone.side * hostLaneEdge;
+        const dividerLateral = zone.side * (hostLaneEdge + auxiliaryWidth);
+        const outerLateral = zone.side * (hostLaneEdge + auxiliaryTotalWidth);
+        if (hostS > divergeHandoffStart) {
+          const outwardOffset = -auxiliaryTotalWidth * 0.5 + auxiliaryWidth * boundaryIndex;
+          boundaryPosition = divergeHandoffGeometryAt(hostS, 0.04).pointAt(outwardOffset);
+          lateral = boundaryPosition.clone().sub(frame.position).dot(frame.normal);
+        } else {
+          // Before the widening every temporary boundary is still the host's
+          // own edge line; each becomes a real line only as its lane opens.
+          const firstOpening = quintic((hostS - openingStart)
+            / Math.max(1e-6, firstOpeningEnd - openingStart));
+          const secondOpening = quintic((hostS - secondOpeningStart)
+            / Math.max(1e-6, parallelStart - secondOpeningStart));
+          if (boundaryIndex === 0) {
+            lateral = stableEdgeLine + (innerLateral - stableEdgeLine) * firstOpening;
+          } else if (boundaryIndex === 1) {
+            lateral = stableEdgeLine + (dividerLateral - stableEdgeLine) * firstOpening;
+          } else if (hostS <= secondOpeningStart) {
+            lateral = stableEdgeLine + (dividerLateral - stableEdgeLine) * firstOpening;
+          } else {
+            lateral = dividerLateral + (outerLateral - dividerLateral) * secondOpening;
+          }
+          boundaryPosition = map._deckPoint(frame, lateral, 0.04);
+        }
+      } else if (twoPlusThreeMerge && boundaryIndex !== null && hostS <= parallelStart) {
         const geometry = mergeHandoffGeometryAt(hostS, 0.04);
         const outwardOffset = -auxiliaryTotalWidth * 0.5 + auxiliaryWidth * boundaryIndex;
         boundaryPosition = geometry.pointAt(outwardOffset);
@@ -1107,7 +1517,8 @@ function buildRecord(map, zone, prototype) {
         const outwardOffset = -auxiliaryTotalWidth * 0.5 + auxiliaryWidth * boundaryIndex;
         boundaryPosition = divergeExitPoint(hostS, outwardOffset, 0.04);
         lateral = boundaryPosition.clone().sub(frame.position).dot(frame.normal);
-      } else if (zone.kind === 'diverge' && branchS !== null && boundary.id === 'outer-edge'
+      } else if (zone.kind === 'diverge' && !threePlusTwoDiverge
+        && branchS !== null && boundary.id === 'outer-edge'
         && hostS >= exteriorHandoffRow.hU) {
         const branchFrame = map._frameAt(zone.branch, branchS);
         const branchHalf = map._halfWidthAt(zone.branch, branchS);
@@ -1133,17 +1544,31 @@ function buildRecord(map, zone, prototype) {
       const outwardZ = boundaryLength > 1e-5
         ? boundaryDz / boundaryLength
         : frame.normal.z * zone.side;
-      const handoffFactor = quintic((hostS - exteriorHandoffRow.hU)
-        / Math.max(1e-6, transitionEnd - exteriorHandoffRow.hU));
+      const handoffFactor = threePlusTwoDiverge
+        ? quintic((hostS - divergeHandoffStart)
+          / Math.max(1e-6, divergeHandoffComplete - divergeHandoffStart))
+        : quintic((hostS - exteriorHandoffRow.hU)
+          / Math.max(1e-6, transitionEnd - exteriorHandoffRow.hU));
       const markingShoulder = auxiliaryMarkingShoulder * factor;
       // Both exiting lanes retain their physical 3.55 m width. The exterior
       // solid remains outside the outer lane for the whole transition; it no
       // longer sheds its shoulder offset and cannot become the branch divider.
       // The hostward shoulder appears only as that side becomes a branch edge.
-      const innerOffset = markingShoulder * handoffFactor;
-      const outerOffset = twoPlusTwo
+      let innerOffset = markingShoulder * handoffFactor;
+      let outerOffset = twoPlusTwo
         ? markingShoulder
         : markingShoulder * (1 - handoffFactor);
+      if (threePlusTwoDiverge) {
+        // The dashed hostward line lands exactly on the ramp's own edge line at
+        // the end of the departure, so the branch's route-local paint takes over
+        // without a step. The solid exterior is 0.75 m inside whichever paved
+        // edge owns it: the widened host deck's, then the ramp's own.
+        innerOffset = auxiliaryMarkingShoulder * handoffFactor;
+        const firstOpening = quintic((hostS - openingStart)
+          / Math.max(1e-6, firstOpeningEnd - openingStart));
+        outerOffset = hostEdgeMarkingShoulder * firstOpening * (1 - handoffFactor)
+          + branchEdgeMarkingShoulder * handoffFactor;
+      }
       const innerPosition = pointRecord({
         x: innerBoundary.position.x - outwardX * innerOffset,
         y: innerBoundary.position.y + 0.015,
@@ -1354,7 +1779,7 @@ function buildRecord(map, zone, prototype) {
         return {
           hostS,
           branchS: record.branchAtHost(hostS),
-          ownership: hostS >= transitionEnd - 1e-4
+          ownership: hostS >= (threePlusTwoDiverge ? divergeHandoffComplete : transitionEnd) - 1e-4
             ? 'branch'
             : (hostS >= exteriorHandoffRow.hU ? 'shared' : 'host'),
           width,
@@ -1383,7 +1808,7 @@ function buildRecord(map, zone, prototype) {
             id: `aux:${lane}`,
             hostS,
             branchS: record.branchAtHost(hostS),
-            ownership: hostS >= transitionEnd - 1e-4
+            ownership: hostS >= (threePlusTwoDiverge ? divergeHandoffComplete : transitionEnd) - 1e-4
               ? `branch:${branchExitLanes[lane]}`
               : (hostS >= exteriorHandoffRow.hU ? 'shared' : 'host'),
             width: Math.hypot(
@@ -1503,8 +1928,13 @@ export function buildProgressiveTransitions(map, prototypes) {
     // A declared topology is a contract, not a hint: silently falling back to
     // the generic single-auxiliary model would hide a lane-count change in the
     // source network behind a still-passing build.
-    if (prototype.topology === '2+3-merge'
-      && !(zone.kind === 'merge' && zone.host.lanes === 3 && zone.branch.lanes === 2)) {
+    const appendedPairHostLanes = APPENDED_PAIR_MERGE_HOST_LANES[prototype.topology];
+    if (appendedPairHostLanes !== undefined
+      && !(zone.kind === 'merge' && zone.host.lanes === appendedPairHostLanes && zone.branch.lanes === 2)) {
+      throw new Error(`Progressive prototype topology drift: ${prototype.id}`);
+    }
+    if (prototype.topology === '3+2-diverge'
+      && !(zone.kind === 'diverge' && zone.host.lanes === 3 && zone.branch.lanes === 2)) {
       throw new Error(`Progressive prototype topology drift: ${prototype.id}`);
     }
     const measuredClassification = classifyProgressiveJunction(map, zone);

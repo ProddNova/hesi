@@ -90,10 +90,19 @@ for (const zone of zones) {
     // must prohibit. Grade the actual exterior ownership transfer instead:
     // widened host terminal -> branch exterior terminal, each on its own
     // authoritative paved boundary, with a bounded world-space handoff gap.
-    const hostSamples = (zone.host._progressiveRailSamples || []).filter((sample) => (
-      sample.transitionId === zone.progressive.id && sample.role === 'host-exterior'));
+    // Ownership passes at the measured exterior handoff. A diverge whose host
+    // parapet legitimately returns downstream of the gore (its own edge, once
+    // the two carriageways are clear of each other) still has to be graded on
+    // the terminal it hands over WITH, not on whatever it emits afterwards.
+    const exteriorHandoff = zone.progressive.exteriorHandoffStart ?? zone.progressive.transitionEnd;
     const branchSamples = (zone.branch._progressiveRailSamples || []).filter((sample) => (
       sample.transitionId === zone.progressive.id && sample.role === 'branch-exterior'));
+    const branchTakeoverHostS = branchSamples.length
+      ? (zone.progressive.hostAtBranch(branchSamples[0].distance) ?? Infinity)
+      : Infinity;
+    const hostSamples = (zone.host._progressiveRailSamples || []).filter((sample) => (
+      sample.transitionId === zone.progressive.id && sample.role === 'host-exterior'
+      && zone.progressive.unwrapHost(sample.distance) <= branchTakeoverHostS + 0.01));
     let valid = hostSamples.length > 0 && branchSamples.length > 0;
     valid &&= hostSamples.every((sample) => {
       const envelope = zone.progressive.envelopeAt(sample.distance);
@@ -122,7 +131,15 @@ for (const zone of zones) {
     // Machine rounding can place an exact 3.55 m envelope one ulp below the
     // source lane-width literal. This epsilon is numerical only; the emitted
     // vertex/envelope checks above retain their 0.03 m physical tolerance.
-    valid &&= Math.abs(last.lateral - lastBase) + 1e-6 >= zone.progressive.auxiliaryWidth;
+    // The envelope must still carry at least one full extra lane at the moment
+    // it hands over — never a premature closure. Graded at the handoff station
+    // rather than at the record's end, which for a diverge that transfers early
+    // is already back on the stable host edge by design.
+    const handoffRow = zone.progressive.guardrailEnvelope.reduce((best, row) => (
+      Math.abs(row.hostS - exteriorHandoff) < Math.abs(best.hostS - exteriorHandoff) ? row : best
+    ), zone.progressive.guardrailEnvelope[0]);
+    const handoffBase = zone.side * map._halfWidthAt(zone.host, handoffRow.hostS);
+    valid &&= Math.abs(handoffRow.lateral - handoffBase) + 1e-6 >= zone.progressive.auxiliaryWidth;
     if (!valid) {
       fail('outer-rail-convergence', `${zone.id}: invalid host-to-branch exterior ownership handoff (${handoffGap.toFixed(2)} m)`);
     } else {
