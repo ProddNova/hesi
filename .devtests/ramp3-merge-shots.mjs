@@ -72,6 +72,10 @@ const cases = [
   { name: 'plan-approach', at: 800, up: 120, back: 30, pitch: -1.2 },
   { name: 'plan-full-four', at: 890, up: 120, back: 30, pitch: -1.2 },
   { name: 'plan-absorptions', at: 990, up: 130, back: 30, pitch: -1.2 },
+  // Straight down over the whole treatment.
+  { name: 'topdown-merge', at: 930, up: 300, back: 0, pitch: -Math.PI / 2 },
+  { name: 'topdown-opening', at: 850, up: 190, back: 0, pitch: -Math.PI / 2 },
+  { name: 'topdown-tapers', at: 1010, up: 190, back: 0, pitch: -Math.PI / 2 },
   { name: 'before-chase', at: 780, up: 6, back: 26, pitch: -0.06 },
   { name: 'opening-chase', at: 830, up: 6, back: 26, pitch: -0.06 },
   { name: 'four-lane-chase', at: 880, up: 6, back: 26, pitch: -0.06 },
