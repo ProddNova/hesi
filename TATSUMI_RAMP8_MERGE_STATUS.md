@@ -98,6 +98,103 @@ Host chainages on `wangan_0` (live build):
 289 m from "two lanes established alongside" to "back to three lanes", in four
 geometry-derived 72.3 m stages. Transition length 375.0 m.
 
+## Horizontal signage
+
+`_buildMergeRoadMarkings` (js/map.js) paints the merge in reading order:
+合流注意 down the ramp (host s ≈ 1393–1426), lane-change arrows in **both** ramp
+lanes in two ranks (1443, 1483), then **two arrows in every lane the merge is
+about to take away**, ahead of the taper that takes it.
+
+### The lane a marking sits in is the one that is PAINTED
+
+The bug that made all of this read as sloppy, and the one worth remembering:
+**`_laneOffset` is not where the lanes are.** It divides `lanes * laneWidth`.
+The edge lines are painted at `half - 0.75`, and the two disagree whenever a
+route's `halfWidth` is wider than its lane block:
+
+- **ramp 8** is 2 × 3.55 m of lane inside a **4.50 m** half-width. Its edge
+  lines sit at ±3.75, so the lanes the driver sees are **3.75 m** wide centred
+  on **±1.875** — every marking that trusted `laneWidth` was 0.10 m off.
+- the **outermost auxiliary lane** is worse. `outerMarkingLateralAt` is
+  `outerLateral - side * 0.75`, i.e. the edge line is inset 0.75 m from the
+  paved edge but still sits 0.55 m **outboard** of the geometric lane edge. The
+  painted lane is **4.10 m** around a 3.55 m lane, so an arrow on the
+  lane-centre path sat **0.28 m off centre** in a ribbon half a metre too
+  narrow. Measured, not guessed: `aux:1` paints −8.87..−12.97.
+- and the outer line changes identity partway. The aux divider is only painted
+  while a lane still exists outboard of this one; after the first absorption,
+  `aux:0`'s outer boundary IS the edge line, and it too becomes 4.10 m wide.
+
+Two helpers now derive lanes from the same numbers that draw the lines, and
+every marking is placed through them: `_paintedLanes(route, distance)` for a
+plain route, `_progressivePaintedLane(transition, laneId, distance)` for the
+auxiliary lanes. Nothing in the signage path computes a lane centre itself.
+
+### The arrow, and two ways of getting it wrong
+
+`_roadMergeArrowMaterial` stroked a quadratic in TILE space, which broke three
+ways at once on a 30 × 5 m ribbon:
+
+- `lineWidth` was constant in texture space, so the upright shaft measured
+  1.0 m across and the near-horizontal elbow 1.5 m;
+- the curve reached the head 19° off horizontal and then turned square into
+  it, so the default mitre join threw a spike;
+- the head's outer corner sat 3.83 m off the ramp centreline against a 3.55 m
+  half-width — it hung over the paved edge.
+
+The first replacement fixed all three and was still wrong: a full lane-width
+translation — straight, smoothstep one whole lane across, straight. It is
+geometrically clean and it is not a road marking. It drove sideways over the
+lane line it was painted beside; no road paints its trajectory on the deck.
+
+`_roadLaneChangeArrowMaterial(bend, length, width, shift)` is the shape a
+Japanese expressway actually uses, laid out in **metres** and mapped to the tile
+last: **16 m of straight shaft on the lane centre, a 3 m hook, and a head angled
+off it.** The ribbon is exactly as wide as the painted lane, so the shaft sits
+on that lane's centre and the head reaches `shift` = 0.65 m — head corner at
+1.45 m against a 1.775 m half-lane at worst. Nothing touches a line.
+
+Three details carry the shape:
+
+- The shaft is offset off its own centreline **along the normal**, in metres,
+  and filled — constant 0.55 m real width (measured 0.54–0.58 over the hook),
+  and no join for a mitre to spike.
+- The hook eases **in only** (`1 − cos`), so it is flat where it leaves the
+  straight and steepest where it ends. The head inherits that tangent, so it
+  points across at ~26° instead of turning square back down the road. A
+  smoothstep would have returned the tangent to zero and left the head pointing
+  straight ahead again.
+- Weight is road paint, not linework. At 0.45 m of shaft under a 1.25 m head it
+  read as a scratch from the driver's seat at night; 0.55 under 1.6 reads.
+
+### An arrow before each lane closes
+
+There was no marking anywhere inside the transition: the only arrow was 200 m
+upstream of the first taper and 350 m upstream of the second. `absorptionSteps`
+now each get closure arrows from `_paintLaneClosureArrows` — **repeated**, the
+way a real closing lane is signed, at 10 m and 46 m of clear run ahead of the
+taper, while the lane is still full width and the driver can still act on them.
+
+| Lane | Arrows (host s, head) | Painted lane | Taper it warns about |
+| --- | ---: | ---: | --- |
+| `aux:1` | 1606.4, 1642.4 | −8.87..−12.97 (4.10 m) | 1652.4 → 1724.7 (5 → 4) |
+| `aux:0` | 1751.0, 1787.0 | −5.32..−9.43 (4.10 m) | 1797.0 → 1869.3 (4 → 3) |
+
+The appended lanes drift across the deck as they close, so the ribbon rides the
+lane's **painted** centre at every station and is cut to the paint's width.
+`_paintDecalRibbon` takes a lateral **function** for this. Measured ribbon
+centres land within **0.02 m** of the painted centre at every sampled station,
+against 0.28 m before.
+
+`node .devtests/merge-arrow-probe.mjs [--shots]` gates it: an arrow in every
+absorption step's lane, each head upstream of its taper, each on the centre of
+the lane as painted rather than as computed, each inside the real paved
+envelope (`envelopeAt`, not a guess at carriageway width) — plus the arrow
+textures measured row by row for constant shaft width, unbroken runs and a
+monotone centre. Ramp-side markings are checked the same way against
+`_paintedLanes`. Writes `MA-*.png`, including straight-down frames over every
+marking and driver's-eye frames on each closing lane's painted centre.
+
 ## Locked merge tail (world editor)
 
 The last 220 m of ramp 8 — the 30 m of lead points on the glue line plus the

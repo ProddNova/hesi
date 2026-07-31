@@ -625,3 +625,201 @@ the outer one, and the row frozen by the editor saves was the inner one.
 Shots: `node .devtests/lamp-topdown-shot.mjs <tag>` → `.devtests/shots/L-*.png`
 (the two overhead spots show the ribbon on the outer flanks and the median gap
 dark; the chase spot is the driver's view).
+
+---
+
+## Round 8 (31 Jul 2026): the merge poles, and the dark PA bay
+
+Two spots where the single outer row was in the wrong place — or absent.
+
+### 1. Poles standing in the middle of the ramp_8 -> wangan_0 merge
+
+`J13:merge:wangan_0:ramp_8:end` is a `branchAnchor: 'appended'` progressive
+merge: ramp 8's two lanes are laid **outside** the Wangan's own paved edge and
+absorbed over 375 m (`TATSUMI_RAMP8_MERGE_STATUS.md`). `_lampSideFor(wangan_0)`
+picks the same kerb the transition works on, so from the moment the envelope
+opens, that kerb is no longer the outside of the road — it is a paint line down
+the middle of a five-lane deck. Measured on the live build, six poles stood
+2.7–7.1 m inside the pavement:
+
+| host s | pole lateral | real edge |
+| ---: | ---: | ---: |
+| 1612.8 | −6.01 | −13.72 |
+| 1654.8 | −6.01 | −13.72 |
+| 1696.8 | −6.01 | −11.22 |
+| 1738.8 | −6.01 | −10.17 |
+| 1780.8 | −6.01 | −10.17 |
+| 1822.8 | −6.01 | −9.30 |
+
+Ramp 8 could not cover for them: its own row ends with the ramp, at host
+s ≈ 1580, 290 m before the taper is done.
+
+`_queueRouteLamps` now reads `_progressiveEnvelopeAt` and mounts on
+`max(drawn edge, |envelope.outerLateral|)` when the transition is on the lamp
+side. Every pole in the window now stands **0.62 m inside the real edge**, the
+same setback it has everywhere else, and follows the envelope back in as the
+merge tapers 5 → 4 → 3. The ground pool's WIDTH follows the same surface half
+(a merge's appended lanes are running surface; a lay-by's bulge still is not,
+so that term is unchanged). One station, host 1570.8, is still dropped by
+`_barrierSuppressed` — there the outer edge IS ramp 8's deck, which carries its
+own pole at host ≈ 1536.
+
+No `_instance` call was added, removed or reordered: pole counts and instance
+indices are byte-identical (`lamp-coverage-probe` 4140 poles on 63 routes).
+
+### 2. The Tatsumi PA bay had no row at all
+
+Two things left the widening black. `_lampSideFor(ramp_8)` puts its one row on
+the kerb facing away from the Wangan — the **opposite** kerb from the bay; and
+the bay lies inside the PA clearing rectangle, where `_instance` zero-scales
+everything, so a pole there could not have survived anyway.
+
+New `_buildTatsumiBayLamps()` — three poles + lenses + ground pools down the
+bay's outer edge, using the same escape hatch and for the same two reasons as
+`_buildZoneEntrances`: built after `_finalizeChunks` as three small
+InstancedMeshes added straight to the group, so the clearing never sees them
+and no saved editor (mesh, index) address can move. Placement is derived from
+the bay — drawn edge, bank, sag — exactly like the road row, plus one extra
+rule: the bay runs downhill and its outer edge passes **under** the lot slab
+about two thirds of the way along, so pole and pool walk in from the parapet to
+the last lateral still in the open (13.88 → 11.88 → 10.88 m). Without it the
+pools were cut by the slab — the classic buried-decal hard light/dark line
+(10/25 corner samples under the slab, now 2/25). The lenses are registered in
+`_carPaintLightChunks`, so the player's paint reacts to them like any other
+fixture.
+
+### Measured / verification
+
+- `node .devtests/merge-lamp-diag.mjs` — every wangan_0 pole through J13 at
+  0.62 m inside the real edge (was up to 7.10 m inside).
+- `node .devtests/tatsumi-bay-lamp-diag.mjs` — 3 poles at ramp_8 s 567/602/637,
+  slab occlusion 0/2/2 of 25 corner samples per pool, 4 car-paint lights in
+  range.
+- `node .devtests/merge-bay-lamp-shots.mjs` → `.devtests/shots/MBL-*.png`
+  (`MBL-merge-full5`, `MBL-merge-eye`, `MBL-bay-eye`), no page errors.
+- `lamp-coverage-probe` 4140/63, one row each; `pool-deck-fit-probe`
+  2767/94454 (2.93%) buried, worst 12.597 m — **byte-identical to the same run
+  with the change stashed**; `editor-build-ops-probe` no drift (the build file
+  currently carries 0 operations).
+
+### Noted, not fixed
+
+`_buildServiceAreaDressing` sets `_suppressServiceAreaObjects = true` for the
+Tatsumi deck and only clears it *after* `_buildTatsumiPaDressing` has run, so
+the real-footprint lot dressing this file's §2 describes is emitted entirely as
+zero-scale tombstones — all 196 instances, including its own 5 sodium poles and
+7 light pools. That is why the lot itself is bare and dark. Out of scope here
+(it is the lot, not the bay), but it is one line.
+
+### Round 8b (same day): the rest of the edge furniture, and the bay tail
+
+Round 8 fixed the lamp row by reading the envelope inside `_queueRouteLamps`.
+That was the right rule in the wrong place — **every** piece of edge-mounted
+furniture rides `_edgeHalfAt`, and all of it stayed behind on the lanes:
+
+- **barrier reflectors** — 6 of them left floating at 1 m over the running
+  surface, 3.7–7.3 m inside the real edge, with no parapet under them (the
+  parapet already used `_surfaceEdgeLateral` and had correctly moved out). This
+  is the "robi volanti" in the merge.
+- chevron boards, SOS cabinets and lay-by furniture would do the same at any
+  future appended-anchor merge.
+
+So the envelope rule moved **into `_edgeHalfAt`** and the lamp loop went back to
+one line. After it, the only wangan_0 instances still standing inside the paved
+edge through J13 are the ones that belong there: the lamp lenses (2.90 m — they
+hang on the arm, by design), the ground pools/streaks, and the viaduct piers on
+the centreline. Verified by `node .devtests/merge-residue-diag.mjs`.
+
+**Junction name masts removed** (`_buildSignage`): 26 planted 15 m poles with a
+double-faced `<name>|JUNCTION` board, dropped on each junction's own point —
+i.e. in the middle of the interchange. The junctions themselves are untouched.
+
+**The PA bay row now covers the whole lay-by**, tapers included (5 poles at
+30 m over 550–700 instead of 3 over 550–655, 50 m pools). The first pass lit
+the half you brake into and left the half you accelerate out of dark.
+
+### Still open: the paved-edge notch at the ramp_8 handoff
+
+Reported and reproduced (`.devtests/shots/MBL-seam-top.png`, straight down over
+host s 1570): the outer paved edge has a visible step around host
+s 1570–1590 — where ramp 8's own deck stops owning the outside and the host's
+progressive envelope takes over. The measurable quantities there
+(`node .devtests/merge-edge-seam-diag.mjs`) are small: the union of the two
+outer edges wiggles by ~0.11 m and the two owners' edges differ by at most
+0.35 m at the crossover, with the parapet handing over at 1580.1. That is not
+enough to explain what the shot shows, so the cause is in how the two SURFACES
+are clipped against each other (`_mouthClipAt` / the envelope flare from −6.63
+to −13.72 in 28 m), not in the edge laterals. Not fixed — it needs a pass
+through the merge geometry model, not the furniture.
+
+### Round 8c (same day): poles off the middle of the bay, unbroken ramp paint,
+### and Shutoko merge markings
+
+**The bay poles no longer lean in.** Round 8b walked them inboard wherever the
+bay's outer edge passes under the PA lot slab, which put two of them 2.4 and
+3.4 m inside the paved edge — standing in the middle of an emergency lay-by.
+`node .devtests/lane-obstruction-diag.mjs` scores that directly (a pole is an
+offence when it is more than 0.75 m inside the pavement, i.e. past the 0.62 m
+the row legitimately sits in from the drawn edge) and reported them as the two
+worst on the network. The poles are back on the drawn edge at every station;
+only the ground POOLS still walk in, because a decal under the slab is cut by
+it and that is the buried-decal hard line, not a placement question.
+
+What that leaves: the outer ~4 m of the bay downstream of s ≈ 640 cannot be lit
+at all, because the lot slab is at or above the bay surface there — the lay-by
+and the lot overlap in plan for about 110 m. That is a conflict between the two
+footprints, not a lighting bug; see TATSUMI_PA_STATUS.
+
+**ramp_8's lane divider no longer breaks.** The branch's own divider was retired
+at the marking opening, but the transition's replacement
+(`progressiveMergeDivider`) only starts at `openingStart` — and its first dash
+lands ~16 m of host chainage later still, because the aux divider takes that
+long to converge onto the ramp's centreline. Result: **44.6 m** (branch
+s 1118.0 → 1162.6) with no line at all between the ramp's two lanes. The branch
+now keeps its divider until `openingStart + PROGRESSIVE_DIVIDER_HANDOFF` (16 m
+of host). Measured after: no gap over 10 m, worst lateral step at the handoff
+**0.18 m**, and **0** stations painted by both owners.
+
+**Merge markings (`_buildMergeRoadMarkings`).** Every progressive merge now
+carries Shutoko-style horizontal signage on the branch, upstream of the
+transition and in the lane the driver has to leave:
+
+- **合流注意** — four glyphs, 3.1 × 6.4 m each, 11 m apart, starting 215 m
+  before the merge point, read in order as you drive over them.
+- **the merge arrow** — 5 × 30 m, a shaft up the lane that bends toward the
+  mainline and ends in a head, 128 m before the merge.
+
+Both are painted decals, not signs: `_paintDecalRibbon` lays a ribbon of quads
+along the centreline (2.5 m steps) so they follow the ramp's curve, bank and
+grade — a single 30 m quad would cut into the deck on the inside of the bend.
+
+Two things that are load-bearing and non-obvious:
+
+- **alphaTest, not transparent.** As transparent meshes the glyphs sorted
+  against the additive light pools and won: every character punched a dim hole
+  through the sodium ribbon and read *darker* than the asphalt. Alpha-tested,
+  they render in the opaque pass and the pools add their light on top of the
+  paint, which is what a lamp does to real paint.
+- **Lambert at `materials.marking`'s colour (0xd8d6bf)**, not white MeshBasic,
+  so painted text sits at the same brightness as the dashes beside it.
+
+The pass runs last, adds meshes with unique names and calls `_instance` zero
+times, so no saved editor (mesh, index) address moves. It needs a canvas, so
+headless node builds skip it — verify it in the browser
+(`node .devtests/merge-bay-lamp-shots.mjs` → `MBL-mark-top`, `MBL-mark-text`,
+`MBL-mark-arrow`).
+
+### Also found, not fixed: six poles standing in other ramps' lanes
+
+`lane-obstruction-diag` flags six pre-existing offenders far from this work,
+where one route's lamp row lands inside another route's surface and
+`_barrierSuppressed` did not catch it:
+
+| pole | lands in | how far inside |
+| --- | --- | ---: |
+| chunk 2,0 #17 | ramp_20 s=285.6 | 3.11 m |
+| chunk -2,-6 #45 | r1_0 s=295.0 | 2.20 m |
+| chunk -2,-6 #44 | r1_0 s=253.1 | 2.15 m |
+| chunk -4,-21 #4 | ramp_47 s=1985.3 | 1.67 m |
+| chunk 2,0 #12 | ramp_40 s=142.3 | 1.44 m |
+| chunk 2,0 #1 | ramp_19 s=176.7 | 0.07 m |

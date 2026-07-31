@@ -71,9 +71,13 @@ console.log(`routes with no lampposts at all: ${unlit.length
 const deck = map.serviceAreas?.find((area) => area.id === 'tatsumi_pa');
 if (deck) {
   let onDeck = 0;
+  let exempt = 0;
   map.group.traverse((object) => {
-    // The soffit pools are deliberately under the slab, not on it.
+    // The soffit pools are deliberately under the slab, not on it, and the
+    // gate / PA-bay lamp row is the content that is MEANT to stand inside the
+    // rectangle (map.js _buildTatsumiBayLamps, _buildZoneEntrances).
     if (!object.isInstancedMesh || object.userData.bakedRoadLighting) return;
+    if (object.userData.tatsumiClearingSurface) { exempt += object.count; return; }
     const local = new THREE.Matrix4();
     const point = new THREE.Vector3();
     const scale = new THREE.Vector3();
@@ -85,7 +89,8 @@ if (deck) {
       if (map._insideTatsumiClearing(point)) onDeck += 1;
     }
   });
-  console.log(`live instances standing inside the Tatsumi clearing: ${onDeck}`);
+  console.log(`live instances standing inside the Tatsumi clearing: ${onDeck}`
+    + ` (+${exempt} exempt: gate / PA-bay lamp row)`);
 }
 
 // Editor saves address instances by (bucket, index) with no matrix check, so a

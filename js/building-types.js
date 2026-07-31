@@ -51,10 +51,10 @@
  * follows on its own: `radius` is derived from the scaled footprint, so
  * neighbours and the road keep the same clearance in proportion.
  *
- * 1 = the sizes the grids below declare. 1.5 = half again as big in every
- * direction (27 Jul 2026: +25 %, then another +20 % on top).
+ * 1 = the sizes the grids below declare. 1.95 = 95 % bigger in every
+ * direction (27 Jul 2026: +25 %, then another +20 %, then +30 % on top).
  */
-export const BUILDING_SCALE = 1.5;
+export const BUILDING_SCALE = 1.95;
 
 /** Grid -> metres, so a size can never drift out of step with its facade. */
 function sized(entry) {

@@ -1,9 +1,9 @@
 {
   "version": 1,
   "scene": "highway",
-  "generatedAt": "2026-07-31T07:28:37.505Z",
+  "generatedAt": "2026-07-31T11:05:17.947Z",
   "project": {
-    "draftSignature": "fnv1a32:46466dda",
+    "draftSignature": "fnv1a32:edf24cd6",
     "name": "HESI Main World",
     "path": "data/editor/hesi-world-project.json"
   },
@@ -27,7 +27,7 @@
     "lighting": {
       "ambientIntensity": 0.72,
       "directIntensity": 0.82,
-      "exposure": 0.65,
+      "exposure": 1.2,
       "intensity": 0.9,
       "streetLampColor": "#fe692a",
       "streetLampIntensity": 1.8,

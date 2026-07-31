@@ -90,6 +90,10 @@ const SERVICE_DASH_PERIOD = 14;
 // Denser broken line marking a merge/exit boundary through junction zones.
 const ZONE_DASH_LENGTH = 3.0;
 const ZONE_DASH_PERIOD = 6;
+// Host chainage past a merge's openingStart at which the transition's own lane
+// divider has converged onto the branch's centreline. Until then the branch
+// keeps painting its own (see mouthPaintLat).
+const PROGRESSIVE_DIVIDER_HANDOFF = 16;
 // ------------------------------------------------------------------
 // Emergency lay-bys (非常駐車帯 / piazzole di sosta d'emergenza)
 //
@@ -178,6 +182,12 @@ const SURFACE_GLOSS_BASE = Object.freeze({ lightPool: 0.28, lightStreak: 0.12 })
 // bumper height that every car visibly waded through. The streak keeps a
 // centimetre over the pool because the two overlap across the near lane.
 const DECAL_LIFT = Object.freeze({ pool: 0.04, streak: 0.05 });
+// Lane-change arrow, in metres. Short and repeated, the way a real closing
+// lane is signed — NOT one long arrow that drives itself across the lane line.
+// The shift is the head's reach off the lane centre: it has to leave the head's
+// outer corner (shift + headWidth / 2) inside a 3.55 m lane's half-width.
+const ARROW_LENGTH = 16;
+const ARROW_SHIFT = 0.65;
 // These fixtures are emissive meshes with baked road pools, not real Three.js
 // lights. Keep a tiny spatial record so the player-car shader can reproduce
 // their direct highlight without adding PointLights to every world material.
@@ -3378,9 +3388,23 @@ export class HighwayMap {
    * barrier reflectors, chevron boards, SOS cabinets). These follow the drawn
    * edge, not the through-lane edge, so a lay-by carries its parapet
    * furniture outward with it instead of leaving posts standing in the bay.
+   *
+   * The same applies — harder — to a progressive merge. A merge with
+   * `branchAnchor: 'appended'` lays the branch's lanes OUTSIDE this
+   * carriageway's own edge and absorbs them over a few hundred metres, so from
+   * the moment the envelope opens the pre-merge edge is a paint line in the
+   * middle of a five-lane deck. The parapet already knows that
+   * (`_surfaceEdgeLateral`); the furniture bolted to it did not, and every
+   * lamp, reflector and board stayed behind on the lanes — poles in the
+   * running surface, reflectors floating at 1 m with no wall under them.
    */
   _edgeHalfAt(route, distance, side) {
-    return this._halfWidthAt(route, distance) + this._laybyExtraAt(route, distance, side);
+    const drawn = this._halfWidthAt(route, distance) + this._laybyExtraAt(route, distance, side);
+    const progressive = this._progressiveEnvelopeAt(route, distance);
+    if (progressive && progressive.transition.sideSign === side) {
+      return Math.max(drawn, Math.abs(progressive.envelope.outerLateral));
+    }
+    return drawn;
   }
 
   _endIsOpen(route, whichEnd) {
@@ -6148,6 +6172,520 @@ export class HighwayMap {
     this._tatsumiUnderdeckPools = pools;
   }
 
+  /**
+   * The lamp row down the outer edge of the Tatsumi PA bay (the "slargo").
+   *
+   * Two things conspire to leave that widening pitch black. `_lampSideFor`
+   * puts ramp_8's single row on the kerb facing away from the Wangan, which is
+   * the OPPOSITE kerb from the bay; and the bay lies inside the PA clearing
+   * rectangle, where `_instance` zero-scales everything (that is what keeps the
+   * deck a bare paved strip). So the one stretch the driver has to read — the
+   * bay he brakes into, and the gate standing at the end of it — got no pole
+   * on its own side and could not have kept one anyway.
+   *
+   * Same escape hatch as `_buildZoneEntrances`, for the same two reasons:
+   * build it outside the index-sensitive chunk buckets, as three small
+   * InstancedMeshes added straight to the group after `_finalizeChunks`. No
+   * saved editor (mesh, index) address can move, and the clearing never sees
+   * it. Placement is derived from the bay itself — the drawn edge, the bank
+   * and the sag — exactly like `_queueRouteLamps`, so the poles stand against
+   * the bay parapet and their pools lie on the bay surface.
+   */
+  _buildTatsumiBayLamps() {
+    const halfTurn = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI);
+    const deck = this.serviceAreas?.find((candidate) => candidate.id === 'tatsumi_pa');
+    const deckTop = deck ? (deck.elevation ?? deck.center.y) : -Infinity;
+    const poles = [];
+    for (const layby of this.laybys || []) {
+      if (!layby.paZone) continue;
+      const { route, side } = layby;
+      if (!route) continue;
+      // The WHOLE bay, tapers included. Covering only the square part left the
+      // downstream third — the taper the driver rejoins the ramp through —
+      // dark, which is the half of the bay you actually look at on the way out.
+      const from = layby.start;
+      const to = layby.end;
+      const span = to - from;
+      if (span < 24) continue;
+      // The bay runs downhill along the lot and its outer edge passes UNDER the
+      // deck slab about two thirds of the way down. A ground DECAL out there is
+      // cut by the slab — the hard light/dark line a buried decal always draws
+      // — so the pools walk in to the last lateral still in the open.
+      //
+      // The POLES do not. Leaning them in put two of them 2.4 and 3.4 m inside
+      // the bay's paved edge, i.e. standing in the middle of an emergency
+      // lay-by, which is worse than a pole whose foot is hidden by the lot
+      // slab: a lamppost belongs against the parapet and nowhere else. That the
+      // lot overhangs the bay at all is a geometry conflict between the two
+      // (see the note in TATSUMI_PA_STATUS), not something the lamp row should
+      // paper over.
+      const openLateral = (frame, outermost, inner) => {
+        for (let lateral = outermost; lateral > inner; lateral -= 0.25) {
+          const point = this._deckPoint(frame, side * lateral, 0.01);
+          if (!this._insideTatsumiClearing(point, 0) || point.y >= deckTop) return lateral;
+        }
+        return inner;
+      };
+      // Evenly spread at roughly the mainline pitch, so the row reads as the
+      // same lighting the rest of the road has.
+      const count = Math.max(2, Math.round(span / 30));
+      for (let i = 0; i < count; i += 1) {
+        const distance = from + span * (i + 0.5) / count;
+        const center = this._sampleCenter(route, distance, 1);
+        const tangent = center.baseTangent;
+        const frame = {
+          position: center.position,
+          tangent,
+          normal: horizontalNormal(tangent),
+          bank: this._bankAt(route, distance),
+          route,
+          distance,
+        };
+        const half = this._halfWidthAt(route, distance);
+        const drawnHalf = this._edgeHalfAt(route, distance, side);
+        const mountHalf = drawnHalf;
+        const base = this._deckPoint(frame, side * (mountHalf - 0.62), 0.01);
+        const quaternion = yawQuaternion(tangent);
+        if (side < 0) quaternion.multiply(halfTurn);
+        const lens = base.clone().addScaledVector(frame.normal, -side * 2.28);
+        lens.y = base.y + 9.26;
+        // The pool spans the bay AND the running lanes beside it: at the gate
+        // the driver is crossing from one to the other. Its outer edge stops
+        // where the slab starts, for the same reason the pole did.
+        const poolOuter = openLateral(frame, drawnHalf, -half);
+        const poolInner = -half * 0.6;
+        const poolWidth = clamp(poolOuter - poolInner, 9, 19);
+        const poolLen = span / count + 20;   // overlaps its neighbours, no dark gaps
+        const poolOffset = side * (poolOuter - poolWidth * 0.5);
+        const bankQuat = new THREE.Quaternion()
+          .setFromAxisAngle(TMP_AXIS.copy(tangent).normalize(), -frame.bank);
+        const pool = this._deckPoint(frame, poolOffset, DECAL_LIFT.pool
+          + this._decalSagClearance(route, frame, tangent, distance, poolOffset, poolLen));
+        poles.push({
+          base,
+          quaternion,
+          lens,
+          pool,
+          poolQuaternion: surfaceQuaternion(tangent).premultiply(bankQuat),
+          poolScale: vec(poolWidth, 1, poolLen),
+        });
+      }
+    }
+    if (!poles.length) return;
+
+    const build = (geometry, material, name, compose) => {
+      const mesh = new THREE.InstancedMesh(geometry, material, poles.length);
+      mesh.name = name;
+      // The gate, its forecourt and this row are the things that are MEANT to
+      // stand inside the clearing rectangle (see _buildZoneEntrances).
+      mesh.userData.tatsumiClearingSurface = true;
+      const matrix = new THREE.Matrix4();
+      poles.forEach((pole, index) => {
+        compose(matrix, pole);
+        mesh.setMatrixAt(index, matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere?.();
+      this.group.add(mesh);
+      return mesh;
+    };
+
+    const unit = new THREE.Vector3(1, 1, 1);
+    build(this._unitGeometries.lamppost, this.materials.concrete, 'Tatsumi bay lampposts',
+      (matrix, pole) => matrix.compose(pole.base, pole.quaternion, unit));
+    build(this._unitGeometries.box, this.materials.lampSodium, 'Tatsumi bay lamp lenses',
+      (matrix, pole) => matrix.compose(pole.lens, pole.quaternion, vec(1.1, 0.1, 0.34)));
+    const pools = build(this._unitGeometries.pool, this.materials.lightPool, 'Tatsumi bay light pools',
+      (matrix, pole) => matrix.compose(pole.pool, pole.poolQuaternion, pole.poolScale));
+    pools.userData.bakedRoadLighting = true;
+
+    // The lenses are fixtures like any other: let the player's paint shader
+    // pick them up so the car reacts to the bay lighting.
+    const paintLight = CAR_PAINT_LIGHT_MATERIALS.lampSodium;
+    for (const pole of poles) {
+      const key = this._chunkKey(pole.lens.x, pole.lens.z);
+      if (!this._carPaintLightChunks.has(key)) this._carPaintLightChunks.set(key, []);
+      this._carPaintLightChunks.get(key).push({
+        position: pole.lens.clone(),
+        materialName: 'lampSodium',
+        range: paintLight.range,
+        strength: paintLight.strength,
+        distanceSq: Infinity,
+      });
+    }
+    this._tatsumiBayLamps = poles.length;
+  }
+
+  /**
+   * A painted decal laid ALONG the road: a ribbon of quads following the
+   * centreline from `sNear` to `sFar`, `width` metres wide, centred on
+   * `lateral`, with v running 0→1 from near to far so the texture is read the
+   * way the driver drives it.
+   *
+   * It has to be a ribbon, not one big quad: these run 6–30 m and the ramp
+   * curves, banks and climbs under them. A single plane would cut into the
+   * deck on the inside of the bend and float on the outside — the same
+   * buried-decal hard line the lamp pools are shaped to avoid.
+   *
+   * `lateral` may be a function of the route distance instead of a number, so
+   * a marking can ride a lane that is itself moving across the deck — which is
+   * every lane a progressive merge is about to take away.
+   */
+  _paintDecalRibbon(route, material, sNear, sFar, lateral, width, name) {
+    const lateralAt = typeof lateral === 'function' ? lateral : () => lateral;
+    const length = Math.abs(sFar - sNear);
+    const steps = Math.max(2, Math.ceil(length / 2.5));
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    const centre = new THREE.Vector3();
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const distance = this._normalizeDistance(route, sNear + (sFar - sNear) * t);
+      const sample = this._sampleCenter(route, distance, 1);
+      const frame = {
+        position: sample.position,
+        tangent: sample.baseTangent,
+        normal: horizontalNormal(sample.baseTangent),
+        bank: this._bankAt(route, distance),
+        route,
+        distance,
+      };
+      const lift = DECAL_LIFT.streak + 0.025;
+      const centreLateral = lateralAt(distance);
+      const low = this._deckPoint(frame, centreLateral - width * 0.5, lift);
+      const high = this._deckPoint(frame, centreLateral + width * 0.5, lift);
+      positions.push(low.x, low.y, low.z, high.x, high.y, high.z);
+      uvs.push(0, t, 1, t);
+      centre.add(low).add(high);
+      if (i > 0) {
+        const base = (i - 1) * 2;
+        indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+      }
+    }
+    centre.multiplyScalar(1 / ((steps + 1) * 2));
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = name;
+    this._addChunkMesh(mesh, centre);
+    return mesh;
+  }
+
+  /**
+   * White-on-transparent road paint textures. Kept in one cache because a
+   * merge repeats the same few glyphs and the same arrow.
+   */
+  _roadPaintMaterial(key, draw, aspect) {
+    if (!this._roadPaintMaterials) this._roadPaintMaterials = new Map();
+    if (this._roadPaintMaterials.has(key)) return this._roadPaintMaterials.get(key);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = Math.round(256 * aspect);
+    draw(canvas.getContext('2d'), canvas.width, canvas.height);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = 4;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    this._ownedTextures.add(texture);
+    // Lambert, tinted like every other line on the deck (materials.marking), so
+    // painted text sits at the same brightness as the dashes beside it instead
+    // of glowing through the night at full white.
+    // alphaTest, NOT transparent: painted text has to render in the OPAQUE
+    // pass. As a transparent mesh it sorted against the additive light pools
+    // and won — every glyph punched a dim hole through the sodium ribbon and
+    // read DARKER than the asphalt around it. Alpha-tested, the pools add
+    // their light on top of the paint, which is what a lamp does to real
+    // paint. polygonOffset keeps it off the deck it is 25 mm above.
+    const material = new THREE.MeshLambertMaterial({
+      map: texture,
+      color: 0xd8d6bf,
+      alphaTest: 0.45,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    this._ownedTextures.add({ dispose: () => material.dispose() });
+    this._roadPaintMaterials.set(key, material);
+    return material;
+  }
+
+  /** One kanji/kana, drawn to fill the tile the way road paint is stretched. */
+  _roadGlyphMaterial(glyph) {
+    return this._roadPaintMaterial(`glyph:${glyph}`, (context, width, height) => {
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = '#ffffff';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      // Road glyphs are drawn tall and narrow so they read as square from the
+      // driver's seat; the tile is already 1:2, so fill it and let the ribbon's
+      // real-world 3 x 6 m do the foreshortening.
+      context.font = `bold ${Math.round(height * 0.86)}px sans-serif`;
+      context.save();
+      context.translate(width * 0.5, height * 0.52);
+      context.scale(width / (height * 0.86), 1);
+      context.fillText(glyph, 0, 0);
+      context.restore();
+    }, 2);
+  }
+
+  /**
+   * The lane-change arrow: a straight shaft up the middle of the lane that
+   * peels off in the last few metres and ends in a head angled toward the lane
+   * the driver has to take. `bend` is +1 when that lane is on the +lateral side
+   * of the ribbon. The whole arrow stays INSIDE its own lane — the shaft is on
+   * the lane centre and the head reaches `shiftMetres` off it, which is what
+   * makes it a road marking rather than a drawn trajectory.
+   *
+   * Two shapes have already been wrong here, and in opposite directions:
+   *
+   * - A stroked quadratic in TILE space. lineWidth was constant in texture
+   *   space, so on a 30 x 5 m ribbon the upright shaft came out 1.0 m across
+   *   and the near-horizontal elbow 1.5 m; the curve reached the head 19
+   *   degrees off horizontal and then turned square into it, so the mitre join
+   *   threw a spike; and its 3.8 m half-width hung over the ramp's paved edge.
+   * - Then a full lane-width translation: straight, smoothstep one whole lane
+   *   across, straight. Geometrically clean, and completely wrong as paint — it
+   *   drove sideways over the lane line it was painted beside. No road carries
+   *   its trajectory on the deck; it carries an arrow that POINTS.
+   *
+   * So: laid out in METRES and mapped to the tile last, a shaft offset off its
+   * own centreline (constant real width, no join to spike), and a hook whose
+   * ease has ZERO slope where it leaves the straight and MAXIMUM slope where
+   * the head grows off it — the head inherits that tangent, so it points into
+   * the next lane instead of turning square back down the road.
+   */
+  _roadLaneChangeArrowMaterial(bend, lengthMetres, widthMetres, shiftMetres) {
+    const key = `lane-arrow:${bend}:${lengthMetres}:${widthMetres}:${shiftMetres}`;
+    // Road-paint weight, not linework: at 0.45 m the shaft read as a scratch
+    // in the one view that matters — from the driver's seat, at night, at
+    // speed. 0.55 m of shaft under a 1.6 m head is what a Japanese expressway
+    // lane-change arrow actually carries, and `shift + headWidth / 2` = 1.45 m
+    // still leaves 0.3 m of clearance inside a 3.55 m lane.
+    const shaft = 0.55;
+    const headWidth = 1.6;
+    const headLength = 2.6;
+    return this._roadPaintMaterial(key, (context, pixelWidth, pixelHeight) => {
+      context.clearRect(0, 0, pixelWidth, pixelHeight);
+      context.fillStyle = '#ffffff';
+      const perMetreX = pixelWidth / widthMetres;
+      const perMetreS = pixelHeight / lengthMetres;
+      // World (x metres from the lane centre, s metres from the upstream end)
+      // -> tile. v runs 0->1 near->far and flipY puts v=0 at the bottom of the
+      // canvas, so s grows upward and the head ends up downstream.
+      const at = (x, s) => [pixelWidth * 0.5 + x * perMetreX, pixelHeight - s * perMetreS];
+      const tipS = lengthMetres - 0.3;
+      const baseS = tipS - headLength;
+      // The hook is the last 3 m of shaft and nothing more. Longer than that
+      // and the arrow starts reading as a path across the lane again.
+      const hook = Math.min(3, baseS * 0.35);
+      const bendStart = baseS - hook;
+      const centreX = (s) => {
+        if (s <= bendStart) return 0;
+        const t = Math.min(1, (s - bendStart) / hook);
+        // Ease-IN only: flat where it leaves the straight, steepest at the head.
+        return bend * shiftMetres * (1 - Math.cos(t * Math.PI * 0.5));
+      };
+      const slope = (s) => (centreX(s + 0.02) - centreX(s - 0.02)) / 0.04;
+      const samples = Math.max(24, Math.round(baseS / 0.3));
+      const edge = (side) => {
+        const points = [];
+        for (let i = 0; i <= samples; i += 1) {
+          const s = (baseS * i) / samples;
+          const m = slope(s);
+          const norm = Math.hypot(1, m);
+          // Offset along the centreline's normal in metres, not along x: on
+          // the hook the shaft would otherwise read wider than it is.
+          points.push([centreX(s) + (side * shaft * 0.5) / norm, s - (side * shaft * 0.5 * m) / norm]);
+        }
+        return points;
+      };
+      context.beginPath();
+      const outline = [...edge(-1), ...edge(1).reverse()];
+      outline.forEach(([x, s], index) => {
+        const [px, py] = at(x, s);
+        if (index === 0) context.moveTo(px, py);
+        else context.lineTo(px, py);
+      });
+      context.closePath();
+      context.fill();
+      // Head, aligned with the tangent the hook hands it, so it points across
+      // at the angle the shaft was already leaning.
+      const headX = centreX(baseS);
+      const m = slope(baseS);
+      const norm = Math.hypot(1, m);
+      const forward = [m / norm, 1 / norm];
+      const across = [1 / norm, -m / norm];
+      context.beginPath();
+      context.moveTo(...at(headX + forward[0] * headLength, baseS + forward[1] * headLength));
+      context.lineTo(...at(headX - across[0] * headWidth * 0.5, baseS - across[1] * headWidth * 0.5));
+      context.lineTo(...at(headX + across[0] * headWidth * 0.5, baseS + across[1] * headWidth * 0.5));
+      context.closePath();
+      context.fill();
+    }, lengthMetres / widthMetres);
+  }
+
+  /**
+   * The lanes as PAINTED, not as `_laneOffset` imagines them.
+   *
+   * `_laneOffset` divides `lanes * laneWidth`; the edge lines are drawn at
+   * `half - 0.75`, and on a route whose `halfWidth` is wider than its lane
+   * block those two disagree. Ramp 8 is 2 x 3.55 m of lane inside a 4.50 m
+   * half-width, so its edge lines sit at +/-3.75 and the lanes the driver
+   * actually sees are 3.75 m wide centred on +/-1.875 — a tenth of a metre
+   * off every marking that trusted `laneWidth`, and enough for road paint to
+   * read as sloppy. Boundaries first, lanes derived from them.
+   */
+  _paintedLanes(route, distance) {
+    const half = this._halfWidthAt(route, this._normalizeDistance(route, distance));
+    const edge = Math.max(half * 0.5, half - 0.75);
+    const boundaries = [-edge, ...this._laneDividerOffsets(route).filter((offset) => Math.abs(offset) < edge), edge]
+      .sort((left, right) => left - right);
+    const lanes = [];
+    for (let index = 1; index < boundaries.length; index += 1) {
+      lanes.push({
+        centre: (boundaries[index - 1] + boundaries[index]) * 0.5,
+        width: boundaries[index] - boundaries[index - 1],
+      });
+    }
+    return lanes.length ? lanes : [{ centre: 0, width: edge * 2 }];
+  }
+
+  /**
+   * Shutoko-style horizontal signage for a merge: 合流注意 painted down the
+   * ramp, then the merge arrow swinging toward the mainline.
+   *
+   * Built last, outside the chunk instance buckets and out of `_instance`
+   * entirely (added meshes, unique names), so nothing an editor save addresses
+   * can move. Skipped in headless builds — it needs a canvas.
+   */
+  _buildMergeRoadMarkings() {
+    if (typeof document === 'undefined') return;
+    for (const transition of this.progressiveTransitions || []) {
+      if (transition.type !== 'merge') continue;
+      const route = this.routes.get(transition.branchRouteId);
+      if (!route || route.removed) continue;
+      const [branchFrom, branchTo] = transition.branchInterval;
+      // The driver meets the merge at whichever branch end the junction names;
+      // `direction` is +1 when that is the far end in station terms.
+      const atEnd = Math.abs(branchTo - route.length) <= Math.abs(branchFrom);
+      const mergeStation = atEnd ? branchTo : branchFrom;
+      const direction = atEnd ? 1 : -1;
+      const hostward = transition.sourceZone?.hostwardSign ?? -transition.sideSign;
+      // Everything stays UPSTREAM of the transition: inside it the host owns
+      // the surface and the branch's own deck is clipped away under it.
+      const before = (metres) => mergeStation - direction * metres;
+      const lanes = this._paintedLanes(route, before(180));
+      const outerLane = hostward > 0 ? lanes[lanes.length - 1] : lanes[0];
+      const place = (material, atMetres, length, width, name, lateral) => {
+        const near = before(atMetres + length);
+        const far = before(atMetres);
+        if (near < 2 || far < 2 || near > route.length - 2 || far > route.length - 2) return;
+        if (this._isTunnel(route, (near + far) * 0.5)) return;
+        this._paintDecalRibbon(route, material, near, far, lateral, width, name);
+      };
+      // 合流注意 — one glyph per tile, read in order as you drive over them.
+      const warning = [...'合流注意'];
+      warning.forEach((glyph, index) => {
+        place(this._roadGlyphMaterial(glyph), 215 - index * 11, 6.4, 3.1,
+          `road marking ${transition.id} ${glyph}`, outerLane.centre);
+      });
+      // Both ramp lanes are absorbed downstream, so both are told to move over,
+      // in two ranks — one arrow on its own reads as decoration.
+      for (const [index, lane] of lanes.entries()) {
+        const material = this._roadLaneChangeArrowMaterial(hostward, ARROW_LENGTH, lane.width, ARROW_SHIFT);
+        for (const at of [160, 120]) {
+          place(material, at, ARROW_LENGTH, lane.width,
+            `road marking ${transition.id} ramp arrow ${index} ${at}`, lane.centre);
+        }
+      }
+      // Then arrows in every lane the merge is about to take away, ahead of
+      // the taper that takes it: an arrow that only appears once the lane has
+      // already started closing is telling the driver something they can no
+      // longer act on.
+      this._paintLaneClosureArrows(transition);
+    }
+  }
+
+  /**
+   * The two lines an auxiliary lane is PAINTED between, at a host station.
+   *
+   * These come from the same three lateral functions the route dressing uses,
+   * because nothing else is the lane the driver sees. The lane-centre path is
+   * not: the outer edge line is set 0.55 m outboard of the geometric lane edge
+   * (a marked shoulder), which makes the outermost aux lane 4.10 m of paint
+   * around a 3.55 m lane — so an arrow centred on the geometry sits 0.28 m off
+   * centre in a ribbon half a metre too narrow.
+   *
+   * The outer line changes identity partway: the aux divider is only painted
+   * while a lane still exists outboard of this one. After that absorption, the
+   * outer edge line IS this lane's outer boundary.
+   */
+  _progressivePaintedLane(transition, laneId, distance) {
+    const index = Number(laneId.split(':')[1]);
+    if (!Number.isFinite(index)) return null;
+    const outermost = transition.auxiliaryLaneCount - 1;
+    const dividerRetired = transition.absorptionSteps?.[0]?.to ?? transition.secondAbsorptionStart;
+    const hostS = transition.unwrapHost(distance);
+    const inner = index === 0
+      ? transition.boundaryLateralAt(distance)
+      : transition.auxDividerLateralAt(distance);
+    const outer = index === outermost || hostS >= dividerRetired
+      ? transition.outerMarkingLateralAt(distance)
+      : transition.auxDividerLateralAt(distance);
+    if (!Number.isFinite(inner) || !Number.isFinite(outer)) return null;
+    return { inner, outer, centre: (inner + outer) * 0.5, width: Math.abs(outer - inner) };
+  }
+
+  /**
+   * A lane-change arrow in each closing lane of a progressive merge, painted
+   * in the full-width run BEFORE its taper starts. The lanes are appended
+   * outside the host carriageway and drift across the deck as they close, so
+   * the ribbon rides the lane's PAINTED centre at every station rather than a
+   * fixed lateral, and is exactly as wide as the paint around it.
+   */
+  _paintLaneClosureArrows(transition) {
+    const steps = transition.absorptionSteps || [];
+    if (!steps.length) return;
+    const host = this.routes.get(transition.hostRouteId);
+    if (!host || host.removed) return;
+    // The lanes close inward, toward the host carriageway.
+    const hostward = -transition.sideSign;
+    // The arrow has to sit in the lane at full width: never upstream of the
+    // point the five-lane section is established, never inside the taper that
+    // closed the lane before it.
+    let clearFrom = transition.fiveLaneStart ?? transition.absorptionStart;
+    for (const step of steps) {
+      const openFrom = clearFrom;
+      clearFrom = Math.max(clearFrom, step.to);
+      const lateralAt = (distance) => (
+        this._progressivePaintedLane(transition, step.lane, distance)?.centre ?? 0);
+      // Repeated, the way a real closing lane is signed: one arrow well back
+      // and one on the last of the full-width run. `gap` is head-to-taper.
+      for (const gap of [10, 10 + ARROW_LENGTH + 20]) {
+        const end = step.from - gap;
+        const start = end - ARROW_LENGTH;
+        if (start < openFrom + 4) continue;
+        const middle = this._normalizeDistance(host, (start + end) * 0.5);
+        if (this._isTunnel(host, middle)) continue;
+        const lane = this._progressivePaintedLane(transition, step.lane, middle);
+        // Rounded, so two stations a millimetre apart cannot mint two textures.
+        const width = lane ? Math.round(lane.width * 20) / 20 : host.laneWidth;
+        const material = this._roadLaneChangeArrowMaterial(
+          hostward, ARROW_LENGTH, width, ARROW_SHIFT);
+        this._paintDecalRibbon(host, material, start, end, lateralAt, width,
+          `road marking ${transition.id} ${step.lane} closure arrow ${gap}`);
+      }
+    }
+  }
+
   /** True when `object` is or contains a light anywhere in its subtree. */
   _containsLight(object) {
     let found = false;
@@ -6319,6 +6857,8 @@ export class HighwayMap {
     this._finalizeChunks();
     // Built last and outside the index-sensitive chunk buckets.
     this._buildTatsumiUnderdeckPools();
+    this._buildTatsumiBayLamps();
+    this._buildMergeRoadMarkings();
   }
 
   _buildEnvironment() {
@@ -7963,7 +8503,15 @@ export class HighwayMap {
       // Pole and lens ride the DRAWN edge (a lay-by carries them outward with
       // its parapet); the pools below stay sized/offset off the through-lane
       // half-width, so the light ribbon over the running lanes is unchanged.
+      // _edgeHalfAt rides the progressive envelope, so through a merge the row
+      // stays on the outside of the five-lane deck instead of standing on it.
       let mountHalf = this._edgeHalfAt(route, distance, side);
+      // Pool WIDTH keys off the running surface: a lay-by's bulge is not
+      // running surface (hence `half`), but a merge's appended lanes are.
+      const envelope = this._progressiveEnvelopeAt(route, distance);
+      const surfaceHalf = envelope && envelope.transition.sideSign === side
+        ? Math.max(half, Math.abs(envelope.envelope.outerLateral))
+        : half;
       let base = this._deckPoint(frame, side * (mountHalf - 0.62), 0.01);
       // Tatsumi PA: the deck is a deliberately empty paved rectangle, and
       // _instance zero-scales anything standing inside its footprint. On ramp_8
@@ -8004,7 +8552,7 @@ export class HighwayMap {
       // light under it. The pool's overhang past the deck edge is unchanged
       // either way (it is +0.1x its width in both cases).
       const poolLen = lampStep * (1.2 + jL * 0.2);
-      const poolWidth = clamp(half * (1.38 + jW * 0.3), 13, 19);
+      const poolWidth = clamp(surfaceHalf * (1.38 + jW * 0.3), 13, 19);
       const poolOffset = side * (mountHalf - poolWidth * 0.4) + (jW - 0.5) * 1.6;
       // The pool is a big flat quad; the deck is banked AND graded. Orient it to
       // lie PARALLEL to the road surface so it hugs the asphalt instead of cutting
@@ -8121,6 +8669,27 @@ export class HighwayMap {
         };
         if (route._zonesAsBranch) {
           for (const zone of route._zonesAsBranch) {
+            // The line BETWEEN the branch's own lanes is not a boundary with
+            // the host, and the transition does not start painting its
+            // replacement (`progressiveMergeDivider`) until openingStart. Both
+            // the opening rule and the transition-owner rule were retiring the
+            // branch's divider from the approach instead, which left ramp 8's
+            // two lanes running with nothing between them for 44.6 m (branch
+            // s 1118.0 → 1162.6). The branch keeps its own divider until the
+            // station where the transition's actually takes over; from there
+            // the two are the same physical line, so they meet without a step.
+            const progressive = zone.progressive;
+            if (progressive && progressive.type === 'merge'
+              && boundaryRole === 'laneDivider' && progressive.auxiliaryLaneCount > 1) {
+              const hostS = progressive.hostAtBranch(frame.distance);
+              // Held to the transition's FIRST divider dash, not to openingStart:
+              // the aux divider only comes within a lane width of the ramp's own
+              // centreline ~16 m of host chainage later, so releasing at the
+              // interval start still left 20.7 m with no line at all.
+              if (hostS === null || hostS < progressive.openingStart + PROGRESSIVE_DIVIDER_HANDOFF) {
+                return { lateral: lat, intendedLateral: lat, suppressionReason: null, zoneId: zone.id };
+              }
+            }
             if (zone.progressive) {
               const phase = zone.progressive.phaseAtBranch(frame.distance);
               const ownsEdgeSettle = zone.progressive.type === 'diverge'
@@ -8886,20 +9455,12 @@ export class HighwayMap {
       }
     }
 
-    // Junction name masts (double-faced boards on a planted pole).
-    for (const junction of this.junctions) {
-      const position = junction.point.clone();
-      position.y += 15;
-      const mast = vec(position.x, (position.y + 1.1) * 0.5 - 0.5, position.z);
-      this._instance(mast, vec(0.5, position.y + 1.1, 0.5), null, null, 'box:concreteDark');
-      for (const flip of [0, Math.PI]) {
-        const board = this._makeSignMesh(`${junction.name}|JUNCTION`, '#123c78', 6.4, 2.1, true);
-        board.position.copy(position);
-        board.quaternion.setFromAxisAngle(UP, flip);
-        board.translateZ(0.08);
-        this._addChunkMesh(board, position);
-      }
-    }
+    // Junction name masts: REMOVED (31 Jul 2026, on request). Every junction
+    // carried a 15 m planted pole with a double-faced `<name>|JUNCTION` board
+    // dropped on the junction's own point — which is the middle of the
+    // interchange, not a gantry position — so they read as a signboard
+    // standing in the road rather than as Shutoko signage. The junctions
+    // themselves are unaffected; only their masts are gone.
     // PA advance boards (blue P), on poles, facing their carriageway.
     for (const area of this.serviceAreas) {
       if (area.accessDisabled) continue; // no access lane — don't advertise the exit
