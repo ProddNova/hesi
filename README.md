@@ -27,7 +27,7 @@ You can also create a **Static Site** manually with an empty build command and `
 - Garage: WASD + mouse, E interact, Esc release pointer/exit screens
 - Diagnostics: `I` toggles the performance HUD, `P` starts/stops a structured recording (JSON download + clipboard summary), and `O` adds a manual marker
 - Dev panels: `0` debug menu, `9` PS2 picture filter (on touch, both from the on-screen `DBG` button)
-- Interface (HUD, fonts, loading screen, phone, PC terminal): authored in the editor — `npm run editor`, then **HUD** — by dragging and resizing the real HUD on a PC and a phone preview. The game only applies what was published (`HUD_EDITOR_STATUS.md`).
+- Replay (solo build di test `?editorTest`): `3` apre il pannello — registra, salva e rivede i replay con hitbox, camere (inseguimento/orbita/TV/volo libero), pausa, scrub e frame-step
 - Mobile driving: on-screen steering, pedals, handbrake, camera, gears, phone and reset
 - Mobile garage: on-screen movement, drag the right side to look, USE to interact
 - Admin unlock: enter `1997` in the phone Admin app

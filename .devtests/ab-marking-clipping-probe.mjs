@@ -116,8 +116,13 @@ for (const zone of zones) {
     && piece.tag === 'edgeLine'
     && piece.boundary === `edge:${zone.hostwardSign}`
     && piece.suppressionZoneId === zone.id
+    // Inside a progressive transition the same cut is claimed by the
+    // transition owner instead of the generic zone, so both reasons count:
+    // the invariant is that the branch's host-facing edge is cut over exactly
+    // A..B, not which owner claimed each metre of it.
     && (piece.suppressionReason === 'junction-zone-owner-handoff'
-      || piece.suppressionReason === 'junction-opening-no-marking'));
+      || piece.suppressionReason === 'junction-opening-no-marking'
+      || piece.suppressionReason === 'progressive-transition-owner-handoff'));
   if (handoff.length) {
     const actualA = Math.min(...handoff.map((piece) => piece.sFrom));
     const actualB = Math.max(...handoff.map((piece) => piece.sTo));

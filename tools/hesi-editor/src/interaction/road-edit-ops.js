@@ -105,3 +105,49 @@ export function nearestSegment(points, x, z) {
   }
   return best;
 }
+
+/**
+ * Control-point indices whose position is DERIVED by the map generator rather
+ * than authored here.
+ *
+ * `HighwayMap` rewrites the tail of a route anchored onto a host carriageway
+ * (`_anchorEndpoint`) and publishes the stretch it owns as
+ * `route.protectedSegments`: `{ span, anchor: {x, z}, reason }`. Dragging a
+ * point inside that stretch does not move the road, it changes what the
+ * derived alignment blends away from — so the editor locks those handles.
+ *
+ * A segment is located by the WORLD position of its terminal, not by an index
+ * or an end name: the left-hand-traffic build reverses every route, so the
+ * runtime tail is the source document's head and only geometry identifies the
+ * same physical stretch in both point orders.
+ *
+ * Two points always stay free, so a protected span can never lock a whole
+ * road out of the editor.
+ */
+export function protectedPointIndices(points, segments, { closed = false } = {}) {
+  const locked = new Set();
+  if (closed || !Array.isArray(points) || points.length < 3) return locked;
+  const usable = (Array.isArray(segments) ? segments : []).filter((segment) => (
+    segment && Number.isFinite(segment.span) && segment.span > 0
+    && segment.anchor && Number.isFinite(segment.anchor.x) && Number.isFinite(segment.anchor.z)
+  ));
+  if (!usable.length) return locked;
+  const arc = [0];
+  for (let index = 1; index < points.length; index += 1) {
+    arc.push(arc[index - 1] + Math.hypot(
+      points[index][0] - points[index - 1][0],
+      points[index][2] - points[index - 1][2],
+    ));
+  }
+  const total = arc[arc.length - 1];
+  for (const segment of usable) {
+    const gap = (point) => Math.hypot(point[0] - segment.anchor.x, point[2] - segment.anchor.z);
+    const fromHead = gap(points[0]) <= gap(points[points.length - 1]);
+    for (let index = 0; index < points.length; index += 1) {
+      const fromTerminal = fromHead ? arc[index] : total - arc[index];
+      if (fromTerminal <= segment.span) locked.add(index);
+    }
+  }
+  if (locked.size > points.length - 2) return new Set();
+  return locked;
+}

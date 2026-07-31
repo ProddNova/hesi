@@ -218,6 +218,32 @@
         <div class="debug-controls"><b>NOTE</b><span>Le dimensioni sono in pixel virtuali: seguono la risoluzione qui sopra</span><span>0 apre il menu debug · 9 chiude questo pannello</span></div>
       </div>
     </aside>
+    <aside id="replay-menu" class="debug-menu replay-menu hidden" aria-label="Replay" aria-hidden="true">
+      <header><div><small>TESTING TOOLS</small><h2>REPLAY // 3</h2></div><button id="replay-close" aria-label="Chiudi replay">×</button></header>
+      <div class="debug-menu-body">
+        <div class="debug-diagnostics">
+          <span><b>REGISTRAZIONE</b><small id="replay-rec-status">Pronto — registra mentre guidi</small></span>
+          <div><button id="replay-rec-toggle" type="button">START REC</button></div>
+        </div>
+        <div class="debug-diagnostics" id="replay-last-clip" hidden>
+          <span><b>ULTIMO REPLAY</b><small id="replay-last-info"></small></span>
+          <div><button id="replay-last-play" type="button">PLAY</button><button id="replay-last-save" type="button">SALVA</button><button id="replay-last-export" type="button">JSON</button></div>
+        </div>
+        <details class="debug-traffic-panel" open>
+          <summary><span><b>REPLAY SALVATI</b><small>localStorage · max 8 · esportabili in JSON</small></span><em>LIST</em></summary>
+          <div id="replay-list" class="replay-list"></div>
+          <p class="debug-range-note"><label class="replay-import">IMPORTA JSON<input id="replay-import" type="file" accept="application/json,.json" hidden></label></p>
+        </details>
+        <details class="debug-traffic-panel">
+          <summary><span><b>OPZIONI VISIONE</b><small>Valgono durante il playback</small></span><em>VIEW</em></summary>
+          <label class="debug-toggle"><span><b>HITBOX VEICOLI</b><small>Box di collisione di player e traffico nel replay</small></span><input id="replay-opt-hitboxes" type="checkbox" checked><i></i></label>
+          <label class="debug-toggle"><span><b>HITBOX STRADE</b><small>Superfici di collisione stradali</small></span><input id="replay-opt-roads" type="checkbox"><i></i></label>
+          <label class="debug-toggle"><span><b>HITBOX MURI</b><small>Barriere e muri</small></span><input id="replay-opt-walls" type="checkbox"><i></i></label>
+          <label class="debug-toggle"><span><b>LOOP</b><small>Riparti da capo alla fine del replay</small></span><input id="replay-opt-loop" type="checkbox"><i></i></label>
+        </details>
+        <div class="debug-controls"><b>PLAYBACK</b><span>SPAZIO pausa · ←/→ ±2s · ,/. frame per frame · C camera</span><span>CAMERE: CHASE · ORBIT mouse+rotella · TV · FLY WASD+mouse</span><span>Solo build di test · 3 apre/chiude questo pannello</span></div>
+      </div>
+    </aside>
 
     <div id="debug-drone-hud" class="debug-drone-hud hidden"><b>NOCLIP</b><span id="debug-drone-speed">55 M/S</span><span class="drone-help-desktop">WHEEL SPEED · SHIFT BOOST</span><span class="drone-help-touch">DRAG LOOK · BOOST</span><small class="drone-help-desktop">0 MENU</small><small class="drone-help-touch">DBG MENU</small></div>
 

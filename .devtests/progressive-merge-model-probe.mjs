@@ -1,6 +1,6 @@
 import { HighwayMap } from '../js/map.js';
 import { PROGRESSIVE_PHASES } from '../js/progressive-merge.js';
-import { PROGRESSIVE_MERGE_PROTOTYPES } from '../js/progressive-merge-prototypes.js';
+import { progressiveMergePrototypesForFlow } from '../js/progressive-merge-prototypes.js';
 import { createHash } from 'node:crypto';
 
 const failures = [];
@@ -17,7 +17,12 @@ const map = new HighwayMap(null, { addLighting: false, legacyFlow: true });
 const legacy = new HighwayMap(null, { addLighting: false, legacyFlow: true, progressiveMerges: false });
 check(map.progressiveTransitions.length === 2, `active record count ${map.progressiveTransitions.length} != 2`);
 check(legacy.progressiveTransitions.length === 0, `legacy record count ${legacy.progressiveTransitions.length} != 0`);
-check(PROGRESSIVE_MERGE_PROTOTYPES.length === 2, 'prototype allow-list is not exactly P1/P2');
+// The allow-list is flow-bound; this probe builds the legacy flow, whose
+// subset must stay exactly P1/P2. Live-flow records are gated by
+// `progressive-merge-probe.mjs --live`.
+const legacyPrototypes = progressiveMergePrototypesForFlow(true);
+check(legacyPrototypes.map((prototype) => prototype.pinId).join(',') === 'P1,P2',
+  `legacy-flow allow-list is ${legacyPrototypes.map((prototype) => prototype.pinId).join(',')}, not P1,P2`);
 check(map.progressiveCandidateClassifications.length === 2, 'candidate classification count is not exactly two');
 check(map.progressiveCandidateClassifications.every((candidate) => candidate.active),
   'P1/P2 are not both active');

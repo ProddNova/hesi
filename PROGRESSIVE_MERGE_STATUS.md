@@ -1,5 +1,21 @@
 # Progressive Merge Checkpoint Status
 
+## Amendment (2026-07-31): the live flow now builds P3
+
+The allow-list is flow-bound rather than legacy-only. Prototypes carry `flow`,
+and `progressiveMergePrototypesForFlow()` (js/progressive-merge-prototypes.js)
+selects the subset whose junction identities exist in the flow being built.
+P1/P2 remain `flow: 'legacy'` and byte-identical; **P3**
+(`J13:merge:wangan_0:ramp_8:end`, the Tatsumi PA ramp onto the Wangan) is
+authored against the live left-hand network and is the first progressive record
+the playable game renders. See [TATSUMI_RAMP8_MERGE_STATUS.md](TATSUMI_RAMP8_MERGE_STATUS.md).
+
+The 2+3 model is now selected by `prototype.topology === '2+3-merge'` instead of
+J48's junction id, and two behaviours are gated on the new
+`branchAnchor: 'appended'` declaration so P2's measured geometry is untouched.
+The section below therefore still describes P1/P2 correctly, but "the live game
+carries no progressive records" is no longer true.
+
 ## Left-hand-traffic binding (2026-07-17)
 
 The live network now loads reversed for Japanese left-hand traffic

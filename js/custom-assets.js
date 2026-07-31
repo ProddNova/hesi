@@ -12,7 +12,6 @@ import {
 } from './car-models.js?v=aa56cc4f53cb';
 import { CAMERA_TUNING_FIELDS, PICTURE_FIELDS } from './playground-config.js?v=aa56cc4f53cb';
 import { PS2_DITHER_PATTERNS, PS2_FILTER_FIELDS } from './ps2-filter.js?v=aa56cc4f53cb';
-import { hudThemeDocumentErrors } from './hud-theme.js?v=aa56cc4f53cb';
 
 // Custom modeled assets — shared between the game and the HESI world editor.
 //
@@ -542,10 +541,6 @@ export function customAssetsDocumentErrors(document) {
       }
     }
   }
-  // The published interface (the HUD editor, key 8). Same reasoning as the
-  // picture: it reaches every visitor, so a malformed theme is named here rather
-  // than clamped silently on the way out.
-  if (document.runtimeTuning?.hud !== undefined) errors.push(...hudThemeDocumentErrors(document.runtimeTuning.hud));
   for (const [view, fields] of Object.entries(CAMERA_TUNING_FIELDS)) {
     const savedView = document.runtimeTuning?.camera?.[view];
     if (savedView === undefined) continue;

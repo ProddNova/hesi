@@ -163,7 +163,6 @@ export function createEditorShell(root) {
       button('Skybox', 'open-skybox', { title: 'Add and manage an unreachable photographic sky around the scene' }),
       button('Lights', 'open-lights', { title: 'Tune the in-game night lighting: colour, warmth and intensity for the road and the garage' }),
       button('Barriers', 'open-barriers', { title: 'Choose the lateral barrier along each road edge — per side, over any stretch of road' }),
-      button('HUD', 'open-hud', { title: 'Edit the interface: drag and resize the real HUD on a PC and a phone preview — palette, fonts, phone, terminal, loading screen' }),
     ),
     element('span', 'toolbar-divider'),
     toolGroup('Transform',

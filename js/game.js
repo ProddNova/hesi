@@ -28,8 +28,8 @@ import { DeveloperMap } from './dev-map.js?v=aa56cc4f53cb';
 import { DebugStats } from './debug-stats.js?v=aa56cc4f53cb';
 import { DEFAULT_PSX_CAR_ID, PSX_CAR_MODELS, disposePSXCar, getPSXCarModel, loadPSXCar } from './psx-car-pack.js?v=aa56cc4f53cb';
 import { cameraTuningFromDocument, normalizeCameraTuning, DEFAULT_PICTURE, normalizePicture, pictureFromDocument, pictureSignature, setDocumentPicture } from './playground-config.js?v=aa56cc4f53cb';
-import { applyHudTheme, hudThemeFromDocument, HUD_DEVICE_QUERY } from './hud-theme.js?v=aa56cc4f53cb';
 import { PlaygroundPanel, PlaygroundSystem } from './playground.js?v=aa56cc4f53cb';
+import { ReplaySystem } from './replay.js?v=aa56cc4f53cb';
 
 const HighwayMap = MapModule.HighwayMap || MapModule.default;
 const ROAD_SURFACE_NAMES = MapModule.ROAD_SURFACE_MATERIAL_NAMES || ['road', 'roadAlt', 'roadService'];
@@ -127,6 +127,9 @@ class ShutokoNights {
     this.setupDebugMenu();
     this.setupDevMap();
     this.setupDebugStats();
+    // REPLAY // 3 — registratore/visualizzatore, attivo solo in build di test
+    // (editorTest); il pannello si apre con il tasto 3.
+    this.replay=new ReplaySystem(this);this.replay.init();
     this._stableViewportSize={width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)};
     this._resizeTimer=null;
     // The pass owns multisampling once it is on, so the canvas MSAA above stops
@@ -134,7 +137,6 @@ class ShutokoNights {
     // a bandwidth cost their profile already budgets against.
     this.vhs=new VHSEffect(this.renderer,{enabled:this.state.settings.vhs!==false,amount:clamp(this.admin.vhsAmount??1,0,MAX_VHS_AMOUNT),samples:this.isHandheld?0:4,filter:this.admin.ps2Filter});
     this.setupFilterMenu();
-    this.setupHudTheme();
     this.resize({force:true});
     // Mobile browser chrome can emit dozens of height-only resize events while
     // the address bar settles. Reallocating WebGL's drawing buffer for each one
@@ -385,6 +387,8 @@ class ShutokoNights {
       const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||'');
       if((e.code==='Digit0'||e.code==='Numpad0')&&!typing&&!e.repeat){e.preventDefault();this.toggleDebugMenu();return;}
       if((e.code==='Digit9'||e.code==='Numpad9')&&!typing&&!e.repeat){e.preventDefault();this.toggleFilterMenu();return;}
+      // REPLAY // 3 — solo build di test: nel gioco normale il tasto non fa nulla.
+      if((e.code==='Digit3'||e.code==='Numpad3')&&this.editorTest&&!typing&&!e.repeat){e.preventDefault();this.replay?.toggleMenu();return;}
       if(e.code==='KeyM'&&!typing&&!e.repeat){e.preventDefault();this.toggleDevMap();return;}
       if(e.code==='KeyI'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggle();return;}
       if(e.code==='KeyP'&&!typing&&!e.repeat){e.preventDefault();this.debugStats?.toggleRecording();return;}
@@ -401,9 +405,10 @@ class ShutokoNights {
       this.audio?.unlock?.();this.audio?.resume?.();
       if(e.code==='KeyF'&&!this.ui.pcOpen&&this.started){this.ui.togglePhone(this.getPhoneContext());this.pressed.delete(e.code);}
       if(e.code==='KeyH'&&this.started&&!e.repeat){this.toggleHUD();this.pressed.delete(e.code);}
-      if(e.code==='KeyC'&&this.mode==='driving'){this.cycleCamera();this.pressed.delete(e.code);}
+      // Durante il playback di un replay la camera (C) e il recover (R) li gestisce il ReplaySystem.
+      if(e.code==='KeyC'&&this.mode==='driving'&&!this.replay?.playing){this.cycleCamera();this.pressed.delete(e.code);}
       if(e.code==='KeyL'&&this.mode==='driving'&&!e.repeat){this.toggleHeadlights();this.pressed.delete(e.code);}
-      if(e.code==='KeyR'&&this.mode==='driving'){this.recover();this.pressed.delete(e.code);}
+      if(e.code==='KeyR'&&this.mode==='driving'&&!this.replay?.playing){this.recover();this.pressed.delete(e.code);}
       // Step out of / back into the car anywhere.
       if(e.code==='KeyG'&&this.started&&!e.repeat&&!this.ui.pcOpen&&!this.ui.phoneOpen&&!this.debug.menuOpen){if(this.mode==='driving')this.exitVehicle();else if(this.mode==='walk')this.tryEnterVehicle();this.pressed.delete(e.code);}
       if(e.code==='F1'){e.preventDefault();this.ui.showHelp();}
@@ -705,7 +710,11 @@ class ShutokoNights {
     // Developer map freezes gameplay (vehicle + drone stay put) while it is open.
     // Freezing is preferable to letting the car/camera drift on stuck input.
     if(this.devMap?.isOpen()){this.render();this.finishFrameProf(frameStart);this.pressed.clear();return;}
-    if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='pa')this.updateTatsumiPa(dt);else if(this.mode==='walk')this.updateWalk(dt);else if(this.mode==='boot')this.updateBoot();
+    // Durante il playback di un replay il mondo resta quello reale ma la
+    // fisica è in pausa: il ReplaySystem riposiziona auto e traffico dai frame
+    // registrati e possiede la camera finché non si esce.
+    if(this.replay?.playing)this.replay.update(dt);else if(this.debug.noclip)this.updateNoclip(dt);else if(this.mode==='driving')this.updateDriving(dt);else if(this.mode==='garage')this.updateGarage(dt);else if(this.mode==='pa')this.updateTatsumiPa(dt);else if(this.mode==='walk')this.updateWalk(dt);else if(this.mode==='boot')this.updateBoot();
+    if(this.mode==='driving'&&this.replay?.recording)this.replay.captureFrame();
     this.updateDebugHitboxes(dt);
     this.render();this.finishFrameProf(frameStart);this.pressed.clear();
   }
@@ -880,7 +889,7 @@ class ShutokoNights {
     document.getElementById('debug-hitboxes-all')?.addEventListener('click',()=>{const inputs=[...document.querySelectorAll('[data-debug-hitbox]')],enable=inputs.some(input=>!input.checked);for(const input of inputs){input.checked=enable;this.setDebugHitbox(input.dataset.debugHitbox,enable);}});
   }
   toggleDebugMenu(force){
-    const open=typeof force==='boolean'?force:!this.debug.debugOpen;this.debug.debugOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.setFilterMenuOpen(false);this.syncTrafficControls();this.syncVisualControls();this.syncCustomCarControls();}
+    const open=typeof force==='boolean'?force:!this.debug.debugOpen;this.debug.debugOpen=open;this.debug.root?.classList.toggle('hidden',!open);this.debug.root?.setAttribute('aria-hidden',String(!open));if(open){this.setFilterMenuOpen(false);this.replay?.toggleMenu(false);this.syncTrafficControls();this.syncVisualControls();this.syncCustomCarControls();}
     this._syncOverlayState();
   }
   /**
@@ -889,7 +898,7 @@ class ShutokoNights {
    * `debug.menuOpen` still works because this recomputes it from the two.
    */
   _syncOverlayState(){
-    const open=this.debug.debugOpen||this.debug.filterOpen;this.debug.menuOpen=open;
+    const open=this.debug.debugOpen||this.debug.filterOpen||!!this.replay?.menuOpen;this.debug.menuOpen=open;
     this.keys={};this.pressed.clear();this.releaseTouchInput?.();
     if(open)document.exitPointerLock?.();else if(this.debug.noclip&&!this.isTouchDevice)this.requestDronePointerLock();
   }
@@ -1010,7 +1019,7 @@ class ShutokoNights {
     this.debug.filterOpen=open;
     this.filterMenu?.classList.toggle('hidden',!open);
     this.filterMenu?.setAttribute('aria-hidden',String(!open));
-    if(open){this.toggleDebugMenu(false);this.syncFilterControls();}
+    if(open){this.toggleDebugMenu(false);this.replay?.toggleMenu(false);this.syncFilterControls();}
     this._syncOverlayState();
   }
   /**
@@ -1061,42 +1070,6 @@ class ShutokoNights {
     }
     const pattern=document.getElementById('filter-dither-pattern');
     if(pattern&&document.activeElement!==pattern)pattern.value=filter.ditherPattern;
-  }
-  // ---------------------------------------------------------------------
-  // The published interface (HUD, fonts, loading screen, phone, terminal).
-  //
-  // The game only APPLIES a theme: js/hud-theme.js turns the published record
-  // into CSS custom properties on <html>, styles.css reads them as
-  // `var(--hud-x, fallback)`, and js/hud-instruments.js samples the handful the
-  // canvas dials and the minimap need. Authoring happens in the editor
-  // (tools/hesi-editor → HUD), which writes data/editor/custom-assets.json →
-  // runtimeTuning.hud, so the playable build carries no editor at all.
-  //
-  // There is deliberately no per-player theme and no adopt-once revision: with
-  // nothing in the game able to change the interface, "what the document says"
-  // is the whole truth, and re-reading it on every boot is both simpler and one
-  // less thing in the save file.
-  // ---------------------------------------------------------------------
-  setupHudTheme(){
-    this.refreshHudTheme();
-    // Which profile is live is a media query, so it can change with no reload:
-    // a tablet rotating, or a window dragged under 700px. Re-apply, or the
-    // properties would describe a layout the stylesheet has stopped using.
-    try{matchMedia(HUD_DEVICE_QUERY).addEventListener('change',()=>this.refreshHudTheme());}
-    catch(error){console.warn('HUD profile watch unavailable',error);}
-  }
-  /** Writes the current theme onto <html> for the profile in force. */
-  refreshHudTheme(){applyHudTheme(this.hudTheme||null);}
-  /**
-   * Takes the theme out of the editor document, or falls back to the shipped
-   * defaults when nothing has been published. Runs on the same path as the
-   * published picture and car models, so an editor save that broadcasts a
-   * reload restyles a running test game with no extra plumbing.
-   */
-  applyHudThemeFromDocument(document){
-    this.hudTheme=hudThemeFromDocument(document);
-    this.refreshHudTheme();
-    return this.hudTheme;
   }
   requestDronePointerLock(){try{const result=this.canvas.requestPointerLock?.();result?.catch?.(()=>{});}catch(e){}}
   updateDroneSpeedHUD(){if(this.debug?.speedHUD)this.debug.speedHUD.textContent=`${Math.round(this.debug.moveSpeed)} M/S`;}
@@ -1407,7 +1380,6 @@ class ShutokoNights {
     this.editorCarAssets=document;
     this.cameraTuning=cameraTuningFromDocument(document);
     this.adoptDocumentPicture(document);
-    this.applyHudThemeFromDocument(document);
     if(this.playgroundPanel?.document!==document)this.playgroundPanel?.setDocument(document);
     this.editorCarResolver=createRuntimeAssetPartResolver(document,this.map);
     // Player hitbox and light settings live beside its Modeler shape. Rebuild

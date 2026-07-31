@@ -82,7 +82,7 @@ nodes — this graph is the ground truth for what connects to what.
 
 Data © OpenStreetMap contributors, ODbL 1.0.
 
-## hesi-editor/ — world, look and interface editor
+## hesi-editor/ — world and look editor
 
 ```
 npm run editor                      # → http://127.0.0.1:8123/editor
@@ -90,14 +90,11 @@ npm run editor:test
 ```
 
 Besides the map itself it owns the game's *look*: **Surfaces** (repeated textures
-and objects), **Skybox**, **Lights**, **Barriers**, the **Modeler** (objects and
-cars) and **HUD** — the interface editor, where the driving HUD, the phone, the
-terminal and the loading/boot screens are edited by dragging and resizing them on
-live PC and phone previews. Everything it authors is committed as data under
-`data/editor/`; the playable build reads it and contains no editor.
+and objects), **Skybox**, **Lights**, **Barriers**, and the **Modeler** (objects
+and cars). Everything it authors is committed as data under `data/editor/`; the
+playable build reads it and contains no editor.
 
-Full guide: [tools/hesi-editor/README.md](hesi-editor/README.md) ·
-[HUD_EDITOR_STATUS.md](../HUD_EDITOR_STATUS.md).
+Full guide: [tools/hesi-editor/README.md](hesi-editor/README.md).
 
 ## road-editor/ — manual centreline editor
 

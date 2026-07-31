@@ -20,7 +20,7 @@ import {
 } from './road-barrier-styles.js?v=aa56cc4f53cb';
 import { BUILDING_TYPES } from './building-types.js?v=aa56cc4f53cb';
 import { buildProgressiveTransitions } from './progressive-merge.js?v=aa56cc4f53cb';
-import { PROGRESSIVE_MERGE_PROTOTYPES } from './progressive-merge-prototypes.js?v=aa56cc4f53cb';
+import { progressiveMergePrototypesForFlow } from './progressive-merge-prototypes.js?v=aa56cc4f53cb';
 // The shared interaction-point look (garage, PA lot, PA road gate).
 import { createHologramMarker, animateHologramMarker, hologramBaseLift } from './hologram-marker.js?v=aa56cc4f53cb';
 
@@ -1598,6 +1598,22 @@ export class HighwayMap {
       edge.mergeLaneBase = mergeInfo.side > 0 ? 0 : Math.max(0, host.lanes - route.lanes);
       edge.mergeLane = edge.mergeLaneBase;
       if (endEdge) endEdge._handled = true;
+      if (mergeInfo.anchoredSpan) {
+        // Published so the world editor can lock these control points instead
+        // of letting a drag there quietly fight the derived alignment.
+        // `anchor` is the world endpoint rather than an index or a `which`
+        // flag: the left-hand-traffic build reverses every route, so the
+        // runtime end is the source document's first point, and only geometry
+        // identifies the same physical stretch in both orders.
+        const terminal = route.points.at(-1);
+        route.protectedSegments = [...(route.protectedSegments || []), {
+          id: `${route.id}:merge-tail`,
+          span: mergeInfo.anchoredSpan,
+          anchor: { x: terminal.x, y: terminal.y, z: terminal.z },
+          label: `${route.name || route.id} merge tail`,
+          reason: `the merge alignment onto ${host.id} is derived from the host carriageway`,
+        }];
+      }
     }
     return route;
   }
@@ -1636,7 +1652,17 @@ export class HighwayMap {
     // left every branch ~1.1 m outside the outer lane centre, so vehicles
     // rode the shoulder and snapped laterally at the hand-off.
     const branchLanes = Math.max(1, routeData.lanes || (routeData.kind === 'ramp' ? 1 : 2));
-    const lateral = side * Math.max(0, host.lanes - branchLanes) * (host.laneWidth || LANE_W) * 0.5;
+    const hostLaneWidth = host.laneWidth || LANE_W;
+    // An APPROVED PROGRESSIVE MERGE is the exception. Gluing the branch onto
+    // the host's outermost lanes makes the two carriageways coincide at the
+    // mouth, which is exactly the abrupt diagonal crossing the progressive
+    // model exists to replace. Such a branch instead arrives on lanes
+    // APPENDED outside the host's paved edge, runs alongside, and is closed by
+    // the transition's own downstream taper.
+    const appendedCarriageway = this._progressiveAppendedMerge(routeData.id, host.id, which);
+    const lateral = appendedCarriageway
+      ? side * (host.lanes + branchLanes) * hostLaneWidth * 0.5
+      : side * Math.max(0, host.lanes - branchLanes) * hostLaneWidth * 0.5;
 
     const edgePoint = (distance) => {
       const sample = this._sampleCenter(host, this._normalizeDistance(host, distance), 1);
@@ -1712,7 +1738,31 @@ export class HighwayMap {
       hostId: host.id,
       hostDistance: this._normalizeDistance(host, hostDistanceAtMouth + 30),
       side,
+      // The stretch this anchoring OWNS: the 30 m of lead points on the glue
+      // line plus the whole blend. A control point inside it is overridden by
+      // the derived alignment, so an editor drag there either does nothing or
+      // silently deforms the merge treatment built on top of it.
+      anchoredSpan: appendedCarriageway ? blendLength + 30 : null,
     };
+  }
+
+  /**
+   * True when this endpoint belongs to an allow-listed progressive merge that
+   * declares `branchAnchor: 'appended'` and is actually going to be built.
+   * A record without that declaration keeps the legacy host-lane glue it was
+   * engineered and measured against. The check runs during route
+   * registration, long before `buildProgressiveTransitions`, so it reads the
+   * same flow-selected allow-list rather than a transition record; the
+   * `progressiveMerges: false` comparison build keeps the legacy glue line.
+   */
+  _progressiveAppendedMerge(branchRouteId, hostRouteId, which) {
+    if (this.options.progressiveMerges === false) return false;
+    this._progressivePrototypes ??= progressiveMergePrototypesForFlow(this.options.legacyFlow === true);
+    return this._progressivePrototypes.some((prototype) => prototype.branchAnchor === 'appended'
+      && prototype.type === 'merge'
+      && prototype.which === which
+      && prototype.hostRouteId === hostRouteId
+      && prototype.branchRouteId === branchRouteId);
   }
 
   /** Point at arc distance along a raw point list (negative = from the end). */
@@ -3440,16 +3490,17 @@ export class HighwayMap {
       }
     }
     this._prepareJunctionZones();
-    // The progressive prototypes were engineered, measured and golden-digested
-    // against the original (pre-left-hand-traffic) network flow. Reversing the
-    // network turns P1's diverge into a merge and P2's merge into a diverge,
-    // and the transition builder cannot reproduce the engineered treatment in
-    // the flipped sense (missing lane mappings, marking targets missed). They
-    // therefore stay bound to the legacy flow: the live left-hand network uses
-    // the standard junction treatment at both locations (which passes every
-    // generic gate there), and legacyFlow probes keep validating the intact
-    // prototypes against their recorded geometry.
-    const prototypes = this.options.legacyFlow === true ? PROGRESSIVE_MERGE_PROTOTYPES : [];
+    // P1/P2 were engineered, measured and golden-digested against the original
+    // (pre-left-hand-traffic) network flow. Reversing the network turns P1's
+    // diverge into a merge and P2's merge into a diverge, and the transition
+    // builder cannot reproduce the engineered treatment in the flipped sense
+    // (missing lane mappings, marking targets missed). They therefore stay
+    // bound to the legacy flow, where the probes keep validating them against
+    // their recorded geometry. Records authored directly against the live
+    // left-hand network (P3, the Tatsumi ramp merge) are selected here instead;
+    // every other junction keeps the standard treatment in both flows.
+    this._progressivePrototypes ??= progressiveMergePrototypesForFlow(this.options.legacyFlow === true);
+    const prototypes = this._progressivePrototypes;
     this.progressiveTransitions = buildProgressiveTransitions(this, prototypes);
     this.progressiveTransitionById = new Map(
       this.progressiveTransitions.map((transition) => [transition.id, transition]),

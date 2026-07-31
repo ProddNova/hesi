@@ -4,7 +4,6 @@ import {
   customAssetsDocumentErrors,
   normalizeWorldSurfaceStyle,
 } from '/js/custom-assets.js';
-import { hudThemeFromDocument, setDocumentHudTheme } from '/js/hud-theme.js';
 
 const clone = (value) => value == null ? value : structuredClone(value);
 
@@ -84,20 +83,6 @@ export class CustomAssetStore {
 
   /** The custom asset standing in for an instanced archetype's shape, if any. */
   worldModel(instanceType) { return this.document.worldModels?.[instanceType] || null; }
-
-  /**
-   * The published interface theme, or null when nothing has been published — the
-   * caller has to be able to tell "no theme" from "the default theme", because
-   * the first means the game keeps its own defaults.
-   */
-  hudTheme() { return hudThemeFromDocument(this.document); }
-
-  /** Replaces the published interface theme (HUD editor). */
-  setHudTheme(theme) {
-    setDocumentHudTheme(this.document, theme);
-    this.dirty = true;
-    return this.document.runtimeTuning.hud;
-  }
 
   /** Saved model/settings for one player or traffic car target. */
   carModel(target) { return this.document.carModels?.[target] || null; }

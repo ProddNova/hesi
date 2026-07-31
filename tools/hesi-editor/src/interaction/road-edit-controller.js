@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { deletePoint, findRoute, insertPointAfter, movePoint, nearestSegment } from './road-edit-ops.js';
+import { deletePoint, findRoute, insertPointAfter, movePoint, nearestSegment, protectedPointIndices } from './road-edit-ops.js';
 import { loadRouteNetworkData } from '../world/map-module.js';
 
 const ROUTE_EDIT_TYPES = new Set(['road-route', 'service-route']);
 const LINE_COLOR = 0xffb020;
 const HANDLE_COLOR = 0xffb020;
 const ACTIVE_HANDLE_COLOR = 0xff5040;
+// Derived (locked) control points read as inert grey, never as an editable
+// orange handle the user can wonder why they cannot drag.
+const LOCKED_HANDLE_COLOR = 0x6b7280;
 const HANDLE_RADIUS = 2.2;
 const HANDLE_RANGE = 400;
 const HANDLE_CAP = 60;
@@ -82,6 +85,7 @@ export class RoadEditController {
     this._handleGeometry = new THREE.SphereGeometry(HANDLE_RADIUS, 12, 10);
     this._handleMaterial = new THREE.MeshBasicMaterial({ color: HANDLE_COLOR, depthTest: false, toneMapped: false });
     this._activeHandleMaterial = new THREE.MeshBasicMaterial({ color: ACTIVE_HANDLE_COLOR, depthTest: false, toneMapped: false });
+    this._lockedHandleMaterial = new THREE.MeshBasicMaterial({ color: LOCKED_HANDLE_COLOR, depthTest: false, toneMapped: false });
     this._previewMaterial = new THREE.MeshBasicMaterial({
       color: 0x171a23, side: THREE.DoubleSide,
       toneMapped: false,
@@ -109,6 +113,7 @@ export class RoadEditController {
     this._onGizmoMouseDown = () => {
       const point = this.route?.points?.[this.activeHandle];
       if (!point) return;
+      if (this._rejectProtected(this.activeHandle)) return;
       this.gizmoDrag = {
         index: this.activeHandle,
         before: [...point],
@@ -148,6 +153,7 @@ export class RoadEditController {
       const mesh = hit.object;
       const index = mesh.userData.pointIndex;
       this._setActiveHandle(index);
+      if (this._rejectProtected(index)) return;
       const point = this.route.points[index];
       const worldPoint = this._worldPoint(point);
       this.drag = {
@@ -393,6 +399,7 @@ export class RoadEditController {
     const route = this.route;
     const index = this.activeHandle;
     if (!route || !Number.isInteger(index) || !route.points[index]) return false;
+    if (this._rejectProtected(index)) return false;
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
       this.onStatus('Road point coordinates must be numbers');
       return false;
@@ -486,6 +493,11 @@ export class RoadEditController {
     const route = this.route;
     const synthetic = this.synthetic;
     const index = segment.index;
+    const locked = this._protectedIndices();
+    if (locked.has(index) && locked.has(index + 1)) {
+      this.onStatus(this._protectedReason());
+      return false;
+    }
     const point = [...segment.point];
     if (this.gridSnap?.enabled) {
       point[0] = this.gridSnap.snapValue(point[0]);
@@ -504,6 +516,7 @@ export class RoadEditController {
   _deletePointAt(index) {
     const route = this.route;
     if (!route || !Number.isInteger(index)) return false;
+    if (this._rejectProtected(index)) return false;
     if (route.points.length <= 2) {
       this.onStatus('A road needs at least 2 points · use Delete road in the Road panel to take the whole road out');
       return false;
@@ -517,6 +530,49 @@ export class RoadEditController {
       undo: () => { route.points.splice(index, 0, [...snapshot]); this._afterRouteMutation(route, synthetic); },
     });
     this.onStatus('Road point removed');
+    return true;
+  }
+
+  /**
+   * Control points whose position is DERIVED, not authored.
+   *
+   * `HighwayMap` rewrites the tail of a route that is anchored onto a host
+   * carriageway (see `_anchorEndpoint`), and publishes the stretch it owns as
+   * `route.protectedSegments`. Dragging a handle in there does not move the
+   * road — it silently changes what the derived alignment blends away from,
+   * which is how a carefully built merge treatment gets deformed by an edit
+   * that appears to do nothing.
+   *
+   * The segment is anchored by WORLD POSITION rather than by index or by an
+   * end name: the left-hand-traffic build reverses every route, so the runtime
+   * tail is the source document's head, and only geometry identifies the same
+   * physical stretch in both point orders.
+   */
+  _protectedSegments() {
+    const segments = this.runtimeRoute?.protectedSegments;
+    if (!Array.isArray(segments) || !segments.length || !this.route?.points?.length) return [];
+    if (this.route.closed) return [];
+    return segments.filter((segment) => Number.isFinite(segment?.span) && segment.span > 0 && segment.anchor);
+  }
+
+  /** Indices locked by `_protectedSegments`, measured along the polyline. */
+  _protectedIndices() {
+    return protectedPointIndices(this.route?.points, this._protectedSegments(), {
+      closed: Boolean(this.route?.closed),
+    });
+  }
+
+  _protectedReason() {
+    const segment = this._protectedSegments()[0];
+    if (!segment) return 'This part of the road is generated';
+    return `Locked · ${segment.reason}. Edit the road further back instead.`;
+  }
+
+  /** Guard for every mutation entry point. Returns true when index is locked. */
+  _rejectProtected(index) {
+    if (!Number.isInteger(index)) return false;
+    if (!this._protectedIndices().has(index)) return false;
+    this.onStatus(this._protectedReason());
     return true;
   }
 
@@ -966,12 +1022,15 @@ export class RoadEditController {
     if (!force && key === this._handleKey) return;
     this._handleKey = key;
     for (const mesh of this.handles) mesh.removeFromParent();
+    const locked = this._protectedIndices();
     this.handles = this._handleIndices().map((index) => {
       const point = this.route.points[index];
       const world = this._worldPoint(point);
       const mesh = new THREE.Mesh(
         this._handleGeometry,
-        index === this.activeHandle ? this._activeHandleMaterial : this._handleMaterial,
+        locked.has(index)
+          ? this._lockedHandleMaterial
+          : (index === this.activeHandle ? this._activeHandleMaterial : this._handleMaterial),
       );
       mesh.position.set(world[0], world[1] + HANDLE_SURFACE_LIFT, world[2]);
       mesh.renderOrder = 10001;
@@ -985,8 +1044,12 @@ export class RoadEditController {
 
   _setActiveHandle(index) {
     this.activeHandle = index;
+    const locked = this._protectedIndices();
     for (const mesh of this.handles) {
-      mesh.material = mesh.userData.pointIndex === index ? this._activeHandleMaterial : this._handleMaterial;
+      const pointIndex = mesh.userData.pointIndex;
+      mesh.material = locked.has(pointIndex)
+        ? this._lockedHandleMaterial
+        : (pointIndex === index ? this._activeHandleMaterial : this._handleMaterial);
     }
     this._syncGizmoToActivePoint();
     this._emitState();
@@ -994,6 +1057,13 @@ export class RoadEditController {
 
   _syncGizmoToActivePoint() {
     const point = this.route?.points?.[this.activeHandle];
+    if (point && this.group && this._protectedIndices().has(this.activeHandle)) {
+      // No translate gizmo on a derived point: offering the handle and then
+      // refusing the drag is worse than not offering it.
+      this.gizmo.detach();
+      this.gizmo.visible = false;
+      return;
+    }
     if (!point || !this.group) {
       this.gizmo.detach();
       this.gizmo.visible = false;
@@ -1017,6 +1087,7 @@ export class RoadEditController {
     this._handleGeometry.dispose();
     this._handleMaterial.dispose();
     this._activeHandleMaterial.dispose();
+    this._lockedHandleMaterial.dispose();
     this._previewMaterial.dispose();
     this._previewEdgeMaterial.dispose();
     this._previewLaneMaterial.dispose();

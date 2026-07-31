@@ -1,9 +1,25 @@
-/** Focused geometry/topology/paint/rail/physics gate for active prototypes. */
+/**
+ * Focused geometry/topology/paint/rail/physics gate for active prototypes.
+ *
+ *   node .devtests/progressive-merge-probe.mjs            # legacy flow (P1/P2)
+ *   node .devtests/progressive-merge-probe.mjs --live     # live flow (P3)
+ *   node .devtests/progressive-merge-probe.mjs --legacy   # records disabled
+ */
 import * as THREE from 'three';
 import { HighwayMap } from '../js/map.js';
+import { progressiveMergePrototypesForFlow } from '../js/progressive-merge-prototypes.js';
 
 const LEGACY = process.argv.includes('--legacy');
-const map = new HighwayMap(null, { addLighting: false, legacyFlow: true, markingDebug: true, progressiveMerges: !LEGACY });
+// The prototype set is flow-bound: P1/P2 exist only in the original network
+// sense, P3 only in the live left-hand one. Build the flow under test.
+const LIVE_FLOW = process.argv.includes('--live');
+const expectedRecords = progressiveMergePrototypesForFlow(!LIVE_FLOW).length;
+const map = new HighwayMap(null, {
+  addLighting: false,
+  legacyFlow: !LIVE_FLOW,
+  markingDebug: true,
+  progressiveMerges: !LEGACY,
+});
 const failures = [];
 const fail = (id, message) => failures.push(`${id}: ${message}`);
 const radiansToDegrees = (value) => value * 180 / Math.PI;
@@ -19,7 +35,9 @@ const P2_ID = 'J48:merge:wangan_1:ramp_41:end';
 if (LEGACY && map.progressiveTransitions.length === 0) {
   console.log('PROGRESSIVE MERGE PROBE: PASS (legacy mode has no progressive transition records)');
 } else {
-  if (map.progressiveTransitions.length !== 2) fail('global', `record count ${map.progressiveTransitions.length}`);
+  if (map.progressiveTransitions.length !== expectedRecords) {
+    fail('global', `record count ${map.progressiveTransitions.length} != ${expectedRecords}`);
+  }
   for (const transition of map.progressiveTransitions) {
     const id = transition.id;
     const phaseValues = [
@@ -120,14 +138,14 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
         || transition.auxiliaryLaneCount !== 2)) {
       fail(id, 'P4 is not an explicit temporary 2+2 diverge');
     }
-    if (id === P2_ID
-      && (transition.topology !== '2+3-merge'
-        || transition.temporaryLaneCount !== 5
+    if (transition.topology === '2+3-merge'
+      && (transition.temporaryLaneCount !== 5
         || transition.auxiliaryLaneCount !== 2
         || transition.finalLaneCount !== 3
         || transition.absorptionSteps.length !== 2)) {
-      fail(id, 'P2 is not an explicit 5 -> 4 -> 3 merge');
+      fail(id, 'not an explicit 5 -> 4 -> 3 merge');
     }
+    if (id === P2_ID && transition.topology !== '2+3-merge') fail(id, 'P2 lost its 2+3 topology');
     const expectedFinalLanes = transition.type === 'diverge'
       ? transition.hostLaneCount + transition.branchLaneCount
       : transition.hostLaneCount;
@@ -166,7 +184,9 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
       if (routeSequence.at(-1) !== (info?.routeId || 'none')) routeSequence.push(info?.routeId || 'none');
       const allowedRouteIds = transition.type === 'diverge'
         ? [transition.hostRouteId, transition.branchRouteId]
-        : (transition.id === P2_ID
+        // A 2+3 merge's outer temporary lane is still the branch's own deck
+        // through the opening and becomes host-owned at the handoff.
+        : (transition.topology === '2+3-merge'
           ? [transition.branchRouteId, transition.hostRouteId]
           : [transition.hostRouteId]);
       if (!info || !allowedRouteIds.includes(info.routeId)) {
@@ -189,7 +209,7 @@ if (LEGACY && map.progressiveTransitions.length === 0) {
     }
     const expectedOwnership = transition.type === 'diverge'
       ? [transition.hostRouteId, transition.branchRouteId]
-      : (transition.id === P2_ID
+      : (transition.topology === '2+3-merge'
         ? [transition.branchRouteId, transition.hostRouteId]
         : [transition.hostRouteId]);
     if (routeSequence.join(',') !== expectedOwnership.join(',')) {

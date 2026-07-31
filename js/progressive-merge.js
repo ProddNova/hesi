@@ -37,7 +37,6 @@ function unwrappedHostDistance(zone, distance) {
 }
 
 const P1_TWO_PLUS_TWO_DIVERGE_ID = 'J2:diverge:c1_0:r1_0:start';
-const P2_TWO_PLUS_THREE_MERGE_ID = 'J48:merge:wangan_1:ramp_41:end';
 
 function laneMappings(zone, branchExitLanes = [0], auxiliaryLaneCount = 1) {
   const { host, branch, kind, side } = zone;
@@ -116,11 +115,13 @@ function buildRecord(map, zone, prototype) {
     && zone.kind === 'diverge'
     && zone.host.lanes === 2
     && zone.branch.lanes === 2;
-  // P2 is the approved conceptual inverse: the existing three-lane Wangan
-  // mainline remains untouched while both two-lane ramp feeds become real,
-  // normal-width temporary lanes. They are absorbed one at a time (5 -> 4
-  // -> 3) instead of being collapsed into the legacy single auxiliary lane.
-  const twoPlusThreeMerge = zone.id === P2_TWO_PLUS_THREE_MERGE_ID
+  // The 2+3 merge is the approved conceptual inverse: the existing three-lane
+  // Wangan mainline remains untouched while both two-lane ramp feeds become
+  // real, normal-width temporary lanes. They are absorbed one at a time
+  // (5 -> 4 -> 3) instead of being collapsed into the legacy single auxiliary
+  // lane. The allow-list carries the topology, so a second approved location
+  // (P3, the Tatsumi ramp) shares this model instead of copying its ID test.
+  const twoPlusThreeMerge = prototype.topology === '2+3-merge'
     && zone.kind === 'merge'
     && zone.host.lanes === 3
     && zone.branch.lanes === 2;
@@ -252,6 +253,12 @@ function buildRecord(map, zone, prototype) {
   let mergeOpeningLateralShift = null;
   let mergeHandoffLateralShift = null;
   let mergeStageLength = null;
+  // A branch anchored ALONGSIDE the host runs adjacent to it for the whole
+  // approach, so the two exterior parapets meet long before the paint opening.
+  // The separating rails must release at that measured clearance instead, or
+  // the two routes emit doubled walls 0.08 m apart on the same edge.
+  const appendedBranch = prototype.branchAnchor === 'appended';
+  let railOpeningStart = openingStart;
   if (twoPlusThreeMerge) {
     // The ramp owns its unchanged cross-section through the geometric
     // approach. At parallelStart its two lane centres exactly match the two
@@ -267,12 +274,38 @@ function buildRecord(map, zone, prototype) {
       Math.abs(parallelExitCentreLateral) - branchExitOutwardAt(sourceTerminalRow)
     );
     const measuredPostHandoffSpan = Math.abs(sourceTerminalRow.hU - mergeHandoffComplete);
-    // Preserve the ramp's measured post-handoff drift rate for every plateau
-    // and absorption. One stage is exactly the longitudinal run in which the
-    // source geometry would move one normal lane width; the resulting taper
-    // is geometry-derived and never falls back to a location metre constant.
-    mergeStageLength = measuredPostHandoffSpan
-      * auxiliaryWidth / Math.max(1e-6, mergeHandoffLateralShift);
+    // Preserve the ramp's measured drift rate for every plateau and
+    // absorption. One stage is exactly the longitudinal run in which the
+    // source geometry moves one normal lane width; the resulting taper is
+    // geometry-derived and never falls back to a location metre constant.
+    //
+    // A branch anchored onto APPENDED lanes reaches its slots and then runs
+    // parallel, so it has no post-handoff drift to measure. Its own
+    // convergence onto those slots is the same kind of measurement and is the
+    // rate that branch actually uses, so read the stage from the approach
+    // instead of inventing a constant.
+    const approachRow = zone.which === 'end' ? branchRows[0] : branchRows.at(-1);
+    const approachShift = Math.abs(
+      branchExitOutwardAt(approachRow) - Math.abs(parallelExitCentreLateral)
+    );
+    const approachSpan = Math.abs(mergeHandoffComplete - approachRow.hU);
+    const driftedAfterHandoff = mergeHandoffLateralShift > 0.5 && measuredPostHandoffSpan > 1;
+    mergeStageLength = driftedAfterHandoff
+      ? measuredPostHandoffSpan * auxiliaryWidth / Math.max(1e-6, mergeHandoffLateralShift)
+      : approachSpan * auxiliaryWidth / Math.max(1e-6, approachShift);
+    if (appendedBranch) {
+      // 0.90 m is the width two 0.42 m-inset parapets need between the two
+      // paved edges. Inside it there is no room for a separating wall, so both
+      // owners release and the gap between the carriageways becomes the
+      // painted gore it is in reality.
+      const railClearanceRow = firstDescendingCrossing(
+        (row) => branchHostwardPavementOutwardAt(row) - row.hostHalf,
+        0.9,
+      );
+      railOpeningStart = Math.min(railClearanceRow.hU, openingStart);
+    } else {
+      railOpeningStart = openingStart;
+    }
   }
   let absorptionStart = clamp(
     Math.min(approachStart + length * 0.68, compatibleEnd - 8),
@@ -466,6 +499,8 @@ function buildRecord(map, zone, prototype) {
     parallelStart,
     mergeOpeningStart,
     mergeHandoffComplete,
+    branchAnchor: appendedBranch ? 'appended' : 'host-lanes',
+    railOpeningStart,
     mergeDeckHandoffComplete,
     mergeOpeningLateralShift,
     mergeHandoffLateralShift,
@@ -574,7 +609,7 @@ function buildRecord(map, zone, prototype) {
     hostRailModeAt(distance) {
       const hostS = unwrappedHostDistance(zone, distance);
       if (twoPlusThreeMerge) {
-        if (hostS < openingStart || hostS >= parallelStart) return 'on';
+        if (hostS < railOpeningStart || hostS >= parallelStart) return 'on';
         // During the physical opening, the branch exterior owns the outside
         // rail. Removing the host-side wall here prevents a parapet from
         // spanning the drivable throat while the paved envelope widens.
@@ -590,7 +625,7 @@ function buildRecord(map, zone, prototype) {
         if (distance < branchRows[0].bS - 0.01 || distance > branchRows.at(-1).bS + 0.01) return null;
         const hostS = this.hostAtBranch(distance);
         if (hostS === null) return null;
-        if (sideSign === zone.hostwardSign) return hostS < openingStart ? 'on' : 'off';
+        if (sideSign === zone.hostwardSign) return hostS < railOpeningStart ? 'on' : 'off';
         if (sideSign === -zone.hostwardSign) return hostS < parallelStart ? 'on' : 'off';
         return null;
       }
@@ -1464,6 +1499,13 @@ export function buildProgressiveTransitions(map, prototypes) {
       || zone.kind !== prototype.type
       || zone.which !== prototype.which) {
       throw new Error(`Progressive prototype identity drift: ${prototype.id}`);
+    }
+    // A declared topology is a contract, not a hint: silently falling back to
+    // the generic single-auxiliary model would hide a lane-count change in the
+    // source network behind a still-passing build.
+    if (prototype.topology === '2+3-merge'
+      && !(zone.kind === 'merge' && zone.host.lanes === 3 && zone.branch.lanes === 2)) {
+      throw new Error(`Progressive prototype topology drift: ${prototype.id}`);
     }
     const measuredClassification = classifyProgressiveJunction(map, zone);
     const classification = prototype.approvedSameLevel && !measuredClassification.eligible

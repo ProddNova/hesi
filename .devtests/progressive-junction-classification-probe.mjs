@@ -1,20 +1,23 @@
 /** Generic render/collision deck classifier regression for Checkpoint 2. */
 import { readFile } from 'node:fs/promises';
 import { HighwayMap } from '../js/map.js';
-import { PROGRESSIVE_MERGE_PROTOTYPES } from '../js/progressive-merge-prototypes.js';
+import { progressiveMergePrototypesForFlow } from '../js/progressive-merge-prototypes.js';
 import { classifyProgressiveJunction } from '../js/progressive-junction-classifier.js';
 
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
 const map = new HighwayMap(null, { addLighting: false, legacyFlow: true, progressiveMerges: false });
 const activeMap = new HighwayMap(null, { addLighting: false, legacyFlow: true, progressiveMerges: true });
+// P3 is authored against the live left-hand network, so its junction ID does
+// not exist in the legacy-flow maps built above; it is graded separately below.
+const legacyPrototypes = progressiveMergePrototypesForFlow(true);
 const expected = new Map([
   ['P1', 'same-level-simple'],
   ['P2', 'vertical-ramp-complex'],
 ]);
 
 const source = await readFile(new URL('../js/progressive-junction-classifier.js', import.meta.url), 'utf8');
-for (const prototype of PROGRESSIVE_MERGE_PROTOTYPES) {
+for (const prototype of legacyPrototypes) {
   check(!source.includes(prototype.id), `${prototype.pinId}: classifier hard-codes the junction ID`);
   const zone = map.junctionZones.find((candidate) => candidate.id === prototype.id);
   check(!!zone, `${prototype.pinId}: candidate zone is missing`);
@@ -46,6 +49,37 @@ for (const prototype of PROGRESSIVE_MERGE_PROTOTYPES) {
   }
   console.log(`${prototype.pinId} ${prototype.id}: ${classification.category}`
     + ` ownership=${metrics.collisionDeckOwnership} overlap=${metrics.planarOverlapLength}m`);
+}
+
+// Live-flow records: the same measured classifier, the same explicit-approval
+// contract. P3's Tatsumi ramp/Wangan decks are level at transfer, so its
+// approval must stay transparent rather than silently reclassifying the source.
+const liveMap = new HighwayMap(null, { addLighting: false, progressiveMerges: true });
+for (const prototype of progressiveMergePrototypesForFlow(false)) {
+  const zone = liveMap.junctionZones.find((candidate) => candidate.id === prototype.id);
+  check(!!zone, `${prototype.pinId}: live-flow candidate zone is missing`);
+  if (!zone) continue;
+  const measured = classifyProgressiveJunction(liveMap, zone);
+  const effective = liveMap.progressiveCandidateClassifications
+    .find((candidate) => candidate.id === prototype.id);
+  check(effective?.active === true, `${prototype.pinId}: approved transition is not active`);
+  if (measured.eligible) {
+    check(!prototype.approvedSameLevel,
+      `${prototype.pinId}: carries an explicit approval it does not need`);
+  } else {
+    check(prototype.approvedSameLevel === true,
+      `${prototype.pinId}: ineligible measurement without an explicit approval`);
+    check(effective?.classification.category === 'same-level-approved',
+      `${prototype.pinId}: effective approval classification is not transparent`);
+    check(effective?.classification.measuredCategory === measured.category,
+      `${prototype.pinId}: approval hides the measured category`);
+  }
+  check(measured.metrics.transferConnected === true,
+    `${prototype.pinId}: transfer deck is not connected`);
+  console.log(`${prototype.pinId} ${prototype.id}: ${measured.category}`
+    + ` ownership=${measured.metrics.collisionDeckOwnership}`
+    + ` overlap=${measured.metrics.planarOverlapLength}m`
+    + ` maxDeckSeparation=${measured.metrics.maximumVerticalDeckSeparation}m`);
 }
 
 if (failures.length) {

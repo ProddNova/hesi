@@ -42,6 +42,17 @@ await context.route('https://cdn.jsdelivr.net/**', async (route) => {
   const body = await readFile(join(ROOT, 'node_modules/three/build/three.module.js'));
   await route.fulfill({ status: 200, contentType: 'text/javascript', body });
 });
+// SPLIT routing: the game imports both `three` and `three/addons/...`. A
+// blanket jsdelivr route answers the addon URLs with the core build, and the
+// page dies on the missing `mergeGeometries` export before it ever boots.
+await context.route('https://cdn.jsdelivr.net/**/examples/jsm/**', async (route) => {
+  const rest = route.request().url().split('/examples/jsm/')[1];
+  await route.fulfill({
+    status: 200,
+    contentType: 'text/javascript',
+    body: await readFile(join(ROOT, 'node_modules/three/examples/jsm', rest)),
+  });
+});
 const page = await context.newPage();
 page.on('dialog', (d) => d.accept());
 const errors = [];
@@ -71,10 +82,9 @@ const prototypePins = await page.evaluate(() => {
   dm.fitNetwork();
   dm._drawStatic();
   const dpr = dm._dpr;
-  const expected = [
-    'J2:diverge:c1_0:r1_0:start',
-    'J48:merge:wangan_1:ramp_41:end',
-  ];
+  // Live (left-hand) flow: P1/P2 are legacy-flow-bound and absent here; P3 is
+  // the Tatsumi PA ramp merge, authored against this network sense.
+  const expected = ['J13:merge:wangan_0:ramp_8:end'];
   const pins = dm.network.prototypePins;
   const rendered = pins.every((pin) => {
     const s = dm.worldToScreen(pin.x, pin.z);
@@ -92,7 +102,7 @@ const prototypePins = await page.evaluate(() => {
   return {
     count: pins.length,
     idsMatch: pins.map((pin) => pin.id).every((id, index) => id === expected[index]),
-    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P1,P2',
+    labelsMatch: pins.map((pin) => pin.pinId).join(',') === 'P3',
     finite: pins.every((pin) => Number.isFinite(pin.x + pin.y + pin.z + pin.distance)),
     metadataComplete: pins.every((pin) => ['progressive-prototype', 'deferred-progressive-candidate'].includes(pin.category)
       && ['merge', 'diverge'].includes(pin.type)
@@ -109,18 +119,25 @@ const prototypePins = await page.evaluate(() => {
       active: pins.filter((pin) => pin.category === 'progressive-prototype').length,
       deferred: pins.filter((pin) => pin.category === 'deferred-progressive-candidate').length,
     },
-    p1: pins.find((pin) => pin.pinId === 'P1'),
-    p2: pins.find((pin) => pin.pinId === 'P2'),
+    p3: pins.find((pin) => pin.pinId === 'P3'),
     rendered,
     info: document.querySelector('[data-info="prototypes"]')?.textContent || '',
   };
 });
-// The progressive prototypes are bound to the legacy (pre-left-hand-traffic)
-// flow: the live reversed network flips both junction senses, so the map
-// builds them only under options.legacyFlow (see js/map.js) and the live
-// developer map carries no prototype pins. Their geometry stays validated by
-// the progressive probe suite, which constructs legacyFlow maps.
-check('developer map exposes no prototype pins under left-hand flow', prototypePins.count === 0, prototypePins.info);
+// P1/P2 are bound to the legacy (pre-left-hand-traffic) flow: the live
+// reversed network flips both junction senses, so the map builds them only
+// under options.legacyFlow (see js/map.js) and they cannot appear here. Their
+// geometry stays validated by the progressive probe suite, which constructs
+// legacyFlow maps. P3 is authored against the live flow and must be pinned.
+check('developer map pins exactly the live-flow prototype (P3)',
+  prototypePins.count === 1 && prototypePins.idsMatch && prototypePins.labelsMatch,
+  prototypePins.info);
+check('P3 pin is active with complete metadata and renders',
+  prototypePins.metadataComplete && prototypePins.finite && prototypePins.rendered
+  && prototypePins.categoryCounts.active === 1 && prototypePins.categoryCounts.deferred === 0
+  && prototypePins.p3?.topology === '2+3-merge'
+  && prototypePins.p3?.temporaryLaneCount === 5 && prototypePins.p3?.finalLaneCount === 3,
+  JSON.stringify(prototypePins.p3 || null));
 
 const prototypeInteractions = await page.evaluate(() => {
   const g = window.shutoko;
