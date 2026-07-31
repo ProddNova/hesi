@@ -4,7 +4,7 @@ import { createHologramMarker, animateHologramMarker, hologramBaseLift } from '.
 // The lot's real dressing — building, arched canopy, vending, stall rows —
 // built from the reference photographs of 辰巳第一PA. Its own module because it
 // is APPENDED after every editor-addressable child (see the note in build()).
-import { buildTatsumiPaStructure } from './tatsumi-pa-lot.js?v=48d2ded68c0c';
+import { buildTatsumiPaStructure, paLotDeckMaterial, paLotPlan } from './tatsumi-pa-lot.js?v=48d2ded68c0c';
 
 // Tatsumi No.1 PA — the walkable zone behind the lay-by gate.
 //
@@ -20,11 +20,22 @@ import { buildTatsumiPaStructure } from './tatsumi-pa-lot.js?v=48d2ded68c0c';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 
-// Lot footprint in metres. The real strip is a ~190 m wedge; this is the
-// walkable pocket behind the gate, not the whole deck. Grown from 46x30 once
-// the lot got its real dressing: the service building and its arched canopy
-// alone are ~30 m across, and the comb needs depth to lean into.
-export const PA_LOT = Object.freeze({ width: 80, depth: 56 });
+// Lot footprint in metres — X runs ALONG the strip, Z across it.
+//
+// The real PA is a ribbon between the carriageways, and every aerial reads by
+// that proportion: building and large-vehicle bays down one long side, the
+// small-car row down the other, one aisle between them. 80x56 was a yard, and
+// a yard is the one shape this place never is. 150x34 is the strip; the cross
+// section it has to hold is building 5.6 + forecourt/canopy 14 + aisle + a 4.6
+// m bay row, which is what sets the 34.
+export const PA_LOT = Object.freeze({ width: 150, depth: 34 });
+
+// Where the player's car is left and where the gate back to it stands — both
+// taken from the dressing's own layout (js/tatsumi-pa-lot.js) so the car lands
+// in a real bay and the gate opens onto the break the 小型 row leaves for it.
+const PA_PLAN = paLotPlan(PA_LOT);
+export const PA_CAR_BAY = Object.freeze({ ...PA_PLAN.carBay });
+export const PA_GATE_X = PA_PLAN.gateX;
 
 export class TatsumiPaSystem {
   constructor(scene, camera, canvas, callbacks = {}) {
@@ -113,7 +124,9 @@ export class TatsumiPaSystem {
 
   build() {
     this.scene.background = new THREE.Color(0x05070b);
-    this.scene.fog = new THREE.Fog(0x070a10, 34, 120);
+    // The far end of a 150 m strip has to stay visible — the lot reads by the
+    // row of lit pools running away from you, and a 120 m fog end eats it.
+    this.scene.fog = new THREE.Fog(0x070a10, 48, 270);
     this.root = new THREE.Group();
     this.root.name = 'Tatsumi PA';
     this.scene.add(this.root);
@@ -123,10 +136,11 @@ export class TatsumiPaSystem {
     // 0 — deck. The lot is the PA's own paved slab, not a room floor. It is a
     // touch lighter than road asphalt on purpose: the road carries a texture
     // and baked lamp pools, this slab has neither and goes to black under the
-    // night mix if it is given the road's own value.
+    // night mix if it is given the road's own value. Textured from the lot
+    // module — a flat colour over 150 m reads as a backdrop, not a surface.
     this.deck = this.mesh(
-      new THREE.PlaneGeometry(PA_LOT.width, PA_LOT.depth, 12, 8),
-      this.mat(0x353b43), V(0, 0, 0), V(-Math.PI / 2, 0, 0),
+      new THREE.PlaneGeometry(PA_LOT.width, PA_LOT.depth, 24, 8),
+      paLotDeckMaterial(), V(0, 0, 0), V(-Math.PI / 2, 0, 0),
     );
 
     // 1-4 — the road's tall screen wall, all the way round. Wound clockwise
@@ -165,20 +179,23 @@ export class TatsumiPaSystem {
     );
 
     // 10-11 — the way back to the expressway: the same lit portal that stands
-    // in the lay-by wall outside, seen from this side.
+    // in the lay-by wall outside, seen from this side. It sits on the break
+    // the 小型 row leaves for the walkway, not behind a parked car.
     this.exitPortal = this.mesh(
-      new THREE.BoxGeometry(6.6, 3.3, 0.16), this.mat(0xff8b1f, 0xff8b1f, 2.6), V(0, 1.65, halfDepth - 0.5),
+      new THREE.BoxGeometry(6.6, 3.3, 0.16), this.mat(0xff8b1f, 0xff8b1f, 2.6), V(PA_GATE_X, 1.65, halfDepth - 0.5),
     );
-    this.exitSign = this.addSign('EXIT / 首都高速', V(0, 4.2, halfDepth - 0.55), 0, 0xe9b947);
+    // Faced INTO the lot: a PlaneGeometry's front is its +Z, and the reader is
+    // always on the −Z side of the gate, so the sign was showing its back.
+    this.exitSign = this.addSign('EXIT / 首都高速', V(PA_GATE_X, 4.4, halfDepth - 0.62), Math.PI, 0xe9b947);
 
     // Children past this point are APPENDED after every editor-addressable
     // child, so saved childIndex operations keep resolving (cf. GarageSystem).
     this.carDisplay = new THREE.Group();
     this.carDisplay.name = 'Parked car';
-    // Parked in the kerbside bay, clear of the canopy's leading edge: the
-    // forecourt in front of the building is 16 m deep at the real proportions
-    // (see js/tatsumi-pa-lot.js), so the car cannot sit under it.
-    this.carDisplay.position.set(0, 0.05, 2);
+    // The middle parallel bay on the forecourt edge, dead centre of the
+    // frontage — the shot every reference photograph of this lot is: your car
+    // broadside with the shell standing behind it.
+    this.carDisplay.position.set(PA_CAR_BAY.x, 0.05, PA_CAR_BAY.z);
     this.carDisplay.rotation.y = -Math.PI / 2;
     this.root.add(this.carDisplay);
 
@@ -246,7 +263,7 @@ export class TatsumiPaSystem {
     this.refreshExitMarkers();
   }
   refreshExitMarkers() {
-    const portal = this.exitPortal?.position || V(0, 0, PA_LOT.depth / 2 - 0.5);
+    const portal = this.exitPortal?.position || V(PA_GATE_X, 0, PA_LOT.depth / 2 - 0.5);
     this.exitPoint = V(portal.x, 0, portal.z - 1.6);
     // The gate frame stands on the portal wherever the saved build put it —
     // unless the editor has moved the frame itself, which wins.
@@ -360,7 +377,7 @@ export class TatsumiPaSystem {
     const candidates = [];
     // The prism IS the anchor: moving it in the world editor moves both the
     // prompt and the trigger.
-    const exit = this.markerPoint(this.exitMarkers, this.exitPoint || V(0, 0, PA_LOT.depth / 2 - 2.1));
+    const exit = this.markerPoint(this.exitMarkers, this.exitPoint || V(PA_GATE_X, 0, PA_LOT.depth / 2 - 2.1));
     if (this.distance2D(exit) < 2.6) candidates.push({ type: 'exit', pos: exit, text: '<kbd>E</kbd> BACK TO YOUR CAR' });
     return candidates.filter((c) => this.lookScore(c.pos) > -.1).sort((a, b) => this.distance2D(a.pos) - this.distance2D(b.pos))[0] || null;
   }

@@ -326,3 +326,87 @@ farthest, the way road paint is actually laid.
 
 - The middle of the lot between the parking row and the gate is open asphalt.
 - Seen from directly overhead the canopy reads as a filled green vault.
+
+---
+
+## Amendment (31 Jul 2026, later): the lot is a STRIP and the canopy is an ARCH
+
+The first walkable pass was rejected on three counts — "la forma del rettangolo
+non è uguale, la tettoia fatta malissimo, i parcheggi non sono come nella
+realtà" — and all three were the same class of error: the layout was invented
+around the dressing instead of measured off the reference photography.
+
+### 1. Footprint: 80 x 56 → **150 x 34** (`PA_LOT`)
+
+Every aerial of 辰巳第一PA shows a ribbon between the carriageways. 80 x 56 is a
+yard, and the canopy ended up floating in the middle of it with nothing to
+relate to. X now runs ALONG the strip, Z across, and the cross-section is the
+one the photographs have: service building 5.6 m, forecourt and canopy ~14 m,
+the aisle, then a 4.6 m 小型 bay row against the far parapet.
+
+### 2. The canopy
+
+It is an **arch ACROSS the frontage** — springing from a 4.8 m eave at each end
+of the frontage, crown 10.4 m, extending 12.5 m in depth off the building as a
+vault you look INTO. The previous version arched the other way (front to back)
+with the amplitude tapered to nothing at both ends, which is a lens: from the
+ground it read as a flying saucer and from above as a solid green disc.
+
+- Profile is a **semi-ellipse**, `(1 − u²)^0.6`, not a cosine. A cosine keeps
+  only a quarter of its rise at 80 % out, so the last few metres flatten into a
+  horizontal apron and every rib, purlin and rim lands on it at once — from the
+  side that apron reads as a white plank stuck on the end of the shell.
+- **Two surfaces**: green vertex-shaded glazing, and a dark roof deck 14 cm over
+  it. The shell glows from the forecourt and is a black roof from the air,
+  which is what the aerials show and what the old single double-sided surface
+  could not do.
+- A **tympanum** shuts the back of the vault down onto the building roof.
+  Without it the arch's far opening stands 6 m clear of a 4 m roof and you look
+  straight through the shell at the night sky — a black hole in the middle of
+  the frontage. It carries no mullions of its own; the posts that take the back
+  rim down onto the roof already stand in that plane, and a second offset set
+  read as a fringe hanging off the crown.
+- All the steel is **`MeshBasicMaterial` white**. The lot has ~7 point lights
+  over 150 m; a Lambert member 10 m up gets nothing and the shell went green.
+
+### 3. Parking, 1:1 with the aerials
+
+45° 大型 comb (10 bays, 4 box trucks) down one stretch of the building side; a
+perpendicular 大型 row (7 bays, 3 trucks) at the far end of the same side; the
+小型 row the whole length of the gate side (40 bays, ~⅓ occupied, one blue
+accessible bay); parallel bays on the forecourt edge; gore chevrons at both
+ends; aisle edge lines and a dashed centre. The forecourt keeps its bowed kerb
+and railing, and the **parallel bay row is broken at the walkway** — the zebra
+off the kerb gap crosses there, and the bay painted over it was the bay the
+game parked the player's car in.
+
+### 4. Supporting changes
+
+- **`paLotPlan(lot)`** (exported) is the single source for the cross-section,
+  the player's bay and the gate X. `TatsumiPaSystem` derives `PA_CAR_BAY` /
+  `PA_GATE_X` from it, so the car cannot land outside a bay and the gate cannot
+  open behind a parked car again.
+- **Light pools.** Eight twin-headed masts, five with real `PointLight`s, and
+  every one of them lays an additive radial decal on the deck. The aerials read
+  almost entirely by those pools, and they cost nothing.
+- **Emissive floors** on the lane paint, the 大型/小型 glyph tiles and the parked
+  bodies — between the pools nothing lights them, and unlit paint on unlit
+  asphalt is invisible (same reasoning as the traffic fleet in `js/traffic.js`).
+- Deck plane textured (`paLotDeckMaterial`); fog end 120 → 270 m so the far end
+  of the strip is not a void; the EXIT sign turned to face into the lot (a
+  `PlaneGeometry`'s front is its +Z and the reader is always on the −Z side).
+- `data/editor/tatsumi-pa-build.json` op `childIndex 10` (the exit portal, a
+  hide) moved 0,1.65,27.5 → 6,1.65,16.5. The op sets position as well as
+  visibility, so the old value would have stood the gate 11 m outside the new
+  lot. Editor child indices are otherwise untouched: the dressing is still
+  appended last, as the same named groups.
+
+### Verification
+
+- `node .devtests/tatsumi-pa-zone-probe.mjs` — 10/10 (spawn 4.2 m from the car,
+  60 collider boxes, 4 s of sprinting into the wall stays inside).
+- `node .devtests/pa-access-probe.mjs` — PASS.
+- `node .devtests/tatsumi-pa-lot-shots.mjs` — `PALOT-pa-spawn`, `-building`,
+  `-canopy`, `-comb`, `-small`, `-strip`, `-gate`, `-plan`, `-plan-end`. The
+  spawn shot now derives its camera from `carDisplay`, and `-plan-end` is the
+  frame to compare against the aerial of the building end.

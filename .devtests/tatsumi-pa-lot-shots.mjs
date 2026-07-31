@@ -114,12 +114,32 @@ const shoot = async (name) => {
 };
 const want = (name) => !ONLY || ONLY === name;
 
-if (want('pa-spawn')) { await place(0, 6.2, 0, -0.02); await shoot('pa-spawn'); }
-if (want('pa-building')) { await place(2, -1, 0.12, 0.16); await shoot('pa-building'); }
-if (want('pa-comb')) { await place(-20, 10, -0.75, 0.05); await shoot('pa-comb'); }
-if (want('pa-small')) { await place(24, 6, 1.9, 0.0); await shoot('pa-small'); }
-if (want('pa-gate')) { await place(0, 8, Math.PI, 0.05); await shoot('pa-gate'); }
-if (want('pa-plan')) { await overhead(58); await shoot('pa-plan'); }
+// Exactly where TatsumiPaSystem.enter() drops you: beside your own car.
+if (want('pa-spawn')) {
+  const spawn = await page.evaluate(() => {
+    const pa = window.shutoko.tatsumiPa;
+    return { x: pa.carDisplay.position.x, z: pa.carDisplay.position.z + 4.2 };
+  });
+  await place(spawn.x, spawn.z, 0, -0.02);
+  await shoot('pa-spawn');
+}
+if (want('pa-building')) { await place(-13, 15.6, 0, 0.24); await shoot('pa-building'); }
+// The three-quarter the reference photography of the shell is always shot from.
+if (want('pa-canopy')) { await place(14, 14, 0.72, 0.26); await shoot('pa-canopy'); }
+if (want('pa-comb')) { await place(18, 4, -0.64, 0.04); await shoot('pa-comb'); }
+if (want('pa-small')) { await place(32, 9, 1.65, 0.0); await shoot('pa-small'); }
+if (want('pa-strip')) { await place(-64, 3, -1.57, 0.02); await shoot('pa-strip'); }
+if (want('pa-gate')) { await place(6, 4, Math.PI, 0.06); await shoot('pa-gate'); }
+if (want('pa-plan')) { await overhead(64); await shoot('pa-plan'); }
+if (want('pa-plan-end')) {
+  await page.evaluate(() => {
+    const pa = window.shutoko.tatsumiPa;
+    pa.position.set(-13, 34, 4);
+    pa.yaw = 0; pa.pitch = -1.5; pa.updateCamera();
+  });
+  await page.waitForTimeout(500);
+  await shoot('pa-plan-end');
+}
 
 await browser.close();
 server.close();
